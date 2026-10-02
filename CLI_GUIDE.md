@@ -2578,6 +2578,82 @@ those is the mistake this command exists to prevent.
 nanoseconds, the delta, the p-value with its method, the spread and the outcome
 per path; for `show`, the stored samples per path, unscaled.
 
+### `xencode release-notes [--from <ref>] [--to <ref>] [--release <version>] [--out <path>] [--force] [--format text|json]`
+
+Put the release notes together from the two places this project already writes
+about what shipped: the commits since the last release, and the `## [Unreleased]`
+block of `CHANGELOG.md`. The output is a draft, and the two lists of where those
+sources disagree are the reason to generate it.
+
+```bash
+xencode release-notes                            # the draft on standard output
+xencode release-notes --from HEAD~6              # only the work after that commit
+xencode release-notes --release 2.2.0            # label the heading with a version
+xencode release-notes --out draft/notes.md       # write it where a person will edit it
+```
+
+Nothing is parsed out of the commit subjects, and there is no `feat:` / `fix:`
+vocabulary to learn: this repository's 900-odd messages are already sentences, and
+the categories come from the changelog's own `### Added` / `### Changed` /
+`### Fixed` headings, in the order the file keeps them. What ties an entry to a
+commit is the plan id the heading names — `QO-4`, `M-6` — matched against the ids
+the commit subjects name.
+
+The range starts at the newest tag. Where there is none, as here, the draft says
+so and covers every reachable commit rather than inventing a boundary:
+
+```
+$ xencode release-notes --release 2.2.0 --out /tmp/qo6_draft/notes.md
+  draft written to /tmp/qo6_draft/notes.md
+  this repository has no tags, so the draft covers every commit reachable from HEAD
+  903 commits, 33 of them named by the changelog's unreleased block (131 entries)
+  870 commits no entry accounts for, listed in the draft
+  3 entries name no commit in the range, listed in the draft
+```
+
+Both lists are in the draft, newest commit first. The first is work that would go
+out in a release no reader was told about:
+
+```
+### 870 commits with no changelog entry
+
+- `afb9326` — Rewrite one crate-graph assertion into the form the current lint asks for
+- `59bf825` — Add the task evidence graph (EVd-8) after checking ten outside projects
+- `45a6c2a` — Add /impact <file>: a fan-out panel over a file's blast radius
+```
+
+and the second is an entry whose id no commit in the range carries — usually
+because the commit that shipped it describes the work without naming the id:
+
+```
+### 3 entries naming no commit in this range
+
+- **`QD-2`: `/impact <file>` — the blast-radius panel in the TUI** — named QD-2, not in the range
+- **`QD-5`: `xencode removal <file>` — what deleting a file would cost** — named QD-5, not in the range
+- **`QD-1`: change-impact analysis with `xencode impact <file>`** — named QD-1, not in the range
+```
+
+An unexplained list that long is not something anyone can read, so the draft
+names the first 50 and counts the rest:
+
+```
+- … and 820 more, oldest not printed; pass `--from <ref>` to put the range around this release alone
+```
+
+`--out` refuses a file that is already there, because the whole point is that a
+person edits the draft afterwards and regenerating it over their wording is how
+an afternoon of it is lost. `--force` says you meant it:
+
+```
+$ xencode release-notes --out /tmp/qo6_draft/notes.md
+error: /tmp/qo6_draft/notes.md already exists and may hold edits. Pass --force to replace it.
+```
+
+Nothing here rewrites `CHANGELOG.md` — read from it, written beside it.
+`--format json` returns the same draft as data: the entries with their categories
+and ids, the commit count with how many of them an entry names, the ids matched
+on both sides, and the two gap lists with each commit's seven-character hash.
+
 ### `xencode test [--package <name>] [--retries N] [--stress-count N] [--timeout 1800] [--format text|json]`
 
 Run the test suite through `cargo nextest`, and **never call a test that only

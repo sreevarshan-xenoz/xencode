@@ -14,12 +14,12 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-02: it lists 40 subcommands — the
+  (verified against `xencode --help` on 2026-10-03: it lists 41 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
-  `generate`, `mutants`, `cov`, `perf`, `test` — and clap's built-in `help`, 41
-  entries in the list)
-- [x] Workspace gates green — 16 crates, 1998 tests passing, zero warnings (re-verified 2026-10-02, after QO-4)
+  `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
+  built-in `help`, 42 entries in the list)
+- [x] Workspace gates green — 16 crates, 2020 tests passing, zero warnings (re-verified 2026-10-03, after QO-6)
 
 ## Model Catalog Honesty
 
@@ -5377,9 +5377,31 @@ context.
   11 GB, PSI readable, MX250 visible, journalctl readable, dmesg denied — the
   locked-down case reported, never errored. Every fact best-effort. Three unit
   tests plus a CLI parse test. No strategy adaptation, as specified.
-- **QO-6 — Release notes as a draft generator.** `git log <prev>..HEAD` +
+- [x] **QO-6 — Release notes as a draft generator.** `git log <prev>..HEAD` +
   CHANGELOG, categorized, human-edited-after. *Effort: M.* Conventional-commit
   machinery buys nothing on 760 prose messages; WF-5/WF-6 own the real path.
+  *(Done 2026-10-03 — `xencode release-notes`, in
+  `rust/crates/xencode-context-rs/src/releasenotes.rs`. The two sources are read
+  as they are: the commits since the newest tag, and this file's own
+  `## [Unreleased]` block, whose `### Added` / `### Changed` / `### Fixed`
+  headings are the categories. No conventional-commit parsing — the plan's reason
+  for narrowing this item, and the 900-odd subjects here are prose; an entry is
+  tied to a commit by the plan id its heading names, matched against the ids the
+  subjects name. Both disagreement directions are printed, which is what makes the
+  draft worth generating: run against this repository it covers 903 commits (there
+  is no tag, and the draft says that rather than inventing a boundary), names 33 of
+  them from 131 unreleased entries, and lists 870 commits with no entry behind them
+  — `afb9326 Rewrite one crate-graph assertion into the form the current lint asks
+  for` first — plus 3 entries whose commit does not carry the id, `QD-1`, `QD-2` and
+  `QD-5`, whose commits describe the work without naming it. A list that long is
+  capped at 50 with the remainder counted and `--from <ref>` pointed at. With a tag
+  the tag is the range, so work below it is not announced twice; an explicit `--from`
+  overrides the tag. Output is a draft: standard output, or `--out <path>`, which
+  refuses an existing file unless `--force` says so, because a person edits it
+  afterwards — and nothing rewrites `CHANGELOG.md`. Nineteen tests in the module,
+  including a draft started from a subdirectory (which has to find the changelog at
+  the repository top, the case for cargo running in `rust/`), plus three CLI tests
+  for the flag set, its defaults and the counts read as English.)*
 - **QO-7 — `doctor` as the self-debug slice.** Re-use real code paths: does the
   context index open, is a git repo found, is each configured provider
   reachable, does the MCP server spawn, does `metrics.jsonl` parse, is the cache
@@ -8961,6 +8983,22 @@ the thing the two narrowed rows in the research table were waiting on: item 19,
 the performance observatory, was cut down to this harness because a tree with no
 `[[bench]]` target has no history to be observant about, and item 29, self-
 benchmarking, was gated on the same measurement.
+
+**QO-6, done 2026-10-03** — `xencode release-notes`. The draft is built from the
+two sources the repository already writes: `git log` from the newest tag to the
+range end, and this file's `## [Unreleased]` block, whose `### Added` /
+`### Changed` / `### Fixed` headings supply the categories. Conventional-commit
+parsing is absent, exactly as the row said it should be — the subjects here are
+prose, and a prefix would label a sentence that already names itself. An entry is
+tied to a commits by the plan id its heading names, matched against the ids the
+subjects name, and the two ways that link fails are both printed: commits with no
+entry behind them (870 of the 903 reachable here, led by the lint-only commit
+`afb9326`), and entries naming no commit in the range (`QD-1`, `QD-2`, `QD-5` —
+their commits describe the work without carrying the id). Where the repository has
+no tag at all, the draft says so and covers the whole history instead of inventing
+a boundary, and caps the unexplained list at 50 with the remainder counted.
+`--out` refuses an existing file unless told otherwise, because the draft is what
+a person then edits; `CHANGELOG.md` is only ever read.
 
 #### W12 — Long-running autonomy — 15 items
 

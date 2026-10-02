@@ -103,6 +103,9 @@ _xencode() {
             xencode,query)
                 cmd="xencode__subcmd__query"
                 ;;
+            xencode,release-notes)
+                cmd="xencode__subcmd__release__subcmd__notes"
+                ;;
             xencode,removal)
                 cmd="xencode__subcmd__removal"
                 ;;
@@ -357,6 +360,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,query)
                 cmd="xencode__subcmd__help__subcmd__query"
+                ;;
+            xencode__subcmd__help,release-notes)
+                cmd="xencode__subcmd__help__subcmd__release__subcmd__notes"
                 ;;
             xencode__subcmd__help,removal)
                 cmd="xencode__subcmd__help__subcmd__removal"
@@ -839,7 +845,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov perf test review replay eval plugin mcp llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov perf test release-notes review replay eval plugin mcp llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1831,7 +1837,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov perf test review replay eval plugin mcp llamacpp hw history tui help"
+            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov perf test release-notes review replay eval plugin mcp llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2811,6 +2817,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__query)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__release__subcmd__notes)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -4435,6 +4455,40 @@ _xencode() {
                     ;;
                 --format)
                     COMPREPLY=($(compgen -W "text ndjson" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__release__subcmd__notes)
+            opts="-h --from --to --release --out --force --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --from)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --to)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --release)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --out)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0
                     ;;
                 *)

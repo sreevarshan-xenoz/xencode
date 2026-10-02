@@ -1037,6 +1037,18 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(release-notes)
+_arguments "${_arguments_options[@]}" : \
+'--from=[Start the range here instead of at the newest tag. An empty value means no lower bound\: every commit reachable from --to]:FROM:_default' \
+'--to=[End the range here (default\: HEAD)]:TO:_default' \
+'--release=[Label the draft heading with this version instead of \`\[Unreleased\]\`]:RELEASE:_default' \
+'--out=[Write the draft here instead of printing it. A file that already exists is not replaced unless --force says so]:OUT:_files' \
+'--format=[Output format]:FORMAT:(text json)' \
+'--force[Replace the file named by --out even if it is already there]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (review)
 _arguments "${_arguments_options[@]}" : \
 '--base=[Base branch, tag, commit — or HEAD for uncommitted changes]:BASE:_default' \
@@ -1912,6 +1924,10 @@ esac
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(release-notes)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (review)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2139,6 +2155,7 @@ _xencode_commands() {
 'cov:Report which lines this diff added were never executed' \
 'perf:Measure the hot paths against a stored baseline, and refuse the verdict when the run is too noisy to support one' \
 'test:Run the tests, and never call a test that only passed on retry a pass' \
+'release-notes:Draft the release notes from the commits since the last release and the changelog block this project keeps, and report where the two disagree' \
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
 'eval:Score the agent on defects that were seeded on purpose' \
@@ -2537,6 +2554,7 @@ _xencode__subcmd__help_commands() {
 'cov:Report which lines this diff added were never executed' \
 'perf:Measure the hot paths against a stored baseline, and refuse the verdict when the run is too noisy to support one' \
 'test:Run the tests, and never call a test that only passed on retry a pass' \
+'release-notes:Draft the release notes from the commits since the last release and the changelog block this project keeps, and report where the two disagree' \
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
 'eval:Score the agent on defects that were seeded on purpose' \
@@ -2954,6 +2972,11 @@ _xencode__subcmd__help__subcmd__plugin__subcmd__update_commands() {
 _xencode__subcmd__help__subcmd__query_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help query commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__release-notes_commands] )) ||
+_xencode__subcmd__help__subcmd__release-notes_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help release-notes commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__removal_commands] )) ||
 _xencode__subcmd__help__subcmd__removal_commands() {
@@ -3560,6 +3583,11 @@ _xencode__subcmd__plugin__subcmd__update_commands() {
 _xencode__subcmd__query_commands() {
     local commands; commands=()
     _describe -t commands 'xencode query commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__release-notes_commands] )) ||
+_xencode__subcmd__release-notes_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode release-notes commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__removal_commands] )) ||
 _xencode__subcmd__removal_commands() {

@@ -42,6 +42,7 @@ pub mod perf;
 pub mod pricing;
 pub mod prompts;
 pub mod refresh;
+pub mod releasenotes;
 pub mod repo_map;
 pub mod retrieve;
 pub mod rollup;
