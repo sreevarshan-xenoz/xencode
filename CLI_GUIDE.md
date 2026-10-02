@@ -1015,7 +1015,7 @@ A blocking call inside `tokio::task::spawn_blocking` is **not** reported: that i
 the correct place for one, and a lexical "is this inside an `async fn`" cannot
 tell it apart from sleeping on the reactor.
 
-### `xencode interop [--agent NAME]... [--timeout SECS] [--out PATH] [--format text|json]`
+### `xencode interop [--agent NAME]... [--timeout SECS] [--repeat N] [--fan-out] [--out PATH] [--format text|json]`
 
 The `AR-1` probe: launch every installed coding-agent CLI headless on a read-only task in a
 scratch git repository, and record what came back. The scratch directory is created in a temp
@@ -1026,6 +1026,15 @@ xencode interop
 xencode interop --agent codex --agent cline
 xencode interop --out probe.json --format json
 ```
+
+`--fan-out` runs the selected agents **at the same time** instead of one after another, and
+reports what the overlap bought. Measured on five agents: 85.3 s run in series, 29.4 s run
+together — 2.9x, with the slowest single worker at 25.9 s, which is the floor any schedule
+has to clear. It cannot be combined with `--repeat`, since comparing two runs needs them to
+happen one after the other.
+
+Agents you have stood down are skipped, and a report prints who it skipped and why. Naming one
+explicitly — `xencode interop --agent claude` — runs it anyway.
 
 The task asks one agent to read one file in the fixture and reply with the word in it. It asks
 for no changes, so an agent that follows it modifies nothing — which also means an agent with

@@ -385,6 +385,12 @@ enum Commands {
         #[arg(long, default_value_t = 1)]
         repeat: u32,
 
+        /// Run every selected agent at the same time instead of one after
+        /// another, and report what the overlap saved. Ignored with `--repeat`,
+        /// which needs sequential runs to compare.
+        #[arg(long, conflicts_with = "repeat")]
+        fan_out: bool,
+
         /// Report, read-only, which agents look configured on this machine, and
         /// what to run if one is not. Starts no login and reads no credential.
         #[arg(long)]
@@ -1193,8 +1199,9 @@ async fn main() {
             out,
             format,
             repeat,
+            fan_out,
             check_auth,
-        } => run_interop(agents, timeout, out, format, repeat, check_auth),
+        } => run_interop(agents, timeout, out, format, repeat, fan_out, check_auth),
         Commands::Anchor {
             path,
             timeout,
@@ -5581,6 +5588,7 @@ fn run_interop(
     out: Option<std::path::PathBuf>,
     format: OutputFormat,
     repeat: u32,
+    fan_out: bool,
     check_auth: bool,
 ) -> Result<(), String> {
     // Checked first and on its own: it launches nothing and spends nothing, so
@@ -5614,6 +5622,7 @@ fn run_interop(
         workdir,
         task: xencode_agents_rs::probe::default_task().to_string(),
         repeat,
+        fan_out,
     };
     let report = xencode_agents_rs::probe::run_probe(&options);
 
@@ -5652,6 +5661,25 @@ fn run_interop(
                 println!("\n  installed here but this probe has no adapter for them:");
                 for unknown in &report.unknown {
                     println!("    {} — {}", unknown.name, unknown.why);
+                }
+            }
+            if let Some(fan) = &report.fan_out {
+                println!("\n  fan-out: {}", fan.summary());
+            }
+            let with_usage: Vec<_> = report
+                .captures
+                .iter()
+                .filter(|c| c.provenance == xencode_agents_rs::Provenance::Observed)
+                .collect();
+            if !with_usage.is_empty() {
+                println!("\n  what the working agents said they cost:");
+                for capture in &with_usage {
+                    let cost = match &capture.usage {
+                        Some(usage) => usage.summary(),
+                        None => "reported no usage at all".to_string(),
+                    };
+                    let model = capture.model.as_deref().unwrap_or("did not name a model");
+                    println!("    {}: {cost} [model: {model}]", capture.agent);
                 }
             }
             if !report.parked.is_empty() {

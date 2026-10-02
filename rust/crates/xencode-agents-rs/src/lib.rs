@@ -31,7 +31,8 @@ pub mod probe;
 pub mod roster;
 
 pub use contract::{probe_contract, ClaimResult, Verdict};
-pub use probe::{ProbeOptions, ProbeReport, RunCapture};
+pub use probe::{FanOut, ProbeOptions, ProbeReport, RunCapture, Usage};
 pub use roster::{
-    inventory, provenance_of_help_cell, AgentSpec, InstallSource, InstalledAgent, ROSTER,
+    inventory, provenance_of_help_cell, AgentSpec, InstallSource, InstalledAgent, Provenance,
+    ROSTER,
 };
