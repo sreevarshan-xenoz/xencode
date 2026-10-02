@@ -15,6 +15,7 @@ pub mod markdown;
 pub mod mcp;
 pub mod mcp_serve;
 pub mod panic;
+pub mod permission_broker;
 pub mod replay;
 pub mod review;
 pub mod task_eval;

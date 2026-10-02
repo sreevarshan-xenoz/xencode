@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-3`: the permission broker
+
+When xencode hands a task to an external worker, something has to decide how
+much that worker may do on its own — and left to themselves workers are eager:
+a launch line can carry `--yolo` or `--dangerously-skip-permissions` and the
+worker then edits files and shells out with no one watching. The broker is the
+layer that refuses to let that happen, and it lives inside xencode so both of
+its jobs can be checked without spending a call on any vendor.
+
+`plan_launch` builds the launch line. It starts from the agent's one-shot
+command, strips every approval-control flag the *worker* tried to set for
+itself (and the value riding on it, so a removed `--permission-mode` cannot
+leave its dangerous value behind), then appends only the control xencode chose
+for the configured mode. Full autonomy is emitted for exactly one mode, "allow
+everything"; a worker that only gets asked, on a vendor that cannot route
+prompts back, is given **no** flag rather than the widest one the vendor
+supports. Where Claude can send its approvals back over the headless MCP
+server, the broker points it at `--permission-prompt-tool` and pre-grants the
+asking mode instead of widening it; if no such tool is wired, it refuses to
+invent one and stays strict. The flag names are the spellings the contract
+probe verifies against each `--help`, not guesses.
+
+The other half answers a worker's live approval request with the *same* gate
+the user's own tools face, so a worker is never judged by a softer rule — and a
+refusal is recorded and shown, not swallowed. The denied-write case runs against
+the real filesystem: a write that leaves the workspace is refused, the refusal
+appears on the record, and the file is asserted absent on disk. Three of the
+guards were checked by mutation and reverted, so none is decorative. Seven new
+tests. This is the decision layer the launch path and worker panel consume; the
+end-to-end spawn of a live Claude through the prompt tool is a paid call and is
+deliberately not claimed here.
+
 ### Added — `X-2`: two first-class modes over one shared state
 
 The orchestrator becomes a real operating mode rather than a set of panels bolted
