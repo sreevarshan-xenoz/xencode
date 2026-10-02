@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1911 tests passing, zero warnings (re-verified 2026-10-02, after OR-3)
+- [x] Workspace gates green — 16 crates, 1921 tests passing, zero warnings (re-verified 2026-10-02, after OR-15)
 
 ## Model Catalog Honesty
 
@@ -10035,7 +10035,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **Done-when:** turning it off leaves plain xencode exactly as it was found, and
       "attach" only ever means handing the real terminal to a process that has one
       (`S-6 #29`).
-- [ ] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
+- [x] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
       means, by xencode: the lease and its workspace, the allowed file set, the forbidden
       paths, the expected deliverables, the verification commands, and the completion
       condition. The worker does not get to redefine any of them.
@@ -10043,6 +10043,27 @@ worker, `OR-` for the thing that decides what workers to talk to.
       path — a worker that finishes outside its lease fails the contract instead of
       earning a merge, and the forbidden list is enforced by the worktree and `SE-4`'s
       gate rather than by asking politely.
+      **Delivered 2026-10-02** as `xencode-core-rs/src/task_contract.rs`, next to the
+      scheduler it feeds. `TaskContract` carries the lease, the workspace root, the
+      declared file set, the forbidden paths, the deliverables, the verification
+      commands and — implicitly — the completion condition, and exposes no method a
+      worker's output could call to widen any of them. `check_finish(changed)` reads the
+      files the worker *actually* touched and returns a `Breach` list: a path that
+      climbs out of the workspace is `OutsideLease`, a path under a forbidden entry is
+      `ForbiddenPath`, and a path outside a declared (non-empty) file set is
+      `Undeclared` — so finishing outside the lease fails the contract rather than
+      quietly passing. `completion_met` decides done from real file existence (the
+      caller passes the filesystem) and real exit codes, never from a worker saying so;
+      a missing deliverable or a nonzero check means not-done. Ten tests. The done-when
+      is met against a *real* `git diff`: a throwaway repository is seeded, one file
+      inside the declared set and one outside it are genuinely edited, `git diff
+      --name-only` reports both, and the contract refuses the finish on the strength of
+      that real diff. Mutation-checked: with the lease-boundary enforcement stripped the
+      outside-lease and absolute-path tests both fail, so the guard is load-bearing. The
+      worktree and `SE-4`'s gate stop the forbidden write at run time; this contract is
+      the after-the-fact check that denies a merge. A library capability the launch path
+      and control room consume (`X-3`); no CLI command is added, so no user-facing doc
+      changes here.
 - [ ] **OR-16 — the result envelope.** Every finished task produces one machine-readable
       record: status, agent, task, changed files taken from the diff, the commands that
       ran with their exit codes, claims held apart from evidence, and a handoff state.
