@@ -174,7 +174,12 @@ pub const ROSTER: &[AgentSpec] = &[
         // and answers `--version` (2026.09.28-64d2043), but no probe had ever
         // run it: it was in no list at all, so the gap in knowledge was
         // invisible rather than recorded.
-        one_shot: "cursor-agent --print {prompt}",
+        // `--trust` is not optional in a non-interactive run, measured
+        // 2026-10-02: without it cursor-agent refuses with "⚠ Workspace Trust
+        // Required" and exits 1, which reads as a broken agent rather than a
+        // deliberate prompt it cannot show. It trusts *the scratch fixture the
+        // probe itself created*, and is not an account login.
+        one_shot: "cursor-agent --print --trust {prompt}",
         stream_flag: Some("--output-format stream-json"),
         advertises_daemon: true,   // `persist`, `worker` subcommands
         advertises_acp: false,     // not in help

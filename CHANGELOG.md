@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a logged-in agent that still cannot run unattended is no longer called broken
+
+`cursor-agent` had credentials and still exited 1: `⚠ Workspace Trust Required`,
+followed by a prompt it cannot show when there is no terminal. Its `--help` lists
+`--trust` without saying a non-interactive run cannot answer the question, so the
+one-shot form now passes `--trust` for the scratch directory the probe itself
+creates — not an account login, and not permission to touch anything of yours.
+
+It answers in 14.0 s with `apiKeySource: "login"` on its `init` event, and emits
+the only `thinking` deltas seen so far. Seven of the ten agents on this box now
+complete the probe task; `claude`, `gemini` and `crush` still need your accounts.
+
 ### Added — kilo and kiro-cli are now covered, and both answer
 
 `kilo` and `kiro-cli` were installed and configured on this box and both now run a
