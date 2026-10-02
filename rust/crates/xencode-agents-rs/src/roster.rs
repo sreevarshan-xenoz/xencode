@@ -183,6 +183,37 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_approval: true, // `--mode`, `--force`/`--yolo`, `--sandbox`
         read_on: "2026-10-02",
     },
+    AgentSpec {
+        name: "kilo",
+        // Installed 2026-10-02 under `~/.kilo/bin/`, which is **not** on
+        // `PATH`, so a bare `kilo` does not resolve. `~/.kilo/bin` is where
+        // kilo's own installer puts it; `which` walks `PATH` only, so this
+        // entry keeps the documented location as a fallback rather than
+        // reporting an installed agent as absent.
+        binaries: &["kilo", ".kilo/bin/kilo"],
+        one_shot: "kilo run {prompt}",
+        stream_flag: Some("--format json"),
+        advertises_daemon: true,   // `kilo serve`, `kilo attach <url>`
+        advertises_acp: true,      // `kilo acp`
+        advertises_mcp: true,      // `kilo mcp`
+        advertises_resume: true,   // `kilo session`, `kilo run --continue`
+        advertises_approval: true, // `kilo run --auto`
+        read_on: "2026-10-02",
+    },
+    AgentSpec {
+        name: "kiro-cli",
+        // AWS Kiro. The binary is `kiro-cli`, not `kiro`, on `PATH`; read from
+        // `kiro-cli --help-all` and `kiro-cli chat --help` on 2026-10-02.
+        binaries: &["kiro-cli"],
+        one_shot: "kiro-cli chat --no-interactive --output-format stream-json {prompt}",
+        stream_flag: Some("--output-format stream-json"),
+        advertises_daemon: false, // `crew`, `--cloud` are hosted, not a local daemon
+        advertises_acp: true,     // `kiro-cli acp`
+        advertises_mcp: true,     // `kiro-cli mcp`
+        advertises_resume: true,  // `-r/--resume`, `--resume-id`
+        advertises_approval: true, // `-a/--trust-all-tools`, `--trust-tools`
+        read_on: "2026-10-02",
+    },
 ];
 
 /// Agents the proposal names that this crate does not know how to launch.
@@ -194,17 +225,16 @@ pub const ROSTER: &[AgentSpec] = &[
 /// these is actually here is now decided by [`which`], and a name found on
 /// `PATH` is reported as installed-but-unknown rather than absent.
 ///
-/// Kilo still has every claim about it marked UNVERIFIED in Milestone W, and
-/// no binary answers to its name here, so there is nothing to verify against.
+/// Kilo had every claim about it marked UNVERIFIED in Milestone W, and the
+/// reason is now settled rather than guessed: kilo was never installed on this
+/// machine, so there was nothing to verify against. Both names moved into
+/// [`ROSTER`] on 2026-10-02 once they were installed, which empties this list.
 ///
 /// A candidate is added by name on purpose. `AR-2`'s done-when requires
 /// discovery to say nothing about the rest of the filesystem, so scanning `PATH`
 /// for anything that looks like an agent would breach it. Naming an agent we
 /// were asked about keeps the search deliberate while still checking the answer.
-pub const CANDIDATES: &[(&str, &str)] = &[
-    ("kilo", "named in the proposal; no binary answers to this name on this machine, so every claim about it stays unverified"),
-    ("kiro", "AWS's agentic IDE CLI; no binary answers to this name on this machine, so every claim about it stays unverified"),
-    ];
+pub const CANDIDATES: &[(&str, &str)] = &[];
 
 /// Named agents that are genuinely not on this machine, and why that matters.
 ///
@@ -244,7 +274,22 @@ pub fn find(name: &str) -> Option<&'static AgentSpec> {
 }
 
 /// Resolve an executable name to a full path, the way `which` would.
+///
+/// A name containing a path separator is resolved directly rather than walked
+/// on `PATH`, which is how an agent installed outside `PATH` is still found:
+/// `kilo` installs itself to `~/.kilo/bin/kilo` and adds nothing to the shell
+/// profile, so a bare `kilo` does not resolve while the binary is present and
+/// working. A `~` prefix is expanded against `$HOME`.
 pub fn which(binary: &str) -> Option<std::path::PathBuf> {
+    if binary.contains('/') {
+        let relative = binary.strip_prefix("~/").unwrap_or(binary);
+        let full = match binary.strip_prefix("~/") {
+            Some(_) => std::env::var_os("HOME")?.into(),
+            None => std::path::PathBuf::new(),
+        }
+        .join(relative);
+        return full.is_file().then_some(full);
+    }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(binary))
@@ -281,6 +326,8 @@ pub enum InstallSource {
     System,
     /// `~/.local/bin` and friends: user scope, manager unknown.
     UserLocal,
+    /// `~/.kilo/bin/` and similar: the vendor's own installer put it there.
+    VendorDotDir(String),
     /// Present on PATH, origin not inferable from the path.
     Unknown,
 }
@@ -294,6 +341,7 @@ impl InstallSource {
             Self::Npm => "npm".to_string(),
             Self::System => "system".to_string(),
             Self::UserLocal => "user-local".to_string(),
+            Self::VendorDotDir(vendor) => format!("{vendor}-self-installed"),
             Self::Unknown => "unknown".to_string(),
         }
     }
@@ -316,6 +364,16 @@ impl InstallSource {
             let home = home.replace('\\', "/");
             if text.starts_with(&format!("{home}/.cargo/bin/")) {
                 return Self::Cargo;
+            }
+            // A vendor that installs itself into its own dot-directory. Kilo
+            // lands in `~/.kilo/bin/` and is not on PATH at all, which the path
+            // makes obvious and is worth naming rather than reporting as
+            // unclassifiable.
+            if let Some(vendor) = ["kilo", "kiro", "agy", "cursor"]
+                .iter()
+                .find(|d| text.starts_with(&format!("{home}/.{d}/")))
+            {
+                return Self::VendorDotDir((*vendor).to_string());
             }
             if text.starts_with(&format!("{home}/.local/bin/")) {
                 // An npm global under a mise-managed node keeps its package
@@ -422,7 +480,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_roster_is_the_eight_agents_measured_on_this_machine() {
+    fn the_roster_is_the_ten_agents_measured_on_this_machine() {
         let names: Vec<&str> = ROSTER.iter().map(|a| a.name).collect();
         assert_eq!(
             names,
@@ -434,7 +492,9 @@ mod tests {
                 "gemini",
                 "crush",
                 "agy",
-                "cursor-agent"
+                "cursor-agent",
+                "kilo",
+                "kiro-cli"
             ]
         );
         // Two agents reached the roster because a probe met them, not because a
@@ -449,6 +509,11 @@ mod tests {
         assert!(find("cline").is_some());
         assert!(find("agy").is_some());
         assert!(find("cursor-agent").is_some());
+        // And two more, installed later the same day and each found by a
+        // different mistake: `kilo` because it is not on PATH at all, and
+        // `kiro-cli` because its binary is not called `kiro`.
+        assert!(find("kilo").is_some());
+        assert!(find("kiro-cli").is_some());
     }
 
     #[test]
@@ -505,6 +570,42 @@ mod tests {
         assert_eq!(InstallSource::Unknown.label(), "unknown");
     }
 
+    /// A vendor that installs itself into its own dot-directory is not on
+    /// `PATH` at all, so a `PATH`-only lookup reports it missing. Kilo landed
+    /// here on 2026-10-02 and produced exactly that wrong answer until the
+    /// lookup learned to check the documented location too.
+    #[test]
+    fn an_agent_installed_outside_path_is_still_found() {
+        let home = std::env::var("HOME").expect("HOME");
+        // The lookup finds a path-shaped name, so a binary the vendor parked
+        // outside PATH is not invisible.
+        let found = which("~/.local/bin/agy");
+        assert_eq!(
+            found,
+            Some(std::path::PathBuf::from(format!("{home}/.local/bin/agy")))
+        );
+        // A real file outside PATH that is on this machine today. Asserted
+        // against the machine only when it exists there, so the test still
+        // means something on one without kilo.
+        if std::path::Path::new(&format!("{home}/.kilo/bin/kilo")).is_file() {
+            assert_eq!(
+                which("~/.kilo/bin/kilo"),
+                Some(std::path::PathBuf::from(format!("{home}/.kilo/bin/kilo"))),
+                "a binary outside PATH is still found by its documented location"
+            );
+        }
+        // A path-shaped name that is not there is still nothing, rather than
+        // being reported as installed.
+        assert_eq!(which("~/.definitely-not-here/nothing"), None);
+        // And its own dot-dir is now named rather than reported as unknown.
+        if std::path::Path::new(&format!("{home}/.kilo/bin/kilo")).is_file() {
+            assert_eq!(
+                InstallSource::classify(std::path::Path::new(&format!("{home}/.kilo/bin/kilo"))),
+                InstallSource::VendorDotDir("kilo".to_string())
+            );
+        }
+    }
+
     #[test]
     fn only_observed_counts_as_a_measurement() {
         // The rule the whole crate exists to keep, stated as a test.
@@ -521,6 +622,24 @@ mod tests {
             assert!(
                 find(name).is_none(),
                 "{name} is listed as a candidate and must not also be in the roster"
+            );
+        }
+    }
+
+    /// A name can be checked against the machine under more than one spelling.
+    /// `kiro` was installed as `kiro-cli`, so looking only for the product name
+    /// reported it missing while the binary sat in `~/.local/bin`; and `kilo`
+    /// was installed outside `PATH` entirely, where even its real name does not
+    /// resolve. Both are one entry with two executable names.
+    #[test]
+    fn an_agent_is_found_by_any_of_its_binary_names() {
+        for spec in ROSTER {
+            let found = spec.binaries.iter().find_map(|b| which(b));
+            assert!(
+                found.is_some(),
+                "{} lists {:?} and none of them resolve",
+                spec.name,
+                spec.binaries
             );
         }
     }

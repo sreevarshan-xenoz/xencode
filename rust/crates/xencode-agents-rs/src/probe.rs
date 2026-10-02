@@ -369,9 +369,14 @@ fn event_from_line(line: &str) -> Option<ObservedEvent> {
 
 /// Find something that looks like a session id.
 fn session_id_in(text: &str) -> Option<String> {
+    // Key names measured across the vendors probed on 2026-10-02. Two shapes
+    // that were missing here cost a real reading: kilo emits `"sessionID"` and
+    // was reported as issuing no session id at all, which matters because a
+    // resume is impossible without one.
     const KEYS: &[&str] = &[
         "\"sessionId\"",
         "\"session_id\"",
+        "\"sessionID\"",
         "\"conversationId\"",
         "\"conversation_id\"",
         "\"threadId\"",
@@ -949,6 +954,13 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
             (r#"{"session_id":"def-456"}"#, Some("def-456")),
             (r#"{"threadId":"ghi"}"#, Some("ghi")),
             (r#"{"conversation_id":"jkl"}"#, Some("jkl")),
+            // kilo's own casing, measured 2026-10-02. Missing from this list,
+            // kilo was reported as issuing no session id and therefore not
+            // resumable, which was false.
+            (
+                r#"{"type":"step_start","sessionID":"ses_f0508be90f"}"#,
+                Some("ses_f0508be90f"),
+            ),
             (r#"{"type":"assistant"}"#, None),
         ] {
             assert_eq!(session_id_in(line).as_deref(), expected, "{line}");

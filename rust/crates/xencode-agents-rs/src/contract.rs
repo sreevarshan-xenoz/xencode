@@ -101,6 +101,25 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
         ("cursor-agent", "resume") => &["--resume", "--continue"],
         ("cursor-agent", "daemon") => &["persist", "worker"],
         ("cursor-agent", "approval") => &["--mode", "--force", "--sandbox"],
+        // kilo, read from `kilo --help` and `kilo run --help` on 2026-10-02.
+        // Its top-level help lists the subcommands, so every claim checks
+        // against that one screen. Note `--format` here takes `json`, not
+        // `stream-json` — a seventh different spelling for the same idea.
+        ("kilo", "stream") => &["--format", "json"],
+        ("kilo", "acp") => &["acp"],
+        ("kilo", "mcp") => &["mcp"],
+        ("kilo", "resume") => &["session", "--continue"],
+        ("kilo", "daemon") => &["serve", "attach"],
+        ("kilo", "approval") => &["--auto"],
+        // kiro-cli, read from `kiro-cli --help-all` and `kiro-cli chat --help`
+        // on 2026-10-02. Its flags live on the `chat` subcommand, so the probe
+        // reads `kiro-cli chat --help` for the claims that are chat flags.
+        ("kiro-cli", "stream") => &["--output-format", "stream-json"],
+        ("kiro-cli", "acp") => &["acp"],
+        ("kiro-cli", "mcp") => &["mcp"],
+        ("kiro-cli", "resume") => &["--resume"],
+        ("kiro-cli", "daemon") => &["crew"],
+        ("kiro-cli", "approval") => &["--trust-all-tools", "--trust-tools"],
         _ => &[],
     }
 }
