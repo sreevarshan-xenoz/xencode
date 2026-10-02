@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1895 tests passing, zero warnings (re-verified 2026-10-02, after AR-10)
+- [x] Workspace gates green — 16 crates, 1902 tests passing, zero warnings (re-verified 2026-10-02, after OR-2)
 
 ## Model Catalog Honesty
 
@@ -9924,10 +9924,28 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
       was compared against, and a worse-than-baseline result stops `OR-2`'s scheduling
       rather than shipping anyway.
-- [ ] **OR-2 — the task graph and scheduler.** Nodes with dependencies, parallel
+- [x] **OR-2 — the task graph and scheduler.** Nodes with dependencies, parallel
       readiness, and a queue whose capacity is `min(workers, verification throughput)`.
       **Done-when:** a four-node graph with two independent branches runs both and the
       third waits, and the serial bottleneck is named in the output rather than hidden.
+      **Delivered 2026-10-02** as `xencode-core-rs/src/scheduler.rs`, in the same two
+      layers `tasks.rs` uses: a pure `TaskGraph` (nodes with a dependency list,
+      `validate` rejecting duplicate ids / dangling edges / self-loops / cycles by name,
+      `ready(done)` returning the runnable set in insertion order, `longest_chain` as
+      the critical path, and `bottleneck` as the join node on it) plus a `Scheduler`
+      that runs nodes as **real `sh -c` children** through the existing `TaskManager` —
+      no simulated execution. Capacity is `min(workers, verification throughput)` floored
+      at one, and `binding` names which of the two limited it, so a machine with eight
+      workers but two verifiers reports the real concurrency of two rather than the
+      worker count. Seven tests: the four structural guards on the pure layer, the
+      capacity formula on both sides, and the four-node graph executed for real —
+      `A`/`B` branch heads overlapping in wall clock (`A.start < B.finish &&
+      B.start < A.finish`), `C` observed starting only after `A` exited, `D` named as
+      the serial bottleneck on the `A→C→D` critical path, all four exiting 0. Forced
+      to serial capacity, the overlap assertion fails (`B` starts after `A` finishes) —
+      checked by mutation, then reverted — so the parallelism claim is falsifiable, not
+      decorative. This is a library capability: no CLI command or control-room surface
+      drives it yet (`X-3`/`OR-12` consume it), so no user-facing doc changes here.
 - [ ] **OR-3 — the permission broker.** Answer a worker's approval request where the
       vendor supports it (Claude's `--permission-prompt-tool` over `M-5`), pre-grant the
       lowest sufficient mode where it does not, and never widen a mode on a worker's own

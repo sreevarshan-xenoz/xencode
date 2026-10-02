@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-2`: the task graph and scheduler
+
+The orchestrator needs a place that decides *what may run now*, separate from the
+thing that actually runs it. `xencode-core-rs/src/scheduler.rs` adds both, in the
+same two layers the background-task registry already uses: a pure `TaskGraph` —
+nodes carrying a dependency list — that can be checked on any shape without
+launching anything, and a `Scheduler` that runs ready nodes as **real `sh -c`
+subprocesses** through the existing `TaskManager`. Nothing is faked: a node is
+"done" only when its child has actually exited, and downstream readiness is driven
+by that real completion.
+
+The pure layer refuses to build a schedule that cannot run — duplicate ids, an edge
+naming a node that isn't there, a self-loop, or a cycle (named by the nodes on it,
+since no member of a cycle can ever become ready and the alternative is a silent
+hang). It also answers the two questions the item is really about: the **critical
+path**, the longest chain of dependencies that no added worker shortens, and the
+**serial bottleneck** — the join where independent branches converge into one line of
+work.
+
+The queue's capacity is `min(workers, verification throughput)`, not the worker
+count, and the report names which of the two was binding. A machine that could launch
+eight agents but verify two at a time has a real concurrency of two; flooding the
+queue would only pile finished work against a verification step that cannot consume
+it, so the surplus is never offered.
+
+The four-node case is executed, not asserted: two branch heads overlap in wall clock
+(both launched before either finished), the dependent node starts only after its need
+has exited, and the join is named as the bottleneck — while a forced serial capacity
+makes the overlap fail, checked by mutation and reverted, so the concurrency is
+provable rather than claimed. Seven new tests. This is a library capability the control
+room (`X-3`) and the worker panel (`OR-12`) will consume; it adds no CLI command yet.
+
 ### Added — `AR-10`: the Agent Event compatibility kit
 
 A regression firewall for the protocol's adapter layer. `AR-9`'s stream tests ask
