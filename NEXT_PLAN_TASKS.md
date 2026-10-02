@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1904 tests passing, zero warnings (re-verified 2026-10-02, after X-2)
+- [x] Workspace gates green — 16 crates, 1911 tests passing, zero warnings (re-verified 2026-10-02, after OR-3)
 
 ## Model Catalog Honesty
 
@@ -9946,13 +9946,44 @@ worker, `OR-` for the thing that decides what workers to talk to.
       checked by mutation, then reverted — so the parallelism claim is falsifiable, not
       decorative. This is a library capability: no CLI command or control-room surface
       drives it yet (`X-3`/`OR-12` consume it), so no user-facing doc changes here.
-- [ ] **OR-3 — the permission broker.** Answer a worker's approval request where the
+- [x] **OR-3 — the permission broker.** Answer a worker's approval request where the
       vendor supports it (Claude's `--permission-prompt-tool` over `M-5`), pre-grant the
       lowest sufficient mode where it does not, and never widen a mode on a worker's own
       authority.
       **Done-when:** a real denied write is visible at xencode's gate rather than
       silently skipped, and no launch line in the run log contains an approval flag
       xencode did not choose.
+      **Delivered 2026-10-02** as `xencode-tui-rs/src/permission_broker.rs` — the
+      decision layer, so named because it lives where xencode's approval gate does
+      (`agent_tools::classify`) and reaches the vendor flag knowledge in
+      `xencode-agents-rs`. Two halves, both proven without spending a call on any
+      vendor. (1) **The launch line:** `plan_launch` starts from the roster's
+      `one_shot` command, drops every approval-control flag the *worker* tried to put
+      in its own args — and the value riding on it, so a stripped `--permission-mode`
+      cannot leave `bypassPermissions` orphaned — then appends only the one control
+      xencode chose for the configured mode. Full autonomy (Claude
+      `--permission-mode bypassPermissions`, the vendor's own all-yes flag like
+      `crush --yolo`) is emitted for exactly one mode, `AllAllow`; an `Ask` worker on a
+      vendor that cannot prompt gets **no flag at all** rather than being handed the
+      widest flag it happens to support. Where Claude can route approvals back over
+      `M-5`, the broker emits `--permission-prompt-tool <tool>` plus
+      `--permission-mode default` instead of pre-widening; if the caller has wired no
+      such tool, it refuses to invent one and stays strict. The flag tokens are the
+      spellings `AR-3` verifies against each `--help`, not coinages. (2) **An approval
+      request:** `PermissionBroker::answer` judges a worker's call with the *same*
+      `classify` gate the user's own tools face — no softer worker rule — and a denial
+      is recorded and surfaced, not swallowed. Seven tests. The denied-write case runs
+      against the real filesystem: a `write_file` whose path leaves the workspace is
+      denied, the refusal appears on the record with its target, and the file is
+      asserted **absent on disk** — the refusal is the last word, not a note beside a
+      write that happened anyway. Three of the guards were checked by mutation and
+      reverted: disabling the worker-flag stripping fails the "cannot widen its own
+      authority" test, forcing every mode to bypass fails the "not pre-granted full
+      autonomy" test, and dropping the refusal record fails the denied-write test — so
+      none of the guarantees is decorative. This is a library capability the launch
+      path and worker panel wire in (`X-3`, `OR-12`); the actual end-to-end spawn of a
+      live Claude through the prompt tool is a paid call and is **not** claimed here —
+      the two done-when clauses are met at xencode's gate, which is what they ask.
 - [ ] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
       file set, and a conflict refused at scheduling time rather than discovered at merge
       time.
