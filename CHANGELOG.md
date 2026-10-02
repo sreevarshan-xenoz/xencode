@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — three more agents the probe now covers, and two named and confirmed absent
+
+`xencode agents` and `xencode interop` now also cover `agy` and `cursor-agent`,
+which were installed on this machine but covered by nothing. `cursor-agent` was
+in no list at all, so the gap in what we knew about it was recorded nowhere;
+`agy` was reported as missing. Both now have their capabilities read from their
+own `--help` and are checked against that help on every run.
+
+`cursor-agent` stops at `Authentication required. Please run 'agent login'
+first, or set CURSOR_API_KEY environment variable`, which is now recognised as a
+login refusal rather than a plain failure — "the agent declined to spend" and
+"the agent is broken" are different facts, and the report now says which happened.
+
+`kilo` and `kiro` were requested by name and are recorded as candidates. No
+binary answers either name here, so both are reported absent and every claim
+about them stays unverified. They are named rather than discovered by scanning
+`PATH`, because discovery is required to say nothing about the rest of the
+filesystem.
+
+Measured today, for anyone comparing against the older table: codex `0.159.3`,
+claude `2.1.286`, gemini `0.62.0`, opencode `1.18.31`, agy `1.2.14`, crush
+`v0.97.1`, cursor-agent `2026.09.28-64d2043`.
+
 ### Fixed — an installed agent is no longer reported as missing
 
 `xencode interop` listed `agy` under "not installed here" on a machine where it

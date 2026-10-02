@@ -93,6 +93,14 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
         ("agy", "resume") => &["--conversation", "--continue"],
         ("agy", "daemon") => &["--remote-control"],
         ("agy", "approval") => &["--mode", "--dangerously-skip-permissions"],
+        // cursor-agent, read from `cursor-agent --help` on 2026-10-02. Its
+        // flags are at top level, and `--print` is the one-shot form.
+        ("cursor-agent", "stream") => &["--output-format", "stream-json"],
+        ("cursor-agent", "acp") => &["acp"],
+        ("cursor-agent", "mcp") => &["mcp"],
+        ("cursor-agent", "resume") => &["--resume", "--continue"],
+        ("cursor-agent", "daemon") => &["persist", "worker"],
+        ("cursor-agent", "approval") => &["--mode", "--force", "--sandbox"],
         _ => &[],
     }
 }
