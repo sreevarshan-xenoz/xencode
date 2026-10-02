@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `X-3`: the control room as a projection over events
+
+The orchestrator surface now has a data layer that is written only against the
+normalised event model, never against a vendor's raw output. `xencode-tui-rs/src/control_room.rs`
+builds a `ControlRoom` from each worker's already-normalised `AgentEvent` stream
+plus the scheduler's own report, and projects four named views from them: fleet
+cards, a timeline, pending approvals, and the task graph. It imports nothing that
+can read a process handle or a vendor byte — the only agent-data dependency is the
+event protocol itself — and that boundary is held by a test that scans this
+module's own source and fails if a pipe, a process spawn, or a raw parse is ever
+reached for. The proof it is built for follows from the same fact: because the
+surface consumes only the common event variants, an edit to any adapter's line
+normalisation cannot break it.
+
+Two honesty rules are encoded in types, not left to a reviewer's eye. A pane is
+labelled by its task and agent — "codex — split the retrieval tier" — and never
+by where the layout tree happens to place it, so reshuffling panes cannot change
+what they claim; a test confirms a card is identical whichever order its input
+arrives in. And every number is either traced to a stored event or rendered as
+unknown: a worker that reported nothing shows unknown status, unknown duration,
+and unknown approval state rather than a clean zero that would read as "checked
+and empty," while a duration only appears when the scheduler actually timed that
+node, since the event model carries no clock of its own. Seven tests; the
+source-scan guard and the unknown-versus-idle default were each verified by
+breaking them and watching the right test fail. This is the projection layer;
+wiring it into the per-frame render under orchestrator mode is downstream.
+
 ### Added — `OR-16`: the result envelope
 
 A finished worker hands back one machine-readable record, and the record keeps
