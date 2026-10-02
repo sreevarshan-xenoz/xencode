@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-16`: the result envelope
+
+A finished worker hands back one machine-readable record, and the record keeps
+what the worker *claimed* strictly apart from what xencode *observed*. The
+failure this closes is an agent's own prose — "yeah, authentication is done" —
+being read back as a fact it earned. `xencode-core-rs/src/result_envelope.rs`
+builds the `ResultEnvelope` with two separate fields: `claims` (assertions the
+worker made) and `evidence` (the changed files taken from the real diff, the
+commands that ran with their real exit codes, and artifact pointers). The
+evidence half is the only quotable half — `evidence_quotable()` is assembled
+exclusively from `Evidence`, so a claim's text provably cannot leak into what a
+human is shown. A reviewing agent is handed `for_reviewer()` → `ReviewerView`,
+which carries the evidence and status and presents the worker's claims only
+under an explicit unverified label, never merged in. This extends the existing
+checks-ran verdict rather than competing with it: `RanCommand` reuses the same
+`{ran, exit_code, evidence_ref}` shape and its skipped-does-not-equal-passed
+rule, so a command that never ran has no entry and cannot inflate the record,
+`all_checks_passed()` is false for an empty list, and any nonzero exit fails the
+whole envelope. Four tests, one of them fully real — `sh -c true` and
+`sh -c 'exit 7'` are executed for their genuine exit codes and a genuine
+`git diff` supplies the changed-file list, and the envelope reflects both while
+still keeping the claim out of the quotable view.
+
 ### Added — `OR-15`: the task contract
 
 Before a worker is launched, xencode tells it what "done" means, and the worker

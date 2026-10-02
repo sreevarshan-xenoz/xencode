@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1921 tests passing, zero warnings (re-verified 2026-10-02, after OR-15)
+- [x] Workspace gates green — 16 crates, 1925 tests passing, zero warnings (re-verified 2026-10-02, after OR-16)
 
 ## Model Catalog Honesty
 
@@ -10064,13 +10064,33 @@ worker, `OR-` for the thing that decides what workers to talk to.
       the after-the-fact check that denies a merge. A library capability the launch path
       and control room consume (`X-3`); no CLI command is added, so no user-facing doc
       changes here.
-- [ ] **OR-16 — the result envelope.** Every finished task produces one machine-readable
+- [x] **OR-16 — the result envelope.** Every finished task produces one machine-readable
       record: status, agent, task, changed files taken from the diff, the commands that
       ran with their exit codes, claims held apart from evidence, and a handoff state.
       **Done-when:** claims and evidence sit in different fields and only the evidence
       half can be quoted to a human; a reviewing agent is handed this record rather than
       the implementing agent's prose; and it is `EVd-3`'s checks-ran verdict extended, not
       a second ledger competing with the first.
+      **Delivered 2026-10-02** as `xencode-core-rs/src/result_envelope.rs`. The
+      `ResultEnvelope` keeps **claims** (what the worker asserted) and **evidence**
+      (what xencode observed — the diff's changed files, the commands that ran with their
+      exit codes, artifact pointers) in separate fields, so the two can never be
+      conflated. Only the evidence half is quotable: `evidence_quotable()` is built
+      exclusively from `Evidence` and provably cannot contain a claim's text, which is
+      what stops *"yeah, authentication is done"* from being read back as fact. A
+      reviewing agent is handed `for_reviewer()` → `ReviewerView`, which carries the
+      evidence and status and the worker's claims only under an explicit "unverified"
+      label, never merged into evidence. This is `EVd-3`'s verdict extended, not a rival
+      ledger: `RanCommand` reuses the same `{ran, exit_code, evidence_ref}` shape with
+      JUnit's `skipped ≠ passed` rule — a command that did not run has no entry and
+      cannot inflate anything, `all_checks_passed()` is false for an empty list (nothing
+      proven is nothing passed), and any nonzero exit fails the whole record. Four tests,
+      one of them fully real: `sh -c true` and `sh -c 'exit 7'` are executed for their
+      genuine exit codes and a genuine `git diff` supplies the changed-file list, and the
+      envelope reflects both while still keeping the claim out of the quotable view.
+      Mutation-checked: leaking claims into `evidence_quotable` fails the exclusion test,
+      and dropping the empty-command guard makes "nothing proven" wrongly read as passed.
+      A library capability the reviewer and control room consume; no CLI surface added.
 - [ ] **OR-17 — the veto.** A review or verification outcome can block a merge, and the
       block cannot be lifted by the worker that caused it. Only a named reviewer, the
       human, or a policy that says out loud what it clears.
