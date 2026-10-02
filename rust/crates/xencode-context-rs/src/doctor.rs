@@ -1,10 +1,18 @@
-//! Machine environment probe (`QO-5`).
+//! Machine environment probe (`QO-5`) and self-debug checks (`QO-7`).
 //!
 //! Probe and display, nothing more: core count, available memory, pressure
 //! stall information, cgroup limits, GPUs, log readability, and whether the
 //! colab route looks live. No "adaptive execution strategy" — adapting to a
 //! machine on the basis of one probe is unverifiable, and this module does not
 //! try.
+//!
+//! The `SelfCheck` half is the slice a person runs when xencode itself is the
+//! thing that looks broken: does the context index open, is a git repo found,
+//! does each configured provider answer, does each configured MCP server start
+//! and get through its handshake, does `metrics.jsonl` parse, is the cache
+//! directory writable. Every check reuses the code path the feature uses — the
+//! same manifest path, the same `git rev-parse`, the same TCP connect, the same
+//! write — and each one returns a sentence naming what to do about the failure.
 //!
 //! Every fact is best-effort. An unreadable file, a missing binary, or a
 //! denied syscall yields `None` (or `false` for readability checks), never an
@@ -220,6 +228,47 @@ pub fn check_metrics(xencode_dir: &std::path::Path) -> SelfCheck {
     }
 }
 
+/// A provider endpoint, dialled at the address the config points it at.
+/// `start_command` is what to run when the endpoint is a server that belongs on
+/// this machine; a cloud address has none, and its failure says only that the
+/// address did not answer, because there is nothing here to start.
+pub fn check_provider(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout: std::time::Duration,
+    start_command: Option<&str>,
+) -> SelfCheck {
+    let reachable = tcp_reachable(host, port, timeout);
+    let detail = if reachable {
+        format!("{host}:{port} accepts TCP")
+    } else {
+        match start_command {
+            Some(command) => format!(
+                "{host}:{port} refused: nothing is listening; start it with `{command}` or point \
+                 the config elsewhere"
+            ),
+            None => format!("{host}:{port} refused: the {name} endpoint does not answer from here"),
+        }
+    };
+    SelfCheck {
+        name: format!("provider:{name}"),
+        state: if reachable { "pass" } else { "fail" }.to_string(),
+        detail,
+    }
+}
+
+/// One configured MCP server, in the words the attempt to reach it came back
+/// with. The caller runs the real client, so a pass means the handshake was
+/// answered and a failure carries the client's own sentence for why it was not.
+pub fn check_mcp(name: &str, reached: bool, detail: impl Into<String>) -> SelfCheck {
+    SelfCheck {
+        name: format!("mcp:{name}"),
+        state: if reached { "pass" } else { "fail" }.to_string(),
+        detail: detail.into(),
+    }
+}
+
 /// Is the cache directory writable, proved by writing.
 pub fn check_cache_writable(xencode_dir: &std::path::Path) -> SelfCheck {
     let dir = xencode_dir.join("cache");
@@ -317,6 +366,61 @@ mod tests {
         assert!(check_cache_writable(&xencode).passed());
         assert_eq!(check_git(&dir).state, "fail");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_provider_failure_names_the_thing_to_run() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let up = check_provider(
+            "ollama",
+            "127.0.0.1",
+            port,
+            std::time::Duration::from_secs(2),
+            Some("ollama serve"),
+        );
+        assert_eq!(up.name, "provider:ollama");
+        assert!(up.passed(), "{}: {}", up.state, up.detail);
+        drop(listener);
+
+        // The same port with nothing behind it: the check says what to do, not
+        // just that something refused.
+        let down = check_provider(
+            "ollama",
+            "127.0.0.1",
+            port,
+            std::time::Duration::from_secs(2),
+            Some("ollama serve"),
+        );
+        assert_eq!(down.state, "fail");
+        assert!(down.detail.contains("ollama serve"), "{}", down.detail);
+
+        // An address with no local server to start says so without inventing a
+        // command. Port 1 is privileged, so nothing here can be listening.
+        let cloud = check_provider(
+            "cloud:openai",
+            "127.0.0.1",
+            1,
+            std::time::Duration::from_secs(2),
+            None,
+        );
+        assert_eq!(cloud.state, "fail");
+        assert!(!cloud.detail.contains('`'), "{}", cloud.detail);
+        assert!(cloud.detail.contains("does not answer"), "{}", cloud.detail);
+    }
+
+    #[test]
+    fn an_mcp_server_is_named_by_its_attempt() {
+        let up = check_mcp("docs", true, "starts and answers the handshake");
+        assert_eq!(up.name, "mcp:docs");
+        assert!(up.passed());
+        let down = check_mcp(
+            "docs",
+            false,
+            "cannot start MCP server `docs`: not executable",
+        );
+        assert_eq!(down.state, "fail");
+        assert!(down.detail.contains("not executable"), "{}", down.detail);
     }
 
     #[test]

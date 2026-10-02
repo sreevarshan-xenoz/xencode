@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2020 tests passing, zero warnings (re-verified 2026-10-03, after QO-6)
+- [x] Workspace gates green — 16 crates, 2022 tests passing, zero warnings (re-verified 2026-10-03, after QO-7)
 
 ## Model Catalog Honesty
 
@@ -4857,7 +4857,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 25 | Security Attack-Path Graph | narrowed | QD-4 — a Semgrep rule-pack plus a hand-written sink list, explicitly not a taint engine |
 | 26 | Regression Memory | planned | EV-7 + the EVd ledger; QT-6 is its retrieval form |
 | 27 | Failure Pattern Library | narrowed | Seed from RS-6 (rustc's own JSON known-error channel), not from git archaeology |
-| 28 | Self-Debugging Environment | planned | DB-6 `xencode doctor --json` (+QO-7's probe list) |
+| 28 | Self-Debugging Environment | partly shipped | DB-6 `xencode doctor --json` (+QO-7's probe list — the probes themselves ship as `doctor --selfcheck`, done 2026-10-03) |
 | 29 | Self-Benchmarking | narrowed | QO-4, gated on CX-8. "Agent success %" needs an eval corpus that does not exist yet |
 | 30 | Reproducible Agent Runs | planned | EV-8 (HTTP-boundary playback); QA-1 adds `xencode replay <run-id>` on top of it |
 | 31 | Deterministic Agent Mode | narrowed | QA-2 is done: `llama_cpp_seed` is sent and recorded, and a turn says whether it was pinned. Still only honest on CPU with fixed threads — MD-1 is the mode axis |
@@ -5370,13 +5370,17 @@ context.
   PSI, cgroup-limit presence, `nvidia-smi -L` (works here — fact Q-1.1),
   `lspci` GPU classes, `journalctl --user` readability, `dmesg` EPERM, colab
   route presence. *Effort: S.* No "adaptive execution strategy" until QO-4 can
-  measure something. **Done 2026-09-28** — `xencode doctor --env [--json]`
+  measure something. **Done 2026-09-28** — `xencode doctor --env [--format
+  text|json]`
   over `context-rs/src/doctor.rs`: cores, memory, PSI readability, cgroup
   limit, `nvidia-smi -L` lines, journalctl readability, dmesg denial, and
   colab route (state file plus live forward pid). On this machine: 8 cores,
   11 GB, PSI readable, MX250 visible, journalctl readable, dmesg denied — the
   locked-down case reported, never errored. Every fact best-effort. Three unit
-  tests plus a CLI parse test. No strategy adaptation, as specified.
+  tests plus a CLI parse test. No strategy adaptation, as specified. The JSON
+  half of that row was recorded with the wrong flag name: it is `--format json`,
+  and `xencode doctor --env --json` is refused as an unexpected argument,
+  verified against the built binary on 2026-10-03.
 - [x] **QO-6 — Release notes as a draft generator.** `git log <prev>..HEAD` +
   CHANGELOG, categorized, human-edited-after. *Effort: M.* Conventional-commit
   machinery buys nothing on 760 prose messages; WF-5/WF-6 own the real path.
@@ -5402,10 +5406,35 @@ context.
   including a draft started from a subdirectory (which has to find the changelog at
   the repository top, the case for cargo running in `rust/`), plus three CLI tests
   for the flag set, its defaults and the counts read as English.)*
-- **QO-7 — `doctor` as the self-debug slice.** Re-use real code paths: does the
+- [x] **QO-7 — `doctor` as the self-debug slice.** Re-use real code paths: does the
   context index open, is a git repo found, is each configured provider
   reachable, does the MCP server spawn, does `metrics.jsonl` parse, is the cache
   dir writable — each with a named failure string. *Effort: S,* inside DB-6.
+  *(Done 2026-10-03 — the six rows already printed, and two of them printed a
+  guess. Providers were dialled at `127.0.0.1:11434` and `localhost:8080`
+  whatever the config said — this machine's `llama_cpp_url` and
+  `remote_base_url` are both port 18000 — and a declared MCP server was only
+  looked for on `PATH`, which answers whether a binary exists, not whether the
+  server starts. Both now go through the code path the feature uses: the
+  addresses come from `ollama_url` / `llama_cpp_url` / `remote_base_url`, a cloud
+  provider is dialled only when a key is configured, and an MCP server is started
+  by the same client `/mcp` starts it with, asked to introduce itself, and killed
+  (`xencode_mcp_rs::McpClient::start` over
+  `xencode_tui_rs::mcp::spec_from_config`, the existing conversion). The wording
+  of the two new rows lives in `context-rs/src/doctor.rs` as `check_provider` and
+  `check_mcp`, so the failure sentence is a tested string rather than an
+  interpolation in the CLI. Live on this machine, all seven row shapes from one
+  run: index absent, git pass at the repository root, metrics absent, cache pass
+  proved by writing, `provider:ollama` pass at a port that is serving
+  (`127.0.0.1:631 accepts TCP`), `provider:llamacpp` and `provider:remote`
+  refused at the configured 18000 naming the command that would answer there,
+  `mcp:talking` pass (`started and answered the handshake; it offers tools`),
+  `mcp:ghost` fail (`cannot start MCP server \`ghost\`: No such file or directory
+  (os error 2)`), and `mcp:undecided` fail before anything starts (`the
+  declaration names neither a "command" to spawn nor a "url" to reach`). Exit
+  code stays 0; the FAIL rows are the signal. Two new library tests — the
+  provider row's wording proved against a real listener and a closed port, the
+  MCP row's against both states.)*
 
 ### Q-6 Retrieval, queries and traceability (QN)
 
@@ -5762,7 +5791,11 @@ coordination is not.
   Live on this machine: index absent (true, never built here), git pass,
   metrics absent (true), cache pass, both local providers refused (true,
   nothing serving). Three unit tests with real syscalls on both outcomes plus
-  a CLI parse test.
+  a CLI parse test. **QO-7 later replaced two of those mechanisms with the real
+  code paths:** the provider rows dial the addresses in the config instead of
+  two hardcoded ports, and an MCP server is started and put through its
+  handshake by the same client `/mcp` uses instead of being looked for on
+  `PATH`.
   **Done 2026-09-28** — `xencode verify [--skip test|lint|fmt]` runs the three
   slots every release-facing change needs: the full nextest suite (retries 0,
   flaky-result fail), clippy with zero tolerance, `cargo fmt --check`. Each
@@ -8934,7 +8967,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items
+#### W11 — Self-diagnosis, cost and operations — 20 items, 6 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -8990,7 +9023,7 @@ range end, and this file's `## [Unreleased]` block, whose `### Added` /
 `### Changed` / `### Fixed` headings supply the categories. Conventional-commit
 parsing is absent, exactly as the row said it should be — the subjects here are
 prose, and a prefix would label a sentence that already names itself. An entry is
-tied to a commits by the plan id its heading names, matched against the ids the
+tied to a commit by the plan id its heading names, matched against the ids the
 subjects name, and the two ways that link fails are both printed: commits with no
 entry behind them (870 of the 903 reachable here, led by the lint-only commit
 `afb9326`), and entries naming no commit in the range (`QD-1`, `QD-2`, `QD-5` —
@@ -8999,6 +9032,28 @@ no tag at all, the draft says so and covers the whole history instead of inventi
 a boundary, and caps the unexplained list at 50 with the remainder counted.
 `--out` refuses an existing file unless told otherwise, because the draft is what
 a person then edits; `CHANGELOG.md` is only ever read.
+
+**QO-7, done 2026-10-03** — `xencode doctor --selfcheck` asks six questions, and
+two of them had been answered about the wrong thing. Providers were dialled at
+`127.0.0.1:11434` and `localhost:8080` regardless of what the config said; this
+machine's `llama_cpp_url` and `remote_base_url` are both on port 18000, so those
+rows reported on addresses no request ever uses. A declared MCP server was only
+looked for on `PATH`, which tells you a binary exists, not that the server
+starts and speaks the protocol. The rows now come from the code paths the
+features take: the addresses are read from `ollama_url`, `llama_cpp_url` and
+`remote_base_url`, a cloud provider is dialled only when a key is configured for
+it, and each MCP server is started by the same client `/mcp` starts it with,
+asked to introduce itself, then killed. The two new row shapes live in
+`context-rs/src/doctor.rs` as `check_provider` and `check_mcp`, so a failure
+sentence is a tested string rather than text assembled in the command handler.
+Verified against this machine's config and three declared servers in one run: a
+port that is serving reads `127.0.0.1:631 accepts TCP`, one that is not names the
+command that would answer there, a working server reads `started and answered the
+handshake; it offers tools`, a command that is absent reads `cannot start MCP
+server \`ghost\`: No such file or directory (os error 2)`, and a declaration that
+says nothing about how it is reached fails before anything is started. Exit code
+stays zero either way — a laptop with nothing serving on the model ports is a
+normal laptop.
 
 #### W12 — Long-running autonomy — 15 items
 

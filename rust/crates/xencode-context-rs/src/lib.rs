@@ -87,8 +87,8 @@ pub use context::{
 pub use conversation::{Transcript, TranscriptEntry};
 pub use crate_graph::{cargo_metadata, crate_of_file, parse_crate_graph, CrateGraph, EdgeKind};
 pub use doctor::{
-    check_cache_writable, check_git, check_index, check_metrics, probe_env, resolve_on_path,
-    tcp_reachable, EnvFacts, SelfCheck,
+    check_cache_writable, check_git, check_index, check_mcp, check_metrics, check_provider,
+    probe_env, resolve_on_path, tcp_reachable, EnvFacts, SelfCheck,
 };
 pub use documents::{
     is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
