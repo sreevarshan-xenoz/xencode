@@ -5864,8 +5864,14 @@ one live conflict (§R-3). The one exception is the re-arguing Milestone S force
 cloud workers are not bound by the hardware that made multi-agent pipelines the honest
 answer, so two parked graph items are scoped back in (§R-2 item 8).
 
-**Inventory.** The universe is **303 IDs** across **305 rows**: N 55 + O 73 + P 48 +
-Q 63 + S 26 + L-1…L-12 + M-1…M-7 + U-1…U-8. The L/M/N/O/P/Q/S sum is 284 rather
+**Inventory.** As recorded on 2026-09-28 the universe was **303 IDs** across **305
+rows**: N 55 + O 73 + P 48 + Q 63 + S 26 + L-1…L-12 + M-1…M-7 + U-1…U-8. Milestone X
+brings that forward on 2026-10-02 to **306 IDs across 309 rows** — and the script
+count then found the 2026-09-28 row figure one short of reality (306 rows, not 305),
+because §V-12 had by then placed `V-10` into W14 as a second row for an ID already
+counted. The appendix subsets above say where the IDs came from; the authoritative
+figures are the script counts of §R-1's tables, stated below and in the per-wave and
+per-bucket tables after this paragraph. The L/M/N/O/P/Q/S sum is 284 rather
 than the original headline **208** because that number counts Q at its **32
 net-new candidates** — 29 of Q's 63 are folds or refinements of items already
 counted and 2 are deterministic bug fixes — leaves out the 19 L/M items, which were
@@ -5873,13 +5879,16 @@ committed tasks before any appendix existed, and predates Milestone S's 26.
 
 Milestone U added 10 rows on 2026-09-28 for 8 IDs: **U-3** holds a row in W3 and
 W11, and **U-6** a row in W5 and W7, because each is genuinely two placements —
-one builds the thing, one enforces or surfaces it. Every other ID holds exactly
-one row. So the two numbers differ by two and both are stated everywhere they
+one builds the thing, one enforces or surfaces it. `V-10` gained a second row the
+same way, placed into W14 by §V-12 after this paragraph was written, so three IDs
+hold two rows and the wave tables run three rows ahead of their unique-ID count.
+Every other ID holds exactly one row. Both numbers are stated everywhere they
 appear rather than reconciled by quietly dropping a row.
 
-Checked by script against the file rather than by eye: **295 rows** in W0…W17
-(**293 unique IDs**), **10 not scheduled** (8 register rejections carried forward,
-plus MI-5, which is contested, plus U-8 which is deferred behind CI-6's change
+Checked by script against the file rather than by eye, on 2026-10-02: **299 rows**
+in W0…W17 (**296 unique IDs**), **10 not scheduled** (seven register rejections
+carried forward — `CAP-3`, `MA-4`, `MA-5`, `MD-3`, `MD-4`, `MEM-4`, `MEM-5` — plus
+MI-5, which is contested, plus U-8 which is deferred behind CI-6's change
 graph, plus V-11 which §V-3 declines on the adaptive-UI evidence), and QN-5
 sitting inside W10 as conditional. The two tables share no ID,
 verified.
@@ -5908,15 +5917,15 @@ and the two sums must agree.
 | W11 | Self-diagnosis, cost and operations | 20 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
-| W14 | Product surface and ecosystem | 65 |
+| W14 | Product surface and ecosystem | 66 |
 | W15 | Measure the other agents before planning on them (new, from S) | 3 |
-| W16 | One worker at a time, then brokered (new, from S) | 13 |
-| W17 | Many workers at once (new, from S) | 12 |
+| W16 | One worker at a time, then brokered (new, from S) | 14 |
+| W17 | Many workers at once (new, from S) | 14 |
 | — | declined / contested | 10 |
 
 | bucket | count | what it means |
 |---|---|---|
-| core substrate | 78 | other items depend on it; skipping one is a deferral, not a speed-up |
+| core substrate | 79 | other items depend on it; skipping one is a deferral, not a speed-up |
 | capability | 155 | makes the agent better at the work; nearly all of it waits on the substrate |
 | ecology | 61 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
 | park | 11 | declined, conditional, or contested (§R-3) |
@@ -8875,7 +8884,7 @@ Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores 
 | **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
 | **MA-3** | Read-only explorer as a tool call | capability | read-only explorer as a tool call |
 
-#### W14 — Product surface and ecosystem — 65 items
+#### W14 — Product surface and ecosystem — 66 items
 
 No hard dependencies, which is exactly why it is last: real value that should never be allowed to interrupt the loop above.
 
@@ -9247,7 +9256,7 @@ prove nothing about a remote connection).
   server names"). Three unit tests plus the firewall test plus a CLI parse
   test.
 
-#### W16 — One worker at a time, then brokered — 13 items
+#### W16 — One worker at a time, then brokered — 14 items
 
 From Milestone S. Needs W1 (`WF-1` events, `EVd-1` ledger, `CX-2` schema), W5 (a verdict
 worth collecting) and W7 (`CAP-1`'s vocabulary, `SE-4`'s trifecta gate). `M-5` moved here
@@ -9263,6 +9272,7 @@ approval request instead of pre-granting one.
 | **AR-7** | The handoff package, built only from observed facts | core | no self-reported progress; `EVd-3`'s rule |
 | **AR-8** | Worker health, reported read-only | core | shows an expired login, never fixes one |
 | **AR-9** | The common event protocol every adapter normalises into | core | **derived from `AR-1`'s matrix**, not from the proposal's draft; file changes derived from our own diff (§S-12) |
+| **AR-10** | Agent Event TCK — the protocol replayed against the captured streams | core | after `AR-4`/`AR-5`; the regression firewall for the adapter layer; the two unobserved variants stay declared gaps, never fabricated lines |
 | **OR-1** | Task decomposition, measured before it is trusted | core | gated on `EV-1` — the local planner is the weakest link (§S-4.2) |
 | **OR-2** | The task graph and scheduler | core | capacity is `min(workers, verification throughput)`, not worker count, and parallelism is computed from independence + lease collision + cost (§S-12), not a fixed constant |
 | **OR-3** | The permission broker | core | real brokering for one vendor, pre-grant for the rest; never widens a mode itself |
@@ -9271,7 +9281,7 @@ approval request instead of pre-granting one.
 | **M-5** | `xencode mcp serve` | ecology | moved up from W14: the broker's only seam (§S-3) |
 | **V-10** | Worker-event to window bridge | capability | after V-1 and AR-1/AR-4/AR-5/AR-6/AR-9; consumes observed state without controlling layout |
 
-#### W17 — Many workers at once — 12 items
+#### W17 — Many workers at once — 14 items
 
 From Milestone S. Needs W6 (evidence), W11 (`CX-7`'s budgets that act, `CX-4`'s price
 lookup) and W12 (`LF-2`'s approval round-trip), and it is where `MA-4`/`MA-5` come back in
@@ -9292,9 +9302,11 @@ processes at once.
 | **OR-17** | The veto, liftable only by reviewer, human or stated policy | capability | the authority claim that makes the middle position real rather than cosmetic |
 | **OR-13** | The Local-Only profile | capability | refuses external workers by name; rides `LF-8`'s no-network measurement in W14 |
 | **OR-12** | The worker panel | ecology | every number traces to a row; unobservable renders as unknown, never as idle |
-| **OR-14** | `/orchestrator` as a mode, plus its command surface | ecology | turning it off leaves plain xencode untouched |
+| **OR-14** | `/orchestrator` as a mode, plus its command surface | ecology | turning it off leaves plain xencode untouched; the mode itself is now `X-2`, this row keeps the command surface |
+| **X-2** | Two first-class modes over one shared state, plus the global toggle | core | the owner's directive of 2026-10-02; done means a Coding → Orchestrator → Coding round trip preserves task state, agents, sessions, worktrees, diffs, approvals, event history, verification and git state |
+| **X-3** | The control room as an event-to-UI projection | capability | consumes `AgentEvent` + `OR-2` state only; a worker's pane is labelled by its task and agent, not by where the layout tree happens to put it (§X-3) |
 
-#### Not scheduled — 8 items
+#### Not scheduled — 10 items
 
 Declined once already, or genuinely contested. Recorded here so nobody re-proposes one of these inside a wave.
 
@@ -9790,17 +9802,33 @@ worker, `OR-` for the thing that decides what workers to talk to.
       working. Both agents' cells are now verified against their own help on every
       run. Still open: only `--help` is consulted, so anything a vendor documents
       elsewhere remains invisible, and absence is only assertable for `acp`/`mcp`.
-- [ ] **AR-4 — one worker, one event schema.** Launch a vendor headless, normalise its
-      JSONL into xencode's `WF-1` event shape, and mark the provenance of every field a
-      vendor did not supply.
-      **Done-when:** two different vendors' runs render in the same trace view, and any
-      field invented to make them line up is visibly xencode's, not theirs.
-- [ ] **AR-5 — worker identity and state files.** Give every worker an id that survives
-      into `EVd-1`'s ledger and `CX-2`'s metrics, and define what xencode owns versus the
-      vendor (task record, not session mirror).
+- [ ] **AR-4 — capture, normalise, persist — and keep the raw.** Launch a vendor
+      headless, normalise its JSONL into xencode's `WF-1` event shape through `AR-9`'s
+      `AgentEvent`, mark the provenance of every field a vendor did not supply, and
+      **store both streams** — the owner's directive of 2026-10-02 fixes the shape:
+      `capture/raw.jsonl`, `capture/normalized.jsonl`, `capture/metadata.json`. The raw
+      stream is never replaced: the separation of what a worker emitted from what
+      xencode inferred is the same line `Origin::Synthesised` draws in memory, and it
+      has to survive to disk so any later claim can be proved against the bytes.
+      **Done-when:** two different vendors' runs render in the same trace view, any
+      field invented to make them line up is visibly xencode's, not theirs, and for
+      every stored normalised event the raw line it came from is recoverable.
+- [ ] **AR-5 — worker identity and the event envelope.** Give every worker an id that
+      survives into `EVd-1`'s ledger and `CX-2`'s metrics, define what xencode owns
+      versus the vendor (task record, not session mirror), and fix the envelope every
+      `AgentEvent` travels in — session id, task id, agent id, sequence, timestamp,
+      origin, payload — with **four states kept semantically distinct**: observed (the
+      worker said it), synthesised (xencode filled it in because the model needs the
+      field and no stream carried it), unknown (nobody said anything, which is itself a
+      recorded fact), and unavailable (the vendor provably cannot say — `agy`'s missing
+      correlation id on tool calls, measured 2026-10-02, is the worked example). A
+      verifier downstream must never be able to read an absence as a zero or an
+      inference as a measurement.
       **Done-when:** every new file is written with `DB-1`'s atomic write, `DB-5`'s
-      torn-line discard and `0600` per `SE-1`, and a redaction pass proves an
-      authentication token that appeared in a stream did not land on disk (S-6 #31).
+      torn-line discard and `0600` per `SE-1`, a redaction pass proves an
+      authentication token that appeared in a stream did not land on disk (S-6 #31),
+      and a stored event whose origin field is missing deserialises to *not observed*,
+      never to a silent measurement.
 - [x] **AR-6 — the process ceiling.** 2026-09-29. The existing in-process
       background-task manager now applies a 30-minute wall-clock limit by default,
       supports tighter per-task limits, drains a capped output tail, and gives each
@@ -9846,6 +9874,16 @@ worker, `OR-` for the thing that decides what workers to talk to.
       the variant stays unpopulated by a real stream until claude is switched
       back on or a run genuinely denies something. The box stays open for that
       single gap.
+- [ ] **AR-10 — the Agent Event TCK.** A compatibility kit for `AR-9`'s protocol: every
+      captured vendor stream under `tests/fixtures/` replayed through `normalise_line`
+      on every test run — the ten variant shapes, the finish semantics, the origin
+      discipline — so a normalisation regression is a test failure and not a runtime
+      surprise in front of a user.
+      **Done-when:** all eight real streams pass the suite as committed fixtures; the
+      two variants with no observed stream on this box (`PermissionRequested`, `Error`)
+      are stated as evidence gaps in the kit rather than tested against invented input,
+      because a TCK greenlit on fabricated lines certifies nothing; and `AR-9` is not
+      called settled until a re-run of claude or a ninth vendor populates them.
 - [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
       tree, and score the split with `EV-1` before any router consumes it.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
@@ -11622,7 +11660,7 @@ Ten items are scheduled and one is parked. Nothing renumbers an existing item.
 |---|---|---|---|
 | W1 | Make the agent observable | 16 | 15 |
 | W11 | Self-diagnosis, cost and operations | 20 | 19 |
-| W14 | Product surface and ecosystem | 65 | 58 |
+| W14 | Product surface and ecosystem | 66 | 58 |
 | W16 | One worker at a time, then brokered | 13 | 12 |
 
 | ID | item | wave | bucket | depends on |
@@ -12052,3 +12090,154 @@ server plus SDK without confirming the SDK's surface.
 **No external claim is load-bearing for any disposition in this appendix.** Every
 disposition rests on a local probe, a file:line in this repository, or text already
 recorded in this file.
+
+---
+
+## Milestone X — two operating modes over one state, and the seam between them (owner directive, 2026-10-02)
+
+### X-0 What was decided, in the owner's terms
+
+The plan has carried the orchestrator as a pile of worker-facing items (`AR-`) and
+scheduling items (`OR-`) with a UI implied somewhere at the end. On 2026-10-02 the
+owner settled that open question before implementation: Xencode gets **two
+first-class operating modes — Coding and Orchestrator — over one shared state.**
+Not an orchestrator tucked into the side of the chat TUI, and not two programs that
+each own their own copy of the work.
+
+Three boundaries come with the decision. They are the part of this appendix that
+binds later work, and they are written as prohibitions because each one closes a
+failure mode this file has already seen once.
+
+**1. `AgentEvent` is the protected seam.** Nothing above a worker reads a vendor's
+stdout. The TUI, the scheduler, the ledger and the view controller consume `AR-9`'s
+normalised events and nothing else, so when a vendor changes its JSON shape the fix
+is in that vendor's adapter and not in five panels. Events update semantic state;
+the view system decides layout. `AR-4` writes them, `AR-5` envelopes them, `AR-10`
+is the kit that proves the seam holds.
+
+**2. The modes are projections, not state owners.** Changing from Coding to
+Orchestrator preserves the task state, the running agents, their sessions,
+worktrees, diffs, pending approvals, the event history, verification results and
+git state — because none of those belong to a mode; they belong to the single state
+both modes render. A mode that owns data is how a toggle quietly becomes two
+products, which is the thing this decision rules out.
+
+**3. The orchestrator must never become a monolith crate.** The namespaces are
+fixed: `xencode-agents-rs` holds the registry, discovery, protocol, adapters and
+sessions; `xencode-core-rs` holds tasks, scheduler, policies, verification and
+state; `xencode-tui-rs` holds views, layout, projections and the orchestrator UI.
+The name **XAR** stays declined at §S-11 for the fourth time; what this adds is not
+a crate to call XAR but a rule about where new code may be put.
+
+**TUIOS enters with a narrower job than the earlier proposals gave it.** It is a
+source of *spatial primitives* — a layout tree, split behaviour, focus — and
+nothing else. It does not own state, does not define the event vocabulary, and does
+not get a say in what a task's status means. §V-0 already drew that line in the
+other direction — *"'Adopt the TUIOS UX' is tractable; 'become TUIOS' is not"* —
+and this appendix fixes the remaining scope at geometry: the modes read one state,
+and the state is xencode's.
+
+### X-1 The spine, mapped onto IDs that already exist
+
+The owner gave a build order. Almost all of it is already in this file, so this
+table exists to stop a later session from re-proposing it:
+
+| the owner's phase | already planned as | wave |
+|---|---|---|
+| capture what a worker really says | **AR-4** (amended today: raw and normalised both stored) | W16 |
+| give every event an identity and envelope | **AR-5** (amended today: observed / synthesised / unknown / unavailable) | W16 |
+| the compatibility kit | **AR-10** (new today — the owner called it "AR-6", which is taken by the process ceiling closed on 2026-09-29) | W16 |
+| orchestrator state, task graph, scheduler | **OR-2**, **OR-3**, **OR-15**, **OR-16** | W16 |
+| verification before any claim of done | **CU-1** (the verifier seam), **VF-1…VF-7**, **WF-4** (what "run the tests" means), verdict plumbing **EVd-3**/**WF-1**; `OR-1`'s decomposition stays gated on `EV-1` | W1/W5/W6 |
+| the arrangement the control room sits in | **V-1** (layout tree) and **V-10** (worker-event to window bridge) | W14/W16 |
+| the two modes and the toggle | **X-2** (new) | W17 |
+| event-to-UI projection, the control room | **X-3** (new), consuming only `AgentEvent` | W17 |
+
+Two collisions are worth recording rather than smoothing over. The owner's "phase 3
+is AR-6" was a name clash, resolved by giving the TCK the next free ID in the
+`AR-` series. And his phase for the modes supersedes the framing of **OR-14**
+("`/orchestrator` as a mode, plus its command surface", W17): a slash command
+entering a mode is not a first-class mode with a global toggle. `OR-14` stays
+useful for its command surface; the mode itself is `X-2`.
+
+### X-2 Two first-class modes over one shared state
+
+The mode switch is a **global toggle** — the owner suggested `Ctrl+Space`. That
+binding is a suggestion, not a decision, and the check he asked for has now been
+done against the compiled keymap: `Ctrl+Space` is claimed by nothing in
+`global_ctrl_chord` (`rust/crates/xencode-tui-rs/src/keymap.rs:286`), which is the
+stage that runs before focus routing. It is **not free everywhere**, though — three
+panel handlers match `KeyCode::Char(' ')` without testing modifiers, at
+`keymap.rs:757` (attach/detach a file), `keymap.rs:1277` (cycle the security
+scan's severity filter) and `keymap.rs:1629` (toggle voice mute). So a chord that
+is handled after focus routing would fire Space inside those three panels, and the
+toggle has to be claimed in `global_ctrl_chord` or on an equivalent pre-focus
+stage. That is the check the item's done-when requires: **report the binding and the
+stage it was installed at, not just the chord.**
+
+The states are `CODING ⇄ ORCHESTRATOR`, and inside Orchestrator:
+`IDLE → PLANNING → SCHEDULING → EXECUTING → VERIFICATION → REVIEW/REPAIR → MERGE`.
+
+- [ ] **X-2 — the mode state machine and the global toggle.** Implement both modes
+      over the one state, with the toggle described above, and prove that switching
+      preserves everything on the list in §X-0 item 2.
+      **Done-when:** a round trip Coding → Orchestrator → Coding leaves the task
+      state, the running agents, their sessions, worktrees, diffs, pending
+      approvals, event history, verification results and git state identical — byte
+      for byte where those are files — and no mode owns a copy of any of them. The
+      toggle is claimed on the pre-focus stage, and a test presses it while each of
+      the three panels that read a bare `Space` is focused and asserts the panel's
+      own Space action did *not* fire — so the choice cannot silently overwrite an
+      existing action.
+
+### X-3 The control room is a projection, not a fifth panel
+
+Named views (`V-4`, shipped) already address a pane group by what it is *for* —
+Code, Agents, Review, Verify, Git — but they name an arrangement, not a contents. The
+orchestrator surface needs the other axis: a set of **named projections over
+semantic state** — fleet cards, the task graph, a timeline, verification results,
+pending approvals — each consuming `AgentEvent` plus orchestrator state and nothing
+else. A worker's pane is labelled by its task and agent ("`codex` — split the
+retrieval tier"), never by where it happens to sit, because position is what the
+layout tree changes and a task is what the user is tracking.
+
+- [ ] **X-3 — the event-to-UI projection: the orchestrator control room.** Build the
+      control room as a pure consumer of `AR-9`/`AR-10`'s events and `OR-2`'s state,
+      laid out by the `V-1` tree.
+      **Done-when:** the projection reads no vendor output and no worker process
+      handle (grep-verifiable: the only agent-data import in the view layer is the
+      protocol), every number on it traces to a stored event or is rendered as
+      unknown rather than idle (`OR-12`'s rule), and the panes carry task-and-agent
+      names. It must be demonstrably false that a vendor stream change can break
+      this surface: re-running `AR-10` after an adapter edit is the proof.
+
+### X-4 The baseline this directive was written against, and one loose end
+
+Measured on 2026-10-02 on this machine, after the three commits this appendix
+follows: `f565837` (`AR-9`, the protocol), `b809826` (`AR-1`/`AR-2` closed),
+`c32ab05` (probe help honesty).
+
+- **1863 tests pass, 0 failures**, across two full `cargo test --workspace
+  --no-fail-fast` runs, on a clean tree, in 16 crates. `cargo fmt --check` and
+  clippy are clean.
+- **One transient failure was seen and not reproduced.** A single earlier
+  fail-fast run stopped at 839 passed / 1 failed before cargo named the failing
+  test; three subsequent full runs were green. It is recorded as a **known
+  transient, not reproduced, with no deterministic failure signature**. It is
+  deliberately *not* "fixed" by a guess: a change made to satisfy an unreproducible
+  failure is unfalsifiable and would be logged as a fix that was never
+  demonstrated. If it recurs, the reproduction detail is the fix's precondition.
+- **Counting.** The frozen headline stays where it is: the L/M/N/O/P/Q/S sum of
+  **284** is what Milestone R found on 2026-09-23 and is not re-derived here. The
+  live figures in §R-0 have been brought forward to the file as it now stands —
+  **309 rows across 306 unique IDs**, the additions being `AR-10` in W16 and `X-2`
+  and `X-3` in W17 — with the three double-holding IDs listed and the W14 count
+  corrected to 66, which had drifted by one row when §V-12 placed `V-10` there.
+  Per-wave and per-bucket tables now agree with the script count, which is the
+  check §R-0 states. New work joins the pool after §R-1 was written; it does not
+  rewrite it.
+- **Standing caveat, repeated because it is the rule that keeps breaking:** nothing
+  in this appendix is permission to build. `AR-9`'s two unpopulated variants
+  (`PermissionRequested`, `Error`) are still open evidence gaps — closing them needs
+  a claude re-run on a parked paid account (the owner's call, per S-8) or a ninth
+  vendor, and a fabricated stream would certify nothing.
