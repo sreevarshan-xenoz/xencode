@@ -8957,8 +8957,8 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   §S-11 designated for `AR-*`. The captured output is redacted and capped at
   64 KiB with the capping reported.
 
-  **The headline, measured rather than assumed: five vendors, five event
-  vocabularies, and no word in common.**
+  **The headline, measured rather than assumed: six working agents, six event
+  vocabularies, and — with one exception — no word in common.**
 
 | agent | exit | ms | events | stream | auth | session id | observed event kinds |
 |---|---|---|---|---|---|---|---|
@@ -8970,10 +8970,30 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | `crush` | 1 | 2154 | 0 | no | yes | no | — |
 | `agy` | 0 | 26357 | 8 | yes | no | yes | `init`, `result`, `step_update` |
 | `cursor-agent` | 1 | 1352 | 0 | no | yes | no | — |
+| `kilo` | 0 | 19192 | 6 | yes | no | yes | `step_finish`, `step_start`, `text`, `tool_use` |
+| `kiro-cli` | 0 | 7565 | 10 | yes | no | yes | `metadata`, `runFinished`, `runStarted`, `sessionUpdate` |
 
   Re-run 2026-10-02, same task, with a second run of each to check stability. The
-  vocabularies above held across both runs for every agent that answered. `agy`
-  joined the table that day — see the seventh row's own finding below.
+  vocabularies above held across both runs for every agent that answered.
+  `agy`, `cursor-agent`, `kilo` and `kiro-cli` joined the table that day.
+
+  **Six of these ten now answer for real, and `kilo` breaks the headline in an
+  interesting way.** Its vocabulary — `step_finish`, `step_start`, `text`,
+  `tool_use` — is *identical* to `opencode`'s, event for event. Kilo is an
+  opencode fork: its own `--help` banner says `command=--help … opencode`, and
+  its JSON carries opencode's exact envelope (`sessionID`, `part.type`,
+  `callID`, a `snapshot` hash). So the "six vocabularies, nothing in common"
+  reading is really **five distinct vocabularies across six working agents**, and
+  that is a stronger result for `AR-9` rather than a weaker one: two of the ten
+  agents on this box are the same protocol under two names, which means the
+  adapter layer should key on the *event schema* rather than on the agent name,
+  or it will pay for the same adapter twice.
+
+  `kiro-cli` is the only agent here speaking camelCase (`runStarted`,
+  `sessionUpdate`, `runFinished`) alongside a `metadata` event the others have no
+  equivalent for. `kilo` and `opencode` both varied their event *count* between
+  runs (6 vs 7) while their vocabularies held — the count depends on how many
+  tool calls a task happened to take, so a count is not a fingerprint either.
 
   `AR-1` is **not** closed by this. **Four of eight stopped on an authentication
   check** — claude, gemini, crush and cursor-agent — so their event vocabularies
@@ -9001,12 +9021,30 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   carries `-w/--worktree` and `~/.cursor/worktrees/`, which is the closest any
   vendor comes to Milestone S's `OR-4` worktree-lease idea.
 
-  **`kilo` and `kiro` are named and absent.** Both were added as candidates on
-  2026-10-02 at the operator's request. No binary answers either name on this
-  machine, so the probe reports them missing and every claim about them stays
-  unverified — the same treatment `kilo` has had since Milestone W. Installing
-  them is S-8's "install on the user's behalf", which this plan declines to do,
-  so the honest state is: named, checked, absent.
+  **`kilo` and `kiro-cli` were installed on 2026-10-02 and both answer.** Until
+  then both were candidates reported absent, and each turned out to need a
+  different fix to be findable at all:
+
+  - **Installed is not the same as on `PATH`, and the product name is not always
+    the binary.** When kilo was checked it was not on `PATH` at all: its
+    installer had put it in `~/.kilo/bin/kilo` and changed no shell profile, so
+    a `PATH`-only lookup reported an executable, working binary as *missing* —
+    the same wrong answer as the agy bug in a new shape. A second kilo (an npm
+    global under mise's node, symlinked into
+    `mise/installs/node/26.8.1/bin/kilo`) appeared on `PATH` shortly afterwards,
+    which is why the entry now lists **two** executable names and why the
+    reported install source is that npm shim rather than the dot-directory. The
+    fallback is kept because the dot-directory copy still exists and is still not
+    on `PATH`: a machine with only that copy would otherwise report kilo missing
+    again. kiro's binary is simply not called `kiro` — it is `kiro-cli`.
+  - **kiro's binary is not called `kiro`.** It is `kiro-cli`, so looking for the
+    product name found nothing. Every roster entry takes a list of binary names
+    for this reason.
+
+  With both resolved, `kilo` completed the read-only task in 19.2 s and
+  `kiro-cli` in 7.6 s, both twice with stable vocabularies. The candidate list
+  is now empty, which is the correct state: a name is a candidate only until we
+  know how to launch it.
 
   **A sixth finding, and the only one that was a bug in the measuring rather
   than in the measured.** The first re-run reported `agy` as *not installed here*
@@ -9020,7 +9058,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   a separate category from absent, because "nothing to measure here" and "we did
   not look at this" are different answers.
 
-  **Seven things only running them revealed**, each of which a help screen or the
+  **Eight things only running them revealed**, each of which a help screen or the
   S-0 table would have got wrong:
 
   - **A child process needs `PWD` set, not just its working directory.**
@@ -9050,12 +9088,24 @@ No hard dependencies, which is exactly why it is last: real value that should ne
     refusal rather than as a crash. `cursor-agent` added a fourth wording —
     "Authentication required. Please run 'agent login' first, or set
     CURSOR_API_KEY environment variable" — which is now also a marker and a test.
-- **An agent nobody names is not an agent nobody has.** `cursor-agent` was
+- **`sessionID` is not `sessionId`, and the difference is whether a worker can be
+    resumed.** The session-id key list covered six spellings and missed
+    camelCase-with-capital-D, which is what kilo emits — so kilo was reported as
+    issuing no session id, i.e. not resumable, while every one of its events
+    carried one. Measured 2026-10-02; the seventh spelling is now a test using
+    kilo's own output.
+  - **An agent nobody names is not an agent nobody has.** `cursor-agent` was
     installed and working while appearing in no list whatsoever, so unlike `agy`
     (wrongly reported absent) it produced *no* wrong statement — it simply left a
     gap in what we know invisible. Fixing the false-negative case exposed this
     second failure: candidates are named deliberately, because `AR-2`'s
     done-when forbids scanning the filesystem for things that look like agents.
+  - **Installed is not the same as on `PATH`, and the product name is not always
+    the binary.** kilo's own installer put it in `~/.kilo/bin/` and changed no
+    shell profile, so it read as "absent" while running; and kiro's binary is
+    `kiro-cli`, so the product name found nothing. Both fixes are resolution
+    rules — check a documented path, accept several binary names — rather than a
+    longer name list.
 
   **A fifth observation, which is the reason to care:** the four vocabularies
   that were captured share nothing — not one event name. `AR-9`'s common protocol
@@ -9072,6 +9122,17 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   model has to mark as invented. `agy` also advertises `--input-format
   stream-json` for NDJSON on stdin, making it the only agent here that can be
   *fed* a turn as well as asked for one.
+
+  **`kilo` then broke the pattern — by being opencode.** Same four event names,
+  same envelope, same `snapshot` hash. Kilo is a fork, and it is the first time
+  two agents on this box were measured speaking the *same* protocol, which turns
+  the "nothing in common" finding into the sharper "five vocabularies across six
+  working agents". `AR-9`'s protocol therefore has to key on the observed event
+  schema, not the agent's name, or the adapter layer pays for opencode twice.
+  `kiro-cli` then added a seventh spelling of "machine-readable" —
+  `--output-format stream-json`, camelCase events, and a `--format` flag that
+  means something else entirely (`--format json` is for *list* commands, not the
+  response stream).
 
   **Second run of the same task, `--repeat 2`, on 2026-09-28 — the repeatability
   gap partly closed.** All four captured vocabularies came back **identical**:
@@ -9630,12 +9691,15 @@ worker, `OR-` for the thing that decides what workers to talk to.
       Measured today: codex `0.159.3`, claude `2.1.286`, gemini `0.62.0`, opencode
       `1.18.31`, agy `1.2.14`, crush `v0.97.1` — five of six moved since
       2026-09-23, and `agy` moved from `1.2.9` to `1.2.13` to `1.2.14` within
-      today. `xencode agents` now reports all eight installed agents with path and
-      install source, `cursor-agent` included, and names `kilo` and `kiro` as
-      candidates checked and found absent. Still open because the done-when names
-      the S-0 versions and those are now out of date — either the table is
-      refreshed from this reading or the done-when is rewritten to say "the
-      versions as measured on the day".
+      today. `xencode agents` now reports **ten** installed agents with path and
+      install source: the six above plus `cline 3.0.67`, `cursor-agent
+      2026.09.28-64d2043`, `kilo 7.8.3` and `kiro-cli 2.27.0`. Two resolution
+      rules were needed to see the last two — check a documented path when a
+      vendor installs outside `PATH`, and accept several binary names because a
+      product's binary need not carry the product's name. Still open
+      because the done-when names the S-0 versions and those are now out of
+      date — either the table is refreshed from this reading or the done-when is
+      rewritten to say "the versions as measured on the day".
 - [ ] **AR-3 — contract probe, not capability table.** For a discovered agent, extract
       the flags it actually advertises (headless mode, stream format, approval ladder,
       sandbox) into the S-0 row shape.

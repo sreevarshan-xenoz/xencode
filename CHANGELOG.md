@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — three more agents the probe now covers, and two named and confirmed absent
+### Added — kilo and kiro-cli are now covered, and both answer
+
+`kilo` and `kiro-cli` were installed and configured on this box and both now run a
+real headless task: kilo in 19.2 s, kiro-cli in 7.6 s, each twice with an
+identical event vocabulary both times.
+
+Getting them *found* needed two fixes rather than two more names:
+
+- **kilo was not on `PATH`.** Its own installer put it in `~/.kilo/bin/kilo` and
+  changed no shell profile, so a bare `kilo` did not resolve while the binary was
+  present and answering `7.8.3`. Being reported missing was wrong, so the lookup
+  now also resolves a documented path, and a vendor's own dot-directory is
+  reported as its own kind of install rather than as unclassifiable. A second
+  kilo — an npm global under mise's node — reached `PATH` moments later, so the
+  entry lists both executable names; the dot-directory fallback stays because
+  that copy is still on disk and still off `PATH`.
+- **kiro's binary is not called `kiro`.** It is `kiro-cli`, so searching for the
+  product name found nothing. Every agent entry already took a list of binary
+  names; this is the first entry to need two.
+
+Also fixed: **kilo was reported as having no session id**, which would have meant
+"cannot be resumed", while every one of its events carried one. The key `sessionID`
+(capital D) was missing from the six spellings searched. kilo's own output is now
+the test.
+
+The measurement gained a result worth more than the two agents. **kilo is an
+opencode fork** — its help banner says `opencode` and its JSON carries opencode's
+exact envelope. Its four event names are identical to opencode's. So the honest
+reading is five distinct event vocabularies across six working agents, not six
+across six, and a common protocol has to key on the observed event schema rather
+than on an agent's name, or the adapter layer pays for opencode twice.
+
+`xencode agents` now reports ten agents with path and install source. The named
+but absent list is empty, which is the correct state once we know how to launch
+them.
+
+### Added — agy and cursor-agent are covered, and cursor-agent's login refusal is recognised
 
 `xencode agents` and `xencode interop` now also cover `agy` and `cursor-agent`,
 which were installed on this machine but covered by nothing. `cursor-agent` was
@@ -20,15 +56,13 @@ first, or set CURSOR_API_KEY environment variable`, which is now recognised as a
 login refusal rather than a plain failure — "the agent declined to spend" and
 "the agent is broken" are different facts, and the report now says which happened.
 
-`kilo` and `kiro` were requested by name and are recorded as candidates. No
-binary answers either name here, so both are reported absent and every claim
-about them stays unverified. They are named rather than discovered by scanning
-`PATH`, because discovery is required to say nothing about the rest of the
-filesystem.
+`kilo` and `kiro-cli` were requested by name and are now covered by everything
+above.
 
 Measured today, for anyone comparing against the older table: codex `0.159.3`,
 claude `2.1.286`, gemini `0.62.0`, opencode `1.18.31`, agy `1.2.14`, crush
-`v0.97.1`, cursor-agent `2026.09.28-64d2043`.
+`v0.97.1`, cline `3.0.67`, cursor-agent `2026.09.28-64d2043`, kilo `7.8.3`,
+kiro-cli `2.27.0`.
 
 ### Fixed — an installed agent is no longer reported as missing
 
