@@ -415,6 +415,13 @@ fn stopped_on_auth(text: &str) -> bool {
         "sign in",
         "authenticate",
         "token expired",
+        // Measured 2026-10-02 from cursor-agent: "Error: Authentication
+        // required. Please run 'agent login' first, or set CURSOR_API_KEY
+        // environment variable." It says "Authentication", so it matched
+        // already — but only because of the lowercase `authentication`
+        // marker above. Kept explicit here so the case that carried this
+        // finding is not lost if that marker is ever narrowed.
+        "authentication required",
     ];
     let lower = text.to_lowercase();
     MARKERS.iter().any(|m| lower.contains(m))
@@ -964,6 +971,10 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
         assert!(stopped_on_auth("Error: not logged in. Run `claude login`."));
         assert!(stopped_on_auth("401 Unauthorized"));
         assert!(stopped_on_auth("No API key found"));
+        // cursor-agent's own words, measured 2026-10-02.
+        assert!(stopped_on_auth(
+            "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+        ));
         // A normal answer that merely mentions the word must not be misread.
         assert!(!stopped_on_auth("The file contains the word xencode."));
     }

@@ -167,6 +167,22 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_approval: true, // `--mode`, `--dangerously-skip-permissions`
         read_on: "2026-10-02",
     },
+    AgentSpec {
+        name: "cursor-agent",
+        binaries: &["cursor-agent"],
+        // Read from `cursor-agent --help` on 2026-10-02. It is installed here
+        // and answers `--version` (2026.09.28-64d2043), but no probe had ever
+        // run it: it was in no list at all, so the gap in knowledge was
+        // invisible rather than recorded.
+        one_shot: "cursor-agent --print {prompt}",
+        stream_flag: Some("--output-format stream-json"),
+        advertises_daemon: true,   // `persist`, `worker` subcommands
+        advertises_acp: false,     // not in help
+        advertises_mcp: true,      // `cursor-agent mcp`, `--approve-mcps`
+        advertises_resume: true,   // `--resume`, `--continue`
+        advertises_approval: true, // `--mode`, `--force`/`--yolo`, `--sandbox`
+        read_on: "2026-10-02",
+    },
 ];
 
 /// Agents the proposal names that this crate does not know how to launch.
@@ -180,9 +196,15 @@ pub const ROSTER: &[AgentSpec] = &[
 ///
 /// Kilo still has every claim about it marked UNVERIFIED in Milestone W, and
 /// no binary answers to its name here, so there is nothing to verify against.
+///
+/// A candidate is added by name on purpose. `AR-2`'s done-when requires
+/// discovery to say nothing about the rest of the filesystem, so scanning `PATH`
+/// for anything that looks like an agent would breach it. Naming an agent we
+/// were asked about keeps the search deliberate while still checking the answer.
 pub const CANDIDATES: &[(&str, &str)] = &[
     ("kilo", "named in the proposal; no binary answers to this name on this machine, so every claim about it stays unverified"),
-];
+    ("kiro", "AWS's agentic IDE CLI; no binary answers to this name on this machine, so every claim about it stays unverified"),
+    ];
 
 /// Named agents that are genuinely not on this machine, and why that matters.
 ///
@@ -400,11 +422,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_roster_is_the_seven_agents_measured_on_this_machine() {
+    fn the_roster_is_the_eight_agents_measured_on_this_machine() {
         let names: Vec<&str> = ROSTER.iter().map(|a| a.name).collect();
         assert_eq!(
             names,
-            ["opencode", "cline", "codex", "claude", "gemini", "crush", "agy"]
+            [
+                "opencode",
+                "cline",
+                "codex",
+                "claude",
+                "gemini",
+                "crush",
+                "agy",
+                "cursor-agent"
+            ]
         );
         // Two agents reached the roster because a probe met them, not because a
         // proposal named them. Cline was absent from Milestone S's table
@@ -412,8 +443,12 @@ mod tests {
         // done-when, but had no AgentSpec, so the probe reported it absent while
         // its binary sat on PATH answering `1.2.13` — the absence list was a
         // hand-typed claim rather than a lookup (2026-10-02).
+        // And a third found the other way: `cursor-agent` was in no list at
+        // all, so its gap in our knowledge was invisible instead of recorded
+        // (2026-10-02).
         assert!(find("cline").is_some());
         assert!(find("agy").is_some());
+        assert!(find("cursor-agent").is_some());
     }
 
     #[test]

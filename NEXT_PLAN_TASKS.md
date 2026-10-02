@@ -8969,16 +8969,44 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | `gemini` | 41 | 1703 | 0 | no | yes | no | — |
 | `crush` | 1 | 2154 | 0 | no | yes | no | — |
 | `agy` | 0 | 26357 | 8 | yes | no | yes | `init`, `result`, `step_update` |
+| `cursor-agent` | 1 | 1352 | 0 | no | yes | no | — |
 
   Re-run 2026-10-02, same task, with a second run of each to check stability. The
   vocabularies above held across both runs for every agent that answered. `agy`
   joined the table that day — see the seventh row's own finding below.
 
-  `AR-1` is **not** closed by this. Three of seven stopped on an authentication
-  check, so their event vocabularies are still unknown; `opencode`'s event
-  **count** varied between runs (6 vs 7) even though its vocabulary did not;
-  there is no five-worker fan-out cost figure; and every row here is one run of
-  one task. What exists is the instrument, and an honest reading from it.
+  `AR-1` is **not** closed by this. **Four of eight stopped on an authentication
+  check** — claude, gemini, crush and cursor-agent — so their event vocabularies
+  are still unknown; `opencode`'s event **count** varied between runs (6 vs 7)
+  even though its vocabulary did not; there is no five-worker fan-out cost
+  figure; and every row here is one run of one task. What exists is the
+  instrument, and an honest reading from it.
+
+  **Four of the eight answers are login walls, and that is now the dominant
+  fact about the measurement.** Only `opencode`, `cline`, `codex` and `agy` have
+  been seen to actually work. Each refusal names its own remedy and none is a
+  machine change: `claude` wants `/login`, `gemini` wants an auth method in
+  `~/.gemini/settings.json`, `crush` wants an interactive provider, `cursor-agent`
+  wants `agent login` or `CURSOR_API_KEY`. S-8 forbids doing any of these on the
+  user's behalf — they are browser flows belonging to a human — so closing those
+  four rows needs a decision from the operator, not another probe. The
+  measurement is blocked on accounts, not on code.
+
+  **`cursor-agent` was found the same way `agy` was: installed and invisible.**
+  It is on `PATH`, answers `2026.09.28-64d2043`, and had been in no list at all,
+  so the gap in what we know about it was not recorded anywhere. It now has a
+  roster entry read from its `--help` on 2026-10-02 and a measured refusal:
+  `Error: Authentication required. Please run 'agent login' first, or set
+  CURSOR_API_KEY environment variable.` Its help is worth a note later — it
+  carries `-w/--worktree` and `~/.cursor/worktrees/`, which is the closest any
+  vendor comes to Milestone S's `OR-4` worktree-lease idea.
+
+  **`kilo` and `kiro` are named and absent.** Both were added as candidates on
+  2026-10-02 at the operator's request. No binary answers either name on this
+  machine, so the probe reports them missing and every claim about them stays
+  unverified — the same treatment `kilo` has had since Milestone W. Installing
+  them is S-8's "install on the user's behalf", which this plan declines to do,
+  so the honest state is: named, checked, absent.
 
   **A sixth finding, and the only one that was a bug in the measuring rather
   than in the measured.** The first re-run reported `agy` as *not installed here*
@@ -8992,7 +9020,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   a separate category from absent, because "nothing to measure here" and "we did
   not look at this" are different answers.
 
-  **Five things only running them revealed**, each of which a help screen or the
+  **Seven things only running them revealed**, each of which a help screen or the
   S-0 table would have got wrong:
 
   - **A child process needs `PWD` set, not just its working directory.**
@@ -9019,9 +9047,17 @@ No hard dependencies, which is exactly why it is last: real value that should ne
     none of the three actually seen: "Not logged in · Please run /login",
     "Please set an Auth method in …", "No providers configured". All three are
     now markers, all three are tests, and a refusal to spend is reported as a
-    refusal rather than as a crash.
+    refusal rather than as a crash. `cursor-agent` added a fourth wording —
+    "Authentication required. Please run 'agent login' first, or set
+    CURSOR_API_KEY environment variable" — which is now also a marker and a test.
+- **An agent nobody names is not an agent nobody has.** `cursor-agent` was
+    installed and working while appearing in no list whatsoever, so unlike `agy`
+    (wrongly reported absent) it produced *no* wrong statement — it simply left a
+    gap in what we know invisible. Fixing the false-negative case exposed this
+    second failure: candidates are named deliberately, because `AR-2`'s
+    done-when forbids scanning the filesystem for things that look like agents.
 
-  **A sixth observation, which is the reason to care:** the four vocabularies
+  **A fifth observation, which is the reason to care:** the four vocabularies
   that were captured share nothing — not one event name. `AR-9`'s common protocol
   is therefore not a naming exercise over a shared vocabulary, and the plan's
   refusal to derive it from a wish list is what the evidence supports. Codex is
@@ -9590,11 +9626,29 @@ worker, `OR-` for the thing that decides what workers to talk to.
       upgrading or touching any of them.
       **Done-when:** on this box it lists codex/claude/gemini/opencode/agy/crush with the
       six versions from S-0 and says nothing about the rest of the filesystem.
+      **2026-10-02: the six S-0 versions are stale and two names were missing.**
+      Measured today: codex `0.159.3`, claude `2.1.286`, gemini `0.62.0`, opencode
+      `1.18.31`, agy `1.2.14`, crush `v0.97.1` — five of six moved since
+      2026-09-23, and `agy` moved from `1.2.9` to `1.2.13` to `1.2.14` within
+      today. `xencode agents` now reports all eight installed agents with path and
+      install source, `cursor-agent` included, and names `kilo` and `kiro` as
+      candidates checked and found absent. Still open because the done-when names
+      the S-0 versions and those are now out of date — either the table is
+      refreshed from this reading or the done-when is rewritten to say "the
+      versions as measured on the day".
 - [ ] **AR-3 — contract probe, not capability table.** For a discovered agent, extract
       the flags it actually advertises (headless mode, stream format, approval ladder,
       sandbox) into the S-0 row shape.
       **Done-when:** an agent whose help text lacks a flag is reported as *lacking* it,
       and the router cannot see a capability that no probe recorded.
+      **2026-10-02: the firewall fired on the same day the two new agents joined.**
+      `agy` and `cursor-agent` were added with cells read from their `--help`, and
+      the live-help test immediately rejected the first attempt because `agy`'s
+      evidence tokens had not been registered — the probe refused a claim it had no
+      evidence for rather than passing it, which is the done-when's first clause
+      working. Both agents' cells are now verified against their own help on every
+      run. Still open: only `--help` is consulted, so anything a vendor documents
+      elsewhere remains invisible, and absence is only assertable for `acp`/`mcp`.
 - [ ] **AR-4 — one worker, one event schema.** Launch a vendor headless, normalise its
       JSONL into xencode's `WF-1` event shape, and mark the provenance of every field a
       vendor did not supply.
