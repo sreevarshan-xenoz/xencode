@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1943 tests passing, zero warnings (re-verified 2026-10-02, after QD-3)
+- [x] Workspace gates green — 16 crates, 1955 tests passing, zero warnings (re-verified 2026-10-02, after QD-1)
 
 ## Model Catalog Honesty
 
@@ -4980,7 +4980,11 @@ here is inherited from the reviewer's assumptions.
    /init first`; the repo's `.xencode/` contains only `cache/`. The existing
    advise tests pass only on synthetic four-file graphs (`advise.rs:433-456`).
    Any impact/blast-radius CLI (6, 7, 48) inherits this trap until index-on-CLI
-   or a documented stale-index mode exists.
+   or a documented stale-index mode exists. *(Sidestepped for `xencode impact`
+   by **QD-1**, landed 2026-10-02: `impact::headless_graph` scans the git-tracked
+   tree and builds the symbol graph in memory instead of reading `.xencode`, so
+   the command answers with no index present. `advise` itself still needs the
+   index; the fix is a reusable graph-from-files path, not a written snapshot.)*
 8. **The dependency graph has no intra-crate edges.** `symbols.rs:58-67` is four
    regexes over `use`; nothing matches `mod x;`, and this workspace declares **79
    `mod`/`pub mod`** statements — so `build_graph` (`:359-386`) genuinely gives
@@ -4993,7 +4997,11 @@ here is inherited from the reviewer's assumptions.
    `cargo_metadata|MetadataCommand` including all Cargo.tomls. Crate-level
    reverse dependencies — exact, offline, and free (`cargo tree -i tokio`
    measured at 0.34 s) — are the cheapest real capability the entire impact
-   cluster is missing.
+   cluster is missing. *(Now consumed, by **QD-1**, landed 2026-10-02:
+   `crate_graph.rs` shells out to `cargo metadata --no-deps --format-version 1`,
+   parses each member's dependency edges (keeping the dev/build kind), and
+   `xencode impact` reports the crate's direct dependents and transitive reverse
+   closure, agreeing with `cargo tree -i` on the spot-checked crates.)*
 10. **The static-analysis scanner's output was not trustworthy.**
     `xencode-analysis-rs/src/security.rs:196` and `:220` grouped their alternation
     wrong: `…\([^)]*user|input|param|filename` made `input`, `param` and
@@ -5222,7 +5230,24 @@ context.
   empirically the strongest of the three and needs no new infrastructure. Label
   output "predicted, hop-capped". *Prerequisite:* fix the headless-index trap
   (fact Q-1.7). *Done-when:* it runs headless on this repo and agrees with
-  `cargo tree -i` on three spot-checked crates.
+  `cargo tree -i` on three spot-checked crates. **Done 2026-10-02** —
+  `xencode impact <file>` (`[limit, format]` flags) unions the three layers, each
+  labelled with its strength of evidence and kept structurally apart. The crate
+  layer (`crate_graph.rs`) is exact, from `cargo metadata --no-deps`, and gives the
+  dependents' crate and transitive reverse closure; the file layer builds the symbol
+  graph straight off the git-tracked tree (`headless_graph`), so it needs no `.xencode`
+  index and reports predicted, hop-capped consumers; the churn layer reads one
+  `git log` and reports co-change partners. Verified live headless on this repo with no
+  index present: `xencode impact crates/xencode-core-rs/src/lib.rs` returns 7 direct
+  crates and churn (12 own commits), and the direct-dependency layer matches
+  `cargo tree -i -e normal --depth 1` exactly on `xencode-core-rs` (7), `xencode-context-rs`
+  (3) and `xencode-providers-rs` (2). One bug found and fixed during that live run:
+  `git log --name-only` keys files from the repository top (`rust/crates/…`) while the
+  graph names them from the workspace (`crates/…`), so the churn lookup missed every
+  file in this nested workspace — reconciled by the base, with a regression test that
+  builds a workspace one directory below git root and asserts `own_commits == 1`. 8 new
+  `crate_graph` tests and 3 `impact` tests (the headless answer, the crate/file
+  separation, and the nested-workspace churn regression), plus the CLI parse test.
 - **QD-2 — Blast-radius render.** The TUI fan-out panel over QD-1, needing
   WF-1's event stream. The word "simulation" is dropped: it is graph BFS plus
   history, not an execution model.

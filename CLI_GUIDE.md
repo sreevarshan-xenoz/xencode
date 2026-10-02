@@ -2239,6 +2239,25 @@ shows). Discovery only: nothing is installed, upgraded, or written.
 reports confirmed or contradicted per claim with evidence. A contradiction is
 a stale roster cell, and a firewall test fails the build on any of them.
 
+### `xencode impact <file> [--limit 15] [--format text|json]`
+
+Who has to be re-checked if this file changes, in three layers kept apart because
+they are three strengths of evidence. The **crate** layer is exact: it reads
+`cargo metadata --no-deps` and names the workspace member the file lives in, the
+members that depend on it directly (with the edge kind), and the transitive set
+behind it. The **file** layer is a prediction, capped at three hops: it builds the
+symbol graph straight from the git-tracked sources — no pre-built `.xencode` index
+needed — and lists the files that link this one through a `use` path, a `mod`
+declaration or an `impl`. A link means a resolved name, not a type-checked call
+site. The **coupling** layer reads one `git log` and lists the files whose history
+moves with this one, plus the file's own commit count. Runs headless; a workspace
+nested below the git root is reconciled so history still reads.
+
+```
+xencode impact crates/xencode-core-rs/src/lib.rs
+xencode impact crates/xencode-core-rs/src/lib.rs --format json
+```
+
 ### `xencode hotspots [--limit 10] [--format text|json]`
 
 Rank files by commits × bytes with bus factor and CODEOWNERS owners, as

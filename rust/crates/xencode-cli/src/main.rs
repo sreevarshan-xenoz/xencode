@@ -520,6 +520,21 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// What a change to one file affects: the crates that depend on its crate,
+    /// the files that link it, and the files its history is coupled to
+    Impact {
+        /// The file to analyse, by path or by its tail
+        file: String,
+
+        /// How many entries to list in each section
+        #[arg(long, default_value_t = 15)]
+        limit: usize,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Print shell completions or the man page; both are generated from the
     /// clap definition, never written by hand
     Generate {
@@ -1259,6 +1274,11 @@ async fn main() {
         Commands::Envcheck { format } => run_envcheck(format),
         Commands::Agents { contract, format } => run_agents(contract, format),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
+        Commands::Impact {
+            file,
+            limit,
+            format,
+        } => run_impact(&file, limit, format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
             diff,
@@ -5002,6 +5022,106 @@ fn run_hotspots(limit: usize, format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
+/// `QD-1`: what a change to one file affects, in three layers that carry three
+/// different strengths of evidence and are never blended. The crate list is exact
+/// (it comes from `cargo metadata`); the file list is a hop-capped prediction over
+/// the source graph; the coupling list is history. The command runs with no
+/// `.xencode` index, building the graph from the files on disk.
+fn run_impact(file: &str, limit: usize, format: OutputFormat) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let workspace = xencode_context_rs::verify::manifest_dir(&root)?;
+    let impact = xencode_context_rs::change_impact(&workspace, file).map_err(|e| e.to_string())?;
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "target": impact.target,
+                "crate": impact.crate_name,
+                "crate_basis": "exact, from `cargo metadata --no-deps`",
+                "reverse_crates": impact.reverse_crates.iter().map(|(n, hops)| serde_json::json!({
+                    "crate": n, "hops": hops,
+                })).collect::<Vec<_>>(),
+                "direct_crates": impact.direct_crates.iter().map(|(d, kind)| serde_json::json!({
+                    "crate": d, "kind": kind,
+                })).collect::<Vec<_>>(),
+                "files": {
+                    "basis": impact.files.basis(),
+                    "affected": impact.files.files.iter().map(|f| serde_json::json!({
+                        "file": f.file, "hops": f.hops, "via": f.via,
+                    })).collect::<Vec<_>>(),
+                },
+                "history": {
+                    "known": impact.history_known,
+                    "own_commits": impact.own_commits,
+                    "cochange": impact.cochange.iter().map(|(f, n)| serde_json::json!({
+                        "file": f, "commits_together": n,
+                    })).collect::<Vec<_>>(),
+                },
+            }))
+            .map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    println!("\n  impact of {}", impact.target);
+    match &impact.crate_name {
+        Some(name) => println!("  crate: {name}"),
+        None => println!("  crate: (this file is not inside a workspace crate)"),
+    }
+
+    println!("\n  crates that depend on it — exact, from cargo metadata:");
+    if impact.reverse_crates.is_empty() {
+        println!("    none — nothing first-party depends on this crate");
+    } else {
+        for (name, hops) in impact.reverse_crates.iter().take(limit) {
+            let direct = impact
+                .direct_crates
+                .iter()
+                .find(|(d, _)| d == name)
+                .map(|(_, kind)| format!(" ({kind} edge)"))
+                .unwrap_or_default();
+            println!("    {name} — {hops} hop(s){direct}");
+        }
+    }
+
+    println!("\n  files that link it — predicted, hop-capped:");
+    if impact.files.files.is_empty() {
+        println!("    none in the graph — this file's own edges point outward, not in");
+    } else {
+        for f in impact.files.files.iter().take(limit) {
+            println!(
+                "    {} — {} hop(s) via {}",
+                f.file,
+                f.hops,
+                f.via.join(", ")
+            );
+        }
+        if impact.files.files.len() > limit {
+            println!("    … {} more", impact.files.files.len() - limit);
+        }
+    }
+    println!("\n  {}", impact.files.basis());
+
+    println!("\n  coupled by history — most co-changed with:");
+    if !impact.history_known {
+        println!("    unknown — no git history here to read");
+    } else if impact.cochange.is_empty() {
+        println!("    none — this file is not committed alongside others");
+    } else {
+        for (f, n) in impact.cochange.iter().take(limit) {
+            println!("    {f} — {n} commit(s) together");
+        }
+    }
+    if impact.history_known {
+        println!(
+            "\n  own churn: {} commit(s) touching {}",
+            impact.own_commits, impact.target
+        );
+    }
+    Ok(())
+}
+
 fn run_generate(artifact: GenerateArtifact, shell: GenerateShell) -> Result<(), String> {
     use clap::CommandFactory;
     let mut cmd = Cli::command();
@@ -6784,6 +6904,35 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Hotspots { limit: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn impact_parses_a_file_and_optional_limit() {
+        // The file is positional; without it the command must not parse.
+        assert!(Cli::try_parse_from(["xencode", "impact"]).is_err());
+        let cli = Cli::try_parse_from(["xencode", "impact", "src/lib.rs"]).unwrap();
+        match cli.command {
+            Some(Commands::Impact { file, limit, .. }) => {
+                assert_eq!(file, "src/lib.rs");
+                assert_eq!(limit, 15, "default section size");
+            }
+            _ => panic!("expected impact"),
+        }
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "impact",
+            "src/lib.rs",
+            "--limit",
+            "4",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Impact { file, limit: 4, format: super::OutputFormat::Json, .. })
+                if file == "src/lib.rs"
         ));
     }
 

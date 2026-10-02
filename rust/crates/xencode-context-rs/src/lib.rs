@@ -20,6 +20,7 @@ pub mod cochange;
 pub mod compact;
 pub mod context;
 pub mod conversation;
+pub mod crate_graph;
 pub mod doctor;
 pub mod documents;
 pub mod editing;
@@ -81,6 +82,7 @@ pub use context::{
     HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
+pub use crate_graph::{cargo_metadata, crate_of_file, parse_crate_graph, CrateGraph, EdgeKind};
 pub use doctor::{
     check_cache_writable, check_git, check_index, check_metrics, probe_env, resolve_on_path,
     tcp_reachable, EnvFacts, SelfCheck,
@@ -109,7 +111,8 @@ pub use hotspots::{
     hotspots, owners_for, parse_churn, parse_codeowners, pattern_matches, FileHistory, OwnerRule,
 };
 pub use impact::{
-    impact, impact_from_snapshot, ImpactReport, ImpactedFile, DECLARED_CAP, IMPACT_MAX_HOPS,
+    change_impact, impact, impact_from_filesystem, impact_from_snapshot, ChangeImpact,
+    ImpactReport, ImpactedFile, DECLARED_CAP, IMPACT_MAX_HOPS,
 };
 pub use index::{
     deps_json_path, file_index_path, history_json_path, read_json, symbols_json_path, write_atomic,
