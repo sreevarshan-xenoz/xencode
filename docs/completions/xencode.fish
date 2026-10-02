@@ -231,13 +231,13 @@ complete -c xencode -n "__fish_xencode_using_subcommand analyze" -s h -l help -d
 complete -c xencode -n "__fish_xencode_using_subcommand fetch" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand fetch" -s h -l help -d 'Print help'
-complete -c xencode -n "__fish_xencode_using_subcommand interop" -l agent -d 'Probe only these agents (repeatable); default is the whole roster' -r
+complete -c xencode -n "__fish_xencode_using_subcommand interop" -l agent -d 'Probe only these agents (repeatable); default is every installed agent the operator has not stood down' -r
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l timeout -d 'Per-agent wall-clock limit in seconds' -r
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l out -d 'Where to write the JSON report; omit to print it' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l format -d 'Output format for the printed summary' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l repeat -d 'Run each agent this many times and compare. One run is a reading; two is a check, and a fact that differs between runs is reported rather than smoothed over' -r
-complete -c xencode -n "__fish_xencode_using_subcommand interop" -l fan-out -d 'Run every selected agent at the same time instead of one after another, and report what the overlap saved. Ignored with `--repeat`, which needs sequential runs to compare'
+complete -c xencode -n "__fish_xencode_using_subcommand interop" -l fan-out -d 'Run every selected agent at the same time instead of one after another, and report what the overlap saved. Cannot be combined with `--repeat`, which needs sequential runs to compare'
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l check-auth -d 'Report, read-only, which agents look configured on this machine, and what to run if one is not. Starts no login and reads no credential'
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c xencode -n "__fish_xencode_using_subcommand anchor" -l timeout -d 'Per-command wall-clock limit in seconds. A command that runs out of time is recorded as unverified, never as a pass' -r

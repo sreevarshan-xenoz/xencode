@@ -359,11 +359,15 @@ enum Commands {
     /// The `AR-1` interop probe. Every agent is launched headless on a
     /// read-only task and what came back is recorded, with each cell marked as
     /// observed or read from a help screen. A run that failed is recorded as a
-    /// failure, never as an empty success. Costs nothing: the task asks one
-    /// question about one file and asks for no changes, so an agent with no
-    /// account stops at its auth check — which is itself an observation.
+    /// failure, never as an empty success. The task asks one question about
+    /// one file and requests no changes, and an agent with no account stops at
+    /// its auth check — which is itself an observation. But a signed-in agent
+    /// makes real provider calls: measured 2026-10-02, the free-tier agents
+    /// report zero or no cost while kiro-cli meters credits and kilo answers on
+    /// a metered free model, so one probe run is a small spend, not zero.
     Interop {
-        /// Probe only these agents (repeatable); default is the whole roster
+        /// Probe only these agents (repeatable); default is every installed
+        /// agent the operator has not stood down
         #[arg(long = "agent")]
         agents: Vec<String>,
 
@@ -386,8 +390,8 @@ enum Commands {
         repeat: u32,
 
         /// Run every selected agent at the same time instead of one after
-        /// another, and report what the overlap saved. Ignored with `--repeat`,
-        /// which needs sequential runs to compare.
+        /// another, and report what the overlap saved. Cannot be combined
+        /// with `--repeat`, which needs sequential runs to compare.
         #[arg(long, conflicts_with = "repeat")]
         fan_out: bool,
 
