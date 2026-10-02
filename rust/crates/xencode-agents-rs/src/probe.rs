@@ -312,6 +312,11 @@ pub struct ProbeReport {
     /// separate from [`ProbeReport::absent`] because "nothing to measure here"
     /// and "we did not look at this" are different answers.
     pub unknown: Vec<AbsentAgent>,
+    /// Agents the operator has parked, and so were not run. Reported rather than
+    /// dropped: a skipped agent is a decision on the record, and a run that
+    /// silently covered fewer agents than it did last week reads as a
+    /// regression. Naming one with `--agent` still probes it.
+    pub parked: Vec<ParkedAgent>,
     /// Anything the run could not answer, stated rather than left blank.
     pub unanswered: Vec<String>,
 }
@@ -319,6 +324,17 @@ pub struct ProbeReport {
 /// An agent this probe cannot say anything about, and why.
 #[derive(Debug, Clone, Serialize)]
 pub struct AbsentAgent {
+    pub name: String,
+    pub why: String,
+}
+
+/// An agent this probe deliberately did not run, and on whose instruction.
+///
+/// Separate from [`AbsentAgent`] because the two claims are opposites: absent
+/// means "not here to measure", parked means "here, measured or not by choice".
+/// Collapsing them would let a standing decision read as a missing install.
+#[derive(Debug, Clone, Serialize)]
+pub struct ParkedAgent {
     pub name: String,
     pub why: String,
 }
@@ -683,16 +699,25 @@ pub fn seed_task_dir(root: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Run the probe over the roster, or over `options.only`.
-pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
-    let selected: Vec<&AgentSpec> = if options.only.is_empty() {
-        ROSTER.iter().collect()
+/// Which agents a run will cover.
+///
+/// A bare run covers every agent the operator has not parked. Naming an agent
+/// with `options.only` overrides that: asking for a parked agent by name is the
+/// operator changing their mind, so it is probed.
+pub fn selected_agents(options: &ProbeOptions) -> Vec<&'static AgentSpec> {
+    if options.only.is_empty() {
+        ROSTER.iter().filter(|a| !a.parked).collect()
     } else {
         ROSTER
             .iter()
             .filter(|a| options.only.iter().any(|n| n == a.name))
             .collect()
-    };
+    }
+}
+
+/// Run the probe over [`selected_agents`].
+pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
+    let selected = selected_agents(options);
     let repeat = options.repeat.max(1);
     let mut all_runs: Vec<RunCapture> = Vec::new();
     let mut captures: Vec<RunCapture> = Vec::new();
@@ -784,6 +809,10 @@ pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
         unknown: crate::roster::installed_but_unknown()
             .into_iter()
             .map(|(name, why)| AbsentAgent { name, why })
+            .collect(),
+        parked: crate::roster::parked_agents()
+            .into_iter()
+            .map(|(name, why)| ParkedAgent { name, why })
             .collect(),
         unanswered,
     }
@@ -902,6 +931,51 @@ impl CredentialStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_parked_agent_is_reported_as_skipped_rather_than_as_a_failure() {
+        // The point of parking: a bare run must not carry an agent nobody is
+        // going to authenticate. It must also not silently vanish — a report that
+        // quietly covered fewer agents reads as a regression.
+        let bare = selected_agents(&ProbeOptions::conservative("."));
+        let parked = crate::roster::parked_agents();
+        assert!(
+            !parked.is_empty(),
+            "nothing is parked, so nothing is tested"
+        );
+        for (name, _) in &parked {
+            assert!(
+                !bare.iter().any(|s| s.name == *name),
+                "{name} is parked but a bare run still selected it"
+            );
+            // Naming it is the operator changing their mind, so it runs.
+            let named = selected_agents(&ProbeOptions {
+                only: vec![name.clone()],
+                ..ProbeOptions::conservative(".")
+            });
+            assert!(
+                named.iter().any(|s| s.name == *name),
+                "{name} was named explicitly and must still be probed"
+            );
+            assert_eq!(named.len(), 1, "naming {name} selected something else too");
+        }
+    }
+
+    #[test]
+    fn a_parked_agent_keeps_its_roster_row_and_says_why_it_was_parked() {
+        for (name, why) in crate::roster::parked_agents() {
+            let spec = crate::roster::find(&name).expect("a parked agent is still known");
+            assert!(
+                spec.parked,
+                "{name} is listed as parked but its row disagrees"
+            );
+            assert!(!why.is_empty(), "{name} is parked with no reason recorded");
+            assert!(
+                spec.one_shot.contains("{prompt}"),
+                "{name} is parked but its row stopped describing how to run it"
+            );
+        }
+    }
 
     #[test]
     fn a_redaction_pass_removes_the_shapes_agents_actually_echo() {
@@ -1035,6 +1109,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
             advertises_mcp: false,
             advertises_resume: false,
             advertises_approval: false,
+            parked: false,
+            park_reason: None,
             read_on: "2026-09-28",
         };
         let options = ProbeOptions::conservative(std::env::temp_dir());

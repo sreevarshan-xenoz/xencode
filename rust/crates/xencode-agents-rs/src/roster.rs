@@ -68,6 +68,26 @@ pub struct AgentSpec {
     pub advertises_resume: bool,
     /// Whether help advertises its own approval or permission control.
     pub advertises_approval: bool,
+    /// The operator has stood this agent down, so the probe skips it by default.
+    ///
+    /// This is a decision, not an observation. A parked agent is still
+    /// installed and still fully described — its roster row and its capability
+    /// cells stay, because what is true about it has not stopped being true.
+    /// What changes is that a run stops reporting it as a failure it cannot fix:
+    /// an agent with no account left every report carrying three login walls
+    /// that no amount of re-probing would clear, which trains a reader to ignore
+    /// the failures that *are* actionable.
+    ///
+    /// Naming the agent explicitly (`--agent claude`) still probes it, because
+    /// the operator asking for it is a fresh decision.
+    pub parked: bool,
+    /// Why this agent was parked, in words fit for a report.
+    ///
+    /// `None` while `parked` is false. Kept beside the flag rather than folded
+    /// into it because the flag says what happened and this says whether it was
+    /// a choice about the vendor or a missing account — and only the second is
+    /// fixed by logging in.
+    pub park_reason: Option<&'static str>,
     /// When these cells were read.
     pub read_on: &'static str,
 }
@@ -85,6 +105,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,    // `opencode mcp`
         advertises_resume: true, // `session list`, `export`/`import`
         advertises_approval: true, // `--auto`, auto-approve permissions (AR-3 contradicted `false` on 2026-09-29)
+        parked: false,
+        park_reason: None,
         read_on: "2026-09-29",
     },
     AgentSpec {
@@ -97,6 +119,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `cline mcp`
         advertises_resume: true,   // `--id <session-id>`, `cline history`
         advertises_approval: true, // `--auto-approve`, `CLINE_TOOL_APPROVAL_MODE`
+        parked: false,
+        park_reason: None,
         read_on: "2026-09-28",
     },
     AgentSpec {
@@ -109,6 +133,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `codex mcp`
         advertises_resume: true,   // `resume`, `fork`, `queue`, `archive`
         advertises_approval: true, // `--sandbox`, `--ask-for-approval`
+        parked: false,
+        park_reason: None,
         read_on: "2026-09-28",
     },
     AgentSpec {
@@ -124,6 +150,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `claude mcp`
         advertises_resume: true,   // `--resume`, `--fork-session`
         advertises_approval: true, // `--permission-mode`, `--allowedTools`
+        parked: true,
+        park_reason: Some("no Claude account on this box; the operator has not asked for one"),
         read_on: "2026-09-28",
     },
     AgentSpec {
@@ -136,6 +164,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `gemini mcp`
         advertises_resume: true,   // `--resume`, `--session-id`, `--session-file`
         advertises_approval: true, // `--approval-mode`, `--policy`
+        parked: true,
+        park_reason: Some("no Gemini auth configured; the operator has not asked for one"),
         read_on: "2026-09-28",
     },
     AgentSpec {
@@ -148,6 +178,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: false,
         advertises_resume: true,   // `--session`, `--continue`
         advertises_approval: true, // `--yolo`
+        parked: true,
+        park_reason: Some("no provider configured in crush; the operator has not asked for one"),
         read_on: "2026-09-28",
     },
     AgentSpec {
@@ -165,6 +197,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `agy mcp`
         advertises_resume: true,   // `--conversation`, `--continue`
         advertises_approval: true, // `--mode`, `--dangerously-skip-permissions`
+        parked: false,
+        park_reason: None,
         read_on: "2026-10-02",
     },
     AgentSpec {
@@ -186,6 +220,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `cursor-agent mcp`, `--approve-mcps`
         advertises_resume: true,   // `--resume`, `--continue`
         advertises_approval: true, // `--mode`, `--force`/`--yolo`, `--sandbox`
+        parked: false,
+        park_reason: None,
         read_on: "2026-10-02",
     },
     AgentSpec {
@@ -203,6 +239,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `kilo mcp`
         advertises_resume: true,   // `kilo session`, `kilo run --continue`
         advertises_approval: true, // `kilo run --auto`
+        parked: false,
+        park_reason: None,
         read_on: "2026-10-02",
     },
     AgentSpec {
@@ -217,6 +255,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,     // `kiro-cli mcp`
         advertises_resume: true,  // `-r/--resume`, `--resume-id`
         advertises_approval: true, // `-a/--trust-all-tools`, `--trust-tools`
+        parked: false,
+        park_reason: None,
         read_on: "2026-10-02",
     },
 ];
@@ -269,6 +309,27 @@ pub fn installed_but_unknown() -> Vec<(String, String)> {
                     format!("{why} (found at {})", path.display()),
                 )
             })
+        })
+        .collect()
+}
+
+/// Agents the operator has stood down, with the reason they were stood down.
+///
+/// The reason is kept with the decision because a park is not permanent: whoever
+/// unparkes an agent later needs to know whether it was parked because it is
+/// unwanted or because its account was missing, and those call for opposite
+/// amounts of work.
+pub fn parked_agents() -> Vec<(String, String)> {
+    ROSTER
+        .iter()
+        .filter(|a| a.parked)
+        .map(|a| {
+            (
+                a.name.to_string(),
+                a.park_reason
+                    .unwrap_or("parked by the operator")
+                    .to_string(),
+            )
         })
         .collect()
 }

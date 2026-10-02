@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — claude, gemini and crush are stood down by decision, and every report says so
+
+The operator does not need these three, so `xencode interop` no longer runs them.
+Their roster rows, capability cells and measured refusals all stay, because what is
+true about them has not stopped being true; what changed is that a bare run covers
+seven agents and prints who it skipped and why, instead of ending every report in
+three login walls that re-probing could never clear.
+
+Naming one with `--agent claude` still probes it, because the operator asking for an
+agent by name is a fresh decision.
+
 ### Fixed — a logged-in agent that still cannot run unattended is no longer called broken
 
 `cursor-agent` had credentials and still exited 1: `⚠ Workspace Trust Required`,
