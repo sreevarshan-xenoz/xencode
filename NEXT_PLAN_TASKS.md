@@ -14,11 +14,12 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-09-30: it lists 37 subcommands — the
+  (verified against `xencode --help` on 2026-10-02: it lists 40 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
-  `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
-  `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1975 tests passing, zero warnings (re-verified 2026-10-02, after QD-2)
+  `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
+  `generate`, `mutants`, `cov`, `perf`, `test` — and clap's built-in `help`, 41
+  entries in the list)
+- [x] Workspace gates green — 16 crates, 1998 tests passing, zero warnings (re-verified 2026-10-02, after QO-4)
 
 ## Model Catalog Honesty
 
@@ -5352,6 +5353,19 @@ context.
   when CV > 5%**. *Effort: M.* Done-when: an injected artificial 10% slowdown
   fires and a no-change rerun does not. (Fact Q-1.18 says why the threshold is
   right; fact Q-1.6 says there is nothing to baseline against yet.)
+  *(Done 2026-10-02 — `xencode perf record|check|show`, seven paths in
+  `xencode-context-rs/benches/hot_paths.rs` over this repository read from disk,
+  ten samples each; the judgement lives in `xencode-context-rs/src/perf.rs`.
+  Both halves of fact Q-1.6 are now false: the workspace has `[[bench]]` targets,
+  and there is a baseline to compare against. The p-value is exact by
+  enumeration while the split count stays under a million and the method travels
+  with the number; the spread refusal is checked on both sides, and `record`
+  refuses to store a wide baseline rather than warning about it. Done-when, on
+  one clean 200-file baseline: an extra parse injected into symbol extraction
+  printed `REGRESSION delta +16.55% p = 0.0000` and exit 1; the same code without
+  the injection printed `0 regression(s), 0 refusal(s)` and exit 0. A run made
+  under four competing processes printed `NO VERDICT … spread 6.1%` on a path that
+  contention had made 80.7% slower — the false positive refused, not reported.)*
 - **QO-5 — `xencode doctor --env`.** Probe and *display*: nproc, MemAvailable,
   PSI, cgroup-limit presence, `nvidia-smi -L` (works here — fact Q-1.1),
   `lspci` GPU classes, `journalctl --user` readability, `dmesg` EPERM, colab
@@ -8933,6 +8947,20 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
   idle loop draws nothing, every signal draws, animation covers all eight
   spinner sources. The "Ns ago" labels now refresh on draws rather than
   continuously — informational, and documented where the policy lives.
+
+**QO-4, done 2026-10-02** — `xencode perf record|check|show`. Seven criterion
+benchmarks over this repository read from disk (index scan, symbol extraction,
+graph build, BM25 scoring, hybrid retrieval, transcript compaction, token
+trimming), ten samples per path, compared by Mann-Whitney against the stored
+baseline with the p-value, its method and the percentage printed. A verdict is
+refused — `NO VERDICT`, counted separately from a clean result — when either side
+spreads past 5% of its own level, and `record` refuses to store such a run rather
+than warning about it. The baseline carries the file count it was measured over,
+so a comparison against a different tree refuses instead of answering. This is
+the thing the two narrowed rows in the research table were waiting on: item 19,
+the performance observatory, was cut down to this harness because a tree with no
+`[[bench]]` target has no history to be observant about, and item 29, self-
+benchmarking, was gated on the same measurement.
 
 #### W12 — Long-running autonomy — 15 items
 

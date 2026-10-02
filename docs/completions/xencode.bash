@@ -94,6 +94,9 @@ _xencode() {
             xencode,mutants)
                 cmd="xencode__subcmd__mutants"
                 ;;
+            xencode,perf)
+                cmd="xencode__subcmd__perf"
+                ;;
             xencode,plugin)
                 cmd="xencode__subcmd__plugin"
                 ;;
@@ -346,6 +349,9 @@ _xencode() {
             xencode__subcmd__help,mutants)
                 cmd="xencode__subcmd__help__subcmd__mutants"
                 ;;
+            xencode__subcmd__help,perf)
+                cmd="xencode__subcmd__help__subcmd__perf"
+                ;;
             xencode__subcmd__help,plugin)
                 cmd="xencode__subcmd__help__subcmd__plugin"
                 ;;
@@ -489,6 +495,15 @@ _xencode() {
                 ;;
             xencode__subcmd__help__subcmd__models,list)
                 cmd="xencode__subcmd__help__subcmd__models__subcmd__list"
+                ;;
+            xencode__subcmd__help__subcmd__perf,check)
+                cmd="xencode__subcmd__help__subcmd__perf__subcmd__check"
+                ;;
+            xencode__subcmd__help__subcmd__perf,record)
+                cmd="xencode__subcmd__help__subcmd__perf__subcmd__record"
+                ;;
+            xencode__subcmd__help__subcmd__perf,show)
+                cmd="xencode__subcmd__help__subcmd__perf__subcmd__show"
                 ;;
             xencode__subcmd__help__subcmd__plugin,install)
                 cmd="xencode__subcmd__help__subcmd__plugin__subcmd__install"
@@ -679,6 +694,30 @@ _xencode() {
             xencode__subcmd__models__subcmd__help,list)
                 cmd="xencode__subcmd__models__subcmd__help__subcmd__list"
                 ;;
+            xencode__subcmd__perf,check)
+                cmd="xencode__subcmd__perf__subcmd__check"
+                ;;
+            xencode__subcmd__perf,help)
+                cmd="xencode__subcmd__perf__subcmd__help"
+                ;;
+            xencode__subcmd__perf,record)
+                cmd="xencode__subcmd__perf__subcmd__record"
+                ;;
+            xencode__subcmd__perf,show)
+                cmd="xencode__subcmd__perf__subcmd__show"
+                ;;
+            xencode__subcmd__perf__subcmd__help,check)
+                cmd="xencode__subcmd__perf__subcmd__help__subcmd__check"
+                ;;
+            xencode__subcmd__perf__subcmd__help,help)
+                cmd="xencode__subcmd__perf__subcmd__help__subcmd__help"
+                ;;
+            xencode__subcmd__perf__subcmd__help,record)
+                cmd="xencode__subcmd__perf__subcmd__help__subcmd__record"
+                ;;
+            xencode__subcmd__perf__subcmd__help,show)
+                cmd="xencode__subcmd__perf__subcmd__help__subcmd__show"
+                ;;
             xencode__subcmd__plugin,help)
                 cmd="xencode__subcmd__plugin__subcmd__help"
                 ;;
@@ -800,7 +839,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov test review replay eval plugin mcp llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov perf test review replay eval plugin mcp llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1792,7 +1831,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov test review replay eval plugin mcp llamacpp hw history tui help"
+            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck agents hotspots impact removal generate mutants cov perf test review replay eval plugin mcp llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2634,6 +2673,62 @@ _xencode() {
         xencode__subcmd__help__subcmd__mutants)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__perf)
+            opts="record check show"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__perf__subcmd__check)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__perf__subcmd__record)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__perf__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -3960,6 +4055,156 @@ _xencode() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf)
+            opts="-h --help record check show help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__check)
+            opts="-h --filter --alert-pct --alpha --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --filter)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --alert-pct)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --alpha)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__help)
+            opts="record check show help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__help__subcmd__check)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__help__subcmd__record)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__help__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__record)
+            opts="-h --force --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__perf__subcmd__show)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0

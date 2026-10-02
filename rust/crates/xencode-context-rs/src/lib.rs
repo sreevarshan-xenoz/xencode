@@ -38,6 +38,7 @@ pub mod init;
 pub mod ledger;
 pub mod metrics;
 pub(crate) mod parse;
+pub mod perf;
 pub mod pricing;
 pub mod prompts;
 pub mod refresh;
