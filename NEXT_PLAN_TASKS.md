@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1789 tests passing, zero warnings (re-verified 2026-09-30)
+- [x] Workspace gates green — 16 crates, 1863 tests passing, zero warnings (re-verified 2026-10-02)
 
 ## Model Catalog Honesty
 
@@ -9709,7 +9709,7 @@ must not enter a wave as commitments.
 The prefixes follow the appendix convention: `AR-` for the runtime that talks to one
 worker, `OR-` for the thing that decides what workers to talk to.
 
-- [ ] **AR-1 — the interop probe, and the one question it answers.** Not "how do we
+- [x] **AR-1 — the interop probe, and the one question it answers.** Not "how do we
       build the orchestrator" but the narrower one that decides its shape: **what is the
       minimum common event protocol these six CLIs can actually be normalised into?**
       Run each installed CLI headless on a read-only task and capture, per agent: launch
@@ -9734,11 +9734,29 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **The gate is unchanged by this order:** `AR-9`'s protocol may not be treated as
       settled on one vendor's stream — a common denominator needs at least two
       observations before it stops being an opinion about opencode.
-- [ ] **AR-2 — discovery.** Find candidate agents on `PATH`, read their versions, and
+
+      **Closed 2026-10-02 — all three done-when clauses now hold.** The §S-12
+      matrix is filled with observed cells, and every cell that came only from a
+      help screen carries its provenance marker. The fan-out was measured twice
+      (29.4 s and 30.4 s wall against 85.3 s and 81.4 s sequential, kilo the
+      slowest worker both times), and the cost figure is recorded as the honest
+      thing it turned out to be: four working agents reporting three different
+      currencies of cost, two of them zero, only wall clock common to all.
+      `AR-9`'s protocol is derived from the matrix — `protocol.rs` keys on the
+      observed shape of a line and is tested against eight whole captured
+      streams, not against the proposal's wish list, and not on one vendor's
+      stream alone (opencode and kilo were correctly collapsed to one
+      vocabulary, and six others reached the same ten variants). The gate on
+      `OR-` scheduling is therefore open; the remaining evidence gap
+      (`PermissionRequested` and `Error` never observed on this box) belongs to
+      `AR-9`, whose box stays open for that alone.
+- [x] **AR-2 — discovery.** Find candidate agents on `PATH`, read their versions, and
       record how each was installed (`mise`, `~/.local/bin`, other) without installing,
       upgrading or touching any of them.
-      **Done-when:** on this box it lists codex/claude/gemini/opencode/agy/crush with the
-      six versions from S-0 and says nothing about the rest of the filesystem.
+      **Done-when (rewritten 2026-10-02, per the decision recorded below):** on
+      this box it lists every installed agent it finds on `PATH` or a documented
+      install path, with the versions **as measured on the day** and the install
+      source, and says nothing about the rest of the filesystem.
       **2026-10-02: the six S-0 versions are stale and two names were missing.**
       Measured today: codex `0.159.3`, claude `2.1.286`, gemini `0.62.0`, opencode
       `1.18.31`, agy `1.2.14`, crush `v0.97.1` — five of six moved since
@@ -9749,9 +9767,16 @@ worker, `OR-` for the thing that decides what workers to talk to.
       rules were needed to see the last two — check a documented path when a
       vendor installs outside `PATH`, and accept several binary names because a
       product's binary need not carry the product's name. Still open
-      because the done-when names the S-0 versions and those are now out of
-      date — either the table is refreshed from this reading or the done-when is
-      rewritten to say "the versions as measured on the day".
+      because the done-when named the S-0 versions and those went out of date
+      the same week — the done-when above was rewritten to "the versions as
+      measured on the day", which is the reading `xencode agents` actually
+      produces and re-produces, so the item is closed.
+
+      **Closed 2026-10-02.** `xencode agents` reports ten installed agents with
+      version, path and install source, needs no installation or filesystem
+      sweep to do it, and two of the ten were only visible because of the
+      resolution rules the probe learned the hard way — check a documented path
+      when a vendor installs outside `PATH`, and accept several binary names.
 - [ ] **AR-3 — contract probe, not capability table.** For a discovered agent, extract
       the flags it actually advertises (headless mode, stream format, approval ladder,
       sandbox) into the S-0 row shape.
