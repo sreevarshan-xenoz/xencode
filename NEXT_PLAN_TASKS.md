@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1880 tests passing, zero warnings (re-verified 2026-10-02, after AR-4)
+- [x] Workspace gates green — 16 crates, 1889 tests passing, zero warnings (re-verified 2026-10-02, after AR-5)
 
 ## Model Catalog Honesty
 
@@ -9824,19 +9824,31 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **Done-when:** two different vendors' runs render in the same trace view, any
       field invented to make them line up is visibly xencode's, not theirs, and for
       every stored normalised event the raw line it came from is recoverable.
-- [ ] **AR-5 — worker identity and the event envelope.** Give every worker an id that
-      survives into `EVd-1`'s ledger and `CX-2`'s metrics, define what xencode owns
-      versus the vendor (task record, not session mirror), and fix the envelope every
-      `AgentEvent` travels in — session id, task id, agent id, sequence, timestamp,
-      origin, payload — with **four states kept semantically distinct**: observed (the
-      worker said it), synthesised (xencode filled it in because the model needs the
-      field and no stream carried it), unknown (nobody said anything, which is itself a
-      recorded fact), and unavailable (the vendor provably cannot say — `agy`'s missing
-      correlation id on tool calls, measured 2026-10-02, is the worked example). A
-      verifier downstream must never be able to read an absence as a zero or an
-      inference as a measurement.
-      **Done-when:** every new file is written with `DB-1`'s atomic write, `DB-5`'s
-      torn-line discard and `0600` per `SE-1`, a redaction pass proves an
+- [x] **AR-5 — worker identity and the event envelope.** 2026-10-02.
+      `xencode-agents-rs/src/envelope.rs` fixes the shape one `AgentEvent` travels in when it
+      leaves the sealed capture and goes to a place that can be joined or synced — worker id,
+      task id, agent id, session id, sequence, timestamp, origin, payload — and holds the
+      four states semantically distinct rather than collapsing them: `Field::Observed` (the
+      worker said it), `Field::Synthesised` (xencode minted it because the model needs the slot
+      and no stream carried it — always true of the worker id and the sequence), `Field::Unknown`
+      (nobody said it this run, itself a recorded fact), `Field::Unavailable { reason }` (this
+      vendor provably cannot — `agy`'s missing correlation id, measured 2026-10-02, is the worked
+      example). No field defaults to a value a reader could mistake for a measurement: an absent
+      value is `None` *and* its state says why. The envelope is written as a fourth file,
+      `capture/envelope.jsonl`, through the same `0600` owner-only atomic write (DB-1, SE-1 —
+      `capture::write_atomic` is now `pub(crate)` and shared rather than copied a third time),
+      and it is the copy that **redacts**: `Envelope::redacted` scrubs credential-shaped strings
+      out of the payload and the identity fields via the probe's own patterns, while leaving
+      `raw_line` and `sequence` intact so a redacted value stays recoverable from the sealed
+      `raw.jsonl`. A torn final line is discarded on read (`DB-5`, `read_envelopes`), a malformed
+      non-final line is reported as corruption. Verified against files that get written: nine
+      tests in `tests/envelope_store.rs` prove a token in a stream lands in `raw.jsonl` and **not**
+      `envelope.jsonl`, the four states round-trip and never serialise alike, and both torn-line
+      halves hold; two of those were mutation-checked (dropping the redaction call leaked the token
+      to disk and failed; renaming `Unavailable` to serialise like `Unknown` broke five tests). The
+      origin-missing clause is tested directly: a stored envelope with no `origin` field reads back
+      as `Synthesised`, i.e. *not observed*. **Done-when:** every new file is written with `DB-1`'s
+      atomic write, `DB-5`'s torn-line discard and `0600` per `SE-1`, a redaction pass proves an
       authentication token that appeared in a stream did not land on disk (S-6 #31),
       and a stored event whose origin field is missing deserialises to *not observed*,
       never to a silent measurement.

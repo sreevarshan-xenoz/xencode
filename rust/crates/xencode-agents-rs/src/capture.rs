@@ -95,6 +95,10 @@ pub struct Capture {
     pub metadata: Metadata,
     pub raw: Vec<RawLine>,
     pub events: Vec<StoredEvent>,
+    /// The [`AR-5`] propagation envelopes, each derived from one stored event and
+    /// written redacted. This is the copy that flows to the ledger and the
+    /// metrics, so it never carries a credential the sealed `raw.jsonl` holds.
+    pub envelopes: Vec<crate::envelope::Envelope>,
 }
 
 impl Capture {
@@ -236,6 +240,20 @@ pub fn write_capture(root: &Path, run: &RunCapture) -> Result<PathBuf, String> {
 
     write_jsonl(&dir.join("raw.jsonl"), &raw)?;
     write_jsonl(&dir.join("normalized.jsonl"), &events)?;
+
+    // AR-5: the propagation copy, derived from the stored events and written
+    // redacted. `metadata.session_id` is the session the vendor opened; a replay
+    // has no job id and no per-line clock, so those fields state that plainly.
+    let envelopes = crate::envelope::envelopes_for_capture(
+        &run.agent,
+        run.session_id.as_deref(),
+        None,
+        0,
+        &events,
+        &raw,
+    );
+    crate::envelope::write_envelopes(&dir, &envelopes)?;
+
     write_json(
         &dir.join("metadata.json"),
         &serde_json::to_string_pretty(&metadata)
@@ -262,10 +280,15 @@ pub fn read_capture(dir: &Path) -> Result<Capture, String> {
                 dir.join("metadata.json").display()
             )
         })?;
+    // DB-5: a torn trailing envelope line is a write interrupted mid-line, not a
+    // stored envelope. It is dropped rather than failing the whole read; the
+    // sealed raw stream still holds every byte, so nothing is truly lost.
+    let read = crate::envelope::read_envelopes(&dir)?;
     Ok(Capture {
         metadata,
         raw,
         events,
+        envelopes: read.envelopes,
     })
 }
 
@@ -464,7 +487,10 @@ fn read_text(path: &Path) -> Result<String, String> {
 /// tasks, and a worker capture must not drag the scheduler in with it — so the
 /// procedure is repeated here rather than shared. It is the same procedure:
 /// write to a sibling, flush it, rename it over the target, sync the directory.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+///
+/// `pub(crate)` so the envelope store ([`crate::envelope`]) writes through the
+/// identical owner-only path instead of keeping a third copy of this procedure.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())

@@ -1107,14 +1107,28 @@ to show, in a directory you name:
     raw.jsonl          every line the vendor printed, verbatim and unredacted
     normalized.jsonl   the common events, each naming the raw line it came from
     metadata.json      what was run, what it said it cost, what was truncated
+    envelope.jsonl     AR-5's propagation copy — each event with its session,
+                       task, agent, worker id, sequence, timestamp and origin,
+                       written REDACTED
 ```
 
-This costs **no extra run** — it writes the bytes the probe already received. Because a raw
-vendor stream can carry a credential the vendor itself printed, `raw.jsonl` is kept **unredacted**
-(a redacted raw stream is not a raw stream): nothing is hidden from the record. Two things contain
-that — a capture exists only when you ask for one by directory, and all three files are written
-`0600` through the same owner-only atomic write the rest of xencode's private state uses. Redaction
-that still keeps every line recoverable is `AR-5`'s job, not this one's.
+This costs **no extra run** — it writes the bytes the probe already received. The first three
+files are the sealed capture: `raw.jsonl` stays **unredacted** (a redacted raw stream is not a raw
+stream), because nothing about the run should be hidden from the record. Two things contain that —
+a capture exists only when you ask for one by directory, and all four files are written `0600`
+through the same owner-only atomic write the rest of xencode's private state uses.
+
+The fourth file is the `AR-5` **envelope**: the shape an event takes when it leaves the capture and
+goes somewhere it can be joined or synced — the ledger, the metrics. Unlike the sealed capture, the
+envelope **redacts** every credential-shaped string, because it is the copy that propagates. A token
+that appeared in a vendor's stream therefore does not reach `envelope.jsonl`, yet each redacted
+event still names its exact `raw.jsonl` line, so recovering the true bytes stays a deliberate act on
+the sealed capture rather than a lost fact. Every envelope field is in one of four distinct states —
+**observed** (the worker said it), **synthesised** (xencode minted it, like the worker id and the
+sequence), **unknown** (nobody said it this run), and **unavailable** (this vendor provably cannot,
+with the reason — `agy` sends no correlation id on tool calls) — and nothing defaults to a value
+that could be mistaken for a measurement: a stored event whose origin field is missing reads as
+*not observed*.
 
 With `--repeat N`, each run lands in its own `<DIR>/run-K/<agent>/capture/` so a second run never
 overwrites the first's raw stream.
