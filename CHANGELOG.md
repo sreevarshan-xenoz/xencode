@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a common event protocol that every agent's stream normalises into
+
+The seven working agents speak six vocabularies with not one event name in
+common, so `AR-9`'s protocol is derived from the measured matrix instead of a
+wish list. `protocol.rs` defines ten common events — session start, message,
+tool requested/started/output, file changed, permission requested, error,
+completed, session ended — and a normaliser keyed on the *shape* of a line, not
+on the agent's name: opencode and kilo are one fork, and paying for both would
+double the adapter layer for no gain.
+
+The proof is whole captured streams, not hand-picked lines: eight real streams
+from 2026-10-02 sit under `tests/fixtures/` verbatim, and each is asserted to
+reach the model, report finishing, and contain no event xencode invented. Three
+real limits came out of running them rather than reading them: agy delivers its
+answer only in the final `result` (its response step carries usage and no
+text), streams no correlation id on tool calls at all — so its tool output
+cannot be paired to its request — and kiro-cli sends prose in chunks (`xen`,
+then `code`), which the model passes through as sent and leaves the consumer to
+join.
+
+Two rules hold by construction: a `FileChanged` can only be built from xencode's
+own diff of the lease, and anything the model fills in that no stream said is
+marked synthesised — with a default of *not* observed, so a missing field can
+never read as a measurement. A run that emits nothing but text terminates
+through the same state machine as one that ran tools. One done-when cell stays
+open honestly: `PermissionRequested` and `Error` were never observed from any
+agent on this box, so those variants are complete in the model and empty in the
+evidence.
+
 ### Added — `xencode interop --fan-out`, and a measured five-worker run
 
 `--fan-out` launches the selected agents at the same time on the shared read-only

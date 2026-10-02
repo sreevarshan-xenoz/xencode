@@ -9808,6 +9808,19 @@ worker, `OR-` for the thing that decides what workers to talk to.
       variant is populated by at least one real observed stream; any field xencode
       synthesised is marked as synthesised; and a run whose worker emitted nothing but
       text still terminates correctly through the same state machine.
+      **Status 2026-10-02 — drafted and tested; one variant still unobserved.**
+      `rust/crates/xencode-agents-rs/src/protocol.rs` holds the ten variants, a
+      shape-keyed `normalise_line` covering all eight captured vocabularies, and
+      an `Origin` that separates a measurement from xencode's own bookkeeping.
+      Whole captured streams (verbatim, under `tests/fixtures/`) are asserted to
+      reach the model, to report finishing, and to contain no invented event; a
+      prose-only run terminates through the same check. `FileChanged` is
+      populated only from xencode's own diff, as specified. What is *not* met:
+      `PermissionRequested` and `Error` were never observed from any agent run
+      on this box (the mentions in earlier captures were tool-list noise), so
+      the variant stays unpopulated by a real stream until claude is switched
+      back on or a run genuinely denies something. The box stays open for that
+      single gap.
 - [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
       tree, and score the split with `EV-1` before any router consumes it.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
