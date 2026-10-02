@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AR-10`: the Agent Event compatibility kit
+
+A regression firewall for the protocol's adapter layer. `AR-9`'s stream tests ask
+whether each captured vendor run still *behaves* — it finished, it said the answer,
+its tool call carried an id. The new kit asks a sharper question: **which shapes**
+each real stream produces, committed as a per-vendor table. If a normalisation edit
+makes an agent gain or lose a variant it had on 2026-10-02, the matching vendor's
+row fails on the next run instead of surfacing live in front of a user. Verified by
+mutation: retargeting `codex`'s `item.started` to a different variant breaks only
+codex's row, because a whole-corpus view still sees that shape elsewhere — which is
+why the table is per-vendor and not just a set.
+
+The eight committed streams together exercise seven of the model's ten variants. The
+kit records that number as a fact and asserts that `permission_requested` and `error`
+appear in **no** captured run rather than feeding a made-up line to a fixture — a
+compatibility kit greenlit on fabricated input certifies nothing. When a `claude`
+re-run or a ninth vendor emits one of them, that assertion fails and points to
+replacing the declared gap with a positive case built on the new capture.
+(`file_changed` is absent by the model's own design — never derived from a worker's
+stream — so it is not an evidence gap and has its separate unit test.)
+
 ### Added — `AR-5`: the event envelope, four provenance states, and a redaction that keeps recovery
 
 An event that leaves `AR-4`'s sealed capture and goes somewhere it can be joined
