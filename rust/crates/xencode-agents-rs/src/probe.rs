@@ -5,7 +5,7 @@
 //! documentation for why that is the whole design.
 
 use crate::roster::{which, AgentSpec, Provenance, ROSTER};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 
@@ -173,7 +173,7 @@ pub struct RunCapture {
 /// at all. This is the first cut at one shape for them, and it is deliberately
 /// not lossy: a unit the reader does not recognise is carried as a string rather
 /// than dropped or guessed at.
-#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Usage {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,

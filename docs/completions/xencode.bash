@@ -3258,7 +3258,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__interop)
-            opts="-h --agent --timeout --out --format --repeat --fan-out --check-auth --help"
+            opts="-h --agent --timeout --out --format --repeat --fan-out --check-auth --capture-dir --trace --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3281,6 +3281,14 @@ _xencode() {
                     return 0
                     ;;
                 --repeat)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --capture-dir)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --trace)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

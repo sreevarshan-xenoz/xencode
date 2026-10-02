@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — a common event protocol that every agent's stream normalises into
+### Added — `xencode interop --capture-dir` and `--trace`, keeping what a worker said
+
+A normalised event stream is the convenient thing to store and the wrong thing
+to store alone: every judgement the adapter made — that this chunk was prose,
+that this line ended the run, that this call and that output are the same call —
+is baked into it and cannot be argued with afterwards. So `AR-4` keeps one run as
+three files under `<dir>/<agent>/capture/`: `raw.jsonl` (every line the vendor
+printed, verbatim), `normalized.jsonl` (the common events, each naming the raw
+line it was read out of), and `metadata.json` (what was run and what it said it
+cost). Keeping a capture costs no extra run — it writes the bytes the probe
+already received — and `--trace` renders a stored capture back into one column
+view, taking the whole root so two vendors that agree on nothing else appear in
+the same rendering.
+
+The raw stream is deliberately unredacted, because a redacted raw stream is not a
+raw stream; a vendor that prints a credential into its own output puts it in this
+file. Two things contain that: a capture only exists when the operator asks for
+one by directory, and all three files are written `0600` through the same
+owner-only atomic write the rest of xencode's private state uses. Redaction that
+still keeps every line recoverable is left for `AR-5`. The store and the renderer
+are checked against the eight real committed streams, not fixtures built for the
+occasion: every stored event names a raw line, re-normalising that line returns
+the same event, and no vendor name is read by the code that prints them.
+
+
 
 The seven working agents speak six vocabularies with not one event name in
 common, so `AR-9`'s protocol is derived from the measured matrix instead of a

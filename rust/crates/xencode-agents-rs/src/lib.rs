@@ -26,11 +26,15 @@
 //! that needs an account and has none stops at the auth check, which is still a
 //! useful observation and is recorded as one.
 
+pub mod capture;
 pub mod contract;
 pub mod probe;
 pub mod protocol;
 pub mod roster;
 
+pub use capture::{
+    find_captures, read_capture, write_capture, Capture, Metadata, RawLine, StoredEvent,
+};
 pub use contract::{probe_contract, ClaimResult, Verdict};
 pub use probe::{FanOut, ProbeOptions, ProbeReport, RunCapture, Usage};
 pub use protocol::{AgentEvent, Origin};

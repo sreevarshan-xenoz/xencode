@@ -5,10 +5,10 @@
 //! roster, and every one of them is marked as read-only evidence so a reader can
 //! tell at a glance which parts of the matrix still need running.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// How a cell in the matrix came to be believed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     /// We ran the thing and watched it happen. The only kind `AR-1` accepts as a

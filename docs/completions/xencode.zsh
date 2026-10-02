@@ -759,6 +759,8 @@ _arguments "${_arguments_options[@]}" : \
 '--out=[Where to write the JSON report; omit to print it]:OUT:_files' \
 '--format=[Output format for the printed summary]:FORMAT:(text json)' \
 '--repeat=[Run each agent this many times and compare. One run is a reading; two is a check, and a fact that differs between runs is reported rather than smoothed over]:REPEAT:_default' \
+'--capture-dir=[Keep each agent'\''s whole run on disk, in \`<dir>/<agent>/capture/\`\: \`raw.jsonl\` (every line the vendor printed, unredacted), \`normalized.jsonl\` (the common events, each naming its raw line) and \`metadata.json\` (what was run and what it said it cost). Written \`0600\` and only when you ask. Costs no extra run — it keeps what the probe already received]:CAPTURE_DIR:_files' \
+'(--check-auth)--trace=[Print the trace view of a capture written earlier and probe nothing. Takes the \`<agent>\` directory, e.g. \`xencode interop --trace ../captures/opencode\`]:CAPTURE:_files' \
 '(--repeat)--fan-out[Run every selected agent at the same time instead of one after another, and report what the overlap saved. Cannot be combined with \`--repeat\`, which needs sequential runs to compare]' \
 '--check-auth[Report, read-only, which agents look configured on this machine, and what to run if one is not. Starts no login and reads no credential]' \
 '-h[Print help (see more with '\''--help'\'')]' \
