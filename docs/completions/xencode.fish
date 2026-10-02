@@ -237,6 +237,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand interop" -l out -d 'Wher
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l format -d 'Output format for the printed summary' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l repeat -d 'Run each agent this many times and compare. One run is a reading; two is a check, and a fact that differs between runs is reported rather than smoothed over' -r
+complete -c xencode -n "__fish_xencode_using_subcommand interop" -l fan-out -d 'Run every selected agent at the same time instead of one after another, and report what the overlap saved. Ignored with `--repeat`, which needs sequential runs to compare'
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -l check-auth -d 'Report, read-only, which agents look configured on this machine, and what to run if one is not. Starts no login and reads no credential'
 complete -c xencode -n "__fish_xencode_using_subcommand interop" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c xencode -n "__fish_xencode_using_subcommand anchor" -l timeout -d 'Per-command wall-clock limit in seconds. A command that runs out of time is recorded as unverified, never as a pass' -r

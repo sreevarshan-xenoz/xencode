@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode interop --fan-out`, and a measured five-worker run
+
+`--fan-out` launches the selected agents at the same time on the shared read-only
+fixture instead of one after another, and reports what the overlap bought. Run
+alone, five workers took 85.3 s; run together, 29.4 s — 2.9x, measured twice
+(30.4 s the second time, 2.7x), with kilo the slowest single worker at 25.9 s and
+28.2 s. That last figure is the one that bounds a schedule.
+
+Reports now also show what each agent said the run cost, in each agent's own
+units. That is not one number: opencode and cline state a cost of zero beside
+their token counts, agy reports tokens and no cost, kiro-cli meters credits
+(0.0650) and reports no tokens at all, and cursor-agent reported nothing. A
+fan-out total can only be assembled by normalising six usage shapes into one.
+
+Reading those shapes took three attempts, and each failure is now a test using the
+line the agent actually printed: cline reported `usage` at the top of one line and
+nested under `event` in the next; agy nests under `result`; cline's run-level
+summary restates a total that its per-step events already added up to, so summing
+everything counts a 13,911-token run as 27,822; kiro-cli meters credits twice with
+no token count, so the larger reading is taken rather than their sum.
+
 ### Changed — claude, gemini and crush are stood down by decision, and every report says so
 
 The operator does not need these three, so `xencode interop` no longer runs them.

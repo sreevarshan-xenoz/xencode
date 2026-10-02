@@ -759,6 +759,7 @@ _arguments "${_arguments_options[@]}" : \
 '--out=[Where to write the JSON report; omit to print it]:OUT:_files' \
 '--format=[Output format for the printed summary]:FORMAT:(text json)' \
 '--repeat=[Run each agent this many times and compare. One run is a reading; two is a check, and a fact that differs between runs is reported rather than smoothed over]:REPEAT:_default' \
+'(--repeat)--fan-out[Run every selected agent at the same time instead of one after another, and report what the overlap saved. Ignored with \`--repeat\`, which needs sequential runs to compare]' \
 '--check-auth[Report, read-only, which agents look configured on this machine, and what to run if one is not. Starts no login and reads no credential]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \

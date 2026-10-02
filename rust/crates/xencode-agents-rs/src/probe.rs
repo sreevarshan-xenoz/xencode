@@ -59,6 +59,14 @@ pub struct ProbeOptions {
     pub workdir: std::path::PathBuf,
     /// The read-only task to hand each agent.
     pub task: String,
+    /// Run every selected agent at once instead of one after another.
+    ///
+    /// `AR-1` asks for the cost of a five-worker fan-out, and that question
+    /// cannot be answered by a sequential run: five agents in series measures
+    /// arithmetic, not concurrency. A fan-out is only ever run on a read-only
+    /// task, and it is opt-in, because the point of the flag is to spend real
+    /// concurrent requests against whatever accounts are configured.
+    pub fan_out: bool,
     /// How many times to run each agent.
     ///
     /// One is a reading; two is a check. `AR-1`'s done-when asks for cells that
@@ -78,6 +86,7 @@ impl ProbeOptions {
             workdir: workdir.into(),
             task: default_task().to_string(),
             repeat: 1,
+            fan_out: false,
         }
     }
 }
@@ -134,10 +143,84 @@ pub struct RunCapture {
     pub stopped_on_auth: bool,
     /// Whether the tool asked for approval, and how it said so.
     pub permission_signal: Option<String>,
+    /// Tokens and money, read out of the run's own stream.
+    ///
+    /// Absent when the agent said nothing about usage, which is a finding and
+    /// not a gap in the reader: on 2026-10-02 `cursor-agent` reported none at
+    /// all. Every field is `None` rather than `0` where the agent did not report
+    /// it, so "this agent charges nothing" is never printed as "this run cost
+    /// nothing".
+    pub usage: Option<Usage>,
+    /// Which model answered, when the stream said so.
+    ///
+    /// Most do not, and that is worth knowing before anything routes by
+    /// capability: on 2026-10-02 four of the seven working agents named a model
+    /// or provider, and `cline` named only its own brand. `None` here means the
+    /// question is unanswered, not that the answer was empty.
+    pub model: Option<String>,
     /// How much of the matrix this run can speak to.
     pub provenance: Provenance,
     /// Why the run did not produce an answer, when it did not.
     pub failure: Option<String>,
+}
+
+/// What a run cost, in whatever units that particular agent reports.
+///
+/// Six working agents report usage in six shapes on 2026-10-02: `cline` sends a
+/// `usage` event with `totalCost` beside the token counts, `opencode` and its
+/// `kilo` fork put a `tokens` object on each `step_finish`, `agy` sends
+/// snake_case `input_tokens`, and `kiro-cli` meters *credits* with no token count
+/// at all. This is the first cut at one shape for them, and it is deliberately
+/// not lossy: a unit the reader does not recognise is carried as a string rather
+/// than dropped or guessed at.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Usage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    /// What the agent charged, when it said. `cline` said `0`.
+    pub cost: Option<f64>,
+    /// The unit `cost` is in, when it is not a currency.
+    pub cost_unit: Option<String>,
+    /// Tokens summed over every event that reported any.
+    pub summed_over_events: u64,
+    /// Whether a run-level summary restated the totals. When true the totals
+    /// come from that summary rather than from the sum of per-step events.
+    pub saw_summary: bool,
+    /// How many lines carried a metered charge.
+    pub metered_events: u64,
+}
+
+impl Usage {
+    /// One line for a report, naming what is missing rather than rounding it to
+    /// zero.
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(n) = self.input_tokens {
+            parts.push(format!("in {n}"));
+        }
+        if let Some(n) = self.output_tokens {
+            parts.push(format!("out {n}"));
+        }
+        if let Some(n) = self.reasoning_tokens {
+            parts.push(format!("reasoning {n}"));
+        }
+        if let Some(n) = self.cache_read_tokens {
+            parts.push(format!("cache read {n}"));
+        }
+        match (self.cost, &self.cost_unit) {
+            (Some(c), Some(u)) => parts.push(format!("{c:.6} {u}")),
+            (Some(c), None) => parts.push(format!("{c}")),
+            _ => parts.push("no cost reported".to_string()),
+        }
+        format!(
+            "{} (summed over {} event(s))",
+            parts.join(", "),
+            self.summed_over_events
+        )
+    }
 }
 
 impl RunCapture {
@@ -319,6 +402,69 @@ pub struct ProbeReport {
     pub parked: Vec<ParkedAgent>,
     /// Anything the run could not answer, stated rather than left blank.
     pub unanswered: Vec<String>,
+    /// Set when the run was a fan-out: what concurrency bought, measured.
+    pub fan_out: Option<FanOut>,
+}
+
+/// What a concurrent run actually cost, next to what it would have cost alone.
+///
+/// The honest part is the units. Six agents do not agree on what a run costs, so
+/// this does not invent a single dollar figure: it reports the tokens each agent
+/// reported, the one agent that metered its own units, and the wall-clock saving
+/// from running them at once — which is the only figure every agent agrees on
+/// and the one an orchestrator actually controls.
+#[derive(Debug, Clone, Serialize)]
+pub struct FanOut {
+    /// How many workers ran at once.
+    pub workers: usize,
+    /// Wall-clock for the whole run.
+    pub wall_clock_ms: u128,
+    /// The sum of what each worker took on its own. Always at least
+    /// `wall_clock_ms`, because they overlapped.
+    pub summed_worker_ms: u128,
+    /// `summed_worker_ms / wall_clock_ms`. Below 1 would mean the clock lied.
+    pub overlap_factor: f64,
+    /// The slowest single worker, which is the floor on any future schedule.
+    pub slowest_worker_ms: u128,
+    /// Slowest worker and how long it took.
+    pub slowest: String,
+}
+
+impl FanOut {
+    /// What a set of finished workers cost, given how long the whole run took.
+    pub fn from_captures(workers: &[RunCapture], wall_clock_ms: u128) -> Self {
+        let summed_worker_ms: u128 = workers.iter().map(|c| c.duration_ms).sum();
+        let slowest = workers
+            .iter()
+            .max_by_key(|c| c.duration_ms)
+            .map(|c| (c.agent.clone(), c.duration_ms))
+            .unwrap_or_else(|| ("none".to_string(), 0));
+        Self {
+            workers: workers.len(),
+            wall_clock_ms,
+            summed_worker_ms,
+            overlap_factor: if wall_clock_ms == 0 {
+                0.0
+            } else {
+                summed_worker_ms as f64 / wall_clock_ms as f64
+            },
+            slowest_worker_ms: slowest.1,
+            slowest: slowest.0,
+        }
+    }
+
+    /// One line for a report.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} worker(s) in {} ms; run alone they would take {} ms ({}x), slowest {} at {} ms",
+            self.workers,
+            self.wall_clock_ms,
+            self.summed_worker_ms,
+            self.overlap_factor,
+            self.slowest,
+            self.slowest_worker_ms
+        )
+    }
 }
 
 /// An agent this probe cannot say anything about, and why.
@@ -544,6 +690,8 @@ pub fn probe_one(spec: &AgentSpec, options: &ProbeOptions) -> RunCapture {
             session_id: None,
             stopped_on_auth: false,
             permission_signal: None,
+            usage: None,
+            model: None,
             provenance: Provenance::NotInstalled,
             failure: Some(format!("no `{}` on PATH", spec.binaries.join("` or `"))),
         };
@@ -599,6 +747,8 @@ pub fn probe_one(spec: &AgentSpec, options: &ProbeOptions) -> RunCapture {
             session_id: None,
             stopped_on_auth: false,
             permission_signal: None,
+            usage: None,
+            model: None,
             provenance: Provenance::RunFailed,
             failure: Some(format!("could not run: {e}")),
         },
@@ -631,6 +781,8 @@ pub fn probe_one(spec: &AgentSpec, options: &ProbeOptions) -> RunCapture {
                 session_id: session_id_in(&combined),
                 stopped_on_auth: auth,
                 permission_signal: permission_signal_in(&combined),
+                usage: usage_in(&combined),
+                model: model_in(&combined),
                 provenance: if success && !auth {
                     Provenance::Observed
                 } else {
@@ -653,6 +805,294 @@ pub fn probe_one(spec: &AgentSpec, options: &ProbeOptions) -> RunCapture {
             }
         }
     }
+}
+
+/// Read tokens and money out of a stream, whatever shape the agent used.
+///
+/// Every branch below is a shape that was actually observed on 2026-10-02, with
+/// the agent and event that produced it named. Nothing here infers a number the
+/// agent did not print: a stream that mentions neither tokens nor cost yields
+/// `None`, because a usage of zero would be indistinguishable from an agent that
+/// is genuinely free — `cline` really does report `totalCost: 0`, and that is not
+/// the same claim.
+pub fn usage_in(text: &str) -> Option<Usage> {
+    let mut usage = Usage::default();
+    let mut saw_any = false;
+    for line in text.lines() {
+        let Some(parsed) = json_value(line) else {
+            continue;
+        };
+        let outer = &parsed;
+        // A vendor wraps the numbers at whatever depth it likes, and three
+        // different depths were measured on 2026-10-02: cline's first run put
+        // `usage` at the top of the line, its second run nested it under
+        // `event`, and agy puts it under `result`. Each nesting level is
+        // searched rather than the first one that happens to match.
+        for object in usage_objects(outer) {
+            let is_summary = is_run_summary(outer);
+            if let Some(found) = read_token_shape(object) {
+                saw_any = true;
+                if is_summary {
+                    // A summary restates what the per-step events already added
+                    // up to, so it replaces rather than adds. Adding both is how a
+                    // 13,911-token run gets reported as 41,733.
+                    usage.input_tokens = found.input_tokens.or(usage.input_tokens);
+                    usage.output_tokens = found.output_tokens.or(usage.output_tokens);
+                    usage.reasoning_tokens = found.reasoning_tokens.or(usage.reasoning_tokens);
+                    usage.cache_read_tokens = found.cache_read_tokens.or(usage.cache_read_tokens);
+                    usage.cache_write_tokens =
+                        found.cache_write_tokens.or(usage.cache_write_tokens);
+                    usage.saw_summary = true;
+                    usage.cost = read_cost(object).or(usage.cost);
+                    usage.cost_unit = usage
+                        .cost_unit
+                        .or_else(|| Some("currency unstated".to_string()));
+                } else {
+                    usage.summed_over_events += 1;
+                    usage.input_tokens = add(usage.input_tokens, found.input_tokens);
+                    usage.output_tokens = add(usage.output_tokens, found.output_tokens);
+                    usage.reasoning_tokens = add(usage.reasoning_tokens, found.reasoning_tokens);
+                    usage.cache_read_tokens = add(usage.cache_read_tokens, found.cache_read_tokens);
+                    usage.cache_write_tokens =
+                        add(usage.cache_write_tokens, found.cache_write_tokens);
+                    if let Some(cost) = read_cost(object) {
+                        usage.cost = Some(usage.cost.unwrap_or(0.0) + cost);
+                        usage.cost_unit = Some("currency unstated".to_string());
+                    }
+                }
+            }
+            if let Some((credits, unit)) = read_metered(object) {
+                saw_any = true;
+                // Taken as the largest figure seen, not their sum: whether an
+                // agent's metering line restates the total or adds to it is not
+                // documented by any of them, and summing a running total
+                // double-counts. The larger reading is the safer of the two
+                // errors, so it is the one taken.
+                if usage.cost.is_none_or(|seen_credits| credits > seen_credits) {
+                    usage.cost = Some(credits);
+                    usage.cost_unit = unit;
+                }
+                usage.metered_events += 1;
+            }
+        }
+        // cline states a price in the same units it counts tokens, on the model
+        // description rather than on a usage line, so a cost of zero with a
+        // token count is a real reading and not a missing one.
+        if let Some(pricing) = read_pricing(outer) {
+            saw_any = true;
+            if usage.cost.is_none() {
+                usage.cost = Some(pricing);
+                usage.cost_unit = Some("listed price".to_string());
+            }
+        }
+    }
+    saw_any.then_some(usage)
+}
+
+/// The usage-shaped objects in one line, at every nesting level that was
+/// measured: the line itself, and under `event`, `result`, `data` and `part`.
+///
+/// Descent stops as soon as an object yields counts, because an object and its
+/// own `tokens` child describe the same step. Counting both is how one
+/// 40,780-token step is reported as 81,560.
+fn usage_objects(outer: &serde_json::Value) -> Vec<&serde_json::Value> {
+    let mut found = vec![outer];
+    // `usage`, `tokens` and `aggregateUsage` are included because that is where
+    // the three summary shapes put their totals: cline's `run_result` holds them
+    // under `usage` and repeats them in `aggregateUsage`.
+    for key in [
+        "event",
+        "result",
+        "data",
+        "part",
+        "usage",
+        "tokens",
+        "aggregateUsage",
+    ] {
+        let Some(nested) = outer.get(key).filter(|v| v.is_object()) else {
+            continue;
+        };
+        found.push(nested);
+        let nested_yields = read_token_shape(nested).is_some() || read_metered(nested).is_some();
+        if !nested_yields {
+            for key in ["usage", "tokens"] {
+                if let Some(deep) = nested.get(key).filter(|v| v.is_object()) {
+                    found.push(deep);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Whether this line restates the whole run rather than describing one step.
+///
+/// cline's `run_result` and agy's `result` event both carry a total that
+/// repeats what their per-step events already said.
+fn is_run_summary(outer: &serde_json::Value) -> bool {
+    outer.get("finishReason").is_some()
+        || outer.get("aggregateUsage").is_some()
+        || outer.get("event").and_then(|e| e.get("status")).is_some()
+}
+
+/// Read a token count out of whichever spelling this object uses.
+///
+/// Two shapes, both measured: `opencode` and its `kilo` fork put a `tokens`
+/// object with a nested `cache` on each step, while `cline` and `agy` use
+/// `inputTokens` / `input_tokens` beside an optional `cacheReadTokens`.
+fn read_token_shape(object: &serde_json::Value) -> Option<TokenShape> {
+    let source = object.get("tokens").unwrap_or(object);
+    let (input_key, output_key, read_key, write_key) = if source.get("input").is_some() {
+        ("input", "output", "read", "write")
+    } else {
+        (
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+        )
+    };
+    let input = num(source, input_key).or_else(|| num(object, input_key));
+    let output = num(source, output_key).or_else(|| num(object, output_key));
+    let input = input
+        .or_else(|| num(source, "input_tokens"))
+        .or_else(|| num(object, "input_tokens"));
+    let output = output
+        .or_else(|| num(source, "output_tokens"))
+        .or_else(|| num(object, "output_tokens"));
+    if input.is_none() && output.is_none() {
+        return None;
+    }
+    let cache = source.get("cache");
+    let thinking = ["reasoning", "reasoningTokenCount", "thinking_tokens"];
+    Some(TokenShape {
+        input_tokens: input,
+        output_tokens: output,
+        reasoning_tokens: thinking
+            .iter()
+            .find_map(|k| num(source, k).or_else(|| num(object, k))),
+        cache_read_tokens: num(cache.unwrap_or(object), read_key)
+            .or_else(|| num(object, "cache_read_tokens"))
+            .or_else(|| num(object, "cacheRead")),
+        cache_write_tokens: num(cache.unwrap_or(object), write_key)
+            .or_else(|| num(object, "cache_write_tokens"))
+            .or_else(|| num(object, "cacheWrite")),
+    })
+}
+
+struct TokenShape {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+}
+
+/// A stated cost on a usage object: cline's `cost` per step and `totalCost` on
+/// its summary.
+fn read_cost(object: &serde_json::Value) -> Option<f64> {
+    object
+        .get("totalCost")
+        .or_else(|| object.get("cost"))
+        .and_then(|v| v.as_f64())
+}
+
+/// kiro-cli's metered credits: an array of `{value, unit}` with no tokens.
+fn read_metered(object: &serde_json::Value) -> Option<(f64, Option<String>)> {
+    let metering = object.get("meteringUsage")?.as_array()?;
+    let mut credits = 0.0;
+    let mut unit = None;
+    for entry in metering {
+        if let Some(value) = entry.get("value").and_then(|v| v.as_f64()) {
+            credits += value;
+        }
+        if let Some(name) = entry.get("unit").and_then(|v| v.as_str()) {
+            unit = Some(name.to_string());
+        }
+    }
+    (credits > 0.0).then_some((credits, unit))
+}
+
+/// A price list, read as a price of zero.
+///
+/// cline prints the model's `pricing` block and it was all zeros for the model
+/// it chose on 2026-10-02. That is how a free run becomes measurable rather than
+/// merely uncounted.
+fn read_pricing(outer: &serde_json::Value) -> Option<f64> {
+    let pricing = outer.get("pricing")?.as_object()?;
+    let input = pricing.get("input")?.as_f64()?;
+    let output = pricing
+        .get("output")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(input);
+    Some(input + output)
+}
+
+/// Which model answered, when the stream said so.
+pub fn model_in(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let Some(parsed) = json_value(line) else {
+            continue;
+        };
+        let value = &parsed;
+        // `kilo` puts provider and model on the same object, nested under the
+        // step's `part`; other agents put it at the top of the event.
+        if let Some(model) = value
+            .get("model")
+            .or_else(|| value.get("part").and_then(|p| p.get("model")))
+        {
+            if let (Some(p), Some(m)) = (
+                model.get("providerID").and_then(|v| v.as_str()),
+                model.get("modelID").and_then(|v| v.as_str()),
+            ) {
+                return Some(format!("{p}/{m}"));
+            }
+            // `cursor-agent` reports `"model":"Auto"`, which names a routing
+            // decision rather than a model. Recording it would let a capability
+            // router think it knew what answered.
+            if let Some(m) = model.as_str().filter(|m| !is_unnamed_model(m)) {
+                return Some(m.to_string());
+            }
+        }
+        for key in ["model", "modelId", "model_id"] {
+            if let Some(m) = value
+                .get(key)
+                .or_else(|| value.get("data").and_then(|d| d.get(key)))
+                .and_then(|m| m.as_str())
+            {
+                if !is_unnamed_model(m) {
+                    return Some(m.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn is_unnamed_model(model: &str) -> bool {
+    model.trim().is_empty()
+        || model.eq_ignore_ascii_case("auto")
+        || model.eq_ignore_ascii_case("default")
+}
+
+fn add(current: Option<u64>, next: Option<u64>) -> Option<u64> {
+    match (current, next) {
+        (Some(a), Some(b)) => Some(a + b),
+        (Some(a), None) => Some(a),
+        (None, b) => b,
+    }
+}
+
+fn num(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(|v| v.as_u64())
+}
+
+fn json_value(line: &str) -> Option<serde_json::Value> {
+    let line = line.trim();
+    if !line.starts_with('{') {
+        return None;
+    }
+    serde_json::from_str(line).ok()
 }
 
 /// Build the read-only fixture the agents are pointed at.
@@ -721,16 +1161,51 @@ pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
     let repeat = options.repeat.max(1);
     let mut all_runs: Vec<RunCapture> = Vec::new();
     let mut captures: Vec<RunCapture> = Vec::new();
-    for spec in &selected {
-        let mut runs: Vec<RunCapture> = Vec::with_capacity(repeat as usize);
-        for _ in 0..repeat {
-            runs.push(probe_one(spec, options));
+    let fan_out = if options.fan_out && selected.len() > 1 {
+        // One worker per thread, all launched together, because the question
+        // this answers is what concurrency *buys* — so measuring it by running
+        // them one after another would answer a different question.
+        //
+        // The fixture is seeded once and shared, and it is read-only: five agents
+        // asked to read one file cannot conflict over it. Each worker still gets
+        // its own `PWD` and its own process.
+        let started = std::time::Instant::now();
+        let mut handles = Vec::with_capacity(selected.len());
+        for spec in &selected {
+            let spec: &'static AgentSpec = spec;
+            let options = options.clone();
+            handles.push(std::thread::spawn(move || probe_one(spec, &options)));
         }
-        // The first run is the one the table shows; the rest exist to be
-        // compared against it, and are all kept so a report can be re-read.
-        all_runs.extend(runs.iter().cloned());
-        captures.push(runs[0].clone());
-    }
+        let mut fan_captures = Vec::with_capacity(selected.len());
+        for handle in handles {
+            match handle.join() {
+                Ok(capture) => fan_captures.push(capture),
+                Err(_) => {
+                    // A worker thread that panicked has already said so on the
+                    // terminal. Losing its capture silently would turn a crash
+                    // into a missing row, which is the failure this crate exists
+                    // to avoid.
+                    unreachable!("a probe worker panicked; see the panic above")
+                }
+            }
+        }
+        let fan = FanOut::from_captures(&fan_captures, started.elapsed().as_millis());
+        all_runs.extend(fan_captures.iter().cloned());
+        captures.extend(fan_captures);
+        Some(fan)
+    } else {
+        for spec in &selected {
+            let mut runs: Vec<RunCapture> = Vec::with_capacity(repeat as usize);
+            for _ in 0..repeat {
+                runs.push(probe_one(spec, options));
+            }
+            // The first run is the one the table shows; the rest exist to be
+            // compared against it, and are all kept so a report can be re-read.
+            all_runs.extend(runs.iter().cloned());
+            captures.push(runs[0].clone());
+        }
+        None
+    };
     let stability: Vec<Stability> = if repeat > 1 {
         selected
             .iter()
@@ -815,6 +1290,7 @@ pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
             .map(|(name, why)| ParkedAgent { name, why })
             .collect(),
         unanswered,
+        fan_out,
     }
 }
 
@@ -931,6 +1407,197 @@ impl CredentialStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_usage_shapes_measured_on_2026_10_02_all_read_as_one() {
+        // Every string below is a line copied out of that agent's own stream, at
+        // the nesting depth it actually used. The nesting is the point: cline
+        // reported `usage` at the top of the line in one run and nested under
+        // `event` in the next, and agy nests under `result`. A reader that only
+        // looked at the top level called both of them free.
+        let opencode = r#"{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":42761,"input":40780,"output":39,"reasoning":0,"cache":{"write":0,"read":42722}}}}"#;
+        let cline_step = r#"{"type":"agent_event","event":{"type":"usage","inputTokens":6901,"outputTokens":83,"cacheReadTokens":241,"cacheWriteTokens":0,"cost":0,"reasoningTokenCount":136,"totalInputTokens":6901}}"#;
+        let cline_nested_step = r#"{"type":"agent_event","event":{"type":"usage","inputTokens":7010,"outputTokens":32,"cacheReadTokens":241,"cacheWriteTokens":0,"cost":0,"reasoningTokenCount":327,"totalInputTokens":13911}}"#;
+        let cline_summary = r#"{"type":"run_result","finishReason":"completed","iterations":2,"usage":{"inputTokens":13911,"outputTokens":115,"cacheReadTokens":482,"cacheWriteTokens":0,"totalCost":0},"aggregateUsage":{"inputTokens":13911}}"#;
+        let agy = r#"{"event":"result","result":{"conversation_id":"8719","status":"SUCCESS","usage":{"input_tokens":28174,"output_tokens":160,"thinking_tokens":109,"cache_read_tokens":0,"total_tokens":28334}}}"#;
+        let kiro = r#"{"type":"metadata","data":{"meteringUsage":[{"value":0.04186594859038143,"unit":"credit","unitPlural":"credits"}]}}"#;
+        let cline_pricing = r#"{"maxTokens":943718,"pricing":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"family":"muse"}"#;
+
+        let o = usage_in(opencode).expect("opencode reported tokens");
+        assert_eq!(o.input_tokens, Some(40780));
+        assert_eq!(o.cache_read_tokens, Some(42722));
+        assert_eq!(o.cost, None, "opencode never said what it cost");
+
+        // Two per-step events plus a summary that restates them. The summary must
+        // win, not add: 6,901 + 7,010 + 13,911 is the bug this guards.
+        let c = usage_in(&format!(
+            "{cline_step}\n{cline_nested_step}\n{cline_summary}"
+        ))
+        .expect("cline reported usage");
+        assert_eq!(
+            c.input_tokens,
+            Some(13911),
+            "cline's own total, counted once"
+        );
+        assert_eq!(c.output_tokens, Some(115));
+        assert_eq!(c.cache_read_tokens, Some(482));
+        // 136 + 327: cline's per-step figures are increments, not running
+        // totals, so these add. Its input figures add for the same reason, and
+        // the run-level summary then replaces the sum rather than joining it.
+        assert_eq!(c.reasoning_tokens, Some(463));
+        assert_eq!(c.cost, Some(0.0), "cline really does charge zero here");
+        assert!(c.saw_summary, "cline's run_result restated the totals");
+        assert!(
+            !c.summary().contains("no cost"),
+            "a reported zero is not a missing cost"
+        );
+
+        let a = usage_in(agy).expect("agy reported usage under result");
+        assert_eq!(a.input_tokens, Some(28174));
+        assert_eq!(
+            a.reasoning_tokens,
+            Some(109),
+            "agy calls reasoning thinking_tokens"
+        );
+
+        let k = usage_in(kiro).expect("kiro metered credits");
+        assert_eq!(
+            k.input_tokens, None,
+            "kiro-cli reports no token count at all"
+        );
+        assert_eq!(
+            k.cost,
+            Some(0.041_865_948_590_381_43),
+            "kiro's credits must not be rounded away"
+        );
+        assert_eq!(k.cost_unit.as_deref(), Some("credit"));
+
+        // A free model with a printed price of zero is a measured cost, not a
+        // missing one, and it must not read as "no cost reported".
+        let free = usage_in(cline_pricing).expect("cline printed a price list");
+        assert_eq!(free.cost, Some(0.0));
+        assert!(!free.summary().contains("no cost"));
+    }
+
+    #[test]
+    fn a_metered_charge_is_taken_as_the_largest_figure_not_their_sum() {
+        // Two metering lines, as kiro-cli emits. Whether the second restates the
+        // total or adds to it is documented by nobody, so the larger figure is
+        // used: over-reporting a charge is recoverable, under-reporting one is
+        // not.
+        let stream = concat!(
+            r#"{"type":"metadata","data":{"meteringUsage":[{"value":0.0418,"unit":"credit"}]}}"#,
+            "\n",
+            r#"{"type":"metadata","data":{"meteringUsage":[{"value":0.0232,"unit":"credit"}]}}"#,
+        );
+        let u = usage_in(stream).expect("kiro metered twice");
+        assert_eq!(u.cost, Some(0.0418), "the larger reading, not the sum");
+        assert_eq!(u.metered_events, 2);
+    }
+
+    #[test]
+    fn a_fan_out_reports_the_overlap_it_bought_and_names_the_slowest_worker() {
+        // Five workers measured on 2026-10-02 took 13.6, 11.6, 25.2, 25.9 and
+        // 9.0 seconds. Run one after another that is 85.3 seconds; run together
+        // it was 29.4. The number that decides a schedule is the slowest worker,
+        // because no amount of concurrency beats it.
+        let worker = |agent: &str, ms: u128| RunCapture {
+            agent: agent.to_string(),
+            binary: Some("/usr/bin/true".into()),
+            version: None,
+            argv: vec![],
+            workdir: "/tmp".into(),
+            exit_code: Some(0),
+            duration_ms: ms,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            events: Vec::new(),
+            stream_recognised: true,
+            session_id: None,
+            stopped_on_auth: false,
+            permission_signal: None,
+            usage: None,
+            model: None,
+            provenance: Provenance::Observed,
+            failure: None,
+        };
+        let workers = vec![
+            worker("opencode", 13_553),
+            worker("cline", 11_596),
+            worker("agy", 25_214),
+            worker("kilo", 25_919),
+            worker("kiro-cli", 9_014),
+        ];
+        let fan = FanOut::from_captures(&workers, 29_415);
+        assert_eq!(fan.workers, 5);
+        assert_eq!(fan.summed_worker_ms, 85_296);
+        assert_eq!(fan.slowest, "kilo");
+        assert_eq!(fan.slowest_worker_ms, 25_919);
+        assert!(
+            fan.overlap_factor > 2.8 && fan.overlap_factor < 3.0,
+            "overlap should be about 2.9x, got {}",
+            fan.overlap_factor
+        );
+        // The saving is real only if it stays under the sequential total.
+        assert!(fan.wall_clock_ms < fan.summed_worker_ms);
+        assert!(fan.summary().contains("kilo"), "{}", fan.summary());
+    }
+
+    #[test]
+    fn a_fan_out_of_one_worker_reports_no_speedup_rather_than_a_lie() {
+        let worker = RunCapture {
+            agent: "solo".into(),
+            binary: Some("/usr/bin/true".into()),
+            version: None,
+            argv: vec![],
+            workdir: "/tmp".into(),
+            exit_code: Some(0),
+            duration_ms: 5_000,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            events: Vec::new(),
+            stream_recognised: true,
+            session_id: None,
+            stopped_on_auth: false,
+            permission_signal: None,
+            usage: None,
+            model: None,
+            provenance: Provenance::Observed,
+            failure: None,
+        };
+        let fan = FanOut::from_captures(&[worker], 5_000);
+        assert_eq!(fan.overlap_factor, 1.0, "one worker cannot overlap itself");
+    }
+
+    #[test]
+    fn a_stream_that_never_mentions_usage_reports_none_rather_than_zero() {
+        // The distinction matters: `cline` really does report a cost of zero,
+        // and "this agent charges nothing" is a different claim from "this
+        // reader found no cost line". Collapsing them would let an orchestrator
+        // treat an unreported cost as a free run.
+        let quiet = "{\"type\":\"step_start\",\"sessionID\":\"ses_1\"}\nplain text, no usage";
+        assert_eq!(usage_in(quiet), None);
+        assert!(!usage_in(quiet).is_some_and(|u| u.cost == Some(0.0)));
+    }
+
+    #[test]
+    fn a_model_is_read_when_the_stream_names_one_and_left_unanswered_when_not() {
+        assert_eq!(
+            model_in(r#"{"type":"step_finish","part":{"model":{"providerID":"kilo","modelID":"stealth/space-bunny-alpha"}}}"#)
+                .as_deref(),
+            Some("kilo/stealth/space-bunny-alpha")
+        );
+        assert_eq!(
+            model_in(r#"{"type":"system","subtype":"init","model":"Auto"}"#),
+            None,
+            "`Auto` is not a model name, so it must not be recorded as one"
+        );
+        assert_eq!(model_in(r#"{"type":"text","text":"hello"}"#), None);
+    }
 
     #[test]
     fn a_parked_agent_is_reported_as_skipped_rather_than_as_a_failure() {
@@ -1152,6 +1819,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
             session_id: id.map(|s| s.to_string()),
             stopped_on_auth: false,
             permission_signal: None,
+            usage: None,
+            model: None,
             provenance: Provenance::Observed,
             failure: None,
         };
@@ -1198,6 +1867,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
             session_id: None,
             stopped_on_auth: false,
             permission_signal: None,
+            usage: None,
+            model: None,
             provenance: Provenance::Observed,
             failure: None,
         };

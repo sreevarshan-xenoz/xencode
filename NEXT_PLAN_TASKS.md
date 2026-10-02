@@ -9004,6 +9004,33 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   figure; and every row here is one run of one task. What exists is the
   instrument, and an honest reading from it.
 
+  **The fan-out is now measured too, and it answered a different question than
+  the one asked.** `xencode interop --fan-out` launches the selected agents
+  together on the shared read-only fixture — five workers cannot conflict over a
+  file none of them may change. Two runs of the five free agents gave 29.4 s and
+  30.4 s wall against 85.3 s and 81.4 s sequential: **2.9x and 2.7x**, with
+  `kilo` the slowest worker at 25.9 s and 28.2 s. Reading usage out of those runs
+  then took three attempts, and each failure is the finding:
+
+  - `cline` reported `usage` at the top of one run's line and nested under
+    `event` in the next. A reader that only looked at the top level called it
+    free on the second run.
+  - `agy` nests the same numbers under `result`, and its step figures are
+    increments while its final figure is a total — summing both inflates it.
+  - `cline` restates its total in a run-level summary, so a naive sum counts the
+    run **three times**: 6,901 + 7,010 + 13,911 = 27,822 tokens for a run that
+    used 13,911.
+  - `kiro-cli` meters credits twice with no token count, and whether the second
+    line restates the running total or adds to it is documented by nobody. The
+    larger figure is taken, because over-reporting a charge is recoverable and
+    under-reporting one is not.
+
+  So the cost cell is answered with a **stated disagreement**: four working
+  agents, three different reports of what a run cost, two of them zero, one
+  silent. Only wall clock was common to all of them, and only the slowest worker
+  bounds a schedule. `AR-9` is now derived from six event shapes and six usage
+  shapes rather than from one vendor's stream.
+
   **Three agents are stood down by decision, and a report now says so.** The
   operator does not need `claude`, `gemini` or `crush`, so on 2026-10-02 they were
   parked. This is worth more than it looks: with them in the run, every report
@@ -11931,13 +11958,29 @@ specified than it was on 2026-09-23:
    `--permission-prompt-tool`, and Cline's `CLINE_TOOL_APPROVAL_MODE=desktop` file
    IPC, which is the cheaper of the two to observe.
 4. **`--data-dir` on every capture**, per §W-5.
-5. **A measured cost figure for a five-worker fan-out**, still the one cell
-   nothing in this file can supply.
+5. ~~**A measured cost figure for a five-worker fan-out.**~~ **Measured
+   2026-10-02** — see §S-12. The five free agents (`opencode`, `agy`, `cline`,
+   `kilo`, `kiro-cli`) were launched together on the read-only task, twice.
+   Five workers finished in **29.4 s** and **30.4 s** wall clock; run one after
+   another the same five took **85.3 s** and **81.4 s**, so concurrency bought
+   **2.9x** and **2.7x**. The slowest single worker — `kilo` at 25.9 s and 28.2 s —
+   is the floor on any schedule, because no amount of overlap beats it.
 
-The blocker is unchanged and it is the owner's: AR-1 needs the user's own
-logged-in accounts and a real, tiny, read-only spend. That is a decision, not a
-research task, and it is the single thing standing between this file and any
-`OR-*` work.
+   The honest part is that **there is no single cost figure, and asking for one
+   was the wrong question.** Each agent reports something different about what a
+   run cost: `opencode` and `cline` state a cost of `0` beside their token
+   counts; `agy` reports tokens and no cost at all; `kiro-cli` meters **credits**
+   (`0.0650` and `0.0650` on two runs) and reports no token count whatsoever. Four
+   working agents in total, three different currencies of cost — two of them
+   literally zero — and `cursor-agent` reported nothing at all. A fan-out total
+   can be assembled only by normalising six shapes into one, which is
+   `AR-9`'s job, not this item's.
+
+   What every agent *did* agree on is wall clock, which is the figure an
+   orchestrator actually controls. Token totals for the same run varied by more
+   than a factor of two between repeats (`opencode` read 40,854 input tokens in
+   one fan-out and 80,864 in the next), because prompt caching decides most of
+   it. So even a normalised token count is a reading of one run, not a budget.
 
 ### W-7 Where to re-check this appendix
 
