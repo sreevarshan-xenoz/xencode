@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode interop --capture-dir` and `--trace`, keeping what a worker said
+### Added — `AR-5`: the event envelope, four provenance states, and a redaction that keeps recovery
+
+An event that leaves `AR-4`'s sealed capture and goes somewhere it can be joined
+or synced — the ledger, the metrics — cannot be a byte-for-byte mirror of the raw
+stream (it would carry the vendor's secrets onto every surface those read) and
+cannot silently drop the slots the model needs (a missing value that reads as a
+zero is the bug the probe kept hitting). `xencode-agents-rs/src/envelope.rs`
+fixes the shape one event travels in — worker id, task id, agent id, session id,
+sequence, timestamp, origin, payload — and keeps it honest.
+
+Every value-bearing field is in one of **four distinct states**: observed (the
+worker said it), synthesised (xencode minted it because the model needs the slot
+and no stream carried it — always the case for the worker id and the sequence),
+unknown (nobody said it on this run, itself a recorded fact), and unavailable
+(this vendor provably cannot, with the reason — `agy`'s missing correlation id on
+tool calls is the worked example). Collapsing `unknown` into `unavailable` is the
+exact mistake the item exists to stop, and nothing here has a default a reader
+could mistake for data: an absent value is `None` *and* its state says why. A
+stored envelope whose origin field is missing deserialises to *not observed*.
+
+The envelope is written as a fourth file, `capture/envelope.jsonl`, through the
+same owner-only atomic write, and it is the copy that **redacts**: a credential
+that appeared in a vendor's stream does not reach `envelope.jsonl`, while each
+redacted event still names its exact line in the sealed `raw.jsonl`, so recovery
+stays a deliberate act rather than a lost fact. A torn final line — a write
+interrupted between the last whole record and its newline — is discarded on read
+(`DB-5`), while a malformed line in the middle is reported as the corruption it
+is. Verified against files that actually get written: nine tests prove the token
+lands in `raw.jsonl` and not `envelope.jsonl`, the four states stay distinct on
+the wire, and both halves of the torn-line contract hold.
+
+
 
 A normalised event stream is the convenient thing to store and the wrong thing
 to store alone: every judgement the adapter made — that this chunk was prose,
