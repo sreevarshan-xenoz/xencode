@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1932 tests passing, zero warnings (re-verified 2026-10-02, after X-3)
+- [x] Workspace gates green — 16 crates, 1938 tests passing, zero warnings (re-verified 2026-10-02, after V-10)
 
 ## Model Catalog Honesty
 
@@ -11762,6 +11762,25 @@ the request to open, without moving focus; a worker xencode cannot observe rende
 as `unknown`, never as `idle` or `working`; and no code path in the bridge can
 move, resize or reorder an existing pane — asserted by a test, because that is the
 line V-11 draws and the easiest line to cross by accident.
+
+**Delivered 2026-10-02 (the bridge)** as `xencode-tui-rs/src/worker_bridge.rs`, a
+pure function over the `X-3` `ControlRoom` projection — so its inputs are the
+normalised `AgentEvent` model and `OR-2`'s scheduler report, never a raw stream.
+It emits the window's own `AgentPane` values (no parallel pane model). Each
+done-when clause is met and tested: a `PermissionRequested` opens a pane titled
+"Awaiting approval" whose row names the worker and the tool, and a run that
+completes drops that pane; a worker whose events show nothing renders as
+`unknown` — with `idle` and `working` both asserted absent — while its
+still-unmeasured duration reads `duration unknown` rather than a number; and the
+no-rearrange clause is enforced by a test that scans the bridge's own source for
+`app.focus`, `set_focus`, `compute_layout`, `BodyLayout` and the reordering calls
+`.sort`/`.swap`/`.reverse`/`.remove`/`.insert`, none of which it may contain, plus
+a `fn(&ControlRoom) -> Vec<AgentPane>` signature test that pins the bridge as
+incapable of being handed the mutable app. The unknown-rendering was checked by
+flipping it to `idle` and the non-rearrange guard by adding a real `.sort_by_key`,
+each watched to fail before restoring. **Not claimed:** feeding the live stream of
+running workers into this bridge every frame under orchestrator mode — that hot
+path is the wiring `X-3` deferred, and there is no mock standing in for it.
 
 ### V-11 Layout that rearranges itself — parked on existing evidence
 

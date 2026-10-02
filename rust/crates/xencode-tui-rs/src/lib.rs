@@ -30,5 +30,6 @@ pub mod view;
 pub mod views;
 pub mod voice;
 pub mod widgets;
+pub mod worker_bridge;
 
 pub use app::run_app;
