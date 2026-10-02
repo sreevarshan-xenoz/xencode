@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1863 tests passing, zero warnings (re-verified 2026-10-02)
+- [x] Workspace gates green — 16 crates, 1880 tests passing, zero warnings (re-verified 2026-10-02, after AR-4)
 
 ## Model Catalog Honesty
 
@@ -9802,14 +9802,25 @@ worker, `OR-` for the thing that decides what workers to talk to.
       working. Both agents' cells are now verified against their own help on every
       run. Still open: only `--help` is consulted, so anything a vendor documents
       elsewhere remains invisible, and absence is only assertable for `acp`/`mcp`.
-- [ ] **AR-4 — capture, normalise, persist — and keep the raw.** Launch a vendor
-      headless, normalise its JSONL into xencode's `WF-1` event shape through `AR-9`'s
-      `AgentEvent`, mark the provenance of every field a vendor did not supply, and
-      **store both streams** — the owner's directive of 2026-10-02 fixes the shape:
-      `capture/raw.jsonl`, `capture/normalized.jsonl`, `capture/metadata.json`. The raw
-      stream is never replaced: the separation of what a worker emitted from what
-      xencode inferred is the same line `Origin::Synthesised` draws in memory, and it
-      has to survive to disk so any later claim can be proved against the bytes.
+- [x] **AR-4 — capture, normalise, persist — and keep the raw.** 2026-10-02. The store is
+      `xencode-agents-rs/src/capture.rs`: one run lands as `capture/raw.jsonl`
+      (every vendor line, verbatim, numbered from one and gapless), `capture/normalized.jsonl`
+      (the `AR-9` `AgentEvent`s, each carrying the raw line it came from), and
+      `capture/metadata.json` (what ran, what it said it cost, how much of it is xencode's
+      own inference). All three go through a local owner-only `0600` atomic write — this crate
+      must not depend on the one holding the shared helper, or it drags the scheduler in with
+      the vendor adapters, which is the boundary Milestone X protects. `xencode interop
+      --capture-dir` writes them from the bytes a probe already received (no extra run), and
+      `--trace` renders one capture — or every vendor under a root, in the same columns — back
+      without launching anything. The done-when is met against the eight **real** committed
+      streams: 13 integration tests assert every stored event names a raw line, that
+      re-normalising that exact line returns the same event, and that codex / cline / agy /
+      kiro-cli — four vocabularies sharing no event name — render through one code path that
+      reads no vendor name; a live `--trace` over codex and cline printed both in one view.
+      One honest limit: `raw.jsonl` is **unredacted**, because a redacted raw stream is not a
+      raw stream; keeping recoverability while scrubbing a credential is AR-5's job, and it is
+      stated in the module doc. A fresh single-vendor launch landing on disk is the owner's
+      spend to make, not this item's — the store is proved on bytes the probe already paid for.
       **Done-when:** two different vendors' runs render in the same trace view, any
       field invented to make them line up is visibly xencode's, not theirs, and for
       every stored normalised event the raw line it came from is recoverable.

@@ -399,6 +399,21 @@ enum Commands {
         /// what to run if one is not. Starts no login and reads no credential.
         #[arg(long)]
         check_auth: bool,
+
+        /// Keep each agent's whole run on disk, in `<dir>/<agent>/capture/`:
+        /// `raw.jsonl` (every line the vendor printed, unredacted),
+        /// `normalized.jsonl` (the common events, each naming its raw line) and
+        /// `metadata.json` (what was run and what it said it cost). Written
+        /// `0600` and only when you ask. Costs no extra run — it keeps what the
+        /// probe already received.
+        #[arg(long)]
+        capture_dir: Option<std::path::PathBuf>,
+
+        /// Print the trace view of a capture written earlier and probe nothing.
+        /// Takes one capture (`../captures/opencode`) or the whole root
+        /// (`../captures`) to render every vendor in the same view.
+        #[arg(long, value_name = "CAPTURE", conflicts_with = "check_auth")]
+        trace: Option<std::path::PathBuf>,
     },
 
     /// Find this repository's build and test commands, run them, and record
@@ -1205,7 +1220,19 @@ async fn main() {
             repeat,
             fan_out,
             check_auth,
-        } => run_interop(agents, timeout, out, format, repeat, fan_out, check_auth),
+            capture_dir,
+            trace,
+        } => run_interop(
+            agents,
+            timeout,
+            out,
+            format,
+            repeat,
+            fan_out,
+            check_auth,
+            capture_dir,
+            trace,
+        ),
         Commands::Anchor {
             path,
             timeout,
@@ -5586,6 +5613,7 @@ fn run_anchor(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to interop options; a struct would just rename them
 fn run_interop(
     agents: Vec<String>,
     timeout: u64,
@@ -5594,7 +5622,29 @@ fn run_interop(
     repeat: u32,
     fan_out: bool,
     check_auth: bool,
+    capture_dir: Option<std::path::PathBuf>,
+    trace: Option<std::path::PathBuf>,
 ) -> Result<(), String> {
+    // Also read-only and also free: a trace view is a file the operator already
+    // paid for, rendered again, so it launches nothing.
+    if let Some(dir) = &trace {
+        let dirs = xencode_agents_rs::capture::find_captures(dir);
+        if dirs.is_empty() {
+            return Err(format!(
+                "{} holds no capture; point --trace at a directory written by --capture-dir",
+                dir.display()
+            ));
+        }
+        for (i, capture_dir) in dirs.iter().enumerate() {
+            let capture = xencode_agents_rs::capture::read_capture(capture_dir)
+                .map_err(|e| format!("cannot read that capture: {e}"))?;
+            if i > 0 {
+                println!("\n{}\n", "─".repeat(60));
+            }
+            println!("{}", capture.trace());
+        }
+        return Ok(());
+    }
     // Checked first and on its own: it launches nothing and spends nothing, so
     // it is the cheap way to find out what a real run would do.
     if check_auth {
@@ -5629,6 +5679,34 @@ fn run_interop(
         fan_out,
     };
     let report = xencode_agents_rs::probe::run_probe(&options);
+
+    // The operator may keep each whole run, not only the lines the report chose
+    // to show. This writes from the bytes the probe already received, so keeping
+    // a capture costs no extra run of anything.
+    let kept: Vec<std::path::PathBuf> = match &capture_dir {
+        None => Vec::new(),
+        Some(root) => {
+            std::fs::create_dir_all(root)
+                .map_err(|e| format!("cannot create {}: {e}", root.display()))?;
+            let runs: Vec<&xencode_agents_rs::RunCapture> = if report.all_runs.is_empty() {
+                report.captures.iter().collect()
+            } else {
+                report.all_runs.iter().collect()
+            };
+            let mut dirs = Vec::new();
+            for (index, run) in runs.iter().enumerate() {
+                // Repeats are compared against each other, so a second run must
+                // not overwrite the first one's raw stream.
+                let base = if repeat > 1 {
+                    root.join(format!("run-{}", index + 1))
+                } else {
+                    root.clone()
+                };
+                dirs.push(xencode_agents_rs::capture::write_capture(&base, run)?);
+            }
+            dirs
+        }
+    };
 
     if let Some(path) = &out {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -5704,6 +5782,23 @@ fn run_interop(
             }
             if let Some(path) = &out {
                 println!("\n  report written to {}", path.display());
+            }
+        }
+    }
+    if !kept.is_empty() {
+        let note = format!(
+            "\n  {} capture(s) kept; read one back with `xencode interop --trace <dir>`",
+            kept.len()
+        );
+        match format {
+            // stdout stays a parseable report.
+            OutputFormat::Json => eprintln!("{note}"),
+            _ => println!("{note}"),
+        }
+        for dir in &kept {
+            match format {
+                OutputFormat::Json => eprintln!("    {}", dir.display()),
+                _ => println!("    {}", dir.display()),
             }
         }
     }

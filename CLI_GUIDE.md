@@ -1015,7 +1015,7 @@ A blocking call inside `tokio::task::spawn_blocking` is **not** reported: that i
 the correct place for one, and a lexical "is this inside an `async fn`" cannot
 tell it apart from sleeping on the reactor.
 
-### `xencode interop [--agent NAME]... [--timeout SECS] [--repeat N] [--fan-out] [--out PATH] [--format text|json]`
+### `xencode interop [--agent NAME]... [--timeout SECS] [--repeat N] [--fan-out] [--out PATH] [--format text|json] [--capture-dir DIR] [--trace CAPTURE]`
 
 The `AR-1` probe: launch every installed coding-agent CLI headless on a read-only task in a
 scratch git repository, and record what came back. The scratch directory is created in a temp
@@ -1096,6 +1096,62 @@ trustworthy signal that an agent can spend.
 xencode interop --check-auth
 xencode interop --check-auth --agent gemini --agent crush
 ```
+
+#### `--capture-dir DIR`
+
+The `AR-4` store. Keeps each agent's **whole run** on disk, not only the lines the report chose
+to show, in a directory you name:
+
+```text
+<DIR>/<agent>/capture/
+    raw.jsonl          every line the vendor printed, verbatim and unredacted
+    normalized.jsonl   the common events, each naming the raw line it came from
+    metadata.json      what was run, what it said it cost, what was truncated
+```
+
+This costs **no extra run** — it writes the bytes the probe already received. Because a raw
+vendor stream can carry a credential the vendor itself printed, `raw.jsonl` is kept **unredacted**
+(a redacted raw stream is not a raw stream): nothing is hidden from the record. Two things contain
+that — a capture exists only when you ask for one by directory, and all three files are written
+`0600` through the same owner-only atomic write the rest of xencode's private state uses. Redaction
+that still keeps every line recoverable is `AR-5`'s job, not this one's.
+
+With `--repeat N`, each run lands in its own `<DIR>/run-K/<agent>/capture/` so a second run never
+overwrites the first's raw stream.
+
+```bash
+xencode interop --agent codex --agent cline --capture-dir ../captures
+```
+
+#### `--trace CAPTURE`
+
+Read-only, and it launches nothing: render a capture you already paid for back into the trace
+view — one event per line, in stream order, each showing the raw line behind it. It reads a single
+capture (either `<agent>` or `<agent>/capture`), or, given the root a probe wrote, **every vendor
+under it in one pass**, so two agents that agree on nothing else appear in the same rendering.
+
+```bash
+xencode interop --trace ../captures/codex
+xencode interop --trace ../captures          # every vendor, one view
+```
+
+```text
+codex — version not reported
+argv: (nothing was launched)
+exit: 0, 0 ms, 7 raw line(s), 6 event(s)
+
+   1  session_started          raw#1  session 01a0fad6-8890-7952-a734-03106b589824
+   2  message                  raw#3  I’ll read `notes.txt` and return its contents as requested.
+   3  tool_started             raw#4  command_execution [item_1]
+   ...
+
+run completed: yes
+0 of 6 event(s) are xencode's inference, the rest the worker's own words
+```
+
+The last line is the point: a normalised stream hides the adapter's judgement, so the count of
+events xencode **inferred** versus events the worker **said** is printed right there, and any field
+invented to line two vendors up is labelled `xencode`, never blended into the vendor's own words.
 
 ### `xencode scan [path] [--hidden] [--max-depth N] [--format text|json]`
 List workspace entries (kind, size, path) as TSV or JSON.
