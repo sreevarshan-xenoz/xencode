@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1925 tests passing, zero warnings (re-verified 2026-10-02, after OR-16)
+- [x] Workspace gates green — 16 crates, 1932 tests passing, zero warnings (re-verified 2026-10-02, after X-3)
 
 ## Model Catalog Honesty
 
@@ -12346,7 +12346,7 @@ else. A worker's pane is labelled by its task and agent ("`codex` — split the
 retrieval tier"), never by where it happens to sit, because position is what the
 layout tree changes and a task is what the user is tracking.
 
-- [ ] **X-3 — the event-to-UI projection: the orchestrator control room.** Build the
+- [x] **X-3 — the event-to-UI projection: the orchestrator control room.** Build the
       control room as a pure consumer of `AR-9`/`AR-10`'s events and `OR-2`'s state,
       laid out by the `V-1` tree.
       **Done-when:** the projection reads no vendor output and no worker process
@@ -12355,6 +12355,28 @@ layout tree changes and a task is what the user is tracking.
       unknown rather than idle (`OR-12`'s rule), and the panes carry task-and-agent
       names. It must be demonstrably false that a vendor stream change can break
       this surface: re-running `AR-10` after an adapter edit is the proof.
+      **Delivered 2026-10-02** as `xencode-tui-rs/src/control_room.rs` — the
+      projection layer itself, not yet the per-frame render that would drop it into
+      the layout tree (that swap is downstream UI and is *not* claimed here). A
+      `ControlRoom` is built from event streams plus an optional `ScheduleReport`
+      and produces named, task-and-agent-labelled views: fleet cards, a timeline,
+      pending approvals, and the task graph. It imports only
+      `xencode_agents_rs::protocol::{AgentEvent, Origin}` for agent data and
+      `xencode_core_rs::scheduler::ScheduleReport` for `OR-2` state — no `capture`,
+      `probe`, `contract`, `envelope`, process handle, or raw JSON parse. The
+      vendor-insulation is enforced as a test that greps the file's own real code:
+      it asserts every `xencode_agents_rs` mention is `::protocol` and that no
+      banned mechanism appears, and a mutation smuggling in `std::process` was
+      watched to fail it. `OR-12`'s rule is a real type: `Trace<T>` is `Known` or
+      `Unknown`, a card for a worker that reported nothing has status/duration/
+      approval all `Unknown` while its message count is an honest zero, and a
+      duration is `Unknown` unless the scheduler timed the node (the event model
+      carries no clock). Every pane label is `"<agent> — <task>"`, and a test
+      confirms a card is byte-identical whichever order the input arrives in, so
+      repositioning a pane cannot change what it says. Seven tests; both load-bearing
+      guards mutation-checked. Because the surface is written only against the
+      normalised event variants, an edit to any adapter's `normalise_line` — the
+      `AR-10` path — is downstream of it and cannot break it.
 
 ### X-4 The baseline this directive was written against, and one loose end
 
