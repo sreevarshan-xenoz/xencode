@@ -2,6 +2,7 @@ pub mod atomic;
 pub mod jsonl;
 pub mod rustc_json;
 pub mod scheduler;
+pub mod task_contract;
 pub mod tasks;
 pub mod tasks_file;
 pub mod workspace;
@@ -16,6 +17,7 @@ pub use scheduler::{
     Binding, GraphError, NodeId, NodeOutcome, ScheduleError, ScheduleReport, Scheduler, TaskGraph,
     TaskNode,
 };
+pub use task_contract::{Breach, TaskContract};
 pub use tasks::{
     TaskError, TaskManager, TaskRecord, TaskStatus, TaskStore, DEFAULT_TASK_TIMEOUT,
     MAX_OUTPUT_LINES,

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-15`: the task contract
+
+Before a worker is launched, xencode tells it what "done" means, and the worker
+does not get to redefine any of it. The ordinary failure this prevents is an
+agent that reports itself finished because "finished" was never actually
+stated. `xencode-core-rs/src/task_contract.rs` states it in machine-checkable
+slots: the lease and its workspace, the declared file set, the forbidden paths,
+the expected deliverables, the verification commands, and the completion
+condition.
+
+The contract carries no method a worker's output could call to widen it.
+`check_finish` reads the files the worker *actually* touched and returns a list
+of breaches — a path that climbs out of the workspace, a path under a forbidden
+entry, or a change outside the declared file set each fail it — so finishing
+outside the lease denies a merge instead of quietly passing. `completion_met`
+decides done from real file existence and real exit codes, never from a worker
+saying so. The item asks for this idea living in a real launch path, so it is
+checked against a genuine `git diff`: a throwaway repository is seeded, one
+allowed and one disallowed file are edited for real, and the contract refuses
+the finish on the strength of what git actually reports. Ten tests; the
+lease-boundary guard was verified by stripping it and watching the right tests
+fail. The worktree and the approval gate stop a forbidden write at run time; the
+contract is the after-the-fact check that denies the merge. A library capability
+the launch path and control room consume; no command is added.
+
 ### Added — `OR-3`: the permission broker
 
 When xencode hands a task to an external worker, something has to decide how
