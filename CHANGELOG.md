@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QD-2`: `/impact <file>` — the blast-radius panel in the TUI
+
+`xencode impact <file>` prints three layers of evidence about who a change to
+one file reaches. `/impact <file>` opens a dedicated panel that draws the same
+three layers as one fan-out tree. The panel is a projection, not a re-derivation:
+`xencode-context-rs::impact_tree` turns a change-impact report into one row per
+target, per crate header, and per consumer file, with the crate hop, the file
+hop, the `use`/`mod`/`impl` names that resolved and the co-change count riding
+on the row. Three churn claims stay three different claims — never co-changed
+(`Some(0)`), co-changed n commits (`Some(n)`), no readable git here (`None`) —
+so the panel and the CLI cannot drift on what a zero means. The keyboard is
+explicit: ↑/↓ walk the rows, Enter opens the row's evidence, → descends onto a
+file row only (never a crate header or the target itself), ← pops the descend
+stack, r re-runs the query in place, o opens the file in the editor, and Esc
+unwinds detail → descend stack → chat one stage at a time. Nothing recomputes
+on cursor motion, so a redraw at any terminal size stays free. The result model
+lives in `xencode-context-rs` rather than a TUI file, so a future non-interactive
+surface reads the same tree without calling `change_impact` again. Verified live
+against this workspace: `/impact crates/xencode-core-rs/src/lib.rs` opens the
+panel over the tree `xencode impact` reports for the same target. Ten behaviour
+tests in `tests/impact_panel.rs` pin every binding, five projection tests in
+`impact_tree.rs` pin group ordering, the unclaimed-file bucket and the three
+churn states, and the size sweep in `small_terminal_render.rs` renders the
+panel at 15 widths × 14 heights without touching the filesystem.
+
 ### Added — `QD-5`: `xencode removal <file>` — what deleting a file would cost
 
 `xencode impact` answers who must be re-checked if a file *changes*. `xencode

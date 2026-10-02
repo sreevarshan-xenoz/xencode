@@ -32,6 +32,7 @@ pub mod history;
 pub mod hotspots;
 pub mod hwprobe;
 pub mod impact;
+pub mod impact_tree;
 pub mod index;
 pub mod init;
 pub mod ledger;
@@ -114,6 +115,9 @@ pub use impact::{
     change_impact, impact, impact_from_filesystem, impact_from_snapshot, removal_from_graph,
     removal_impact, ChangeImpact, ImpactReport, ImpactedFile, RemovalImpact, DECLARED_CAP,
     IMPACT_MAX_HOPS,
+};
+pub use impact_tree::{
+    impact_tree, ChurnSummary, ImpactFile, ImpactGroup, ImpactRow, ImpactTree, UNCLAIMED,
 };
 pub use index::{
     deps_json_path, file_index_path, history_json_path, read_json, symbols_json_path, write_atomic,

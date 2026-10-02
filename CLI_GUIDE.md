@@ -53,6 +53,8 @@ side-by-side panes drags to resize them; if you want the terminal's own
 drag-select of text back, `xencode config set mouse_capture off` hands the
 mouse over (the same row lives on the Settings panel, and it takes effect on
 the next frame). Slash commands: `/init`, `/ctx`, `/advise`,
+`/impact <file>` (open the blast-radius panel over `xencode impact`'s three
+layers),
 `/bytebot`, `/plan` (pin or clear the agent's todo list),
 `/rewind` (undo the agent's file changes for this session),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
@@ -2256,6 +2258,24 @@ nested below the git root is reconciled so history still reads.
 ```
 xencode impact crates/xencode-core-rs/src/lib.rs
 xencode impact crates/xencode-core-rs/src/lib.rs --format json
+```
+
+### TUI slash: `/impact <file>`
+
+Opens a dedicated fan-out panel over the same three layers. One row per target,
+per crate header, per consumer file: each crate row names its hop and the
+dependency kind of the direct edge; each file row names its own hop, the
+`use`/`mod`/`impl` payloads that resolved, and its co-change count with the
+target. Never co-changed, co-changed n times, and no readable git here stay
+three different claims on the row, exactly as on the CLI. ↑/↓ walk the rows,
+`Enter` opens one row's evidence, `→` descends onto a file row only (crate
+headers and the target itself are inert), `←` pops the descend stack, `r`
+re-runs the query in place, `o` opens the file in the editor, `Esc` unwinds
+detail → descend stack → chat one stage at a time. The panel never recomputes
+on cursor motion.
+
+```
+/impact crates/xencode-core-rs/src/lib.rs
 ```
 
 ### `xencode removal <file> [--limit 15] [--format text|json]`

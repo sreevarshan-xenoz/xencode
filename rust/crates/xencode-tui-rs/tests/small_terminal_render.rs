@@ -39,6 +39,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("TaskManager", FocusArea::TaskManager),
     ("WorktreePanel", FocusArea::WorktreePanel),
     ("AdvisePanel", FocusArea::AdvisePanel),
+    ("ImpactPanel", FocusArea::ImpactPanel),
     ("LayoutPanel", FocusArea::LayoutPanel),
 ];
 
@@ -155,6 +156,60 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.learn_quiz_answered = true;
     app.learn_quiz_correct = false;
     app.learn_quiz_why = "It declares two, not one.".into();
+    // QD-2: the impact panel walks target/crate/file rows and each of the
+    // three churn states (real count, zero, unknown). Seed one of each so the
+    // sweep paints every branch of `draw_impact_panel` without touching
+    // `.xencode` or `cargo metadata`.
+    app.impact_tree = Some(xencode_context_rs::ImpactTree {
+        target: "crates/alpha/src/lib.rs".into(),
+        target_crate: Some("alpha".into()),
+        groups: vec![
+            xencode_context_rs::ImpactGroup {
+                crate_name: "alpha".into(),
+                crate_hop: 0,
+                direct: false,
+                kind: None,
+                files: vec![xencode_context_rs::ImpactFile {
+                    path: "crates/alpha/src/inner.rs".into(),
+                    file_hops: 1,
+                    via: vec!["use crate::thing".into()],
+                    churn: Some(0),
+                }],
+            },
+            xencode_context_rs::ImpactGroup {
+                crate_name: "beta".into(),
+                crate_hop: 1,
+                direct: true,
+                kind: Some("normal".into()),
+                files: vec![
+                    xencode_context_rs::ImpactFile {
+                        path: "crates/beta/src/lib.rs".into(),
+                        file_hops: 1,
+                        via: vec!["use alpha::thing".into()],
+                        churn: Some(5),
+                    },
+                    xencode_context_rs::ImpactFile {
+                        path: "crates/beta/src/other.rs".into(),
+                        file_hops: 2,
+                        via: vec!["use alpha::lib::thing".into()],
+                        churn: None,
+                    },
+                ],
+            },
+        ],
+        max_hops: 2,
+        crate_count: 2,
+        file_count: 3,
+        churn: xencode_context_rs::ChurnSummary {
+            own_commits: 12,
+            partner_count: 1,
+            total_partner_commits: 5,
+            known: true,
+        },
+        basis: "edges are resolved `use`/`mod`/`impl` names, not call sites".into(),
+    });
+    app.impact_selected = 1;
+    app.impact_status.clear();
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),

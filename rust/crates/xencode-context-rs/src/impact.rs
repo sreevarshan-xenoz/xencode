@@ -370,6 +370,13 @@ pub struct ChangeImpact {
     /// a file nobody edits together with: an empty coupling list with history
     /// present means "not co-changed", `None` means "no way to know".
     pub history_known: bool,
+    /// The workspace member each consumer file lives in, keyed by the file's
+    /// path as `files` reports it. Populated once from `cargo metadata` alongside
+    /// the crate layer above, so a projection of this report — the fan-out panel
+    /// (`QD-2`) and any later surface — can group by crate without a second
+    /// subprocess. A file the manifest does not claim (a build artifact, a stray
+    /// `.rs` outside any member) is simply absent from this map.
+    pub file_crates: BTreeMap<String, String>,
 }
 
 /// The three-layer answer for one file. `file` may be a repo-relative or absolute
@@ -434,8 +441,19 @@ pub fn change_impact(
         None => (Vec::new(), 0, false),
     };
 
+    // One call to the file layer, reused for both the report itself and the
+    // crate map every consumer file belongs to. Calling `impact` twice would
+    // walk the same BFS twice for no reason.
+    let report = impact(&graph, &symbols, &target, None, IMPACT_MAX_HOPS);
+    let mut file_crates = BTreeMap::new();
+    for f in &report.files {
+        if let Some(name) = crate::crate_graph::crate_of_file(&crate_graph, &root.join(&f.file)) {
+            file_crates.insert(f.file.clone(), name);
+        }
+    }
+
     Ok(ChangeImpact {
-        files: impact(&graph, &symbols, &target, None, IMPACT_MAX_HOPS),
+        files: report,
         target,
         crate_name,
         reverse_crates,
@@ -443,6 +461,7 @@ pub fn change_impact(
         cochange,
         own_commits,
         history_known,
+        file_crates,
     })
 }
 

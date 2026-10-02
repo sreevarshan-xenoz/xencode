@@ -74,6 +74,9 @@ pub enum FocusArea {
     TaskManager,
     WorktreePanel,
     AdvisePanel,
+    /// Blast radius of one file (`QD-2`): the fan-out tree QD-1's three layers
+    /// project into. Opened by `/impact <file>`, traversed with the arrows.
+    ImpactPanel,
     /// Why the screen is arranged as it is: this session's layout changes,
     /// each with the ask behind it (`V-9`).
     LayoutPanel,
@@ -108,6 +111,7 @@ impl FocusArea {
             FocusArea::TaskManager => "Tasks",
             FocusArea::WorktreePanel => "Worktrees",
             FocusArea::AdvisePanel => "Advice",
+            FocusArea::ImpactPanel => "Impact",
             FocusArea::LayoutPanel => "Layout",
         }
     }
@@ -418,6 +422,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("⏳ Background Tasks", "Running & finished commands"),
     ("🌳 Worktrees", "List, create and remove git worktrees"),
     ("💡 Insights", "Live refactor suggestions & warnings"),
+    ("🎯 Blast Radius", "What a change to one file reaches"),
     ("📐 Layout History", "Why the screen is arranged this way"),
 ];
 
@@ -441,7 +446,8 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         14 => FocusArea::TaskManager,
         15 => FocusArea::WorktreePanel,
         16 => FocusArea::AdvisePanel,
-        17 => FocusArea::LayoutPanel,
+        17 => FocusArea::ImpactPanel,
+        18 => FocusArea::LayoutPanel,
         _ => FocusArea::ChatInput,
     }
 }

@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1960 tests passing, zero warnings (re-verified 2026-10-02, after QD-5)
+- [x] Workspace gates green — 16 crates, 1975 tests passing, zero warnings (re-verified 2026-10-02, after QD-2)
 
 ## Model Catalog Honesty
 
@@ -5251,6 +5251,28 @@ context.
 - **QD-2 — Blast-radius render.** The TUI fan-out panel over QD-1, needing
   WF-1's event stream. The word "simulation" is dropped: it is graph BFS plus
   history, not an execution model.
+  **Done 2026-10-02** — `/impact <file>` opens a dedicated `FocusArea::ImpactPanel`
+  that walks QD-1's three layers as one tree. The panel is a projection, not a
+  re-derivation: `xencode-context-rs::impact_tree` turns a `ChangeImpact` into
+  an `ImpactTree` — one row per target/crate-header/consumer-file, grouped by
+  the crate each consumer file lives in, with the crate hop, the file hop, the
+  `use`/`mod`/`impl` names that resolved, and the co-change count riding on the
+  row. `Some(0)`, `Some(n)` and `None` stay three different claims (never
+  co-changed / co-changed n times / no readable git here), so a panel and a CLI
+  never drift on what a zero means. The keyboard is explicit: `↑/↓` walk rows,
+  `Enter` opens the row's evidence, `→` descends onto a file row only (never
+  a crate header or the target itself), `←` pops the descend stack, `r` re-runs
+  the query in place, `o` opens the file in the editor, and `Esc` unwinds
+  detail → descend stack → chat one stage at a time. Nothing recomputes on
+  cursor motion, so a redraw at any terminal size stays free. The result model
+  lives in `xencode-context-rs`, not in a TUI file, so the future Orchestrator
+  fleet card can read the same tree without calling `change_impact` again —
+  QD-2 itself does not know the orchestrator exists. Verified live against
+  this workspace: `/impact crates/xencode-core-rs/src/lib.rs` opens the panel
+  over the tree `xencode impact` reports for the same target. 10 behaviour
+  tests pin every binding and 5 projection tests pin group ordering, the
+  unclaimed-file bucket, and the three churn states; the sweep in
+  `small_terminal_render.rs` renders the panel at 15 widths × 14 heights.
 - **QD-3 — Mutation score as the only defensible "semantic coverage".** Per
   VF-3 (`cargo mutants --in-diff`), rolled up per symbol. Reports "mutants of
   `refresh()` survived by 0/14 tests", never "feature X is untested". *Trap:*
