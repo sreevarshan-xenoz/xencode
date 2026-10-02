@@ -90,6 +90,10 @@ const COMMANDS: &[Binding] = &[
         "context engine: status/track/compact/eval/kv/archive",
     ),
     ("/advise [filter]", "repository insights"),
+    (
+        "/impact <file>",
+        "blast radius of one file (crates · files · churn)",
+    ),
     ("/bytebot <task>", "autonomous task execution"),
     ("/plan [clear]", "expand or clear the agent's todo list"),
     (
@@ -253,6 +257,18 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("o", "open the advised file in the editor"),
             ("r", "recompute insights from the live snapshot"),
             ("Esc", "back to list · close panel"),
+        ],
+        ImpactPanel => &[
+            ("↑ ↓ / j k", "select a row · scroll in detail view"),
+            (
+                "Enter",
+                "open/close detail: hops, the via paths, co-change count",
+            ),
+            ("→", "descend: re-root the query at the selected file"),
+            ("←", "back to the previous target on the descend stack"),
+            ("o", "open the selected consumer file in the editor"),
+            ("r", "recompute this file's blast radius in place"),
+            ("Esc", "back to tree · pop descend stack · close panel"),
         ],
         LayoutPanel => &[
             ("↑ ↓ / j k", "select a change · scroll its detail"),

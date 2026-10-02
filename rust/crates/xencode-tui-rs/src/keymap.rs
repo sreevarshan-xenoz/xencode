@@ -410,6 +410,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::TaskManager
                 | FocusArea::WorktreePanel
                 | FocusArea::AdvisePanel
+                | FocusArea::ImpactPanel
                 | FocusArea::LayoutPanel
                 | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
@@ -602,6 +603,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::TaskManager => key_task_manager(app, key, tx),
         FocusArea::WorktreePanel => key_worktree_panel(app, key),
         FocusArea::AdvisePanel => key_advise_panel(app, key),
+        FocusArea::ImpactPanel => key_impact_panel(app, key),
         FocusArea::LayoutPanel => key_layout_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key, tx),
@@ -682,6 +684,21 @@ fn on_esc(app: &mut App) {
             if app.advise_detail {
                 app.advise_detail = false;
                 app.advise_scroll = 0;
+            } else {
+                app.focus = FocusArea::ChatInput;
+            }
+        }
+        FocusArea::ImpactPanel => {
+            // Esc unwinds one stage at a time: inspect (detail) back to the
+            // tree, then a previous target from the descend stack, then close
+            // to chat. The user's ← is the same unwind as Esc for the target,
+            // so the two are interchangeable and neither silently drops the
+            // history the user built by descending.
+            if app.impact_detail {
+                app.impact_detail = false;
+                app.impact_scroll = 0;
+            } else if let Some(previous) = app.impact_history.pop() {
+                app.refresh_impact_for(&previous);
             } else {
                 app.focus = FocusArea::ChatInput;
             }
@@ -1506,7 +1523,88 @@ fn key_advise_panel(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
-/// LayoutPanel (`V-9`): the session's arrangement changes, newest at the
+/// ImpactPanel (`QD-2`): the fan-out over QD-1's three layers. `↑/↓` move the
+/// cursor over the flattened rows, `Enter` opens the selected row to read its
+/// evidence (crate, hop, the `use`/`mod`/`impl` that resolved, and — where git
+/// history is available — the co-change count with the target), `→` re-roots
+/// the query at the selected consumer file and pushes the previous target onto
+/// the descend stack, `←` pops that stack, and `r` re-runs the query in place.
+/// Nothing here recomputes on its own: the user drives the frontier.
+fn key_impact_panel(app: &mut App, key: KeyEvent) -> bool {
+    use xencode_context_rs::ImpactRow;
+    let rows: Vec<ImpactRow> = app
+        .impact_tree
+        .as_ref()
+        .map(|t| t.rows())
+        .unwrap_or_default();
+    let count = rows.len();
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if app.impact_detail => {
+            app.impact_scroll = app.impact_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.impact_detail => {
+            app.impact_scroll += 1;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.impact_selected = app.impact_selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.impact_selected + 1 < count {
+                app.impact_selected += 1;
+            }
+        }
+        KeyCode::Enter => {
+            if count > 0 {
+                app.impact_detail = !app.impact_detail;
+                app.impact_scroll = 0;
+            }
+        }
+        KeyCode::Right => {
+            // Descend only onto a File row — a crate header or the target
+            // itself has no consumer meaning, so the arrow does nothing there
+            // rather than re-querying something the user did not pick.
+            if let Some(ImpactRow::File { path, .. }) = rows.get(app.impact_selected) {
+                let current = app
+                    .impact_tree
+                    .as_ref()
+                    .map(|t| t.target.clone())
+                    .unwrap_or_default();
+                let next = path.clone();
+                if !next.is_empty() && next != current {
+                    app.impact_history.push(current);
+                    app.impact_selected = 0;
+                    app.impact_detail = false;
+                    app.impact_scroll = 0;
+                    app.refresh_impact_for(&next);
+                }
+            }
+        }
+        KeyCode::Left => {
+            if let Some(previous) = app.impact_history.pop() {
+                app.impact_selected = 0;
+                app.impact_detail = false;
+                app.impact_scroll = 0;
+                app.refresh_impact_for(&previous);
+            }
+        }
+        KeyCode::Char('r') => {
+            if let Some(target) = app.impact_tree.as_ref().map(|t| t.target.clone()) {
+                app.impact_selected = 0;
+                app.impact_detail = false;
+                app.impact_scroll = 0;
+                app.refresh_impact_for(&target);
+            }
+        }
+        KeyCode::Char('o') if !app.impact_detail => {
+            if let Some(ImpactRow::File { path, .. }) = rows.get(app.impact_selected) {
+                let path = path.clone();
+                app.open_file_in_editor(&path);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
 /// bottom, each with the ask behind it. `Enter` opens one row to read what it
 /// moved from and to; the list itself stays a list because the question it
 /// answers is "what happened in order", and a row that expands inline would

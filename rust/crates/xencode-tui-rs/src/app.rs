@@ -94,6 +94,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/init",
     "/ctx",
     "/advise",
+    "/impact",
     "/bytebot",
     "/spawn",
     "/plan",
@@ -362,6 +363,17 @@ pub struct App<'a> {
     pub advise_detail: bool,
     pub advise_scroll: usize,
     pub advise_status: String,
+    /// ImpactPanel (`QD-2`): the fan-out tree QD-1's three layers project into.
+    /// `impact_tree` is what the panel paints; `impact_history` is the ←
+    /// stack of target files so an explicit descend can be undone. `None`
+    /// means no `/impact` has run yet this session, so the panel's open is
+    /// the moment the query happens, not earlier.
+    pub impact_tree: Option<xencode_context_rs::ImpactTree>,
+    pub impact_selected: usize,
+    pub impact_detail: bool,
+    pub impact_scroll: usize,
+    pub impact_status: String,
+    pub impact_history: Vec<String>,
     pub commit_message: String,
     pub commit_cursor: usize,
     pub spinner_tick: usize,
@@ -2400,6 +2412,12 @@ impl<'a> App<'a> {
             advise_detail: false,
             advise_scroll: 0,
             advise_status: String::new(),
+            impact_tree: None,
+            impact_selected: 0,
+            impact_detail: false,
+            impact_scroll: 0,
+            impact_status: String::new(),
+            impact_history: Vec::new(),
             commit_message: String::new(),
             commit_cursor: 0,
             spinner_tick: 0,
@@ -2955,6 +2973,13 @@ impl<'a> App<'a> {
         // Repository insights (/advise [filter])
         if prompt.starts_with("/advise") {
             self.handle_advise_command(&prompt, tx);
+            return;
+        }
+
+        // Blast radius (/impact <file>): open the fan-out panel over QD-1's
+        // three layers. Explicit and file-scoped, never cursor-triggered.
+        if prompt.starts_with("/impact") {
+            self.handle_impact_command(&prompt);
             return;
         }
 
@@ -3613,6 +3638,41 @@ impl<'a> App<'a> {
             Err(_) => {
                 self.advise_items.clear();
                 self.advise_status = "No project index — run /init first.".to_string();
+            }
+        }
+    }
+
+    /// Recompute the blast radius of `file` (`QD-2`). Reads the workspace tree
+    /// with `change_impact`, projects it to a fan-out `ImpactTree`, and puts
+    /// the result where the ImpactPanel paints from. `r` and `/impact <new>`
+    /// both call this; the panel never runs the query itself, so a redraw at
+    /// any terminal size stays free.
+    pub fn refresh_impact_for(&mut self, file: &str) {
+        let root = xencode_context_rs::default_root();
+        match xencode_context_rs::change_impact(&root, file) {
+            Ok(change) => {
+                self.impact_tree = Some(xencode_context_rs::impact_tree(&change));
+                self.impact_status.clear();
+                let rows = self
+                    .impact_tree
+                    .as_ref()
+                    .map(|t| t.rows().len())
+                    .unwrap_or(1);
+                self.impact_selected = self.impact_selected.min(rows.saturating_sub(1));
+            }
+            Err(e) => {
+                self.impact_tree = None;
+                self.impact_status = match &e {
+                    xencode_context_rs::ContextError::AmbiguousTarget { asked, matches } => {
+                        format!(
+                            "\"{asked}\" matches {} files: {} — narrow the tail",
+                            matches.len(),
+                            matches.join(", ")
+                        )
+                    }
+                    other => format!("{other}"),
+                };
+                self.impact_selected = 0;
             }
         }
     }
@@ -4922,6 +4982,25 @@ impl<'a> App<'a> {
         for line in format_advise_report(&self.advise_items, filter) {
             let _ = tx.send(format!("[ADVISE]{line}"));
         }
+    }
+
+    /// Blast radius (`/impact <file>`) — open the ImpactPanel over the fan-out
+    /// QD-1's three layers project into. Requires a file: an empty or
+    /// whitespace argument is a usage line, not a query with an implicit
+    /// target. This is the only way the panel opens on its own; the keyboard
+    /// never recomputes it except at `r`, so a query is always an explicit act.
+    fn handle_impact_command(&mut self, prompt: &str) {
+        let file = prompt.strip_prefix("/impact").unwrap_or("").trim();
+        if file.is_empty() {
+            self.system_line("usage: /impact <file> — the fan-out of one file");
+            return;
+        }
+        self.impact_history.clear();
+        self.impact_selected = 0;
+        self.impact_detail = false;
+        self.impact_scroll = 0;
+        self.refresh_impact_for(file);
+        self.focus = FocusArea::ImpactPanel;
     }
 
     /// `/rewind [turns]` — put back the files the agent changed in its most

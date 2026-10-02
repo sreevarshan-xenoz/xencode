@@ -57,7 +57,7 @@ images ride as message parts the model actually sees, shrunk first to a
 1568-pixel long edge and recompressed to JPEG when they have no transparency,
 PDFs/DOCXs parse to
 text), `/ctx` retrieval,
-`/advise` repo insights, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/skills` to see which `SKILL.md` skills loaded and what they cost the prompt, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
+`/advise` repo insights, `/impact <file>` blast-radius fan-out panel, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/skills` to see which `SKILL.md` skills loaded and what they cost the prompt, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
 turns add up to in tokens and money, model picker, and more. Ask about a library
 and the agent can read the upstream source of the exact version your
 `Cargo.lock` pins, already on disk — address it as `crate:serde/src/de.rs`.
@@ -184,6 +184,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /init [abort|status]  - Generate & control project docs
 /ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/prompts)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
+/impact <file>        - Blast radius of one file (crates · files · churn, in a fan-out panel)
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
 /rewind [turns]       - Undo the agent's file changes for this session

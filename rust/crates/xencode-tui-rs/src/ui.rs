@@ -64,6 +64,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         FocusArea::TaskManager => draw_task_manager(f, app, f.area()),
         FocusArea::WorktreePanel => draw_worktree_panel(f, app, f.area()),
         FocusArea::AdvisePanel => draw_advise_panel(f, app, f.area()),
+        FocusArea::ImpactPanel => draw_impact_panel(f, app, f.area()),
         FocusArea::LayoutPanel => draw_layout_panel(f, app, f.area()),
         _ => {}
     }
@@ -2017,6 +2018,227 @@ fn advise_detail_text(app: &App) -> String {
         "{icon} {}\nkind: {:?}\nfile: {}\n\nPress o to open the file in the editor, Enter/Esc back to the list.",
         a.message, a.kind, a.file
     )
+}
+
+/// ImpactPanel (`QD-2`): the fan-out over QD-1's three layers, drawn as a
+/// tree the user walks with the arrows. This is not a graph renderer — the
+/// hierarchy is the crate hop QD-1 already knows, and every file carries the
+/// evidence that made it here (`via`, `file_hops`, co-change). The basis line
+/// at the bottom is the exact sentence QD-1 owes the reader; it is not
+/// reworded here, so the panel and the CLI cannot drift apart on what an
+/// edge does and does not prove.
+fn draw_impact_panel(f: &mut Frame, app: &App, area: Rect) {
+    use xencode_context_rs::ImpactRow;
+
+    let popup_area = centered_rect(90, 75, area);
+    f.render_widget(Clear, popup_area);
+
+    let tree = app.impact_tree.as_ref();
+    let title: String = match tree {
+        Some(t) => format!(
+            " 🎯 Impact — {} · crates {} · files {} · churn {} · max {} hop(s) ",
+            shorten_path(&t.target, popup_area.width.saturating_sub(28) as usize),
+            t.crate_count,
+            t.file_count,
+            if t.churn.known {
+                t.churn.total_partner_commits.to_string()
+            } else {
+                "?".to_string()
+            },
+            t.max_hops,
+        ),
+        None => " 🎯 Impact — no query yet ".to_string(),
+    };
+    let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(title);
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    if app.impact_detail {
+        let body = impact_detail_text(app);
+        let lines = body.lines().count();
+        let text = Paragraph::new(body)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false })
+            .scroll((
+                (app.impact_scroll as u16).min(clamp_scroll(lines, inner.height)),
+                0,
+            ));
+        f.render_widget(text, inner);
+        return;
+    }
+
+    let Some(t) = tree else {
+        let why = if app.impact_status.is_empty() {
+            "No query yet — run /impact <file>."
+        } else {
+            app.impact_status.as_str()
+        };
+        let text = Paragraph::new(why).style(Style::default().fg(app.theme.fg));
+        f.render_widget(text, inner);
+        return;
+    };
+
+    let rows = t.rows();
+    if rows.is_empty() {
+        // QD-1 answered cleanly and there is simply nothing on the consumer
+        // side. Say so, and offer the same honest basis the CLI prints.
+        let body = format!("No file links to this one in the graph.\n\n{}", t.basis);
+        let text = Paragraph::new(body)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false });
+        f.render_widget(text, inner);
+        return;
+    }
+
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|row| {
+            let span = match row {
+                ImpactRow::Target { file, crate_name } => {
+                    let prefix = crate_name
+                        .as_ref()
+                        .map(|c| format!("[{c}] "))
+                        .unwrap_or_default();
+                    Span::styled(
+                        format!("◎ {prefix}{file}"),
+                        Style::default()
+                            .fg(app.theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
+                ImpactRow::Crate {
+                    crate_name,
+                    crate_hop,
+                    direct,
+                    kind,
+                    file_count,
+                } => {
+                    let direct_tag = if *direct {
+                        let k = kind.as_deref().unwrap_or("normal");
+                        format!(" · direct ({k})")
+                    } else {
+                        String::new()
+                    };
+                    Span::styled(
+                        format!(
+                            "├─ 📦 {crate_name} · hop {crate_hop}{direct_tag} · {file_count} file(s)"
+                        ),
+                        Style::default().fg(app.theme.info),
+                    )
+                }
+                ImpactRow::File {
+                    path,
+                    file_hops,
+                    churn,
+                    ..
+                } => {
+                    let churn_tag = match churn {
+                        Some(0) => "no co-change".to_string(),
+                        Some(n) => format!("co-changed in {n} commit(s)"),
+                        None => "churn unknown".to_string(),
+                    };
+                    Span::styled(
+                        format!("│   ├─ {path} · {file_hops} hop(s) · {churn_tag}"),
+                        Style::default().fg(app.theme.fg),
+                    )
+                }
+            };
+            ListItem::new(Line::from(span))
+        })
+        .collect();
+
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(app.theme.highlight_fg)
+            .bg(app.theme.highlight)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    state.select(Some(app.impact_selected.min(rows.len().saturating_sub(1))));
+    f.render_stateful_widget(list, inner, &mut state);
+}
+
+/// Detail view for the row under the cursor. Reads the same shape the list
+/// paints from, so what a selected row says and what `Enter` shows cannot
+/// disagree.
+fn impact_detail_text(app: &App) -> String {
+    use xencode_context_rs::ImpactRow;
+    let Some(tree) = app.impact_tree.as_ref() else {
+        return "Nothing selected — Esc back to chat.".to_string();
+    };
+    let rows = tree.rows();
+    let Some(row) = rows.get(app.impact_selected) else {
+        return "Nothing selected — Esc back to the tree.".to_string();
+    };
+    match row {
+        ImpactRow::Target { file, crate_name } => format!(
+            "target: {file}\ncrate: {}\n\nEsc back to the tree.",
+            crate_name
+                .as_deref()
+                .unwrap_or("(outside any member)")
+        ),
+        ImpactRow::Crate {
+            crate_name,
+            crate_hop,
+            direct,
+            kind,
+            file_count,
+        } => format!(
+            "crate: {crate_name}\ncrate hop (from the target's crate): {crate_hop}\ndirect dependent of the target's crate: {direct}\ndependency kind of that edge: {}\nconsumer files this crate holds: {file_count}\n\n→ descends onto a file row, not a crate header.\nEnter/Esc back to the tree.",
+            kind.as_deref().unwrap_or("(transitive only)")
+        ),
+        ImpactRow::File {
+            path,
+            crate_name,
+            file_hops,
+            via,
+            churn,
+        } => {
+            let churn_str = match churn {
+                Some(0) => "0 (never co-changed with the target)".to_string(),
+                Some(n) => format!("{n} commit(s) together"),
+                None => "unknown — no readable git history here".to_string(),
+            };
+            let via_block = if via.is_empty() {
+                "  (no `via` recorded on this edge)".to_string()
+            } else {
+                via.iter()
+                    .map(|v| format!("  · {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            format!(
+                "file: {path}\ncrate: {crate_name}\nhops along the file graph from the target: {file_hops}\nco-change with the target: {churn_str}\nthe links that resolve to the target:\n{via_block}\n\n→ descends here · o opens it in the editor · Enter/Esc back to the tree.",
+            )
+        }
+    }
+}
+
+/// Fit a workspace-relative path into a title column. Keeps the tail, since
+/// a reader recognises `src/auth/service.rs` far more readily than the
+/// workspace prefix. Never returns an empty string: a truncated tail is
+/// still a real file name.
+fn shorten_path(path: &str, max: usize) -> String {
+    if max == 0 || path.chars().count() <= max {
+        return path.to_string();
+    }
+    let chars: Vec<char> = path.chars().collect();
+    let keep = max.saturating_sub(1).max(1);
+    let start = chars.len().saturating_sub(keep);
+    let mut out = String::with_capacity(keep + 1);
+    out.push('…');
+    out.extend(&chars[start..]);
+    out
 }
 
 // ── Phase 9 Overlays ────────────────────────────────────────────────────────
