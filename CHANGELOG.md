@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QD-5`: `xencode removal <file>` — what deleting a file would cost
+
+`xencode impact` answers who must be re-checked if a file *changes*. `xencode
+removal <file>` answers the harder question of what it costs to *delete* it —
+harder because a consumer can absorb an edit but never a missing file. The answer
+is the dependency graph with one node removed, and it reports the two directions of
+an edge. **Broken links**: the files whose `use`, `mod` or `impl` resolved to the
+target — their names dangle the moment it is gone. **Newly dead files**: the modules
+that only this file pulled into the build, found by comparing what a crate root can
+reach today against what it can reach once the node and its edges are deleted, so a
+module stranded at any depth — not just a direct child — is caught. An unreferenced
+root is a crate, not dead code, so entry points are never reported. Runs headless,
+off the same graph `xencode impact` builds. Checked live on this repository: deleting
+`crates/xencode-core-rs/src/tasks.rs` names its three importers and strands nothing,
+while deleting `crates/xencode-colab-rs/src/lib.rs` correctly reports the seven
+private modules it alone `mod`s as dead code. Four tests pin the arithmetic (a shared
+child stays live, a `mod.rs` is never orphaned, a leaf strands nothing, and the
+filesystem path resolves and runs), plus the command's argument-parsing test.
+
 ### Added — `QD-1`: change-impact analysis with `xencode impact <file>`
 
 `xencode impact <path>` answers "who has to be re-checked if I edit this file",

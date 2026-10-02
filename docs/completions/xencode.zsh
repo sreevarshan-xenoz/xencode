@@ -910,6 +910,15 @@ _arguments "${_arguments_options[@]}" : \
 ':file -- The file to analyse, by path or by its tail:_default' \
 && ret=0
 ;;
+(removal)
+_arguments "${_arguments_options[@]}" : \
+'--limit=[How many entries to list in each section]:LIMIT:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':file -- The file to imagine removing, by path or by its tail:_default' \
+&& ret=0
+;;
 (generate)
 _arguments "${_arguments_options[@]}" : \
 '--shell=[Shell for completions (ignored for man)]:SHELL:(bash fish zsh powershell elvish)' \
@@ -1780,6 +1789,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(removal)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (generate)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2017,6 +2030,7 @@ _xencode_commands() {
 'agents:List installed agents with versions and install provenance' \
 'hotspots:Rank files by churn times size with bus factor and owners' \
 'impact:What a change to one file affects\: the crates that depend on its crate, the files that link it, and the files its history is coupled to' \
+'removal:What deleting one file would cost\: the links it holds up, and the modules that become dead code the moment it is taken out' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
@@ -2413,6 +2427,7 @@ _xencode__subcmd__help_commands() {
 'agents:List installed agents with versions and install provenance' \
 'hotspots:Rank files by churn times size with bus factor and owners' \
 'impact:What a change to one file affects\: the crates that depend on its crate, the files that link it, and the files its history is coupled to' \
+'removal:What deleting one file would cost\: the links it holds up, and the modules that become dead code the moment it is taken out' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
@@ -2810,6 +2825,11 @@ _xencode__subcmd__help__subcmd__plugin__subcmd__update_commands() {
 _xencode__subcmd__help__subcmd__query_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help query commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__removal_commands] )) ||
+_xencode__subcmd__help__subcmd__removal_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help removal commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__replay_commands] )) ||
 _xencode__subcmd__help__subcmd__replay_commands() {
@@ -3356,6 +3376,11 @@ _xencode__subcmd__plugin__subcmd__update_commands() {
 _xencode__subcmd__query_commands() {
     local commands; commands=()
     _describe -t commands 'xencode query commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__removal_commands] )) ||
+_xencode__subcmd__removal_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode removal commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__replay_commands] )) ||
 _xencode__subcmd__replay_commands() {

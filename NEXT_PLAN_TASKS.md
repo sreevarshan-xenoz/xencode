@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1955 tests passing, zero warnings (re-verified 2026-10-02, after QD-1)
+- [x] Workspace gates green — 16 crates, 1960 tests passing, zero warnings (re-verified 2026-10-02, after QD-5)
 
 ## Model Catalog Honesty
 
@@ -5277,6 +5277,24 @@ context.
   removed.** *Effort: S once QD-1 exists.* Honest framing: it is
   `affected_dependents` minus a node. No schema/API/deploy graph is reachable
   from this repo's evidence, so do not build a migration-specific ontology.
+  **Done 2026-10-02** — `xencode removal <file>` answers the question `impact`
+  cannot: not "who must I re-check if I edit this" but "what does deleting it
+  cost," where deletion is strictly harder than an edit because a consumer can
+  absorb a change but never a missing file. Two outputs, the two directions of an
+  edge. **Broken links** are the files whose `use`/`mod`/`impl` resolved to the
+  target — they dangle the moment it goes. **Newly dead files** are those reachable
+  from a crate root today but not reachable once the node and its edges are deleted:
+  the modules only this file pulled into the build, found by diffing the two
+  reachability sets, so a grandchild stranded at any depth is caught, not just a
+  direct `mod` child. Entry points (`lib.rs`/`main.rs`/`mod.rs`) are never reported
+  dead — an unreferenced root is a crate, not orphaned code. Runs headless off the
+  same graph QD-1 builds; verified live on this repo: removing
+  `crates/xencode-core-rs/src/tasks.rs` names its three importers and strands
+  nothing, while removing `crates/xencode-colab-rs/src/lib.rs` — which `mod`s seven
+  private modules nobody else reaches — correctly reports all seven as dead code.
+  4 new tests (direct-children strand with a shared child kept live, entry-point
+  never orphaned, leaf strands nothing, and the headless filesystem path) plus the
+  CLI parse test.
 
 ### Q-5 Operations, health and dependency intelligence (QO)
 

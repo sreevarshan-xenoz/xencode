@@ -446,6 +446,113 @@ pub fn change_impact(
     })
 }
 
+/// The removal counterfactual (`QD-5`): the same graph with one node deleted, and
+/// what that costs. [`change_impact`] answers "who must be re-checked if I edit
+/// this file"; this answers the stronger question "what breaks if I take it out,"
+/// where editing and deleting are genuinely different — a change may be absorbed
+/// by a consumer, a deletion cannot. Two things fall out of removing the node, and
+/// they are the two directions of an edge:
+///
+/// - **broken links**: the files that write a `use`, `mod` or `impl` resolving to
+///   the removed file. Their name no longer points anywhere.
+/// - **newly dead files**: files reachable from a crate root today that stop being
+///   reachable once the node and its edges are deleted — the modules that only this
+///   file pulled into the build, at any depth. With the one path that declared them
+///   gone, nothing compiles them any more.
+///
+/// Both are exact against the symbol graph the file layer already builds; neither
+/// reads a file body, so neither can claim more than a resolved name. Entry points
+/// (`lib.rs` / `main.rs` / `mod.rs`) are never reported dead: they are roots, not
+/// leaves, and an unreferenced root is a crate, not orphaned code.
+pub struct RemovalImpact {
+    /// The file as the graph stores it, widened from what was asked.
+    pub target: String,
+    /// Files whose `use`/`mod`/`impl` resolved to the target, now left dangling.
+    pub breaks: Vec<String>,
+    /// Files that stop being reached at all once the target is removed.
+    pub orphans: Vec<String>,
+    /// The graph's own size, so an empty pair of lists reads as a fact about this
+    /// graph rather than a promise about the code.
+    pub indexed_files: usize,
+    pub edges: usize,
+}
+
+/// Compute the removal counterfactual over a graph in memory. Split from
+/// [`removal_impact`] so the graph arithmetic is testable without a filesystem.
+pub fn removal_from_graph(graph: &[DepEdge], files: &[String], target: &str) -> RemovalImpact {
+    let is_entry = |f: &str| matches!(f.rsplit('/').next(), Some("lib.rs" | "main.rs" | "mod.rs"));
+
+    // Who points at the target: those links dangle when it goes.
+    let mut breaks: Vec<String> = graph
+        .iter()
+        .filter(|e| e.to == target)
+        .map(|e| e.from.clone())
+        .collect();
+    breaks.sort();
+    breaks.dedup();
+
+    // Newly dead: files reachable from an entry point today that are not reachable
+    // once the target and its edges are gone. The delta of the two reachability
+    // sets, minus entry points (a root is not dead code) and the target itself.
+    let before = reachable_from_entries(graph, None);
+    let after = reachable_from_entries(graph, Some(target));
+    let orphans: Vec<String> = before
+        .difference(&after)
+        .filter(|f| f.as_str() != target && !is_entry(f))
+        .cloned()
+        .collect();
+
+    RemovalImpact {
+        target: target.to_string(),
+        breaks,
+        orphans,
+        indexed_files: files.len(),
+        edges: graph.len(),
+    }
+}
+
+/// Files reachable from any entry point (`lib.rs` / `main.rs` / `mod.rs`),
+/// following edges outward. When `skip` is `Some(name)`, that node and every edge
+/// touching it are deleted first — the graph as it stands with one file removed.
+fn reachable_from_entries(graph: &[DepEdge], skip: Option<&str>) -> BTreeSet<String> {
+    let is_entry = |f: &str| matches!(f.rsplit('/').next(), Some("lib.rs" | "main.rs" | "mod.rs"));
+    let mut adj: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for e in graph {
+        if Some(e.from.as_str()) == skip || Some(e.to.as_str()) == skip {
+            continue;
+        }
+        adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
+    }
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut stack: Vec<&str> = Vec::new();
+    for e in graph {
+        if is_entry(&e.from) && Some(e.from.as_str()) != skip && seen.insert(e.from.clone()) {
+            stack.push(e.from.as_str());
+        }
+    }
+    while let Some(node) = stack.pop() {
+        for next in adj.get(node).into_iter().flatten() {
+            if seen.insert((*next).to_string()) {
+                stack.push(next);
+            }
+        }
+    }
+    seen
+}
+
+/// The removal counterfactual for one file, run headless off the git-tracked
+/// tree. `file` follows the same resolution rules as [`change_impact`].
+pub fn removal_impact(
+    root: &std::path::Path,
+    file: &str,
+) -> Result<RemovalImpact, crate::ContextError> {
+    let (graph, symbols) = headless_graph(root)?;
+    let matches = matching_targets(symbols.keys().cloned(), file);
+    let target = resolve_target(&matches, file, &symbols)?;
+    let files: Vec<String> = symbols.keys().cloned().collect();
+    Ok(removal_from_graph(&graph, &files, &target))
+}
+
 /// The workspace's path relative to the git top level, with a trailing slash,
 /// or empty when the workspace *is* the top level (or git cannot say). This is
 /// the difference between `cargo metadata` and `git log --name-only`: the first
@@ -1028,6 +1135,107 @@ mod tests {
             !impact.cochange.iter().any(|(p, _)| p.starts_with("rust/")),
             "partners are never left on the repo-root base: {:?}",
             impact.cochange
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn edge(from: &str, to: &str) -> DepEdge {
+        DepEdge {
+            from: from.to_string(),
+            to: to.to_string(),
+            via: format!("crate::{to}"),
+        }
+    }
+
+    /// `QD-5`: deleting a node cuts its incoming links (who broke) and can strand
+    /// the modules only it pulled in (what becomes dead). Here `a.rs` is the sole
+    /// thing that declares `helper.rs`, and is one of two that reach `shared.rs`;
+    /// removing it must break `lib.rs` (which `mod`-ed `a`), orphan `helper.rs`
+    /// (nothing else declares it), and leave `shared.rs` alive (lib still reaches it).
+    #[test]
+    fn removing_a_file_breaks_its_importers_and_strands_only_its_own_children() {
+        let graph = vec![
+            edge("src/lib.rs", "src/a.rs"),
+            edge("src/a.rs", "src/helper.rs"),
+            edge("src/a.rs", "src/shared.rs"),
+            edge("src/lib.rs", "src/shared.rs"),
+        ];
+        let files = ["src/lib.rs", "src/a.rs", "src/helper.rs", "src/shared.rs"]
+            .map(str::to_string)
+            .to_vec();
+        let out = removal_from_graph(&graph, &files, "src/a.rs");
+        assert_eq!(out.breaks, vec!["src/lib.rs".to_string()], "lib mod-ed a");
+        assert_eq!(
+            out.orphans,
+            vec!["src/helper.rs".to_string()],
+            "only a declared helper; shared stays live through lib"
+        );
+    }
+
+    /// A module that is itself an entry point (`mod.rs`) is never reported as dead
+    /// code: it is a root, not a leaf, and calling an unreferenced root "orphaned"
+    /// would be a category error. Here `a.rs` pulls in two children — one a `mod.rs`,
+    /// one a plain file — and only the plain file can become dead when `a` goes.
+    #[test]
+    fn an_entry_point_is_never_reported_as_orphaned_by_removal() {
+        let graph = vec![
+            edge("src/lib.rs", "src/a.rs"),
+            edge("src/a.rs", "src/inner/mod.rs"),
+            edge("src/a.rs", "src/orphan_me.rs"),
+        ];
+        let files = [
+            "src/lib.rs",
+            "src/a.rs",
+            "src/inner/mod.rs",
+            "src/orphan_me.rs",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let out = removal_from_graph(&graph, &files, "src/a.rs");
+        assert_eq!(out.breaks, vec!["src/lib.rs".to_string()], "lib mod-ed a");
+        assert_eq!(
+            out.orphans,
+            vec!["src/orphan_me.rs".to_string()],
+            "a plain child strands; the mod.rs under it is a root and stays"
+        );
+        assert!(
+            !out.orphans.iter().any(|f| f.ends_with("mod.rs")),
+            "a mod.rs is never dead code: {:?}",
+            out.orphans
+        );
+    }
+
+    /// Removing a leaf — a file nothing else declares — strands nothing: only the
+    /// files that import it break. An analysis that reported the whole crate as
+    /// dead from deleting one leaf would be useless, so this pins the empty case.
+    #[test]
+    fn removing_a_leaf_orphans_nothing() {
+        let graph = vec![edge("src/lib.rs", "src/leaf.rs")];
+        let files = vec!["src/lib.rs".to_string(), "src/leaf.rs".to_string()];
+        let out = removal_from_graph(&graph, &files, "src/leaf.rs");
+        assert_eq!(out.breaks, vec!["src/lib.rs".to_string()]);
+        assert!(
+            out.orphans.is_empty(),
+            "leaf declares no children: {:?}",
+            out.orphans
+        );
+    }
+
+    /// `QD-5` against the real nested workspace on disk: the headless graph finds
+    /// `inner.rs`'s importer (`alpha/src/lib.rs`, which writes `mod inner;`), so
+    /// removing inner must name that break — proving the filesystem path resolves
+    /// the target and runs the same arithmetic the unit tests pin.
+    #[test]
+    fn removal_runs_headless_against_a_real_workspace() {
+        let dir = temp_dir();
+        write_workspace_in(&dir, "rust");
+        let out =
+            removal_impact(&dir.join("rust"), "crates/alpha/src/inner.rs").expect("runs headless");
+        assert_eq!(out.target, "crates/alpha/src/inner.rs");
+        assert!(
+            out.breaks.iter().any(|f| f.ends_with("alpha/src/lib.rs")),
+            "lib declares mod inner, so deleting inner breaks lib: {:?}",
+            out.breaks
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
