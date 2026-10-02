@@ -2347,6 +2347,26 @@ argument as a missing file. And with pinned `a/`/`b/` prefixes: git's default
 mnemonic prefixes (`i/` for the index, `w/` for the worktree) make the same
 diff yield "No mutants to filter" — a clean summary meaning no work was done.
 
+**The score is rolled up per function.** Each mutant is attributed to the
+function it sits in (read from cargo-mutants' own `function.function_name`), and
+the report gives one score per `(file, function)` sorted worst-first, so the
+weakest function is the first line rather than one to hunt for:
+
+```
+per function (worst first):
+  mutants of `is_even` (src/lib.rs): 1/2 caught — 1 survived
+  mutants of `classify` (src/lib.rs): 2/2 caught
+```
+
+A mutation the tool places outside any function is named under its own bucket,
+never blurred into the whole file. Unviable and timed-out mutants are kept out of
+the denominator: a mutant that cannot compile, or never finished, says nothing
+about the tests, so it is neither counted as caught nor against the score. A
+function with no viable mutant gets no score, and a run where nothing was both
+generated and viable prints one honest note instead of a table of zeros or an
+unbacked 100%. `--format json` carries the same rollup as a structured `symbols`
+array.
+
 On this repository's own change it reports 2 caught, 8 missed, each one naming
 the function to strengthen first.
 

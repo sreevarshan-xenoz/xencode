@@ -5073,6 +5073,15 @@ fn run_mutants(
             "total": run.mutants.len(),
             "counts": run.counts(),
             "usable": run.is_usable(),
+            "symbols": run.per_symbol().iter().map(|s| serde_json::json!({
+                "file": s.file,
+                "symbol": s.symbol,
+                "caught": s.caught,
+                "missed": s.missed,
+                "unviable": s.unviable,
+                "timeout": s.timeout,
+                "viable": s.score().map(|(_, v)| v),
+            })).collect::<Vec<_>>(),
             "missed": missed.iter().map(|m| serde_json::json!({
                 "file": m.file, "name": m.name, "key": m.key(),
             })).collect::<Vec<_>>(),
@@ -5086,6 +5095,12 @@ fn run_mutants(
         println!("\n  {}\n", run.counts());
         for note in &run.notes {
             println!("  note:  {note}");
+        }
+        // QD-3: the rollup names the function the tests are weakest on, so a
+        // score points at code to read rather than a vague "feature is untested".
+        println!("  per function (worst first):");
+        for line in run.symbol_report() {
+            println!("    {line}");
         }
         if missed.is_empty() {
             println!("\n  no missed mutants — every mutation was caught by a test");
@@ -5143,6 +5158,9 @@ fn judge_repair(path: std::path::PathBuf, format: OutputFormat) -> Result<(), St
                     Some(mtest::Mutant {
                         file: m.get("file")?.as_str()?.to_string(),
                         name: m.get("name")?.as_str()?.to_string(),
+                        // A repair patch names mutants by file and name, not by
+                        // the enclosing function, so the rollup bucket is unknown.
+                        symbol: mtest::OUTSIDE_FUNCTION.to_string(),
                         verdict: mtest::Verdict::Missed,
                     })
                 })
@@ -5160,6 +5178,7 @@ fn judge_repair(path: std::path::PathBuf, format: OutputFormat) -> Result<(), St
                 Some(mtest::Mutant {
                     file: m.get("file")?.as_str()?.to_string(),
                     name: m.get("name")?.as_str()?.to_string(),
+                    symbol: mtest::OUTSIDE_FUNCTION.to_string(),
                     verdict: match m.get("verdict").and_then(|v| v.as_str()).unwrap_or("") {
                         "caught" => mtest::Verdict::Caught,
                         "unviable" => mtest::Verdict::Unviable,

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QD-3`: mutation score rolled up per function
+
+`xencode mutants` now answers "which function is untested" rather than "which
+feature is untested". Each mutant is attributed to the function it sits in, read
+from cargo-mutants' own `function.function_name` field on a real `outcomes.json`,
+and rolled up into one score per `(file, function)` sorted worst-first, so the
+code worth fixing is the first line instead of one to hunt for. A mutation the
+tool places outside any function is named under its own bucket rather than blurred
+into the whole file. Unviable and timed-out mutants are held out of the denominator
+entirely — a mutant that cannot compile, or never finished, proves nothing about
+the tests, so it is neither counted as caught nor against the score; a function with
+no viable mutant gets no score at all, and a run where nothing was both generated
+and viable prints one honest note instead of a confident table of zeros or an
+unbacked 100%. The text output leads with the weakest function ("mutants of `is_even`
+(src/lib.rs): 1/2 caught — 1 survived"), and `--format json` carries the same data as
+a structured `symbols` array. Five tests pin the rollup, each checked by breaking the
+guard it names — the denominator, the worst-first ordering, the function-naming, the
+symbol extraction — and watching exactly that test fail. The behaviour when
+cargo-mutants is not installed is unchanged: the command says so and declines.
+
 ### Added — `V-10`: the bridge from worker events to the window
 
 A thin layer now sits between the orchestrator's normalised events and the

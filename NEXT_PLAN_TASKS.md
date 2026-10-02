@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1938 tests passing, zero warnings (re-verified 2026-10-02, after V-10)
+- [x] Workspace gates green — 16 crates, 1943 tests passing, zero warnings (re-verified 2026-10-02, after QD-3)
 
 ## Model Catalog Honesty
 
@@ -5229,7 +5229,22 @@ context.
 - **QD-3 — Mutation score as the only defensible "semantic coverage".** Per
   VF-3 (`cargo mutants --in-diff`), rolled up per symbol. Reports "mutants of
   `refresh()` survived by 0/14 tests", never "feature X is untested". *Trap:*
-  the tool is not installed here; fail gracefully and say so.
+  the tool is not installed here; fail gracefully and say so. **Done
+  2026-10-02** — `xencode mutants` now rolls the run up **per function**, so a
+  score names the code it measured. `analysis-rs/src/mutation.rs` reads cargo-mutants'
+  `function.function_name` off a real `outcomes.json`, groups by `(file, symbol)`,
+  and sorts worst-first; a mutation the tool places outside any function is
+  bucketed under a named label, never blurred into a whole file. Unviable and
+  timed-out mutants are kept **out of the denominator** — a mutant that cannot
+  build says nothing about the tests, so it is neither counted for nor against.
+  A symbol with no viable mutant gets **no score**, and a run where nothing was
+  both generated and viable prints one honest note rather than a table of zeros
+  or an unbacked 100%. The text report leads with the weakest function; `--format
+  json` emits a structured `symbols` array. 5 new tests here, each verified by
+  breaking the guard it pins (denominator, worst-first sort, function-naming,
+  symbol extraction) and watching that test fail. The installed-tool trap is
+  resolved: VF-3 put cargo-mutants 27.1.0 on PATH, and `available()` still
+  reports graceful absence when it is not.
 - **QD-4 — Attack paths as a Semgrep rule-pack + a hand-written sink list.**
   *Effort: M.* Explicitly not a taint engine; CodeQL's Rust support is a starter
   language and MIRAI is effectively unmaintained.
