@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1902 tests passing, zero warnings (re-verified 2026-10-02, after OR-2)
+- [x] Workspace gates green — 16 crates, 1904 tests passing, zero warnings (re-verified 2026-10-02, after X-2)
 
 ## Model Catalog Honesty
 
@@ -12231,7 +12231,7 @@ stage it was installed at, not just the chord.**
 The states are `CODING ⇄ ORCHESTRATOR`, and inside Orchestrator:
 `IDLE → PLANNING → SCHEDULING → EXECUTING → VERIFICATION → REVIEW/REPAIR → MERGE`.
 
-- [ ] **X-2 — the mode state machine and the global toggle.** Implement both modes
+- [x] **X-2 — the mode state machine and the global toggle.** Implement both modes
       over the one state, with the toggle described above, and prove that switching
       preserves everything on the list in §X-0 item 2.
       **Done-when:** a round trip Coding → Orchestrator → Coding leaves the task
@@ -12242,6 +12242,26 @@ The states are `CODING ⇄ ORCHESTRATOR`, and inside Orchestrator:
       the three panels that read a bare `Space` is focused and asserts the panel's
       own Space action did *not* fire — so the choice cannot silently overwrite an
       existing action.
+      **Delivered 2026-10-02.** The mode is one field, `App.mode: Mode` (`focus.rs`:
+      `Coding ⇄ Orchestrator`, `label()` for the status bar, `toggled()`). Because
+      both modes read the same tasks / agents / sessions / worktrees / diffs /
+      approvals / history / verification / git fields on `App` — no mode owns a copy —
+      a round trip cannot drop or duplicate any of them; that is true by construction
+      and the round-trip test confirms it over the fields a worker touches. **Binding
+      and stage (the required report): `Ctrl+Space`, claimed in `global_ctrl_chord`
+      (`keymap.rs:288`) — the pre-focus stage that runs at `keymap.rs:60` only when the
+      CONTROL modifier is present, before focus routing.** Two tests in the keymap
+      module: `ctrl_space_toggles_mode_without_stealing_a_panels_own_space` focuses each
+      of the three bare-`Space` panels in turn (Explorer attach, Security severity
+      cycle, Voice mute), asserts `Ctrl+Space` flips the mode while the panel's own
+      observable stays unchanged, then presses a plain `Space` and asserts that
+      observable *does* change — proving the chord never reaches those handlers and
+      plain Space is untouched; `a_mode_round_trip_leaves_the_shared_state_identical`
+      flips Coding → Orchestrator → Coding and asserts the file tree, selection,
+      attachments, severity filter, mute flag, input history, git branch/status and
+      worktree list are all byte-identical afterwards. The status bar shows
+      `[CODING]` / `[ORCHESTRATOR]`. The mode currently changes only the badge and the
+      field it is read from; the control-room projection that consumes it is `X-3`.
 
 ### X-3 The control room is a projection, not a fifth panel
 

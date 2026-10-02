@@ -23,7 +23,7 @@ use xencode_providers_rs::{
     MessageContent, OllamaRequest, ProviderManager, RoutingFacts,
 };
 
-pub use crate::focus::{navigate_feature, FocusArea, InputMode, FEATURE_LIST};
+pub use crate::focus::{navigate_feature, FocusArea, InputMode, Mode, FEATURE_LIST};
 pub use crate::theme::ThemeColors;
 use crate::ui;
 
@@ -316,6 +316,10 @@ pub struct App<'a> {
     /// insert newlines).
     pub chat_input: TextArea<'static>,
     pub input_mode: InputMode,
+    /// The product mode (`X-2`): Coding or Orchestrator, over the one state this
+    /// struct already holds. Flipping it changes what the surface is *for*, not
+    /// what is stored — there is no per-mode copy of anything here.
+    pub mode: Mode,
     pub messages: Vec<UiMessage>,
     pub chat_scroll: u16,
     /// Sent prompts, oldest first (chat input recall, Alt+Up/Down).
@@ -2361,6 +2365,7 @@ impl<'a> App<'a> {
             focus: FocusArea::ChatInput,
             chat_input: TextArea::default(),
             input_mode: InputMode::Normal,
+            mode: Mode::default(),
             messages: Vec::new(),
             chat_scroll: 0,
             input_history: Vec::new(),
@@ -2783,6 +2788,19 @@ impl<'a> App<'a> {
     /// strictest value as fallback (I1-01).
     pub fn agent_mode(&self) -> crate::agent_tools::ApprovalMode {
         crate::agent_tools::ApprovalMode::parse(&self.config.agent_approval)
+    }
+
+    /// Flip the product mode (`X-2`). This touches exactly one field: every task,
+    /// agent, session, worktree, diff, approval, history entry, verification
+    /// result and git fact lives on this `App` once and is read by both modes, so
+    /// switching cannot copy or drop any of them. What changes is which way the
+    /// same state is presented, not the state itself.
+    pub fn toggle_mode(&mut self) {
+        self.mode = self.mode.toggled();
+        self.push_toast(
+            crate::toast::ToastKind::Info,
+            format!("Mode: {}", self.mode.label()),
+        );
     }
 
     /// Remember an "always allow for this session" approval answer. Never

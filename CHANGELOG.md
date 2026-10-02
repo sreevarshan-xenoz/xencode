@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `X-2`: two first-class modes over one shared state
+
+The orchestrator becomes a real operating mode rather than a set of panels bolted
+onto the coding UI. `App` gains one field, `mode: Mode`, with the two states
+`CODING ⇄ ORCHESTRATOR`; the status bar now shows a `[CODING]` / `[ORCHESTRATOR]`
+badge. Both modes read the *same* tasks, agents, sessions, worktrees, diffs,
+pending approvals, event history, verification results and git state that already
+live on `App` — no mode keeps a private copy — so switching back and forth cannot
+drop or duplicate anything a worker put there. A round-trip test flips Coding →
+Orchestrator → Coding and asserts every one of those fields is byte-identical
+afterwards.
+
+The toggle is **`Ctrl+Space`**, claimed on the pre-focus global stage
+(`global_ctrl_chord`), which only runs when the CONTROL modifier is held and fires
+before focus routing. That placement is deliberate: three panels — the File
+Explorer (attach/detach), the Security scan (cycle severity) and the Voice
+interface (mute) — each bind a *bare* `Space` to their own action. A test focuses
+each of those three in turn, presses `Ctrl+Space`, and asserts the mode flips while
+the panel's own Space action did **not** fire; a following plain `Space` still does
+fire it, proving the new chord never steals an existing binding. Two new tests. The
+mode currently drives only the badge; the control-room projection that reads it is
+`X-3`.
+
 ### Added — `OR-2`: the task graph and scheduler
 
 The orchestrator needs a place that decides *what may run now*, separate from the

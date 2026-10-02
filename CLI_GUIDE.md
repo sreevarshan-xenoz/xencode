@@ -46,6 +46,8 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
 `Ctrl+U` cycle the layout · `Ctrl+0` why the screen is arranged as it is
 (session layout history; `Enter` shows the pane widths a change moved between) ·
+`Ctrl+Space` switch mode (`CODING` ⇄ `ORCHESTRATOR`; both read the same tasks,
+agents and git state, so nothing is lost in the switch) ·
 `Ctrl+C` or `q` quit. If the terminal has the mouse, a divider between two
 side-by-side panes drags to resize them; if you want the terminal's own
 drag-select of text back, `xencode config set mouse_capture off` hands the

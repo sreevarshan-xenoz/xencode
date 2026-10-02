@@ -285,6 +285,17 @@ fn store_view(app: &mut App, slot: usize) {
 
 fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
     match key.code {
+        KeyCode::Char(' ') => {
+            // The product-mode toggle (`X-2`). Claimed here, on the pre-focus
+            // global stage that runs before focus routing, precisely so it cannot
+            // steal the bare `Space` the File Explorer, Security and Voice panels
+            // each bind to their own action: a `Ctrl+Space` never reaches those
+            // handlers, and a plain `Space` (no CONTROL) still does. Flipping the
+            // mode reads and writes one `App.mode` field — every task, agent,
+            // session, worktree, diff, approval and git fact lives once on `App`,
+            // so a round trip between the modes cannot copy or drop any of them.
+            app.toggle_mode();
+        }
         KeyCode::Char('n') | KeyCode::Char('N') => {
             // Agent stack: if tiled in the body layout, advance it directly;
             // otherwise open/advance the overlay. One chord, discoverable in
@@ -1851,6 +1862,108 @@ mod tests {
         assert_eq!(app.agent_stack_index, 0, "wraps instead of growing");
         press_with_mods(&mut app, KeyCode::Esc, KeyModifiers::empty());
         assert!(!app.agent_stack_visible);
+    }
+
+    /// The mode toggle is claimed on the pre-focus global stage, so a
+    /// `Ctrl+Space` must flip `App.mode` without firing the bare-`Space` action
+    /// of whichever panel is focused — and a plain `Space` must still reach that
+    /// same panel's handler afterwards.
+    #[test]
+    fn ctrl_space_toggles_mode_without_stealing_a_panels_own_space() {
+        // File Explorer: bare Space attaches the selected file.
+        let mut app = app_with(FocusArea::FileExplorer);
+        app.file_tree = vec!["notes.txt".into()];
+        app.selected_file = 0;
+        app.attached_files.clear();
+        assert_eq!(app.mode, crate::focus::Mode::Coding);
+        press_with_mods(&mut app, KeyCode::Char(' '), KeyModifiers::CONTROL);
+        assert_eq!(
+            app.mode,
+            crate::focus::Mode::Orchestrator,
+            "Ctrl+Space flips mode"
+        );
+        assert!(
+            app.attached_files.is_empty(),
+            "Ctrl+Space must not attach the file"
+        );
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(
+            app.attached_files.len(),
+            1,
+            "plain Space still reaches the handler"
+        );
+
+        // Security Auditor: bare Space cycles the severity filter.
+        let mut app = app_with(FocusArea::SecurityAuditor);
+        app.sec_filter_severity = "All".into();
+        press_with_mods(&mut app, KeyCode::Char(' '), KeyModifiers::CONTROL);
+        assert_eq!(app.mode, crate::focus::Mode::Orchestrator);
+        assert_eq!(
+            app.sec_filter_severity, "All",
+            "Ctrl+Space must not cycle the filter"
+        );
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(
+            app.sec_filter_severity, "Critical",
+            "plain Space still cycles"
+        );
+
+        // Voice Interface: bare Space toggles mute.
+        let mut app = app_with(FocusArea::VoiceInterface);
+        app.voice_muted = false;
+        press_with_mods(&mut app, KeyCode::Char(' '), KeyModifiers::CONTROL);
+        assert_eq!(app.mode, crate::focus::Mode::Orchestrator);
+        assert!(!app.voice_muted, "Ctrl+Space must not mute");
+        press(&mut app, KeyCode::Char(' '));
+        assert!(app.voice_muted, "plain Space still mutes");
+    }
+
+    /// Both modes read the one shared state on `App`; no mode owns a copy, so a
+    /// round trip cannot drop or duplicate anything a worker has put there.
+    #[test]
+    fn a_mode_round_trip_leaves_the_shared_state_identical() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.file_tree = vec!["a.rs".into(), "b.rs".into()];
+        app.selected_file = 1;
+        app.attached_files.insert("a.rs".into());
+        app.sec_filter_severity = "High".into();
+        app.voice_muted = true;
+        app.input_history.push("a prompt".into());
+        app.git_branch = "topic/x".into();
+        app.git_status.insert("src/main.rs".into(), "M".into());
+
+        let before_tree = app.file_tree.clone();
+        let before_selected = app.selected_file;
+        let before_attached = app.attached_files.clone();
+        let before_severity = app.sec_filter_severity.clone();
+        let before_muted = app.voice_muted;
+        let before_history = app.input_history.clone();
+        let before_branch = app.git_branch.clone();
+        let before_git_status = app.git_status.clone();
+        let before_worktrees = app.worktrees.clone();
+
+        assert_eq!(app.mode, crate::focus::Mode::Coding);
+        app.toggle_mode();
+        assert_eq!(app.mode, crate::focus::Mode::Orchestrator);
+        app.toggle_mode();
+        assert_eq!(
+            app.mode,
+            crate::focus::Mode::Coding,
+            "round trip returns to Coding"
+        );
+
+        assert_eq!(app.file_tree, before_tree);
+        assert_eq!(app.selected_file, before_selected);
+        assert_eq!(app.attached_files, before_attached);
+        assert_eq!(app.sec_filter_severity, before_severity);
+        assert_eq!(app.voice_muted, before_muted);
+        assert_eq!(app.input_history, before_history);
+        assert_eq!(app.git_branch, before_branch);
+        assert_eq!(app.git_status, before_git_status);
+        assert_eq!(
+            app.worktrees, before_worktrees,
+            "the tracked worktrees are untouched"
+        );
     }
 
     fn press_alt(code: KeyCode) -> KeyEvent {

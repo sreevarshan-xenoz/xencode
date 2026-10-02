@@ -8,6 +8,45 @@ pub enum InputMode {
     Editing,
 }
 
+/// The product mode (`X-2`): which *way of working* xencode is in. It is one
+/// piece of state that both views read — the tasks, running agents, their
+/// sessions, worktrees, diffs, pending approvals, event history, verification
+/// results and git state are all held once on the `App`, never per-mode, so
+/// switching cannot duplicate or drop any of them. `Coding` is the single-agent
+/// editor the app has always been; `Orchestrator` is the same state seen as a
+/// fleet to run, verified and merged.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Coding,
+    Orchestrator,
+}
+
+impl Mode {
+    /// The label shown in the status bar, kept short so the right-hand fields
+    /// survive a narrow terminal.
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Coding => "CODING",
+            Mode::Orchestrator => "ORCHESTRATOR",
+        }
+    }
+
+    pub fn toggled(self) -> Mode {
+        match self {
+            Mode::Coding => Mode::Orchestrator,
+            Mode::Orchestrator => Mode::Coding,
+        }
+    }
+}
+
+impl Default for Mode {
+    /// The app opens in Coding; the orchestrator is entered on purpose.
+    fn default() -> Self {
+        Mode::Coding
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FocusArea {
