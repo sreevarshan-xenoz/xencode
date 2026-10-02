@@ -5946,7 +5946,8 @@ answer, so two parked graph items are scoped back in (§R-2 item 8).
 
 **Inventory.** As recorded on 2026-09-28 the universe was **303 IDs** across **305
 rows**: N 55 + O 73 + P 48 + Q 63 + S 26 + L-1…L-12 + M-1…M-7 + U-1…U-8. Milestone X
-brings that forward on 2026-10-02 to **306 IDs across 309 rows** — and the script
+brings that forward on 2026-10-02 to **306 IDs across 309 rows**, and Milestone Y's
+`EVd-8` takes it the same day to **307 IDs across 310 rows** — and the script
 count then found the 2026-09-28 row figure one short of reality (306 rows, not 305),
 because §V-12 had by then placed `V-10` into W14 as a second row for an ID already
 counted. The appendix subsets above say where the IDs came from; the authoritative
@@ -5989,7 +5990,7 @@ and the two sums must agree.
 | W3 | Code intelligence: replace the regex tier | 15 |
 | W4 | Retrieval on top of a real structure | 12 |
 | W5 | The verification engine | 15 |
-| W6 | Evidence and task state | 9 |
+| W6 | Evidence and task state | 10 |
 | W7 | Trust architecture | 19 |
 | W8 | Outward research capability | 6 |
 | W9 | Project DNA and architecture intelligence | 21 |
@@ -6005,8 +6006,8 @@ and the two sums must agree.
 
 | bucket | count | what it means |
 |---|---|---|
-| core substrate | 79 | other items depend on it; skipping one is a deferral, not a speed-up |
-| capability | 155 | makes the agent better at the work; nearly all of it waits on the substrate |
+| core substrate | 80 | other items depend on it; skipping one is a deferral, not a speed-up |
+| capability | 158 | makes the agent better at the work; nearly all of it waits on the substrate |
 | ecology | 61 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
 | park | 11 | declined, conditional, or contested (§R-3) |
 
@@ -8785,9 +8786,9 @@ WF-4 first, always — deciding what “run the tests” means is the decision V
 | **U-4** | Flaky test isolation by differential base-tree run, riding VF-5 | capability | from U — the stress loop and quarantine hook are VF-5's; only the base-tree classification is new |
 | **U-6** | Red-to-green reproduction gate: no production edit before a witnessed RED | core | from U — phase 1 is MD-2's tool-stripping narrowed to the reproduction file; the gate itself is W7 |
 
-#### W6 — Evidence and task state — 9 items
+#### W6 — Evidence and task state — 10 items
 
-EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); EVd-3 needs W5 to have actually run something.
+EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); EVd-3 needs W5 to have actually run something; EVd-8 joins the three (see §Y-3).
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
@@ -8798,6 +8799,7 @@ EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); E
 | **EVd-5** | Ledger-fed compaction | capability | ledger-fed compaction (folds into EV-6/SE-2) |
 | **EVd-6** | False-verified calibration | capability | false-verified calibration |
 | **EVd-7** | Hash-chain the ledger, reusing EV-11's prev-hash+seq primitive | capability | hash-chained ledger on EV-11's primitive |
+| **EVd-8** | The task evidence graph: requirement → decision → action → verification, keyed on the task | capability | added by Milestone Y on 2026-10-02; needs EVd-1's rows, EVd-2's session key and EVd-3's verdicts, and takes its tamper evidence from EVd-7 rather than inventing its own |
 | **QA-4** | Sequential A/B/C variants recorded on EVd-1's ledger | capability | sequential A/B/C variants on EVd-1 |
 | **QI-3** | Machine-checkable slots only | capability | machine-checkable slots only |
 
@@ -12502,8 +12504,193 @@ follows: `f565837` (`AR-9`, the protocol), `b809826` (`AR-1`/`AR-2` closed),
   Per-wave and per-bucket tables now agree with the script count, which is the
   check §R-0 states. New work joins the pool after §R-1 was written; it does not
   rewrite it.
+- **The bucket table was still short when §X-4 claimed otherwise.** Re-running
+  §R-0's own check on 2026-10-02 — count the `| **` rows in each `#### W` table,
+  take the bucket column from the right, and repair the one row whose item text
+  contains an escaped pipe (`L-2`, whose six subcommands are written with `\|`) —
+  gives 300 wave rows: 80 core, 158 capability, 61 ecology, 1 park. Adding the 10
+  contested IDs from §R-3 makes 310 rows and 307 unique IDs against the 297 IDs the
+  wave tables hold. The table read 79 core and 156 capability, one and two short, so
+  both cells are corrected here rather than left one row away from the count they
+  claim to match.
 - **Standing caveat, repeated because it is the rule that keeps breaking:** nothing
   in this appendix is permission to build. `AR-9`'s two unpopulated variants
   (`PermissionRequested`, `Error`) are still open evidence gaps — closing them needs
   a claude re-run on a parked paid account (the owner's call, per S-8) or a ninth
   vendor, and a fabricated stream would certify nothing.
+
+---
+
+## Milestone Y — ten projects checked against the plan, and the one thing it was missing (owner directive, 2026-10-02)
+
+### Y-0 What the owner's research set changed
+
+The owner sent two briefs on 2026-10-02: seven open projects plus five proposed
+primitives, then three more projects plus a proposed task evidence graph and an
+eight-phase build order. His conclusion, quoted: *"Xencode = a local AI development
+control plane where tasks are first-class, agents are interchangeable workers,
+context is explainable, actions are policy-bound, and completion requires
+evidence."* He also said, and this is the part that binds: **"I would not build the
+agent swarm first. That's the trap."**
+
+Every clause of that sentence is already in the plan. Tasks-are-first-class is
+`OR-2`; interchangeable-workers is `AR-1`…`AR-10`; explainable-context is `GH-2`,
+`QN-*`, `QD-1`; policy-bound-actions is W7 (`CAP-*`, `SE-*`, `PR-*`);
+evidence-required-for-done is all of W6. The build order is Milestone X's §X-1
+table, which maps his phases onto IDs that already exist and was written for exactly
+this reason. So this appendix is not a re-plan. It does three things: it records
+what ten projects actually are, so a later session does not re-research them; it
+dispositions the five proposed primitives against existing IDs; and it adds the one
+item the plan genuinely does not have — `EVd-8`.
+
+### Y-1 The prior art, verified against GitHub rather than from the brief
+
+Re-checked 2026-10-02 with `gh api repos/<name>` and each repository's own `LICENSE`
+file. Stars and push dates are as read that day and will drift.
+
+| project | what it is | licence | what is worth taking |
+|---|---|---|---|
+| `NVIDIA/OpenShell` | 14,257★, pushed the same day. "The safe, private runtime for autonomous AI agents" — a policy-governed sandbox a coding agent runs inside | Apache-2.0 | Runtime and policy are one product, not two layers. Our W7 + W16 split says the same thing; OpenShell is the outside proof that the combination is the shape users expect. |
+| `rivet-dev/sandbox-agent` | 1,582★, last pushed 2026-06-19. Process-level isolation between an agent host and the tools it calls, over a JSON-RPC session | Apache-2.0 | The host/agent version handshake: refuse to run when the two sides disagree, rather than degrading silently. That is a rule our adapter layer should state explicitly. |
+| the `gigacode` directory inside that repo | multi-agent orchestration built on sandbox-agent | Apache-2.0 | Nothing new — it is `OR-2` plus `AR-9` in somebody else's vocabulary. |
+| `dpc/tau` | 105★, Rust, pushed 2026-10-01. Small coding agent; the interesting part is its task/status model | MPL-2.0 | A task is a durable row with a status, not a live process. Matches `EVd-1`; confirms we are not inventing a shape no one uses. |
+| `denfry/codebase-index` | 8★, Python, pushed 2026-09-25. "Local code map … find, trace, and predict change impact **with file:line evidence**. No network by default." | MIT | The closest outside confirmation of `QD-1`/`QD-2`'s premise: impact prediction is sold on its evidence, not on its accuracy. Its "no network by default" is our `LF-*` posture. Not a dependency — it is Python, which this project does not reintroduce. |
+| `codefromkarl/ContextAtlas` | 29★, TypeScript, last pushed 2026-06-02. Hybrid retrieval, project memory, and **retrieval observability** — CLI, MCP server or embeddable library | MIT | Checked against what the plan already has, rather than left as a suggestion: the context's *source* is covered by `SE-2` and `QK-3`'s `SourceClass` enum, and the fact that a retrieval happened at all is covered by `QK-5`, which computes knowledge value from `retrieved_files` and token counts. What no item requires is **a per-query explanation of which retrieval arm returned a given hit and in what rank order** — and that is the one hole this project points at. It is recorded as an open question in §Y-5, not as a new ID, because `QN-3` was built, measured against the 25-query gold set and **reverted** on 2026-09-27: rank fusion raised recall@5 from 0.840 to 0.880 but took recall@1 from 0.680 to 0.560 and MRR from 0.743 to 0.673, so the shipped scoring path is still the tuned linear blend — and a panel that attributed each result to a fused arm would be describing a stage that no longer exists. |
+| `nervosys/HawkTUI` | 0★, Rust, pushed 2026-09-15. "The TUI framework for agentic AI" | **dual-licensed: AGPL-3.0 or a paid commercial option** | Design reference only. AGPL is not compatible with adding it as a dependency to a permissively-licensed Rust workspace, and the plan already owns the semantic-TUI idea as `V-*` and `X-3`. Do not depend on it. |
+| `fortunto2/rust-code` | 43★, MIT, Rust, pushed 2026-08-22. "AI-powered terminal coding agent — TUI, BAML agent loop, fuzzy search, tmux background tasks, skills, MCP support" | MIT | Settles the one name the first brief left unresolved: **"rust-code" is `fortunto2/rust-code`**, and it is real. Worth reading for how it wires skills and background tasks into one TUI, which is the surface we already have. |
+| `mixpeek/amux` | 514★, Rust, pushed the same day. "Open-source control plane for AI coding agents … parallel Claude Code, Codex, and Gemini workers with a shared board, **atomic tasks**, schedules, loops, origin-stamped messaging, model switching, and self-healing recovery" | **MIT plus the Commons Clause** (a non-free restriction on selling the software itself) | The strongest confirmation in the set, and the one that changes framing: its unit of work is an **atomic task on a board**, not an agent session. That is `OR-2`'s task graph and `EVd-1`'s ledger, and it argues for the durable-task reading of both. Readable as design; not usable as a dependency, because the Commons Clause is a real restriction on the licensed grant. |
+| `Maxsky5/openducktor` | 35★, TypeScript, pushed the same day. Task-centric agent runner with a SQLite task store and fixed roles (spec, plan, build, verify) | Apache-2.0 | The role pipeline is a convention over one table. SQLite-backed task state is the shape of `EVd-1`; `QA-4`'s sequential variants are its role sequence. |
+| `lthoangg/OpenAgentd` | 211★, TypeScript, pushed the same day. Unified coding workspace with a timeline of tools, diffs and diagnostics | Apache-2.0 | The timeline is the rendered form of `EV-2`'s trace, and the thing it shows — tool, diff, diagnostic side by side — is what `EVd-8` needs to be able to reconstruct. |
+
+**Two licence findings are the operative result of this table.** `HawkTUI` is AGPL
+and `amux` carries the Commons Clause; both are fine to read and not fine to depend
+on. Everything else in the set is Apache/MIT/MPL and equally readable. Nothing in
+this set is proposed as a dependency, and no plan item below asks for one.
+
+**Name collisions, so the next session does not re-search these.** The briefs gave
+short names and four of them are ambiguous on GitHub. `OpenShell` is
+`NVIDIA/OpenShell` (14,257★) — there is also `NVIDIA/OpenShell-Community` (192★),
+`langchain-ai/openshell-deepagent` (193★) and the unrelated `NVIDIA/NemoClaw`
+(22,638★), which the same search returns first. `ContextAtlas` is
+`codefromkarl/ContextAtlas` (29★), not `traviswye/ContextAtlas` (7★), which is a
+different MCP server with a different pitch. `Gigacode` is not a repository at all:
+it is `rivet-dev/sandbox-agent`'s `gigacode/` directory, and searching the word
+returns unrelated projects including `KausikN/GigaCode`, a database tool.
+`sandbox-agent` is under `rivet-dev`, not `rivet`.
+
+### Y-2 The five proposed primitives, dispositioned
+
+Same form as §Q-0: each proposal, a verdict, and the ID it lands as or the reason
+it does not need one.
+
+| proposal | verdict | lands as / why not |
+|---|---|---|
+| Agent Contract Protocol | already planned | `AR-4`, `AR-5`, `AR-9`, `AR-10` are the contract: `AR-9` defines the event vocabulary, `AR-4`/`AR-5` capture and envelope it per vendor, `AR-10` replays the protocol against the captured streams and fails the build on a contradiction. A *new* protocol name on top of that would be a dialect nobody speaks — the reasoning that declined row 64 and row 65 of §Q-0 applies unchanged. |
+| Evidence-First Runtime | already planned | This is Milestone Q §Q-4's whole spine: W5 (`VF-*`) proves a claim, W6 (`EVd-1`…`EVd-7`) stores what happened, `CU-1` is the seam both sit behind. The proposal adds no capability; it adds the ordering, and §X-1 already records that ordering. |
+| Context Firewall | split, and the sound half is planned | Two different things hide in the name. *Which context reaches the model* is `EVd-5` (ledger-fed compaction), `CX-*`, and the retrieval items. *What a context is allowed to cause* is capability separation — `CAP-*`, `SE-*`, `PR-*` — and that is the half with a real guarantee. The classifier-style version, where a model decides whether incoming text is an attack, stays rejected for the reason §Q-0 row 83 gives: a classifier is not a boundary. |
+| Agent Flight Recorder | already shipped | `EV-2`'s turn trace plus `QA-3`'s decision markers, both built 2026-09-24 and already recorded as shipped in the §S-2 disposition table. Adding a recorder item would count the same thing twice. |
+| Semantic TUI | already planned | `V-*` is the view layer and `X-3` is the projection from events to it, under Milestone X's rule that events update semantic state and the view system alone decides layout. `HawkTUI`'s existence is mild outside evidence for that shape and nothing more. |
+| Task Evidence Graph | **new — `EVd-8`** | The one proposal with no home. See §Y-3. |
+
+### Y-3 `EVd-8` — the task evidence graph
+
+**Proposed by the owner, 2026-10-02**, in his second brief. Every task accumulates:
+its intent, its requirements, the context it was given, each agent decision with the
+reason it was made, the files changed, the commands executed, the tests run, review
+findings, permissions granted, failures and retries, and the final evidence.
+Query it and it answers *why was this file changed*, *why was this agent picked*,
+*was it verified*, in that order, from accumulated rows rather than from a
+regenerated summary.
+
+**Why the plan does not already have it.** It has every part and no join. `EVd-1`
+is a per-**session** ledger; a task outlives sessions and spans workers, so the
+ledger's key is not the graph's key. `EVd-3` is a verdict for one check with an
+evidence reference, not a chain from requirement to file. `EV-2` and `QA-3` are a
+turn trace with decision markers, which is per-turn. `GH-2`'s `/why <file>:<line>`
+answers from **git**, which is exactly the honest answer and exactly the one that
+cannot say why an agent chose something. `QN-6`'s requirement-to-code traceability
+is a commit-trailer convention, and the owner's graph wants the same edge with a
+reason behind it.
+
+**The item.** `EVd-8` — a durable evidence graph keyed on the **task**, joining
+requirement → decision → action → verification, where every edge carries the
+evidence reference that justifies it and the absence of one is visible as an
+absence. Built on `EVd-1`'s ledger rows and `EVd-3`'s verdicts, not beside them.
+
+**Placement: W6**, after `EVd-1` (the ledger must exist to be joined), `EVd-2` (the
+session key, because a task spans sessions), and `EVd-3` (the verdict, because
+"was it verified" is a lookup into it). `EVd-7`'s hash chain gives the edges
+tamper evidence once it lands, so `EVd-8` should not invent its own integrity layer.
+
+**Surface.** A query command over the graph — the owner wrote it as `/x <task>`,
+which is not a name anyone has chosen, so the item should not lock it. It reads
+`EVd-8`'s rows and renders the chain.
+
+**Done-when.** Real, on a task that actually ran on this machine, with the answer
+drawn from stored rows and each claim carrying the evidence reference it came from.
+At minimum the four the owner named, each traceable to a row rather than to a
+regenerated paragraph:
+- *why was this file changed* — the task step, and the action row that wrote it;
+- *why was this agent chosen* — the decision row and the reason it recorded;
+- *was it verified* — `EVd-3` verdict rows with their `{ran, skipped, failed}` states;
+- *what is not evidenced* — the gaps, listed as gaps.
+
+**The failure mode this item exists to prevent is the one the plan keeps hitting.**
+If any answer in that graph can be produced by asking a model to summarise what
+happened, `EVd-8` is a chat transcript wearing a graph's clothes, and it will be
+wrong in exactly the way §Q-0 row 11 rejected causal code history for: the missing
+edges get filled in by whoever is answering. Its last required output is therefore
+the honest one — what the graph does not know.
+
+### Y-4 The positioning, in one sentence for the manuals
+
+*"Xencode is a local AI development control plane: tasks are first-class, agents
+are interchangeable workers, context is explainable, actions are policy-bound, and
+completion requires evidence."*
+
+Checked against what exists today, clause by clause, rather than asserted:
+**tasks first-class** is `OR-2`, planned, W16. **Interchangeable workers** is the
+`AR-` series: `AR-1`, `AR-2`, `AR-4`, `AR-5` and `AR-10` are done and `AR-9`'s
+protocol is built, but it carries two variants nothing has produced yet
+(`PermissionRequested`, `Error`), which §X-4 still lists as open evidence gaps;
+`AR-3`, `AR-7`, `AR-8` are unchecked. So this clause is *mostly* true of the code.
+**Context explainable** is true of one part only: `QD-1` and `QD-2` ship today and
+explain a change's blast radius, while `GH-2`'s `/why <file>:<line>` is planned in
+W10. **Actions policy-bound** is W7 (`CAP-*`, `SE-*`, `PR-*`), planned.
+**Completion requires evidence** is `EVd-1`…`EVd-8` and `CU-1`, planned — W6 has no
+completed items.
+
+Read plainly, that is **one clause fully true, one mostly true, and three about the
+plan**. The sentence is therefore **direction, not a capability claim**, and the same
+rule that keeps `README.md` saying "local-first" rather than "offline-first" applies:
+never assert what a measured item has not proved. If it enters a manual, it enters
+as where the product is going, and it must not be written as a feature list.
+
+### Y-5 Prohibitions this appendix records
+
+- **No dependency is added on any project in §Y-1** — ten repositories, eleven table
+  entries, since `gigacode` is a directory inside `rivet-dev/sandbox-agent`. Two are
+  disqualifying for a permissively-licensed Rust workspace — `nervosys/HawkTUI`
+  (AGPL-3.0 dual licence) and `mixpeek/amux` (MIT plus Commons Clause). The rest
+  are reference-only regardless, and `denfry/codebase-index` is Python, which
+  `AGENTS.md` rules out for this repository outright.
+- **The owner's eight-phase order is not a new order.** Phases 1–8 map onto
+  existing waves, and §X-1 records the mapping. Nothing here re-sequences W0–W17,
+  and no future session should re-propose the sequence as if it were undecided.
+- **`rust-code` is resolved** as `fortunto2/rust-code` and is real. It was the one
+  name in the first brief that could not be confirmed, and it no longer needs to
+  be asked about.
+- **`EVd-8` is a plan item, not permission to build it.** It sits in W6 behind
+  `EVd-1`, `EVd-2` and `EVd-3`, none of which is done.
+- **One open question is left open, deliberately.** `ContextAtlas` sells per-query
+  retrieval observability, and no item here requires it. It is not added as an ID
+  because `QN-3`'s revert removed the fused-arm structure that would make "which
+  arm returned this" a meaningful answer. If a future change reintroduces more than
+  one ranked arm into `retrieve()`, revisit this before writing a panel for it.
+- **`QD-4` stays parked** pending the owner's decision on installing Semgrep. This
+  appendix does not change that.
+- **Counting.** Adding `EVd-8` makes W6 ten items and the pool 310 rows across 307
+  unique IDs. §R-0's figures are brought forward here rather than left to drift,
+  per the check §R-0 states; the frozen L/M/N/O/P/Q/S headline of 284 is unchanged,
+  because `EVd-8` is new work joining after §R-1 was written and new work does not
+  rewrite it.
