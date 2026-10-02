@@ -18,7 +18,7 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
   `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
-- [x] Workspace gates green — 16 crates, 1889 tests passing, zero warnings (re-verified 2026-10-02, after AR-5)
+- [x] Workspace gates green — 16 crates, 1895 tests passing, zero warnings (re-verified 2026-10-02, after AR-10)
 
 ## Model Catalog Honesty
 
@@ -9897,7 +9897,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       the variant stays unpopulated by a real stream until claude is switched
       back on or a run genuinely denies something. The box stays open for that
       single gap.
-- [ ] **AR-10 — the Agent Event TCK.** A compatibility kit for `AR-9`'s protocol: every
+- [x] **AR-10 — the Agent Event TCK.** A compatibility kit for `AR-9`'s protocol: every
       captured vendor stream under `tests/fixtures/` replayed through `normalise_line`
       on every test run — the ten variant shapes, the finish semantics, the origin
       discipline — so a normalisation regression is a test failure and not a runtime
@@ -9907,6 +9907,18 @@ worker, `OR-` for the thing that decides what workers to talk to.
       are stated as evidence gaps in the kit rather than tested against invented input,
       because a TCK greenlit on fabricated lines certifies nothing; and `AR-9` is not
       called settled until a re-run of claude or a ninth vendor populates them.
+      **Delivered 2026-10-02** as `tests/agent_event_tck.rs` (six tests). It commits the
+      per-vendor shape inventory — the exact `AgentEvent::name()`s each of the eight
+      streams yields — as the firewall, distinct from `protocol_streams.rs`'s property
+      checks: mutating `codex`'s `item.started` to emit a different variant makes only
+      codex's row fail (verified by hand, then reverted), because the set-level view still
+      sees the shape elsewhere. The eight real streams cover seven of the ten variants;
+      the kit asserts that count as a fact and asserts `permission_requested` and `error`
+      appear in *no* stream rather than feeding a made-up line to a fixture — when a real
+      claude re-run or ninth vendor emits one, that assertion fails and points the way to
+      replacing the gap with a positive case. `file_changed` is absent by model design
+      (never derived from a worker stream) and is covered by its own unit test, so it is
+      not counted as a gap here. `AR-9` stays open on the two gaps.
 - [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
       tree, and score the split with `EV-1` before any router consumes it.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
