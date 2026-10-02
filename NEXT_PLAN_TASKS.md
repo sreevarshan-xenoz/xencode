@@ -8957,7 +8957,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   §S-11 designated for `AR-*`. The captured output is redacted and capped at
   64 KiB with the capping reported.
 
-  **The headline, measured rather than assumed: six working agents, six event
+  **The headline, measured rather than assumed: seven working agents, six event
   vocabularies, and — with one exception — no word in common.**
 
 | agent | exit | ms | events | stream | auth | session id | observed event kinds |
@@ -8969,7 +8969,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | `gemini` | 41 | 1703 | 0 | no | yes | no | — |
 | `crush` | 1 | 2154 | 0 | no | yes | no | — |
 | `agy` | 0 | 26357 | 8 | yes | no | yes | `init`, `result`, `step_update` |
-| `cursor-agent` | 1 | 1352 | 0 | no | yes | no | — |
+| `cursor-agent` | 0 | 14040 | 12 | yes | no | yes | `assistant`, `result`, `system`, `thinking`, `tool_call`, `user` |
 | `kilo` | 0 | 19192 | 6 | yes | no | yes | `step_finish`, `step_start`, `text`, `tool_use` |
 | `kiro-cli` | 0 | 7565 | 10 | yes | no | yes | `metadata`, `runFinished`, `runStarted`, `sessionUpdate` |
 
@@ -9002,44 +9002,55 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   figure; and every row here is one run of one task. What exists is the
   instrument, and an honest reading from it.
 
-  **Four of the eight answers are login walls, and that is now the dominant
-  fact about the measurement.** Only `opencode`, `cline`, `codex` and `agy` have
-  been seen to actually work. Each refusal names its own remedy and none is a
+  **Three of the ten answers are still login walls.** Seven agents have now been
+  seen to actually work: `opencode`, `cline`, `codex`, `agy`, `kilo`, `kiro-cli`
+  and `cursor-agent`. Each remaining refusal names its own remedy and none is a
   machine change: `claude` wants `/login`, `gemini` wants an auth method in
-  `~/.gemini/settings.json`, `crush` wants an interactive provider, `cursor-agent`
-  wants `agent login` or `CURSOR_API_KEY`. S-8 forbids doing any of these on the
-  user's behalf — they are browser flows belonging to a human — so closing those
-  four rows needs a decision from the operator, not another probe. The
-  measurement is blocked on accounts, not on code.
+  `~/.gemini/settings.json`, `crush` wants an interactive provider. S-8 forbids
+  doing any of these on the user's behalf — they are browser flows belonging to a
+  human — so closing those three rows needs a decision from the operator, not
+  another probe. The measurement is blocked on accounts, not on code.
+
+  **Being logged in was necessary but not sufficient, which is the ninth thing
+  only running it revealed.** Once `cursor-agent` had credentials it stopped
+  refusing the login and started failing a *different* way: exit 1 with
+  `⚠ Workspace Trust Required … Pass --trust, --yolo, or -f if you trust this
+  directory`. Its help lists `--trust` without saying a non-interactive run
+  cannot answer the prompt, so the roster read as working and the first probe
+  after login looked like a broken agent. The fix is `--trust` on the scratch
+  fixture the probe itself creates — not an account login, and not permission to
+  touch anything of the operator's. With it, `cursor-agent` answers in 14.0 s
+  with `apiKeySource: "login"` on its `init` event, and a sixth
+  confirmation that this is about schemas: it is the only agent here emitting
+  `thinking` deltas, and the only one spelling its session key `session_id`
+  where opencode's fork spells it `sessionID`.
 
   **`cursor-agent` was found the same way `agy` was: installed and invisible.**
   It is on `PATH`, answers `2026.09.28-64d2043`, and had been in no list at all,
   so the gap in what we know about it was not recorded anywhere. It now has a
-  roster entry read from its `--help` on 2026-10-02 and a measured refusal:
-  `Error: Authentication required. Please run 'agent login' first, or set
-  CURSOR_API_KEY environment variable.` Its help is worth a note later — it
-  carries `-w/--worktree` and `~/.cursor/worktrees/`, which is the closest any
-  vendor comes to Milestone S's `OR-4` worktree-lease idea.
+  roster entry read from its `--help` on 2026-10-02. Its help is worth a note
+  later — it carries `-w/--worktree` and `~/.cursor/worktrees/`, which is the
+  closest any vendor comes to Milestone S's `OR-4` worktree-lease idea.
 
   **`kilo` and `kiro-cli` were installed on 2026-10-02 and both answer.** Until
   then both were candidates reported absent, and each turned out to need a
   different fix to be findable at all:
 
-  - **Installed is not the same as on `PATH`, and the product name is not always
-    the binary.** When kilo was checked it was not on `PATH` at all: its
-    installer had put it in `~/.kilo/bin/kilo` and changed no shell profile, so
-    a `PATH`-only lookup reported an executable, working binary as *missing* —
-    the same wrong answer as the agy bug in a new shape. A second kilo (an npm
-    global under mise's node, symlinked into
+  - **Installed is not the same as on `PATH`.** When kilo was checked it was not
+    on `PATH` at all: its installer had put it in `~/.kilo/bin/kilo` and changed
+    no shell profile, so a `PATH`-only lookup reported an executable, working
+    binary as *missing* — the same wrong answer as the agy bug in a new shape. A
+    second kilo (an npm global under mise's node, symlinked into
     `mise/installs/node/26.8.1/bin/kilo`) appeared on `PATH` shortly afterwards,
     which is why the entry now lists **two** executable names and why the
     reported install source is that npm shim rather than the dot-directory. The
     fallback is kept because the dot-directory copy still exists and is still not
     on `PATH`: a machine with only that copy would otherwise report kilo missing
-    again. kiro's binary is simply not called `kiro` — it is `kiro-cli`.
-  - **kiro's binary is not called `kiro`.** It is `kiro-cli`, so looking for the
-    product name found nothing. Every roster entry takes a list of binary names
-    for this reason.
+    again.
+  - **The product name is not always the binary name.** kiro's binary is
+    `kiro-cli`, so looking for `kiro` found nothing while the binary sat in
+    `~/.local/bin` answering `2.27.0`. Every roster entry takes a list of binary
+    names for this reason, and this is the first entry to need two.
 
   With both resolved, `kilo` completed the read-only task in 19.2 s and
   `kiro-cli` in 7.6 s, both twice with stable vocabularies. The candidate list
@@ -9058,7 +9069,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   a separate category from absent, because "nothing to measure here" and "we did
   not look at this" are different answers.
 
-  **Eight things only running them revealed**, each of which a help screen or the
+  **Nine things only running them revealed**, each of which a help screen or the
   S-0 table would have got wrong:
 
   - **A child process needs `PWD` set, not just its working directory.**
@@ -9100,6 +9111,12 @@ No hard dependencies, which is exactly why it is last: real value that should ne
     gap in what we know invisible. Fixing the false-negative case exposed this
     second failure: candidates are named deliberately, because `AR-2`'s
     done-when forbids scanning the filesystem for things that look like agents.
+  - **Being logged in is not the same as being able to run unattended.**
+    `cursor-agent` refused for two different reasons in sequence: first
+    `Authentication required`, then — once credentials existed —
+    `⚠ Workspace Trust Required` with a prompt it cannot show when there is no
+    terminal. One "did it work?" check would have read the second failure as a
+    broken agent rather than as a deliberate prompt going unanswered.
   - **Installed is not the same as on `PATH`, and the product name is not always
     the binary.** kilo's own installer put it in `~/.kilo/bin/` and changed no
     shell profile, so it read as "absent" while running; and kiro's binary is
