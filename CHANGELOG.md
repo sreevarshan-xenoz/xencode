@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an installed agent is no longer reported as missing
+
+`xencode interop` listed `agy` under "not installed here" on a machine where it
+was installed, working, and answering `1.2.13` from `~/.local/bin/agy`. The list
+of missing agents was a hand-written constant written once and never compared
+against the machine, so nothing would ever correct it.
+
+Whether a named agent is present is now decided by the same `PATH` lookup
+discovery already used, so an installed agent cannot be reported absent.
+`agy` gained a roster entry read from its own `--help`, and it now answers a real
+headless task with an event vocabulary of its own — `init`, `result`,
+`step_update` — which shares no word with the other four agents measured here,
+strengthening the case that a common protocol has to be built rather than
+inferred. Agents that are installed but not yet covered are reported as a
+separate category from absent ones, since "nothing to measure" and "we did not
+look" are different answers.
+
 ### Added — `xencode query --image` sends a picture with the prompt
 
 Images could only reach a model from the TUI's file explorer, so a script or a

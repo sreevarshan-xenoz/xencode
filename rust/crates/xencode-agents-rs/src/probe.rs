@@ -304,8 +304,14 @@ pub struct ProbeReport {
     /// What the repeats showed. Empty at `repeat = 1`, because one run is a
     /// reading and not a check.
     pub stability: Vec<Stability>,
-    /// Agents named by the proposal that are not installed here, with the reason.
+    /// Agents named by the proposal whose binary is not on this machine, with
+    /// the reason that matters. Measured by `PATH` lookup at report time, so it
+    /// cannot claim an installed agent is missing.
     pub absent: Vec<AbsentAgent>,
+    /// Agents that *are* installed but that this crate has no adapter for. Kept
+    /// separate from [`ProbeReport::absent`] because "nothing to measure here"
+    /// and "we did not look at this" are different answers.
+    pub unknown: Vec<AbsentAgent>,
     /// Anything the run could not answer, stated rather than left blank.
     pub unanswered: Vec<String>,
 }
@@ -759,12 +765,13 @@ pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
         captures,
         all_runs,
         stability,
-        absent: crate::roster::NOT_INSTALLED
-            .iter()
-            .map(|(name, why)| AbsentAgent {
-                name: (*name).to_string(),
-                why: (*why).to_string(),
-            })
+        absent: crate::roster::absent_agents()
+            .into_iter()
+            .map(|(name, why)| AbsentAgent { name, why })
+            .collect(),
+        unknown: crate::roster::installed_but_unknown()
+            .into_iter()
+            .map(|(name, why)| AbsentAgent { name, why })
             .collect(),
         unanswered,
     }
