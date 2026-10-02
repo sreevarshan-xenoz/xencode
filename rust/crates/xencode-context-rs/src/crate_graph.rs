@@ -286,7 +286,7 @@ mod tests {
             "both the normal (b) and dev (c) edges count as a depending on a"
         );
         assert!(
-            g.dependents.get("serde").is_none(),
+            !g.dependents.contains_key("serde"),
             "an external crate is not a node"
         );
     }
