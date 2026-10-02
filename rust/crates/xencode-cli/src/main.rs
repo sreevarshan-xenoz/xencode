@@ -5654,6 +5654,12 @@ fn run_interop(
                     println!("    {} — {}", unknown.name, unknown.why);
                 }
             }
+            if !report.parked.is_empty() {
+                println!("\n  stood down by the operator, so not run (name one with --agent to probe it anyway):");
+                for parked in &report.parked {
+                    println!("    {} — {}", parked.name, parked.why);
+                }
+            }
             if let Some(first) = report.stability.first() {
                 println!("\n  across {} run(s) each:", first.runs);
                 for verdict in &report.stability {

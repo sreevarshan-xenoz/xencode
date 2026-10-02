@@ -8995,21 +8995,29 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   runs (6 vs 7) while their vocabularies held — the count depends on how many
   tool calls a task happened to take, so a count is not a fingerprint either.
 
-  `AR-1` is **not** closed by this. **Four of eight stopped on an authentication
-  check** — claude, gemini, crush and cursor-agent — so their event vocabularies
-  are still unknown; `opencode`'s event **count** varied between runs (6 vs 7)
-  even though its vocabulary did not; there is no five-worker fan-out cost
+  `AR-1` is **not** closed by this. Four agents stopped on an authentication check
+  at one point or another — claude, gemini and crush still do, and cursor-agent
+  did until it was logged in and given `--trust`; the first three are now parked
+  by decision rather than measured, so their event vocabularies are unknown and
+  are recorded as unknown. `opencode`'s event **count** varied between runs (6 vs
+  7) even though its vocabulary did not; there is no five-worker fan-out cost
   figure; and every row here is one run of one task. What exists is the
   instrument, and an honest reading from it.
 
-  **Three of the ten answers are still login walls.** Seven agents have now been
-  seen to actually work: `opencode`, `cline`, `codex`, `agy`, `kilo`, `kiro-cli`
-  and `cursor-agent`. Each remaining refusal names its own remedy and none is a
-  machine change: `claude` wants `/login`, `gemini` wants an auth method in
-  `~/.gemini/settings.json`, `crush` wants an interactive provider. S-8 forbids
-  doing any of these on the user's behalf — they are browser flows belonging to a
-  human — so closing those three rows needs a decision from the operator, not
-  another probe. The measurement is blocked on accounts, not on code.
+  **Three agents are stood down by decision, and a report now says so.** The
+  operator does not need `claude`, `gemini` or `crush`, so on 2026-10-02 they were
+  parked. This is worth more than it looks: with them in the run, every report
+  carried three login walls that no amount of re-probing could clear, and a list
+  that always ends in three known-unfixable lines teaches a reader to skim past
+  the ones that are actionable. A park is a decision on the record, not a
+  deletion — the roster rows, the capability cells and the measured refusal for
+  each are all still there, because what is true about those agents has not
+  stopped being true. What changed is that a bare run covers seven agents and
+  prints who it skipped and why, and `--agent claude` still probes it, because
+  the operator naming an agent is a fresh decision.
+
+  The seven that run are `opencode`, `cline`, `codex`, `agy`, `kilo`,
+  `kiro-cli` and `cursor-agent`, all of which have now been seen to actually work.
 
   **Being logged in was necessary but not sufficient, which is the ninth thing
   only running it revealed.** Once `cursor-agent` had credentials it stopped
