@@ -644,6 +644,36 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Draft the release notes from the commits since the last release and the
+    /// changelog block this project keeps, and report where the two disagree
+    ReleaseNotes {
+        /// Start the range here instead of at the newest tag. An empty value
+        /// means no lower bound: every commit reachable from --to.
+        #[arg(long)]
+        from: Option<String>,
+
+        /// End the range here (default: HEAD)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Label the draft heading with this version instead of `[Unreleased]`
+        #[arg(long)]
+        release: Option<String>,
+
+        /// Write the draft here instead of printing it. A file that already
+        /// exists is not replaced unless --force says so.
+        #[arg(long)]
+        out: Option<PathBuf>,
+
+        /// Replace the file named by --out even if it is already there
+        #[arg(long)]
+        force: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Review the diff between a base branch and HEAD, file by file
     Review {
         /// Base branch, tag, commit — or HEAD for uncommitted changes
@@ -1381,6 +1411,14 @@ async fn main() {
             repeat,
             format,
         ),
+        Commands::ReleaseNotes {
+            from,
+            to,
+            release,
+            out,
+            force,
+            format,
+        } => run_release_notes(from, to, release, out, force, format),
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
             run_id,
@@ -5848,6 +5886,119 @@ fn human_duration(ns: f64) -> String {
     format!("{:.3} {}", ns / chosen.0, chosen.1)
 }
 
+/// `1 entry`, `3 commits` — the coverage counts are read by a person, so they
+/// are not printed as `1 entr(y|ies)`.
+fn plural_count(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
+/// QO-6 — put the release notes together from the two places this project
+/// already writes about what shipped: the commits since the last release, and
+/// the changelog's own unreleased block.
+///
+/// The two disagree in both directions and both disagreements are the product:
+/// work that landed with no entry behind it never reaches a reader, and an entry
+/// whose commit sits below the release line would be announced twice. The output
+/// is a draft — to standard output, or to a path that must not already exist
+/// unless `--force` says otherwise, because a person is meant to edit it after.
+fn run_release_notes(
+    from: Option<String>,
+    to: Option<String>,
+    release: Option<String>,
+    out: Option<PathBuf>,
+    force: bool,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_context_rs::releasenotes;
+
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let draft = releasenotes::draft(&cwd, from.as_deref(), to.as_deref())?;
+    let markdown = releasenotes::to_markdown(&draft, release.as_deref());
+
+    let written = match &out {
+        Some(path) => {
+            let path = if path.is_absolute() {
+                path.clone()
+            } else {
+                cwd.join(path)
+            };
+            releasenotes::write_draft(&path, &markdown, force)?;
+            Some(path)
+        }
+        None => None,
+    };
+
+    let named = draft.commits.len() - draft.uncovered.len();
+    match format {
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "to": draft.to,
+                "from": draft.from,
+                "range_note": draft.range_note,
+                "entries": draft.entries.iter().map(|entry| serde_json::json!({
+                    "category": entry.category,
+                    "title": entry.title,
+                    "ids": entry.ids,
+                })).collect::<Vec<_>>(),
+                "commits": draft.commits.len(),
+                "named_by_an_entry": named,
+                "covered_ids": draft.covered_ids(),
+                "uncovered": draft.uncovered.iter().map(|commit| serde_json::json!({
+                    "hash": releasenotes::short_hash(&commit.hash),
+                    "subject": commit.subject,
+                    "ids": commit.ids,
+                })).collect::<Vec<_>>(),
+                "unmatched": draft.unmatched.iter().map(|entry| serde_json::json!({
+                    "title": entry.title,
+                    "ids": entry.ids,
+                })).collect::<Vec<_>>(),
+                "out": written.as_ref().map(|path| path.display().to_string()),
+            }))
+            .map_err(|e| e.to_string())?
+        ),
+        OutputFormat::Text => {
+            match &written {
+                Some(path) => {
+                    println!("  draft written to {}", path.display());
+                    println!("  {}", draft.range_note);
+                    println!(
+                        "  {}, {} of them named by the changelog's unreleased block ({})",
+                        plural_count(draft.commits.len(), "commit", "commits"),
+                        named,
+                        plural_count(draft.entries.len(), "entry", "entries"),
+                    );
+                    if !draft.uncovered.is_empty() {
+                        println!(
+                            "  {}, listed in the draft",
+                            plural_count(
+                                draft.uncovered.len(),
+                                "commit no entry accounts for",
+                                "commits no entry accounts for"
+                            )
+                        );
+                    }
+                    if !draft.unmatched.is_empty() {
+                        println!(
+                            "  {}, listed in the draft",
+                            plural_count(
+                                draft.unmatched.len(),
+                                "entry names no commit in the range",
+                                "entries name no commit in the range"
+                            )
+                        );
+                    }
+                    if draft.uncovered.is_empty() && draft.unmatched.is_empty() {
+                        println!("  nothing to reconcile: every commit is explained, every entry matches");
+                    }
+                }
+                None => print!("{markdown}"),
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Line numbers as compact ranges, so `1,2,3,7,9,10` reads as `1-3, 7, 9-10`.
 fn join(lines: &[u32]) -> String {
     let mut out: Vec<String> = Vec::new();
@@ -7018,8 +7169,8 @@ async fn run_tui() -> Result<(), String> {
 mod tests {
     use super::{
         attach_images_to_final_user_message, compute_advise, format_image_text, human_duration,
-        join, parse_comma_list, resolve_audit_path, resolve_bind, Cli, Commands, GenerateShell,
-        PerfAction, SessionAction,
+        join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind, Cli, Commands,
+        GenerateShell, OutputFormat, PerfAction, SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -7606,6 +7757,78 @@ mod tests {
         assert_eq!(human_duration(1_038_604.0), "1.039 ms");
         assert_eq!(human_duration(801_449_095.0), "801.449 ms");
         assert_eq!(human_duration(1_500_000_000.0), "1.500 s");
+    }
+
+    /// QO-6 — the whole flag set, parsed.
+    #[test]
+    fn release_notes_parses_every_flag_it_offers() {
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "release-notes",
+            "--from",
+            "v2.1.0",
+            "--to",
+            "main",
+            "--release",
+            "2.2.0",
+            "--out",
+            "draft/notes.md",
+            "--force",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::ReleaseNotes {
+                from,
+                to,
+                release,
+                out,
+                force,
+                format,
+            }) => {
+                assert_eq!(from.as_deref(), Some("v2.1.0"));
+                assert_eq!(to.as_deref(), Some("main"));
+                assert_eq!(release.as_deref(), Some("2.2.0"));
+                assert_eq!(out, Some(path("draft/notes.md")));
+                assert!(force);
+                assert!(matches!(format, OutputFormat::Json));
+            }
+            _ => panic!("expected release-notes"),
+        }
+    }
+
+    #[test]
+    fn release_notes_without_flags_drafts_head_as_an_unreleased_block() {
+        let cli = Cli::try_parse_from(["xencode", "release-notes"]).unwrap();
+        match cli.command {
+            Some(Commands::ReleaseNotes {
+                from,
+                to,
+                release,
+                out,
+                force,
+                format,
+            }) => {
+                assert!(from.is_none(), "the newest tag picks the range");
+                assert!(to.is_none(), "the default upper end is HEAD");
+                assert!(
+                    release.is_none(),
+                    "no version is invented for the heading: it stays [Unreleased]"
+                );
+                assert!(out.is_none(), "the draft goes to standard output");
+                assert!(!force, "an existing file is not replaced by default");
+                assert!(matches!(format, OutputFormat::Text));
+            }
+            _ => panic!("expected release-notes"),
+        }
+    }
+
+    #[test]
+    fn a_count_next_to_its_noun_reads_as_english() {
+        assert_eq!(plural_count(1, "entry", "entries"), "1 entry");
+        assert_eq!(plural_count(0, "entry", "entries"), "0 entries");
+        assert_eq!(plural_count(131, "entry", "entries"), "131 entries");
     }
 
     fn path(p: &str) -> std::path::PathBuf {

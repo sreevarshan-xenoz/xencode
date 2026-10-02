@@ -4,7 +4,7 @@
 //! the workspace. All paths are returned with `/` separators.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// branch + HEAD + dirty file count for a workspace.
@@ -156,6 +156,19 @@ pub fn git_diff_file(root: &Path, base: &str, path: &str) -> Result<String, Stri
 
 pub fn is_git_repo(root: &Path) -> bool {
     git_stdout(root, &["rev-parse", "--git-dir"]).is_ok()
+}
+
+/// The directory at the top of the repository that contains `dir`, as git
+/// reports it, or `None` when `dir` is not inside one. Git resolves a
+/// subdirectory to its own top level, which is what lets a command started
+/// anywhere in the tree still find the files that live at the root —
+/// `CHANGELOG.md`, for instance.
+pub fn repo_toplevel(dir: &Path) -> Option<PathBuf> {
+    git_stdout(dir, &["rev-parse", "--show-toplevel"])
+        .ok()
+        .map(|out| out.trim().to_string())
+        .filter(|out| !out.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Set of repo-relative paths (`/` separators) git considers part of the

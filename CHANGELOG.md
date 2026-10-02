@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QO-6`: `xencode release-notes` — the notes drafted from what the repository already says
+
+Releasing meant re-reading `git log` by hand and hoping nothing that shipped was
+left out of the announcement. `xencode release-notes` reads the two places this
+project already writes about what shipped and puts them side by side: the commits
+since the newest tag, and the `## [Unreleased]` block of this file.
+
+Nothing is parsed out of the commit subjects, and no `feat:` or `fix:` vocabulary
+is introduced. The 900-odd messages here are already sentences — "Add
+`xencode perf` (QO-4): measure the hot paths, and decline to judge a noisy run" —
+and a prefix would label a subject that already says what it is. The categories
+are this file's own `### Added` / `### Changed` / `### Fixed` headings, kept in the
+order the file lists them; what links an entry to a commit is the plan id the
+heading names, matched against the ids the commit subjects name.
+
+The disagreement between the two sources is the useful part, so both directions
+are printed. Commits no entry accounts for are work that would go out in a release
+nobody was told about; entries naming no commit in the range are either work that
+landed before the range opened or an id that does not match anything. Run against
+this repository, where there is no tag at all, the draft covers 903 commits, says
+plainly that it is doing so, names 33 of them from 131 unreleased entries, and
+lists 870 commits with nothing written about them and 3 entries whose commit does
+not carry the id. A list that long cannot be read, so the draft names the first 50
+and counts the rest, and points at `--from <ref>` to put the range around one
+release. With a tag present the tag is the range, and work below it is not
+announced twice.
+
+The output is a draft in the form this file already uses: to standard output, or to
+`--out <path>`, which refuses a file that already exists unless `--force` says
+otherwise, because the next edit to that file is meant to be a person's. Nothing
+here rewrites `CHANGELOG.md`. A repository with no unreleased block says so instead
+of printing nothing, and a directory that is not inside a git repository is named
+rather than measured against a history it does not have. Nineteen tests cover the
+block parser, the id pattern against the shapes a changelog actually contains
+(`xencode-context-rs`, `sha1-256`, `--flag-1`, `2.1.0 - 2026-03-30`), the range
+rules for tags and explicit bounds, the two coverage lists, the markdown, and the
+refusal to overwrite — including a draft started in a subdirectory, which has to
+find the changelog at the top.
+
 ### Added — `QO-4`: `xencode perf` — a regression harness that declines to guess
 
 Until now there was no history of how fast anything here is: the workspace had
