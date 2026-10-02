@@ -2479,6 +2479,105 @@ with instrumentation in its own target directory — 272 s cold and 7.2 GB here 
 then reuses it, so later runs are much cheaper. The `build:` line always reports
 which kind of run happened.
 
+### `xencode perf [record|check|show] [--filter <name>] [--alert-pct N] [--alpha A] [--format text|json]`
+
+Measure the workspace's hot paths against a stored baseline, and say so when the
+machine is too noisy to answer the question at all.
+
+```bash
+xencode perf record            # measure all seven paths, store them as the baseline
+xencode perf check             # measure them again and compare
+xencode perf check --filter retrieve   # compare only the paths whose name contains this
+xencode perf show              # the stored baseline, measuring nothing
+```
+
+`xencode perf record` deliberately takes no `--filter`: a baseline covering three
+of seven paths is not a baseline, and every one of them has to be measured on a
+quiet machine for the numbers stored together to mean anything.
+
+Seven criterion benchmarks run over **this repository on disk** — the index scan,
+symbol extraction over every Rust file, the dependency-graph build, BM25 scoring,
+hybrid retrieval, conversation compaction and the token trimmer — ten samples
+each, in `rust/crates/xencode-context-rs/benches/hot_paths.rs`. Each path then
+gets a Mann-Whitney test of its current samples against the stored ones. Below
+1,000,000 possible splits of the two groups the p-value is computed exactly, by
+enumerating every way the pooled ranks could have been dealt; beyond that the
+tie-corrected normal approximation stands in, and the report prints which of the
+two produced the number you are reading.
+
+The comparison is only made when both runs measured the same tree: the baseline
+remembers how many files it was recorded over, and a different count refuses
+every path rather than comparing a 200-file index against a 340-file one.
+
+```
+  cargo bench -p xencode-context-rs --bench hot_paths -- extract_symbols
+  200 file(s) measured, baseline recorded over 200, in 12.3 s
+  alert at 5% of the baseline, judged at α = 0.05, verdicts refused past a 5% spread
+
+  index_build/extract_symbols
+    REGRESSION   delta +16.55%   p = 0.0000 (exact permutation)   spread 4.9%
+    the samples separate at the 5% level (p = 0.0000) and the path runs +16.55% slower than the baseline
+
+  truncation/truncate_to_tokens
+    not measured  delta      —   p =   —   (not tested)   spread   —
+    in the baseline but not measured by this run
+
+  7 path(s) compared: 1 regression(s), 0 refusal(s)
+```
+
+That is the exit-1 case: `error: 1 hot path(s) measurably slower than the
+baseline`. The run above measured one path with `--filter`, which is why the
+other six report `not measured` — a path left out of the run is named as left
+out, and never reuses whatever sample file the previous run happened to leave
+behind. With no filter, the same seven paths against the same baseline and no
+code change read as `7 path(s) compared: 0 regression(s), 0 refusal(s)` and
+`exit 0`, every line `no change` and every delta inside ±2.2%.
+
+**A verdict needs a quiet machine, and this refuses to invent one.** Ten timing
+samples on an ordinary laptop sit about 1.6% apart at the best of times, so the
+spread of a run is checked before its number is used: if either the new samples
+or the stored baseline vary by more than 5% of their own level, that path reports
+`NO VERDICT` and says which side was too wide, instead of calling noise a
+regression.
+
+```
+  index_build/scan_tree
+    NO VERDICT   delta +80.70%   p = 0.0000 (exact permutation)   spread 6.1%
+    this run's spread is 6.1% of its own level, past the 5% a verdict is allowed to rest on
+
+  note: at least one path was measured above the 5% spread a verdict is allowed to rest on — this machine was doing something else
+
+  7 path(s) compared: 0 regression(s), 1 refusal(s)
+```
+
+That is a run made while four other processes were burning cores. `+80.70%` is
+what contention did to the wall-clock of a directory walk, and the harness
+declines to call it a regression — exit 0, with the refusal printed and counted,
+because "the machine was busy" is a finding, not a failure. `perf record` applies
+the same rule before storing anything: `error: refused to record a baseline from
+a run wider than 5% spread on: index_build/extract_symbols at 6.6%; wait for the
+machine to go quiet, or pass --force to record it anyway`.
+
+The other branch that is not a failure is a difference too small to flag:
+
+```
+  retrieve/bm25_build_and_score
+    no change    delta +2.18%   p = 0.0355 (exact permutation)   spread 2.0%
+    separated at p = 0.0355 but only +2.18% away, under the 5% this harness reports as a change
+```
+
+The samples did separate, but by less than the alert level, so it is not reported
+as a change — a harness that flagged every statistically-visible 1% drift would be
+switched off within a week.
+
+The baseline lives at `.xencode/perf/baseline.json` at the repository root and is
+not committed: it is a record of one machine on one day, and comparing it across
+those is the mistake this command exists to prevent.
+
+`--format json` emits the machine-readable form: for `check`, the medians in
+nanoseconds, the delta, the p-value with its method, the spread and the outcome
+per path; for `show`, the stored samples per path, unscaled.
+
 ### `xencode test [--package <name>] [--retries N] [--stress-count N] [--timeout 1800] [--format text|json]`
 
 Run the test suite through `cargo nextest`, and **never call a test that only

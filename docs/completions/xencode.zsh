@@ -948,6 +948,81 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(perf)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__perf_commands" \
+"*::: :->perf" \
+&& ret=0
+
+    case $state in
+    (perf)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-perf-command-$line[1]:"
+        case $line[1] in
+            (record)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'--force[Store it even if a path was measured too widely to support a verdict]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(check)
+_arguments "${_arguments_options[@]}" : \
+'--filter=[Measure only the paths whose name contains this]:FILTER:_default' \
+'--alert-pct=[The slowdown that raises a flag, as a percentage of the baseline]:ALERT_PCT:_default' \
+'--alpha=[The significance level a verdict is judged at]:ALPHA:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__perf__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-perf-help-command-$line[1]:"
+        case $line[1] in
+            (record)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(check)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (test)
 _arguments "${_arguments_options[@]}" : \
 '*--package=[Only these packages (repeatable)]:PACKAGES:_default' \
@@ -1805,6 +1880,34 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(perf)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__perf_commands" \
+"*::: :->perf" \
+&& ret=0
+
+    case $state in
+    (perf)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-perf-command-$line[1]:"
+        case $line[1] in
+            (record)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(check)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (test)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2034,6 +2137,7 @@ _xencode_commands() {
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
+'perf:Measure the hot paths against a stored baseline, and refuse the verdict when the run is too noisy to support one' \
 'test:Run the tests, and never call a test that only passed on retry a pass' \
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
@@ -2431,6 +2535,7 @@ _xencode__subcmd__help_commands() {
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
+'perf:Measure the hot paths against a stored baseline, and refuse the verdict when the run is too noisy to support one' \
 'test:Run the tests, and never call a test that only passed on retry a pass' \
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
@@ -2790,6 +2895,30 @@ _xencode__subcmd__help__subcmd__models__subcmd__list_commands() {
 _xencode__subcmd__help__subcmd__mutants_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help mutants commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__perf_commands] )) ||
+_xencode__subcmd__help__subcmd__perf_commands() {
+    local commands; commands=(
+'record:Measure every hot path and store those samples as the baseline' \
+'check:Measure the hot paths and compare them against the stored baseline' \
+'show:Show the recorded baseline without measuring anything' \
+    )
+    _describe -t commands 'xencode help perf commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__perf__subcmd__check_commands] )) ||
+_xencode__subcmd__help__subcmd__perf__subcmd__check_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help perf check commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__perf__subcmd__record_commands] )) ||
+_xencode__subcmd__help__subcmd__perf__subcmd__record_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help perf record commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__perf__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__perf__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help perf show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__plugin_commands] )) ||
 _xencode__subcmd__help__subcmd__plugin_commands() {
@@ -3304,6 +3433,61 @@ _xencode__subcmd__models__subcmd__list_commands() {
 _xencode__subcmd__mutants_commands() {
     local commands; commands=()
     _describe -t commands 'xencode mutants commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf_commands] )) ||
+_xencode__subcmd__perf_commands() {
+    local commands; commands=(
+'record:Measure every hot path and store those samples as the baseline' \
+'check:Measure the hot paths and compare them against the stored baseline' \
+'show:Show the recorded baseline without measuring anything' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode perf commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__check_commands] )) ||
+_xencode__subcmd__perf__subcmd__check_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf check commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__help_commands] )) ||
+_xencode__subcmd__perf__subcmd__help_commands() {
+    local commands; commands=(
+'record:Measure every hot path and store those samples as the baseline' \
+'check:Measure the hot paths and compare them against the stored baseline' \
+'show:Show the recorded baseline without measuring anything' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode perf help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__help__subcmd__check_commands] )) ||
+_xencode__subcmd__perf__subcmd__help__subcmd__check_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf help check commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__perf__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__help__subcmd__record_commands] )) ||
+_xencode__subcmd__perf__subcmd__help__subcmd__record_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf help record commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__perf__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__record_commands] )) ||
+_xencode__subcmd__perf__subcmd__record_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf record commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__perf__subcmd__show_commands] )) ||
+_xencode__subcmd__perf__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode perf show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__plugin_commands] )) ||
 _xencode__subcmd__plugin_commands() {

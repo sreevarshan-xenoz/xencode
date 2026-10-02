@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QO-4`: `xencode perf` — a regression harness that declines to guess
+
+Until now there was no history of how fast anything here is: the workspace had
+no benchmarks at all, so every claim about a change being slower was a claim
+about a number nobody had ever measured. `xencode perf` adds the measurement and
+the judgement together.
+
+Seven benchmarks run over this repository read from disk — the index walk, symbol
+extraction over every Rust file, the dependency-graph build, BM25 scoring, hybrid
+retrieval, transcript compaction and the token trimmer — ten samples per path, in
+`rust/crates/xencode-context-rs/benches/hot_paths.rs`. `xencode perf record`
+stores those samples as the baseline; `xencode perf check` measures again and
+compares each path with a Mann-Whitney test of the new samples against the stored
+ones, printing the percentage the path moved by, the p-value, and which method
+produced it — exact, by enumerating every way the pooled ranks could have been
+dealt into two groups, whenever that is under a million splits, and the
+tie-corrected normal approximation beyond it. `xencode perf show` prints the
+stored baseline without measuring.
+
+The verdict is withheld when the run cannot support one, and that is the part
+this harness exists for. Ten timing samples on this laptop sit about 1.6% apart
+even when nothing else is running, so a comparison built from one number per side
+would report noise as a regression. Before any path is judged, the spread of both
+sides is checked: past 5% of its own level, the path prints `NO VERDICT` with the
+reason and the refusal is counted separately from a clean bill of health. The same
+rule guards the baseline itself — `perf record` refuses to store a wide run, and
+says to wait for the machine to go quiet or pass `--force`.
+
+Three more refusals keep a comparison honest. The baseline remembers how many
+files it was recorded over, so a run against a different tree refuses every path
+rather than comparing a 200-file index against a 340-file one. A path that is in
+the baseline but was not measured now — which is what happens with `--filter` —
+reports `not measured`, because the previous run's sample file is still on disk
+and would otherwise read as a clean result; the files a filtered run does not
+overwrite are cleared before it starts. And a difference that is statistically
+separated but under the alert level prints as `no change` with the numbers shown,
+so a 2% move is never silently promoted to a finding.
+
+Verified live, against one baseline recorded over 200 files on a quiet machine:
+with an artificial extra parse inserted into the symbol extraction path,
+`xencode perf check --filter extract_symbols` reported `REGRESSION delta +16.55%
+p = 0.0000 (exact permutation)` and exited 1; with the injection removed and the
+code byte-for-byte what it was, the full run reported
+`7 path(s) compared: 0 regression(s), 0 refusal(s)` and exited 0, with every
+delta inside ±2.2%. A run made while four processes were burning cores produced
+`NO VERDICT delta +80.70% … this run's spread is 6.1% of its own level` — the
+false regression refused, not reported. Twenty tests cover the ranks, the exact
+p-value against a hand-computed split, the spread refusals, the tree mismatch, the
+filtered run and the baseline round trip, plus two CLI parse tests and one for
+the duration formatting.
+
 ### Added — `QD-2`: `/impact <file>` — the blast-radius panel in the TUI
 
 `xencode impact <file>` prints three layers of evidence about who a change to

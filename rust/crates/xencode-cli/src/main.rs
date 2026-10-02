@@ -600,6 +600,13 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Measure the hot paths against a stored baseline, and refuse the verdict
+    /// when the run is too noisy to support one
+    Perf {
+        #[command(subcommand)]
+        action: PerfAction,
+    },
+
     /// Run the tests, and never call a test that only passed on retry a pass
     Test {
         /// Only these packages (repeatable)
@@ -1112,6 +1119,48 @@ enum MemoryAction {
 }
 
 #[derive(Subcommand)]
+enum PerfAction {
+    /// Measure every hot path and store those samples as the baseline.
+    ///
+    /// There is no filter here on purpose: a baseline that covers three of seven
+    /// paths is not a baseline, and the whole tree has to be quiet for it to mean
+    /// anything.
+    Record {
+        /// Store it even if a path was measured too widely to support a verdict
+        #[arg(long)]
+        force: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+    /// Measure the hot paths and compare them against the stored baseline
+    Check {
+        /// Measure only the paths whose name contains this
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// The slowdown that raises a flag, as a percentage of the baseline
+        #[arg(long, default_value_t = 5.0)]
+        alert_pct: f64,
+
+        /// The significance level a verdict is judged at
+        #[arg(long, default_value_t = 0.05)]
+        alpha: f64,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+    /// Show the recorded baseline without measuring anything
+    Show {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Subcommand)]
 enum WorktreeAction {
     /// List git worktrees of the current repository
     List,
@@ -1312,6 +1361,7 @@ async fn main() {
             show_missing_lines,
             format,
         } => run_cov(base, test, show_missing_lines, format),
+        Commands::Perf { action } => run_perf(action),
         Commands::Test {
             packages,
             retries,
@@ -5543,6 +5593,261 @@ fn run_cov(
     }
 }
 
+/// QO-4 — measure the hot paths, and decide whether they moved.
+///
+/// The table is the product here: a number without a verdict is what every
+/// benchmark already prints, and a verdict the run cannot support is worse than
+/// none. So a path whose samples are more than 5% spread reports `NO VERDICT`
+/// with the reason, and a baseline measured over a different tree refuses every
+/// comparison in it rather than quietly reporting the difference as a change.
+fn run_perf(action: PerfAction) -> Result<(), String> {
+    use xencode_context_rs::perf;
+
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let repo_root = perf::state_root(&cwd);
+    let manifest_root = xencode_context_rs::verify::manifest_dir(&cwd)?;
+
+    match action {
+        PerfAction::Show { format } => show_baseline(&repo_root, format),
+        PerfAction::Record { force, format } => {
+            let measured = perf::measure(&manifest_root, None)?;
+            let baseline = perf::record_baseline(&repo_root, &measured, force)?;
+            let path = perf::Baseline::path_for(&repo_root);
+            if matches!(format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "command": measured.command,
+                        "seconds": measured.took.as_secs_f64(),
+                        "corpus_files": baseline.corpus_files,
+                        "baseline": path.display().to_string(),
+                        "forced": force,
+                        "paths": baseline.benches.values().map(perf_samples_json).collect::<Vec<_>>(),
+                    }))
+                    .map_err(|e| e.to_string())?
+                );
+            } else {
+                println!("  {}", measured.command);
+                println!(
+                    "  measured {} path(s) over {} file(s) in {:.1} s",
+                    baseline.benches.len(),
+                    baseline.corpus_files,
+                    measured.took.as_secs_f64()
+                );
+                for samples in baseline.benches.values() {
+                    println!(
+                        "  {:<34}  {:>12}  ({} samples, {:.1}% spread)",
+                        samples.id,
+                        human_duration(samples.median()),
+                        samples.n(),
+                        samples.cv().unwrap_or_default() * 100.0
+                    );
+                }
+                println!("\n  baseline written to {}", path.display());
+                if force {
+                    let noisy = perf::noisy_paths(&measured);
+                    if !noisy.is_empty() {
+                        println!(
+                            "  note: recorded despite being forced; {} measured wider than \
+                             the {:.0}% a verdict rests on, and a comparison against it will \
+                             refuse",
+                            noisy.join(", "),
+                            perf::MAX_CV * 100.0
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        PerfAction::Check {
+            filter,
+            alert_pct,
+            alpha,
+            format,
+        } => {
+            let report = perf::check(
+                &repo_root,
+                &manifest_root,
+                filter.as_deref(),
+                alert_pct,
+                alpha,
+            )?;
+            let regressions = report.regressions();
+            let refusals = report.refusals();
+
+            if matches!(format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "command": report.command,
+                        "seconds": report.took.as_secs_f64(),
+                        "corpus_files": report.corpus_files,
+                        "baseline_corpus_files": report.baseline_corpus_files,
+                        "corpus_mismatch": report.corpus_mismatch,
+                        "alert_pct": alert_pct,
+                        "alpha": alpha,
+                        "max_cv": perf::MAX_CV,
+                        "regressions": regressions.len(),
+                        "refusals": refusals.len(),
+                        "notes": report.notes,
+                        "paths": report.comparisons.iter().map(perf_comparison_json).collect::<Vec<_>>(),
+                    }))
+                    .map_err(|e| e.to_string())?
+                );
+            } else {
+                println!("  {}", report.command);
+                println!(
+                    "  {} file(s) measured, baseline recorded over {}, in {:.1} s",
+                    report.corpus_files,
+                    report
+                        .baseline_corpus_files
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "nothing".to_string()),
+                    report.took.as_secs_f64()
+                );
+                println!(
+                    "  alert at {alert_pct}% of the baseline, judged at α = {alpha}, verdicts \
+                     refused past a {:.0}% spread",
+                    perf::MAX_CV * 100.0
+                );
+                for comparison in &report.comparisons {
+                    let delta = comparison
+                        .delta_pct
+                        .map(|d| format!("{d:+.2}%"))
+                        .unwrap_or_else(|| "     —".to_string());
+                    let p = comparison
+                        .p_value
+                        .map(|p| format!("{p:.4}"))
+                        .unwrap_or_else(|| "  —  ".to_string());
+                    let spread = comparison
+                        .cv
+                        .map(|c| format!("{:.1}%", c * 100.0))
+                        .unwrap_or_else(|| "  —  ".to_string());
+                    println!(
+                        "\n  {}\n    {:<11}  delta {delta}   p = {p} ({})   spread {spread}",
+                        comparison.id,
+                        comparison.outcome.label(),
+                        comparison.p_value_method.unwrap_or("not tested"),
+                    );
+                    if let Some(reason) = &comparison.reason {
+                        println!("    {reason}");
+                    }
+                }
+                for note in &report.notes {
+                    println!("\n  note: {note}");
+                }
+                println!(
+                    "\n  {} path(s) compared: {} regression(s), {} refusal(s)",
+                    report.comparisons.len(),
+                    regressions.len(),
+                    refusals.len()
+                );
+            }
+
+            if regressions.is_empty() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{} hot path(s) measurably slower than the baseline",
+                    regressions.len()
+                ))
+            }
+        }
+    }
+}
+
+fn perf_samples_json(samples: &xencode_context_rs::perf::Samples) -> serde_json::Value {
+    serde_json::json!({
+        "id": samples.id,
+        "samples": samples.n(),
+        "median_ns": samples.median(),
+        "mean_ns": samples.mean(),
+        "cv": samples.cv(),
+    })
+}
+
+fn perf_comparison_json(comparison: &xencode_context_rs::perf::Comparison) -> serde_json::Value {
+    serde_json::json!({
+        "id": comparison.id,
+        "outcome": comparison.outcome.label(),
+        "baseline_median_ns": comparison.baseline_median_ns,
+        "current_median_ns": comparison.current_median_ns,
+        "delta_pct": comparison.delta_pct,
+        "p_value": comparison.p_value,
+        "p_value_method": comparison.p_value_method,
+        "cv": comparison.cv,
+        "reason": comparison.reason,
+    })
+}
+
+/// The recorded baseline and nothing else — no measurement, no verdict.
+fn show_baseline(repo_root: &std::path::Path, format: OutputFormat) -> Result<(), String> {
+    use xencode_context_rs::perf;
+
+    let path = perf::Baseline::path_for(repo_root);
+    let Some(baseline) = perf::Baseline::load(repo_root)? else {
+        return Err(format!(
+            "no baseline recorded yet — run `xencode perf record` (it would write {})",
+            path.display()
+        ));
+    };
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&baseline).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    println!("  baseline at {}", path.display());
+    println!(
+        "  recorded over {} file(s) in {}",
+        baseline.corpus_files, baseline.recorded_in
+    );
+    let age_days = {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now.saturating_sub(baseline.recorded_unix) / 86_400
+    };
+    println!(
+        "  {} day(s) old, {} path(s)",
+        age_days,
+        baseline.benches.len()
+    );
+    for samples in baseline.benches.values() {
+        println!(
+            "  {:<34}  {:>12}  ({} samples, {:.1}% spread)",
+            samples.id,
+            human_duration(samples.median()),
+            samples.n(),
+            samples.cv().unwrap_or_default() * 100.0
+        );
+    }
+    Ok(())
+}
+
+/// A duration in nanoseconds, in the unit the number actually reads in.
+///
+/// The hot paths span five orders of magnitude — the token trimmer runs in
+/// microseconds, a whole-tree symbol pass in seconds — so a fixed unit gives a
+/// column of either `0.015` or `801449.095`.
+fn human_duration(ns: f64) -> String {
+    const UNITS: [(f64, &str); 4] = [
+        (1.0, "ns"),
+        (1_000.0, "µs"),
+        (1_000_000.0, "ms"),
+        (1_000_000_000.0, "s"),
+    ];
+    let mut chosen = UNITS[0];
+    for unit in UNITS {
+        if ns >= unit.0 {
+            chosen = unit;
+        }
+    }
+    format!("{:.3} {}", ns / chosen.0, chosen.1)
+}
+
 /// Line numbers as compact ranges, so `1,2,3,7,9,10` reads as `1-3, 7, 9-10`.
 fn join(lines: &[u32]) -> String {
     let mut out: Vec<String> = Vec::new();
@@ -6712,9 +7017,9 @@ async fn run_tui() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        attach_images_to_final_user_message, compute_advise, format_image_text, join,
-        parse_comma_list, resolve_audit_path, resolve_bind, Cli, Commands, GenerateShell,
-        SessionAction,
+        attach_images_to_final_user_message, compute_advise, format_image_text, human_duration,
+        join, parse_comma_list, resolve_audit_path, resolve_bind, Cli, Commands, GenerateShell,
+        PerfAction, SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -7212,6 +7517,95 @@ mod tests {
             }
             _ => panic!("expected cov"),
         }
+    }
+
+    /// QO-4's two thresholds are product decisions, so the defaults are pinned
+    /// here as well as in the module: alert at 5% of the baseline, judge at
+    /// α = 0.05.
+    #[test]
+    fn perf_check_defaults_to_a_five_percent_alert_judged_at_five_percent_significance() {
+        let cli = Cli::try_parse_from(["xencode", "perf", "check"]).unwrap();
+        match cli.command {
+            Some(Commands::Perf {
+                action:
+                    PerfAction::Check {
+                        filter,
+                        alert_pct,
+                        alpha,
+                        ..
+                    },
+            }) => {
+                assert!(filter.is_none());
+                assert_eq!(alert_pct, 5.0);
+                assert_eq!(alpha, 0.05);
+            }
+            _ => panic!("expected perf check"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "perf",
+            "check",
+            "--filter",
+            "retrieve",
+            "--alert-pct",
+            "2.5",
+            "--alpha",
+            "0.01",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Perf {
+                action:
+                    PerfAction::Check {
+                        filter,
+                        alert_pct,
+                        alpha,
+                        ..
+                    },
+            }) => {
+                assert_eq!(filter.as_deref(), Some("retrieve"));
+                assert_eq!(alert_pct, 2.5);
+                assert_eq!(alpha, 0.01);
+            }
+            _ => panic!("expected perf check"),
+        }
+    }
+
+    #[test]
+    fn perf_record_takes_no_filter_because_a_partial_baseline_is_not_a_baseline() {
+        let cli = Cli::try_parse_from(["xencode", "perf", "record", "--force"]).unwrap();
+        match cli.command {
+            Some(Commands::Perf {
+                action: PerfAction::Record { force, .. },
+            }) => assert!(force),
+            _ => panic!("expected perf record"),
+        }
+        let rejected = Cli::try_parse_from(["xencode", "perf", "record", "--filter", "retrieve"]);
+        assert!(
+            rejected.is_err(),
+            "recording three of seven paths would replace the baseline with three of seven \
+             paths, so the flag is not offered"
+        );
+
+        let cli = Cli::try_parse_from(["xencode", "perf", "show"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Perf {
+                action: PerfAction::Show { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn a_measured_path_reads_in_the_unit_its_number_belongs_in() {
+        // The seven paths span five orders of magnitude, so a fixed unit would
+        // print either 0.016 or 801449.095.
+        assert_eq!(human_duration(999.0), "999.000 ns");
+        assert_eq!(human_duration(15_842.0), "15.842 µs");
+        assert_eq!(human_duration(1_038_604.0), "1.039 ms");
+        assert_eq!(human_duration(801_449_095.0), "801.449 ms");
+        assert_eq!(human_duration(1_500_000_000.0), "1.500 s");
     }
 
     fn path(p: &str) -> std::path::PathBuf {
