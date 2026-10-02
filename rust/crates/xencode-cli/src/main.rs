@@ -1358,7 +1358,7 @@ async fn main() {
             deps,
             selfcheck,
             format,
-        } => run_doctor(env, deps, selfcheck, format),
+        } => run_doctor(env, deps, selfcheck, format).await,
         Commands::Session { action } => run_session(action),
         Commands::Verify {
             skip,
@@ -4524,7 +4524,12 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
-fn run_doctor(env: bool, deps: bool, selfcheck: bool, format: OutputFormat) -> Result<(), String> {
+async fn run_doctor(
+    env: bool,
+    deps: bool,
+    selfcheck: bool,
+    format: OutputFormat,
+) -> Result<(), String> {
     use xencode_context_rs::doctor;
 
     if !env && !deps && !selfcheck {
@@ -4534,7 +4539,7 @@ fn run_doctor(env: bool, deps: bool, selfcheck: bool, format: OutputFormat) -> R
         );
     }
     if selfcheck {
-        return run_selfcheck(format);
+        return run_selfcheck(format).await;
     }
     if deps {
         return run_doctor_deps(format);
@@ -4738,7 +4743,7 @@ fn run_doctor_deps(format: OutputFormat) -> Result<(), String> {
     }
 }
 
-fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
+async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
     use xencode_context_rs::doctor as doc;
 
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -4750,107 +4755,112 @@ fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
         doc::check_cache_writable(&xencode_dir),
     ];
 
-    // Providers: locals always probed, cloud only when a key is configured —
-    // dialling an endpoint nobody set up proves nothing about this machine.
-    let mut endpoints: Vec<(String, String, u16)> = vec![
-        ("ollama".to_string(), "127.0.0.1".to_string(), 11434),
-        ("llamacpp".to_string(), "localhost".to_string(), 8080),
+    // Providers are dialled at the address the config points them at. This
+    // machine's llama.cpp server is not on the port a remembered default would
+    // guess, so a check that hardcoded an address proved nothing about the
+    // route the model would actually take.
+    let config = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
+    let mut locals: Vec<(&str, String, Option<&str>)> = vec![
+        ("ollama", config.ollama_url.clone(), Some("ollama serve")),
+        (
+            "llamacpp",
+            config.llama_cpp_url.clone(),
+            Some("llama-server --model <path>"),
+        ),
     ];
-    if let Ok(config) = xencode_config_rs::XencodeConfig::load() {
-        // Env-resolved: a key living in NVIDIA_NIM_API_KEY counts as
-        // configured here too, since the route would use it.
-        let nvidia_key = config.api_keys.nvidia_api_key_resolved();
-        let keyed = [
-            ("openai", &config.api_keys.openai_api_key, "api.openai.com"),
-            (
-                "openrouter",
-                &config.api_keys.openrouter_api_key,
-                "openrouter.ai",
-            ),
-            (
-                "gemini",
-                &config.api_keys.google_gemini_api_key,
-                "generativelanguage.googleapis.com",
-            ),
-            ("qwen", &config.api_keys.qwen_api_key, "chat.qwen.ai"),
-            ("nvidia", &nvidia_key, "integrate.api.nvidia.com"),
-        ];
-        for (name, key, host) in keyed {
-            if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {
-                endpoints.push((format!("cloud:{name}"), host.to_string(), 443));
-            }
-        }
-        for (name, server) in &config.mcp_servers {
-            let check = format!("mcp:{name}");
-            // A declaration has to say how its server is reached before either
-            // kind of check below means anything.
-            if let Some(problem) = server.misconfigured() {
-                checks.push(doc::SelfCheck {
-                    name: check,
-                    state: "fail".to_string(),
-                    detail: format!("the declaration {problem}"),
-                });
-                continue;
-            }
-            if let Some(url) = server.endpoint_url() {
-                // A hosted server is checked the way a provider endpoint is:
-                // does its address answer. Only the address is printed, with
-                // any credentials it carries masked.
-                let shown = xencode_mcp_rs::masked_url(url);
-                match xencode_mcp_rs::address_of(url) {
-                    Some((host, port)) => {
-                        let reachable =
-                            doc::tcp_reachable(&host, port, std::time::Duration::from_secs(2));
-                        checks.push(doc::SelfCheck {
-                            name: check,
-                            state: if reachable { "pass" } else { "fail" }.to_string(),
-                            detail: if reachable {
-                                format!("{shown} accepts TCP on {host}:{port}")
-                            } else {
-                                format!("{host}:{port} refused, so {shown} is not reachable")
-                            },
-                        });
-                    }
-                    None => checks.push(doc::SelfCheck {
-                        name: check,
-                        state: "fail".to_string(),
-                        detail: format!("{shown} is not an address a server can be reached on"),
-                    }),
-                }
-                continue;
-            }
-            // A command is checked the way a shell would: whether it is there
-            // to spawn. Its environment, where its credentials go, is not
-            // printed.
-            let command = server.spawn_command().unwrap_or_default();
-            match doc::resolve_on_path(command) {
-                Some(path) => checks.push(doc::SelfCheck {
-                    name: check,
-                    state: "pass".to_string(),
-                    detail: format!("{command} resolves to {}", path.display()),
-                }),
-                None => checks.push(doc::SelfCheck {
-                    name: check,
-                    state: "fail".to_string(),
-                    detail: format!("{command} is not on PATH, so the server cannot spawn"),
-                }),
-            }
+    if !config.remote_base_url.trim().is_empty() {
+        locals.push(("remote", config.remote_base_url.clone(), None));
+    }
+
+    // A cloud provider is only worth dialling when a key is configured —
+    // reaching an endpoint nobody set up proves nothing about this machine.
+    // Env-resolved: a key living in NVIDIA_NIM_API_KEY counts as configured
+    // here too, since the route would use it.
+    let nvidia_key = config.api_keys.nvidia_api_key_resolved();
+    let mut clouds: Vec<(&str, &str)> = Vec::new();
+    for (name, key, host) in [
+        ("openai", &config.api_keys.openai_api_key, "api.openai.com"),
+        (
+            "openrouter",
+            &config.api_keys.openrouter_api_key,
+            "openrouter.ai",
+        ),
+        (
+            "gemini",
+            &config.api_keys.google_gemini_api_key,
+            "generativelanguage.googleapis.com",
+        ),
+        ("qwen", &config.api_keys.qwen_api_key, "chat.qwen.ai"),
+        ("nvidia", &nvidia_key, "integrate.api.nvidia.com"),
+    ] {
+        if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {
+            clouds.push((name, host));
         }
     }
-    for (name, host, port) in endpoints {
-        let reachable = doc::tcp_reachable(&host, port, std::time::Duration::from_secs(2));
-        checks.push(doc::SelfCheck {
-            name: format!("provider:{name}"),
-            state: if reachable {
-                "pass".to_string()
-            } else {
-                "fail".to_string()
-            },
-            detail: format!(
-                "{host}:{port} {}",
-                if reachable { "accepts TCP" } else { "refused" }
-            ),
-        });
+
+    for (name, url, start_command) in locals {
+        match xencode_mcp_rs::address_of(&url) {
+            Some((host, port)) => checks.push(doc::check_provider(
+                name,
+                &host,
+                port,
+                std::time::Duration::from_secs(2),
+                start_command,
+            )),
+            None => checks.push(doc::SelfCheck {
+                name: format!("provider:{name}"),
+                state: "fail".to_string(),
+                detail: format!("{url} is not an http or https address to dial"),
+            }),
+        }
+    }
+    for (name, host) in clouds {
+        checks.push(doc::check_provider(
+            name,
+            host,
+            443,
+            std::time::Duration::from_secs(2),
+            None,
+        ));
+    }
+
+    // An MCP server is checked by the client the TUI uses: it is started, asked
+    // to introduce itself, and killed. A pass is a completed handshake, and a
+    // failure is the client's own sentence about why there was not one.
+    for (name, server) in &config.mcp_servers {
+        let spec = match xencode_tui_rs::mcp::spec_from_config(name, server) {
+            Ok(spec) => spec,
+            // A declaration that does not say how the server is reached, or says
+            // both ways at once, is the named problem — there is nothing to try.
+            Err(problem) => {
+                checks.push(doc::check_mcp(
+                    name,
+                    false,
+                    format!("the declaration {problem}"),
+                ));
+                continue;
+            }
+        };
+        match xencode_mcp_rs::McpClient::start(&spec, std::time::Duration::from_secs(5)).await {
+            Ok(client) => {
+                let endpoint = client.endpoint();
+                let declared = client.capabilities().declared();
+                client.shutdown().await;
+                checks.push(doc::check_mcp(
+                    name,
+                    true,
+                    format!(
+                        "{endpoint} started and answered the handshake; it offers {}",
+                        if declared.is_empty() {
+                            "nothing it declared".to_string()
+                        } else {
+                            declared.join(", ")
+                        }
+                    ),
+                ));
+            }
+            Err(error) => checks.push(doc::check_mcp(name, false, error.to_string())),
+        }
     }
 
     if matches!(format, OutputFormat::Json) {

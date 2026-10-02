@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `QO-7`: `xencode doctor --selfcheck` — every row now asks the real question
+
+The self-debug slice reported on six things, and two of them were guesses.
+Providers were dialled at `127.0.0.1:11434` and `localhost:8080` no matter what
+`~/.xencode/config.json` said, so on a machine whose llama.cpp route is
+`127.0.0.1:18000` the row described an address no request ever goes to. A
+declared MCP server was only looked for on `PATH`, which answers "is the binary
+there" and not the question the row asks — whether the server starts and speaks
+the protocol.
+
+Both now go the way the feature goes. Providers are dialled at the configured
+`ollama_url`, `llama_cpp_url` and `remote_base_url`, a cloud provider only when
+a key is set for it. An MCP server is started by the same client `/mcp` uses,
+asked to introduce itself, and killed: a pass is a completed handshake, and a
+failure is the client's own sentence about why there was not one, and a
+declaration that names neither a command nor an address fails before anything is
+started.
+
+```
+  PASS   mcp:talking        /home/sree/mcp-doctor-probe.sh started and answered the handshake; it offers tools
+  FAIL   mcp:ghost          cannot start MCP server `ghost`: No such file or directory (os error 2)
+  FAIL   mcp:undecided      the declaration names neither a "command" to spawn nor a "url" to reach
+```
+
+Every refused port names what to do about it, too:
+
+```
+  FAIL   provider:llamacpp  127.0.0.1:18000 refused: nothing is listening; start it with `llama-server --model <path>` or point the config elsewhere
+```
+
+The exit code stays zero when rows fail. A laptop with nothing serving on the
+model ports is a normal laptop, and a command that exits non-zero for that
+teaches nobody to ignore its exit code.
+
 ### Added — `QO-6`: `xencode release-notes` — the notes drafted from what the repository already says
 
 Releasing meant re-reading `git log` by hand and hoping nothing that shipped was

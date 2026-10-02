@@ -2224,6 +2224,44 @@ fail, or absent with a named string. Absent is not failed. Exit code stays
 zero; the FAIL rows are the signal, because a machine without local servers
 is normal, not broken.
 
+Each check goes through the code path the feature uses, so a row says something
+about the real route rather than about a guess. Providers are dialled at the
+addresses in `~/.xencode/config.json` — `ollama_url`, `llama_cpp_url`, and
+`remote_base_url` when it is set — not at a remembered port, and a cloud
+provider is dialled only when a key is configured for it. An MCP server is
+started by the same client `/mcp` uses, asked to introduce itself, and killed;
+a row is a completed handshake, and a failure is the client's own sentence.
+
+```
+$ xencode doctor --selfcheck
+  ABSENT index              no index manifest; run /init for project-aware answers
+  PASS   git                /home/sree/Projects/xencode
+  ABSENT metrics            no metrics recorded yet
+  PASS   cache              /home/sree/Projects/xencode/.xencode/cache
+  FAIL   provider:ollama    localhost:11434 refused: nothing is listening; start it with `ollama serve` or point the config elsewhere
+  FAIL   provider:llamacpp  127.0.0.1:18000 refused: nothing is listening; start it with `llama-server --model <path>` or point the config elsewhere
+  FAIL   provider:remote    127.0.0.1:18000 refused: the remote endpoint does not answer from here
+
+  failing: provider:ollama, provider:llamacpp, provider:remote
+```
+
+That run points at `127.0.0.1:18000` because that is where this machine's
+config sends `llamacpp` and `remote` — a check hardcoded to the usual port would
+have reported on a server nobody here addresses. Pointing `ollama_url` at a port
+that is serving, and declaring three servers — one that runs, one whose command
+is not there, one that says nothing about how it is reached — gives the other
+four shapes, all from one live run:
+
+```
+  PASS   provider:ollama    127.0.0.1:631 accepts TCP
+  PASS   mcp:talking        /home/sree/mcp-doctor-probe.sh started and answered the handshake; it offers tools
+  FAIL   mcp:ghost          cannot start MCP server `ghost`: No such file or directory (os error 2)
+  FAIL   mcp:undecided      the declaration names neither a "command" to spawn nor a "url" to reach
+```
+
+`--format json` prints `{"checks":[{"detail":…,"name":…,"state":…}]}` with the
+same rows.
+
 ### `xencode doctor --deps [--format text|json]`
 
 Dependency health, composed: direct deps with locked versions, pending updates
@@ -2302,7 +2340,7 @@ Rank files by commits × bytes with bus factor and CODEOWNERS owners, as
 advice rows that each carry an action. Build outputs and other generated dirs
 are skipped — a panel led by a `.rlib` is decorative.
 
-### `xencode doctor --env [--json]`
+### `xencode doctor --env [--format text|json]`
 
 Probe and display this machine: cores, memory, PSI, cgroup limit, GPUs,
 journalctl and dmesg readability, colab route presence — plus the
