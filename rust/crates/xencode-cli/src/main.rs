@@ -535,6 +535,21 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// What deleting one file would cost: the links it holds up, and the modules
+    /// that become dead code the moment it is taken out
+    Removal {
+        /// The file to imagine removing, by path or by its tail
+        file: String,
+
+        /// How many entries to list in each section
+        #[arg(long, default_value_t = 15)]
+        limit: usize,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Print shell completions or the man page; both are generated from the
     /// clap definition, never written by hand
     Generate {
@@ -1279,6 +1294,11 @@ async fn main() {
             limit,
             format,
         } => run_impact(&file, limit, format),
+        Commands::Removal {
+            file,
+            limit,
+            format,
+        } => run_removal(&file, limit, format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
             diff,
@@ -5122,6 +5142,65 @@ fn run_impact(file: &str, limit: usize, format: OutputFormat) -> Result<(), Stri
     Ok(())
 }
 
+fn run_removal(file: &str, limit: usize, format: OutputFormat) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let workspace = xencode_context_rs::verify::manifest_dir(&root)?;
+    let removal =
+        xencode_context_rs::removal_impact(&workspace, file).map_err(|e| e.to_string())?;
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "target": removal.target,
+                "basis": "the dependency graph with one file removed, off resolved `use`/`mod`/`impl` names — not a compile",
+                "breaks": removal.breaks,
+                "orphans": removal.orphans,
+                "indexed_files": removal.indexed_files,
+                "edges": removal.edges,
+            }))
+            .map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    println!("\n  if you delete {}", removal.target);
+
+    println!("\n  files that lose a link to it:");
+    if removal.breaks.is_empty() {
+        println!("    none — no other file resolves a name into this one");
+    } else {
+        for f in removal.breaks.iter().take(limit) {
+            println!("    {f}");
+        }
+        if removal.breaks.len() > limit {
+            println!("    … {} more", removal.breaks.len() - limit);
+        }
+    }
+
+    println!("\n  files that become dead code (nothing else reaches them):");
+    if removal.orphans.is_empty() {
+        println!("    none — every module this one pulled in is pulled in elsewhere");
+    } else {
+        for f in removal.orphans.iter().take(limit) {
+            println!("    {f}");
+        }
+        if removal.orphans.len() > limit {
+            println!("    … {} more", removal.orphans.len() - limit);
+        }
+    }
+
+    println!(
+        "\n  From the graph of {} Rust files and {} resolved edges. A link means a \
+         file wrote a `use` path, a `mod` declaration or an `impl Trait for Type` that \
+         resolves to another — name resolution through module paths, not a type-checked \
+         compile. Deletion is stronger evidence than an edit here: a change a consumer \
+         might absorb, a missing file it cannot.",
+        removal.indexed_files, removal.edges
+    );
+    Ok(())
+}
+
 fn run_generate(artifact: GenerateArtifact, shell: GenerateShell) -> Result<(), String> {
     use clap::CommandFactory;
     let mut cmd = Cli::command();
@@ -6933,6 +7012,27 @@ mod tests {
             cli.command,
             Some(Commands::Impact { file, limit: 4, format: super::OutputFormat::Json, .. })
                 if file == "src/lib.rs"
+        ));
+    }
+
+    #[test]
+    fn removal_parses_a_file_and_optional_limit() {
+        // The file is positional; without it the command must not parse.
+        assert!(Cli::try_parse_from(["xencode", "removal"]).is_err());
+        let cli = Cli::try_parse_from(["xencode", "removal", "src/leaf.rs"]).unwrap();
+        match cli.command {
+            Some(Commands::Removal { file, limit, .. }) => {
+                assert_eq!(file, "src/leaf.rs");
+                assert_eq!(limit, 15, "default section size");
+            }
+            _ => panic!("expected removal"),
+        }
+        let cli =
+            Cli::try_parse_from(["xencode", "removal", "src/leaf.rs", "--format", "json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Removal { file, limit: 15, format: super::OutputFormat::Json, .. })
+                if file == "src/leaf.rs"
         ));
     }
 

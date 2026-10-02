@@ -111,8 +111,9 @@ pub use hotspots::{
     hotspots, owners_for, parse_churn, parse_codeowners, pattern_matches, FileHistory, OwnerRule,
 };
 pub use impact::{
-    change_impact, impact, impact_from_filesystem, impact_from_snapshot, ChangeImpact,
-    ImpactReport, ImpactedFile, DECLARED_CAP, IMPACT_MAX_HOPS,
+    change_impact, impact, impact_from_filesystem, impact_from_snapshot, removal_from_graph,
+    removal_impact, ChangeImpact, ImpactReport, ImpactedFile, RemovalImpact, DECLARED_CAP,
+    IMPACT_MAX_HOPS,
 };
 pub use index::{
     deps_json_path, file_index_path, history_json_path, read_json, symbols_json_path, write_atomic,

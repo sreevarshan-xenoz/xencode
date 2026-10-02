@@ -2258,6 +2258,24 @@ xencode impact crates/xencode-core-rs/src/lib.rs
 xencode impact crates/xencode-core-rs/src/lib.rs --format json
 ```
 
+### `xencode removal <file> [--limit 15] [--format text|json]`
+
+What deleting this file would cost — the dependency graph with one node removed,
+the two directions of an edge. **Broken links** are the files whose `use`, `mod`
+or `impl` resolved to the target; they dangle the instant it is gone. **Newly dead
+files** are the modules only this file pulled into the build — found by comparing
+what a crate root reaches today against what it reaches once the node is deleted,
+so a grandchild stranded at any depth is caught, not just a direct `mod` child.
+An unreferenced root is a crate, not dead code, so `lib.rs`/`main.rs`/`mod.rs` are
+never reported orphaned. Runs headless, no `.xencode` index needed. Deletion is
+stronger evidence than an edit: a consumer can absorb a change, never a missing
+file.
+
+```
+xencode removal crates/xencode-core-rs/src/tasks.rs
+xencode removal crates/xencode-colab-rs/src/lib.rs --format json
+```
+
 ### `xencode hotspots [--limit 10] [--format text|json]`
 
 Rank files by commits × bytes with bus factor and CODEOWNERS owners, as

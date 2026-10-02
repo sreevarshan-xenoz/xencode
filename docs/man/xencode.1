@@ -91,6 +91,9 @@ Rank files by churn times size with bus factor and owners
 xencode\-impact(1)
 What a change to one file affects: the crates that depend on its crate, the files that link it, and the files its history is coupled to
 .TP
+xencode\-removal(1)
+What deleting one file would cost: the links it holds up, and the modules that become dead code the moment it is taken out
+.TP
 xencode\-generate(1)
 Print shell completions or the man page; both are generated from the clap definition, never written by hand
 .TP
