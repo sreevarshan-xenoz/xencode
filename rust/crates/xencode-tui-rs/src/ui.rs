@@ -381,8 +381,9 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     // Build status text chunks
     let left_parts = match app.input_mode {
         InputMode::Normal => format!(
-            " {}  {} | {}  {}  {}  {}  \u{394} {}  | ",
+            " {}  [{}]  {} | {}  {}  {}  {}  \u{394} {}  | ",
             mode_str,
+            app.mode.label(),
             branch_str,
             health_icon,
             egress_str,
