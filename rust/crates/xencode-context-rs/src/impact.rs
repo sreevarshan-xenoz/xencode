@@ -256,10 +256,85 @@ pub fn impact_from_snapshot(
         return Err(crate::ContextError::NoIndex(xencode));
     }
     let matches = matching_targets(symbols.keys().cloned(), asked);
-    let target = match matches.as_slice() {
+    let target = resolve_target(&matches, asked, &symbols)?;
+    let graph: Vec<DepEdge> = read_json(&deps_json_path(&xencode)).unwrap_or_default();
+    Ok(impact(&graph, &symbols, &target, symbol, IMPACT_MAX_HOPS))
+}
+
+/// Build the whole graph from the current filesystem — scan, extract, link — and
+/// answer the same question, with no `.xencode` index on disk at all. This is
+/// what lets `xencode impact` run headless: the watcher-driven surfaces need an
+/// index a TUI `/init` wrote, but the reverse-reachability walk only ever needed
+/// the edges, and the edges are pure functions of the files. The graph is
+/// rebuilt per call rather than cached, because a read-only question that has to
+/// build an index to answer it is building a snapshot it was told not to need.
+pub fn impact_from_filesystem(
+    root: &std::path::Path,
+    asked: &str,
+    symbol: Option<&str>,
+) -> Result<ImpactReport, crate::ContextError> {
+    let (graph, symbols) = headless_graph(root)?;
+    let matches = matching_targets(symbols.keys().cloned(), asked);
+    let target = resolve_target(&matches, asked, &symbols)?;
+    Ok(impact(&graph, &symbols, &target, symbol, IMPACT_MAX_HOPS))
+}
+
+/// Scan `root`, read every first-tier Rust file, and build the dependency graph
+/// in memory. Shared by [`impact_from_filesystem`] and [`change_impact`] so the
+/// two can never disagree about what the edges are.
+pub(crate) fn headless_graph(
+    root: &std::path::Path,
+) -> Result<(Vec<DepEdge>, BTreeMap<String, PerFileSymbols>), crate::ContextError> {
+    use crate::scanner::{language_for_extension, scan_tree, ScanOptions};
+    use crate::symbols::{build_graph, extract_rust_symbols};
+    let root = root
+        .canonicalize()
+        .map_err(|source| crate::ContextError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
+    // The same git-filtered scan `/init` runs, so a headless answer walks the
+    // tracked tree, not the build directory or anything ignored. `git_file_set`
+    // is `None` outside a repository, which makes the scan exclusion-based.
+    let git_filter = crate::gitinfo::git_file_set(&root);
+    let scan = scan_tree(
+        &root,
+        &ScanOptions {
+            git_filter,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        },
+    )?;
+    let rust_files: Vec<String> = scan
+        .files
+        .iter()
+        .filter(|e| {
+            language_for_extension(&e.ext).has_semantic_tier() && !e.is_secret && !e.is_binary
+        })
+        .map(|e| e.path.clone())
+        .collect();
+    let mut symbols = BTreeMap::new();
+    for path in &rust_files {
+        let full = root.join(path);
+        let content = std::fs::read_to_string(&full)
+            .map_err(|source| crate::ContextError::Io { path: full, source })?;
+        symbols.insert(path.clone(), extract_rust_symbols(&content));
+    }
+    let graph = build_graph(&rust_files, &symbols);
+    Ok((graph, symbols))
+}
+
+/// Turn the tail-match set into one stored path, or the error that explains why
+/// it is not one. Lifted out of [`impact_from_snapshot`] so the headless and
+/// snapshot paths refuse a missing or ambiguous file identically.
+fn resolve_target(
+    matches: &[String],
+    asked: &str,
+    symbols: &BTreeMap<String, PerFileSymbols>,
+) -> Result<String, crate::ContextError> {
+    match matches {
         [] => Err(crate::ContextError::NotIndexed {
             asked: asked.to_string(),
-            near: near_names(&symbols, asked),
+            near: near_names(symbols, asked),
             indexed: symbols.len(),
         }),
         [only] => Ok(only.clone()),
@@ -267,9 +342,133 @@ pub fn impact_from_snapshot(
             asked: asked.to_string(),
             matches: many.to_vec(),
         }),
-    }?;
-    let graph: Vec<DepEdge> = read_json(&deps_json_path(&xencode)).unwrap_or_default();
-    Ok(impact(&graph, &symbols, &target, symbol, IMPACT_MAX_HOPS))
+    }
+}
+
+/// Everything `xencode impact` reports for one file (`QD-1`): the crate it lives
+/// in and what depends on that crate (exact, from `cargo metadata`), the files
+/// that link it (a hop-capped prediction over the symbol graph), and the files
+/// its history is coupled to (churn). Three layers, three different strengths of
+/// evidence, kept apart so a reader never mistakes a predicted edge for a proven
+/// one or a crate-level fact for a line-level one.
+pub struct ChangeImpact {
+    /// The file as the graph stores it, widened from what was asked.
+    pub target: String,
+    /// The workspace member the file belongs to, when it belongs to one.
+    pub crate_name: Option<String>,
+    /// Members that depend on that crate, transitively, each with its hop.
+    pub reverse_crates: Vec<(String, usize)>,
+    /// Members that link it directly, with the dependency kind of that edge.
+    pub direct_crates: Vec<(String, String)>,
+    /// The file-level prediction, already hop-capped.
+    pub files: ImpactReport,
+    /// Files most changed alongside this one, strongest coupling first.
+    pub cochange: Vec<(String, u32)>,
+    /// Commits this file appeared in — its own churn.
+    pub own_commits: u32,
+    /// `None` when there is no git history here at all, which is not the same as
+    /// a file nobody edits together with: an empty coupling list with history
+    /// present means "not co-changed", `None` means "no way to know".
+    pub history_known: bool,
+}
+
+/// The three-layer answer for one file. `file` may be a repo-relative or absolute
+/// path, or a tail; the same resolution rules the file-graph uses. `cargo
+/// metadata` and `git log` run for real; if either is unavailable the layer that
+/// needed it reports honestly absent rather than fabricating a closure.
+pub fn change_impact(
+    root: &std::path::Path,
+    file: &str,
+) -> Result<ChangeImpact, crate::ContextError> {
+    let root = root
+        .canonicalize()
+        .map_err(|source| crate::ContextError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
+    let (graph, symbols) = headless_graph(&root)?;
+    let matches = matching_targets(symbols.keys().cloned(), file);
+    let target = resolve_target(&matches, file, &symbols)?;
+
+    // The crate layer: exact, offline, from the manifests themselves.
+    let metadata = crate::crate_graph::cargo_metadata(&root).unwrap_or_default();
+    let crate_graph = crate::crate_graph::parse_crate_graph(&metadata).unwrap_or_default();
+    // Place the file by its real path on disk, so the answer matches the graph node.
+    let crate_name = crate::crate_graph::crate_of_file(&crate_graph, &root.join(&target));
+    let (reverse_crates, direct_crates) = match &crate_name {
+        Some(name) => (
+            crate_graph.reverse_closure(name),
+            crate_graph
+                .direct_dependents(name)
+                .into_iter()
+                .map(|(d, k)| (d, k.label().to_string()))
+                .collect(),
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+
+    // The churn layer: one git log over history, coupling read straight off it.
+    // `git log --name-only` keys every file from the top of the repository, but
+    // the graph and `cargo metadata` above speak from the workspace, which here
+    // lives one directory below that top. Without this step the lookup misses
+    // every file in a nested workspace and reports "no history" for a repo that
+    // plainly has it, so put the target on git's base and bring the answer back.
+    let prefix = git_prefix(&root);
+    let history = crate::cochange::mine_commit_history(&root);
+    let (cochange, own_commits, history_known) = match &history {
+        Some(h) => {
+            let entry = h.get(&format!("{prefix}{target}"));
+            (
+                entry
+                    .map(|e| {
+                        e.partners
+                            .iter()
+                            .map(|(p, n)| (to_workspace(p, &prefix), *n))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                entry.map(|e| e.commits).unwrap_or(0),
+                true,
+            )
+        }
+        None => (Vec::new(), 0, false),
+    };
+
+    Ok(ChangeImpact {
+        files: impact(&graph, &symbols, &target, None, IMPACT_MAX_HOPS),
+        target,
+        crate_name,
+        reverse_crates,
+        direct_crates,
+        cochange,
+        own_commits,
+        history_known,
+    })
+}
+
+/// The workspace's path relative to the git top level, with a trailing slash,
+/// or empty when the workspace *is* the top level (or git cannot say). This is
+/// the difference between `cargo metadata` and `git log --name-only`: the first
+/// speaks from `--manifest-dir`, the second always from the repository's top.
+fn git_prefix(root: &std::path::Path) -> String {
+    let toplevel = crate::gitinfo::git_stdout(root, &["rev-parse", "--show-toplevel"])
+        .ok()
+        .and_then(|s| std::fs::canonicalize(s.trim()).ok());
+    match toplevel.and_then(|tl| root.strip_prefix(tl).ok().map(|r| r.to_path_buf())) {
+        Some(rel) if !rel.as_os_str().is_empty() => {
+            format!("{}/", rel.to_string_lossy().replace('\\', "/"))
+        }
+        _ => String::new(),
+    }
+}
+
+/// Bring one git-history path back onto the workspace base the rest of the
+/// report uses, so a co-change partner reads the same way as the file layer.
+fn to_workspace(path: &str, prefix: &str) -> String {
+    match path.strip_prefix(prefix) {
+        Some(rest) => rest.to_string(),
+        None => path.to_string(),
+    }
 }
 
 /// Paths in the index sharing the asked-for file name, so a wrong directory is
@@ -659,5 +858,177 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(said.contains("run /init first"), "{said}");
+    }
+
+    /// The headless-index trap, fixed: the same file that the snapshot path
+    /// refuses (no `.xencode` on disk) is answered by building the graph from the
+    /// files themselves. This is the reason `xencode impact` runs with no index
+    /// and no TUI `/init`.
+    #[test]
+    fn the_headless_answer_works_where_the_snapshot_would_refuse() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "mod leaf;\nmod mid;\n").unwrap();
+        std::fs::write(dir.join("src/leaf.rs"), "pub fn build() {}\n").unwrap();
+        std::fs::write(
+            dir.join("src/mid.rs"),
+            "use crate::leaf::build;\npub fn m() { let _ = build(); }\n",
+        )
+        .unwrap();
+        // No `.xencode` exists, so the snapshot read has nothing to work from…
+        assert!(
+            impact_from_snapshot(&dir, "src/leaf.rs", None).is_err(),
+            "with no index the snapshot path refuses"
+        );
+        // …while the headless walk reads the files and answers anyway.
+        let report = impact_from_filesystem(&dir, "src/leaf.rs", None).expect("headless runs");
+        let got: Vec<&str> = report.files.iter().map(|f| f.file.as_str()).collect();
+        assert!(got.contains(&"src/mid.rs"), "mid links leaf: {got:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Write a two-member cargo workspace into `repo`/`ws_rel` (so `ws_rel` may put
+    /// the workspace in a subdirectory of the git repository, the way this very repo
+    /// does), `beta` depending on `alpha` both in its manifest and in a real `use`,
+    /// then commit it in `repo` so the churn layer has genuine git history to read.
+    fn write_workspace_in(repo: &std::path::Path, ws_rel: &str) {
+        let dir = repo.join(ws_rel);
+        let write = |rel: &str, body: &str| {
+            let full = dir.join(rel);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, body).unwrap();
+        };
+        write(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/alpha\", \"crates/beta\"]\n",
+        );
+        write(
+            "crates/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        write(
+            "crates/alpha/src/lib.rs",
+            "mod inner;\npub fn thing() -> u32 { 1 }\n",
+        );
+        write(
+            "crates/alpha/src/inner.rs",
+            "use crate::thing;\npub fn call() -> u32 { thing() }\n",
+        );
+        write(
+            "crates/beta/Cargo.toml",
+            "[package]\nname = \"beta\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nalpha = { path = \"../alpha\" }\n",
+        );
+        write(
+            "crates/beta/src/lib.rs",
+            "use alpha::thing;\npub fn use_it() -> u32 { thing() }\n",
+        );
+        // A real commit, so `git log` returns a real history rather than nothing.
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            assert!(ok, "git {args:?} failed in the temp repository");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "seed",
+        ]);
+    }
+
+    /// The flat case: the workspace is the repository root.
+    fn write_workspace(dir: &std::path::Path) {
+        write_workspace_in(dir, "");
+    }
+
+    /// `QD-1` end to end against a real workspace: the file resolves to its crate,
+    /// and the two evidence layers each prove the thing only it can. The **crate**
+    /// layer (exact, from `cargo metadata`) is the only one that sees the cross-crate
+    /// dependency `beta → alpha`; the **file** layer (a hop-capped prediction over the
+    /// symbol graph) is the one that sees the intra-crate link between `inner.rs` and
+    /// the `lib.rs` that declares it. They are deliberately different sets — reading
+    /// them as one would mistake a manifest edge for a source edge.
+    #[test]
+    fn change_impact_keeps_the_crate_layer_and_the_file_layer_apart() {
+        let dir = temp_dir();
+        write_workspace(&dir);
+        let impact = change_impact(&dir, "crates/alpha/src/inner.rs").expect("runs headless");
+        assert_eq!(impact.crate_name.as_deref(), Some("alpha"));
+        // The crate layer: cross-crate, exact, from the manifests.
+        assert!(
+            impact.reverse_crates.iter().any(|(n, _)| n == "beta"),
+            "cargo metadata closure should hold beta: {:?}",
+            impact.reverse_crates
+        );
+        let direct: Vec<&str> = impact
+            .direct_crates
+            .iter()
+            .map(|(d, _)| d.as_str())
+            .collect();
+        assert_eq!(direct, vec!["beta"], "and names the beta edge");
+        // The file layer: intra-crate, a prediction over resolved names. `lib.rs`
+        // declares `mod inner`, so it is the file that links inner.rs.
+        let files: Vec<&str> = impact.files.files.iter().map(|f| f.file.as_str()).collect();
+        assert!(
+            files.iter().any(|f| f.ends_with("alpha/src/lib.rs")),
+            "lib declares mod inner, so the graph lists it: {files:?}"
+        );
+        // And the file layer cannot see beta, which never names inner at the
+        // source level — that relationship is the crate layer's alone.
+        assert!(
+            !files.iter().any(|f| f.ends_with("beta/src/lib.rs")),
+            "a cross-crate consumer is the crate layer's, not a graph edge: {files:?}"
+        );
+        // The churn layer really ran: it read the commit we made.
+        assert!(impact.history_known, "git history is present and read");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `QD-1` regression: a workspace nested below the git top level — the layout
+    /// this very repository uses. `git log --name-only` keys files from the
+    /// repository root (`rust/crates/alpha/src/inner.rs`) while the graph and
+    /// `cargo metadata` name them from the workspace (`crates/alpha/src/inner.rs`).
+    /// Without reconciling those bases the churn lookup misses every file and the
+    /// report says "no commits" for history that plainly exists, so here the same
+    /// commit that touched `inner.rs` must still show up as its own churn.
+    #[test]
+    fn a_nested_workspace_reads_churn_from_the_repository_top_level() {
+        let dir = temp_dir();
+        write_workspace_in(&dir, "rust");
+        let impact =
+            change_impact(&dir.join("rust"), "crates/alpha/src/inner.rs").expect("runs headless");
+        assert_eq!(impact.target, "crates/alpha/src/inner.rs");
+        assert!(impact.history_known, "git history is present and read");
+        assert_eq!(
+            impact.own_commits, 1,
+            "the seed commit touched inner.rs, counted from the repo root's keys"
+        );
+        // And the partner is reported on the workspace base, not git's top level,
+        // so it reads the same way as the file layer above it.
+        assert!(
+            impact
+                .cochange
+                .iter()
+                .any(|(p, _)| p == "crates/alpha/src/lib.rs"),
+            "inner co-changed with its lib, on the workspace base: {:?}",
+            impact.cochange
+        );
+        assert!(
+            !impact.cochange.iter().any(|(p, _)| p.starts_with("rust/")),
+            "partners are never left on the repo-root base: {:?}",
+            impact.cochange
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

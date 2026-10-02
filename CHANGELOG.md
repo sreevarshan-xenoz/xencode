@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QD-1`: change-impact analysis with `xencode impact <file>`
+
+`xencode impact <path>` answers "who has to be re-checked if I edit this file",
+in three layers that are deliberately kept apart because they are three different
+strengths of evidence. The **crate** layer is exact: it reads `cargo metadata
+--no-deps` and names the workspace member the file belongs to, the members that
+depend on it directly (with the kind of that edge — normal, dev or build), and the
+full transitive set behind it. The **file** layer is a prediction, capped at three
+hops: it builds the symbol graph straight from the git-tracked sources, so it needs
+no pre-built index, and lists the files that link this one through a `use` path, a
+`mod` declaration or an `impl` — name resolution, not a type-checked call site, and
+the output says so. The **coupling** layer reads one `git log` and lists the files
+whose history moves with this one, plus the file's own commit count. Verified live
+on this repository with no `.xencode` index present: `xencode impact
+crates/xencode-core-rs/src/lib.rs` reports its crate, seven direct dependents and
+twelve commits of history, and the crate layer matches `cargo tree -i` exactly on
+three spot-checked crates. Fixing it surfaced a real bug — git keys changed files
+from the repository root (`rust/crates/…`) while the tool names them from the
+workspace (`crates/…`), so in this nested workspace the history layer silently
+reported nothing; it now reconciles the two bases, guarded by a test that builds a
+workspace a directory below the git root and checks the commits still show up.
+New tests: eight for the crate graph, three for the composed impact (the headless
+answer, keeping the crate and file layers apart, and the nested-workspace history
+regression), and one for the command's argument parsing.
+
 ### Added — `QD-3`: mutation score rolled up per function
 
 `xencode mutants` now answers "which function is untested" rather than "which
