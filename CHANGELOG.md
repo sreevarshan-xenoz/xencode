@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `V-10`: the bridge from worker events to the window
+
+A thin layer now sits between the orchestrator's normalised events and the
+screen. `xencode-tui-rs/src/worker_bridge.rs` is a pure function over the
+control-room projection — its inputs are the common `AgentEvent` model and the
+scheduler's report, never a raw stream — and it returns the window's existing
+pane values, so no second pane vocabulary is invented. Three guarantees, each
+tested. A worker that halts on a permission request opens a pane naming that
+request — the worker, the task, and the tool it is waiting on — and the pane
+disappears once the run finishes, because it tracks state rather than leaving a
+stale prompt behind. A worker xencode cannot observe renders as unknown: the words
+"idle" and "working" are both asserted absent from such a line, and a duration the
+scheduler never timed reads as "duration unknown" instead of a fabricated number.
+And the bridge cannot move, resize, or reorder a pane that already exists — the
+line that separates it from the parked automatic-layout behaviour, and the easiest
+one to cross by accident. That last rule holds because the bridge is handed only a
+projection it reads, never the mutable screen, and a test scans its own source for
+every focus, layout, and reordering call it must not make. The unknown-rendering
+and the no-rearrange guard were each verified by breaking them and watching the
+right test fail. This is the bridge; routing a live run's events through it on
+every frame under orchestrator mode is the remaining wiring and is not claimed.
+
 ### Added — `X-3`: the control room as a projection over events
 
 The orchestrator surface now has a data layer that is written only against the
