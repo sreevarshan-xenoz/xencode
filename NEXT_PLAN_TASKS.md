@@ -8950,30 +8950,47 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 
 #### W15 progress
 
-- [ ] **`AR-1` — harness built and first probe run; the measurement itself is
-  still open.** `xencode interop` launches every installed agent headless on a
-  read-only task in a scratch git repository and records what came back, with
-  each cell marked `observed` or read from a help screen. The crate is
-  `xencode-agents-rs`, which §S-11 designated for `AR-*`. Fifteen unit tests; the
-  captured output is redacted and capped at 64 KiB with the capping reported.
+- [ ] **`AR-1` — harness built; the measurement itself is still open.** `xencode
+  interop` launches every installed agent headless on a read-only task in a
+  scratch git repository and records what came back, with each cell marked
+  `observed` or read from a help screen. The crate is `xencode-agents-rs`, which
+  §S-11 designated for `AR-*`. The captured output is redacted and capped at
+  64 KiB with the capping reported.
 
-  **The headline, measured rather than assumed: four vendors, four event
+  **The headline, measured rather than assumed: five vendors, five event
   vocabularies, and no word in common.**
 
 | agent | exit | ms | events | stream | auth | session id | observed event kinds |
 |---|---|---|---|---|---|---|---|
-| `opencode` | 0 | 9668 | 6 | yes | no | no | `step_finish`, `step_start`, `text`, `tool_use` |
-| `cline` | 0 | 6914 | 19 | yes | no | no | `agent_event`, `hook_event`, `run_result` |
-| `codex` | 0 | 11624 | 7 | yes | no | yes | `item.completed`, `item.started`, `thread.started`, `turn.completed`, `turn.started` |
-| `claude` | 1 | 4512 | 7 | yes | yes | yes | `assistant`, `result`, `system` |
-| `gemini` | 41 | 2454 | 0 | no | yes | no | — |
+| `opencode` | 0 | 8166 | 7 | yes | no | no | `step_finish`, `step_start`, `text`, `tool_use` |
+| `cline` | 0 | 11324 | 16 | yes | no | no | `agent_event`, `hook_event`, `run_result` |
+| `codex` | 0 | 16236 | 7 | yes | no | yes | `item.completed`, `item.started`, `thread.started`, `turn.completed`, `turn.started` |
+| `claude` | 1 | 4560 | 7 | yes | yes | yes | `assistant`, `result`, `system` |
+| `gemini` | 41 | 1703 | 0 | no | yes | no | — |
 | `crush` | 1 | 2154 | 0 | no | yes | no | — |
+| `agy` | 0 | 26357 | 8 | yes | no | yes | `init`, `result`, `step_update` |
 
-  `AR-1` is **not** closed by this. Three of six stopped on an authentication
-  check, so their event vocabularies are still unknown; no cell has been compared
-  against a second run for stability; there is no five-worker fan-out cost
-  figure; and every row here is one run of one task. What exists is the
-  instrument, and the first honest reading from it.
+  Re-run 2026-10-02, same task, with a second run of each to check stability. The
+  vocabularies above held across both runs for every agent that answered. `agy`
+  joined the table that day — see the seventh row's own finding below.
+
+  `AR-1` is **not** closed by this. Three of seven stopped on an authentication
+  check, so their event vocabularies are still unknown; `opencode`'s event
+  **count** varied between runs (6 vs 7) even though its vocabulary did not;
+  there is no five-worker fan-out cost figure; and every row here is one run of
+  one task. What exists is the instrument, and an honest reading from it.
+
+  **A sixth finding, and the only one that was a bug in the measuring rather
+  than in the measured.** The first re-run reported `agy` as *not installed here*
+  — while its binary sat on `PATH` at `~/.local/bin/agy` answering `1.2.13`. The
+  "not installed" list was a hand-typed `const`, written once and never checked
+  against the machine, so an agent could be installed, working, and reported
+  missing indefinitely. The list now decides absence by the same `PATH` lookup
+  that discovery uses, `agy` has an `AgentSpec` read from its `--help` on
+  2026-10-02, and a second run of it answered in 26.4 s with a vocabulary of its
+  own: `init`, `result`, `step_update`. Installed-but-uncovered is now reported as
+  a separate category from absent, because "nothing to measure here" and "we did
+  not look at this" are different answers.
 
   **Five things only running them revealed**, each of which a help screen or the
   S-0 table would have got wrong:
@@ -8994,18 +9011,31 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   - **A flag with a value is two argv entries.** `--format json` passed as one
     made opencode, claude and gemini all print usage and exit 1. The roster's
     values were right; the hand-off was not.
+  - **An installed agent can be reported missing.** `agy` was on `PATH`, ran, and
+    was reported absent — because absence was a hand-typed list rather than a
+    lookup. Written up above, because it is the one finding here about the probe
+    itself.
   - **Auth failures are worded per vendor**, and the first marker list recognised
     none of the three actually seen: "Not logged in · Please run /login",
     "Please set an Auth method in …", "No providers configured". All three are
     now markers, all three are tests, and a refusal to spend is reported as a
     refusal rather than as a crash.
 
-  **A fifth observation, which is the reason to care:** the three vocabularies
+  **A sixth observation, which is the reason to care:** the four vocabularies
   that were captured share nothing — not one event name. `AR-9`'s common protocol
   is therefore not a naming exercise over a shared vocabulary, and the plan's
   refusal to derive it from a wish list is what the evidence supports. Codex is
   also the only agent whose stream carried a correlation id (`thread_id`), which
   is the one field a normalised model cannot invent after the fact.
+
+  **`agy` confirms this from a fifth vendor.** Its vocabulary — `init`,
+  `result`, `step_update` — has no word in common with the other four either,
+  and it is the second agent to issue a session id. `step_update` is worth
+  naming: it is a *shape* none of the others has, an event carrying changing
+  state for work still in flight, which is exactly the kind of field a normalised
+  model has to mark as invented. `agy` also advertises `--input-format
+  stream-json` for NDJSON on stdin, making it the only agent here that can be
+  *fed* a turn as well as asked for one.
 
   **Second run of the same task, `--repeat 2`, on 2026-09-28 — the repeatability
   gap partly closed.** All four captured vocabularies came back **identical**:

@@ -84,6 +84,15 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
         ("crush", "resume") => &["--session", "--continue", "session"],
         ("crush", "daemon") => &["server"],
         ("crush", "approval") => &["--yolo"],
+        // agy, read from `agy --help` on 2026-10-02. It prints the literal
+        // `Usage of agy:` with no subcommand section under `--help`, so every
+        // claim is checked against that one screen.
+        ("agy", "stream") => &["--output-format", "stream-json"],
+        ("agy", "acp") => &["acp"],
+        ("agy", "mcp") => &["mcp"],
+        ("agy", "resume") => &["--conversation", "--continue"],
+        ("agy", "daemon") => &["--remote-control"],
+        ("agy", "approval") => &["--mode", "--dangerously-skip-permissions"],
         _ => &[],
     }
 }

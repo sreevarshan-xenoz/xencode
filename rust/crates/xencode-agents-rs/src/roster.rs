@@ -150,18 +150,71 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_approval: true, // `--yolo`
         read_on: "2026-09-28",
     },
+    AgentSpec {
+        name: "agy",
+        binaries: &["agy"],
+        // Read from `agy --help` on 2026-10-02, which AR-2's done-when names
+        // but the roster had never covered. `-p/--print` is the headless one
+        // shot and `--output-format stream-json` the machine-readable stream,
+        // both confirmed in the help text above; a probe run is what confirms
+        // they behave as advertised.
+        one_shot: "agy --print {prompt}",
+        stream_flag: Some("--output-format stream-json"),
+        advertises_daemon: true,   // `--remote-control`, `agy remote-control`
+        advertises_acp: false,     // not in help
+        advertises_mcp: true,      // `agy mcp`
+        advertises_resume: true,   // `--conversation`, `--continue`
+        advertises_approval: true, // `--mode`, `--dangerously-skip-permissions`
+        read_on: "2026-10-02",
+    },
 ];
 
-/// Agents the proposal names that are **not** on this machine.
+/// Agents the proposal names that this crate does not know how to launch.
 ///
-/// `AR-1`'s done-when is about the installed CLIs, so their absence is recorded
-/// as a fact rather than left as a blank. Kilo in particular had every claim
-/// about it marked UNVERIFIED in Milestone W, and this is why: there is nothing
-/// here to verify against.
-pub const NOT_INSTALLED: &[(&str, &str)] = &[
-    ("kilo", "named in the proposal; no binary on this machine, so every claim about it is unverified"),
-    ("agy", "listed in AR-2's done-when but not installed — that item would fail its own test on day one"),
+/// These are **candidates worth probing**, not a claim that they are missing.
+/// The list used to be a hand-typed statement of absence, which is how `agy`
+/// came to be reported as "not installed" while sitting on `PATH` answering
+/// `1.2.13` — a list nobody re-checked against the machine. Whether one of
+/// these is actually here is now decided by [`which`], and a name found on
+/// `PATH` is reported as installed-but-unknown rather than absent.
+///
+/// Kilo still has every claim about it marked UNVERIFIED in Milestone W, and
+/// no binary answers to its name here, so there is nothing to verify against.
+pub const CANDIDATES: &[(&str, &str)] = &[
+    ("kilo", "named in the proposal; no binary answers to this name on this machine, so every claim about it stays unverified"),
 ];
+
+/// Named agents that are genuinely not on this machine, and why that matters.
+///
+/// Each entry is `(name, reason)` where the reason is only shown when the lookup
+/// actually found nothing, so a stale entry cannot outlive the machine it was
+/// written for.
+pub fn absent_agents() -> Vec<(String, String)> {
+    CANDIDATES
+        .iter()
+        .filter(|(name, _)| which(name).is_none())
+        .map(|(name, why)| ((*name).to_string(), (*why).to_string()))
+        .collect()
+}
+
+/// Named agents that are installed but that this crate cannot launch yet.
+///
+/// Reported instead of dropped: an installed agent missing from [`ROSTER`] is a
+/// gap in our knowledge, and saying so is the difference between "nothing to
+/// measure" and "we did not look".
+pub fn installed_but_unknown() -> Vec<(String, String)> {
+    CANDIDATES
+        .iter()
+        .filter_map(|(name, why)| {
+            which(name).map(|path| {
+                (
+                    (*name).to_string(),
+                    format!("{why} (found at {})", path.display()),
+                )
+            })
+        })
+        .collect()
+}
 
 /// Look one agent up by name.
 pub fn find(name: &str) -> Option<&'static AgentSpec> {
@@ -351,11 +404,16 @@ mod tests {
         let names: Vec<&str> = ROSTER.iter().map(|a| a.name).collect();
         assert_eq!(
             names,
-            ["opencode", "cline", "codex", "claude", "gemini", "crush"]
+            ["opencode", "cline", "codex", "claude", "gemini", "crush", "agy"]
         );
-        // Cline was absent from Milestone S's table entirely; being in the roster
-        // at all is a finding from 2026-09-28.
+        // Two agents reached the roster because a probe met them, not because a
+        // proposal named them. Cline was absent from Milestone S's table
+        // entirely (2026-09-28). agy was *in* that table and in AR-2's
+        // done-when, but had no AgentSpec, so the probe reported it absent while
+        // its binary sat on PATH answering `1.2.13` — the absence list was a
+        // hand-typed claim rather than a lookup (2026-10-02).
         assert!(find("cline").is_some());
+        assert!(find("agy").is_some());
     }
 
     #[test]
@@ -422,13 +480,66 @@ mod tests {
     }
 
     #[test]
-    fn absent_agents_are_recorded_with_the_reason_rather_than_left_blank() {
-        for (name, why) in NOT_INSTALLED {
+    fn every_candidate_is_either_present_or_gives_a_reason_for_its_absence() {
+        for (name, why) in CANDIDATES {
             assert!(!name.is_empty() && !why.is_empty());
             assert!(
                 find(name).is_none(),
-                "{name} is listed as absent and must not also be in the roster"
+                "{name} is listed as a candidate and must not also be in the roster"
             );
+        }
+    }
+
+    /// The bug this replaced: a name was called "not installed" from a
+    /// hand-typed list, so it stayed wrong while the binary sat on `PATH`.
+    /// Absence and presence are now both decided by the same `PATH` lookup,
+    /// and the two answers can never overlap.
+    #[test]
+    fn presence_is_measured_and_the_two_lists_never_disagree() {
+        let absent: Vec<String> = absent_agents().into_iter().map(|(n, _)| n).collect();
+        let unknown: Vec<String> = installed_but_unknown()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        for name in &absent {
+            assert!(
+                !unknown.contains(name),
+                "{name} is reported both absent and installed"
+            );
+            assert!(
+                which(name).is_none(),
+                "{name} claimed absent but is on PATH"
+            );
+        }
+        for name in &unknown {
+            assert!(
+                which(name).is_some(),
+                "{name} claimed present but is not on PATH"
+            );
+            assert!(!absent.contains(name));
+            // Anything installed but unknown must be a real gap: the roster is
+            // the set we know how to launch.
+            assert!(find(name).is_none(), "{name} is on PATH and in the roster");
+        }
+    }
+
+    /// An agent on `PATH` that the roster does not cover is reported, not lost.
+    /// `agy` is installed here and was being called absent; the whole point is
+    /// that a reader can tell those two situations apart.
+    #[test]
+    fn an_installed_agent_outside_the_roster_is_named_as_unknown() {
+        // `sh` is guaranteed on PATH and is deliberately not an agent.
+        assert!(find("sh").is_none());
+        assert!(which("sh").is_some(), "this test needs a PATH to look at");
+        // The two functions together partition the candidates by lookup, so a
+        // name can be in neither list only if it is genuinely off PATH.
+        let covered: Vec<String> = absent_agents()
+            .into_iter()
+            .chain(installed_but_unknown())
+            .map(|(n, _)| n)
+            .collect();
+        for (name, _) in CANDIDATES {
+            assert!(covered.contains(&(*name).to_string()));
         }
     }
 }

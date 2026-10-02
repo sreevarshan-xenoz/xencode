@@ -5643,9 +5643,15 @@ fn run_interop(
                 println!("  {}", capture.summary());
             }
             if !report.absent.is_empty() {
-                println!("\n  not installed here:");
+                println!("\n  no binary on PATH for these names:");
                 for absent in &report.absent {
                     println!("    {} — {}", absent.name, absent.why);
+                }
+            }
+            if !report.unknown.is_empty() {
+                println!("\n  installed here but this probe has no adapter for them:");
+                for unknown in &report.unknown {
+                    println!("    {} — {}", unknown.name, unknown.why);
                 }
             }
             if let Some(first) = report.stability.first() {
