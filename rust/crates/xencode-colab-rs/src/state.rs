@@ -1,13 +1,13 @@
-//! Persistent bridge state (`~/.xencode/colab.json`): what the lifecycle
-//! commands brought up, so `status`/`down` know what to report and tear down.
-//! Pure JSON + filesystem — `unsafe` is forbidden here.
+//! Persistent bridge state (`colab.json` in the directory xencode keeps its
+//! records in): what the lifecycle commands brought up, so `status`/`down` know
+//! what to report and tear down. Pure JSON + filesystem — `unsafe` is forbidden
+//! here.
 #![forbid(unsafe_code)]
 
 use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use xencode_config_rs::XencodeConfig;
 
 /// Filename of the state file inside the xencode config dir.
 pub const STATE_FILENAME: &str = "colab.json";
@@ -44,10 +44,12 @@ pub struct ColabState {
 }
 
 impl ColabState {
-    /// Path of the state file: `$XCODE_CONFIG_DIR` when set, else
-    /// `~/.xencode/`.
+    /// Path of the state file: the directory xencode keeps its records in, so
+    /// `~/.local/state/xencode/colab.json` — or `~/.xencode/colab.json` for a
+    /// person still on the old layout, which is where a bridge brought up before
+    /// the split wrote its state.
     pub fn state_path() -> Result<PathBuf, String> {
-        let dir = XencodeConfig::config_dir().map_err(|e| e.to_string())?;
+        let dir = xencode_config_rs::paths::state_dir().map_err(|e| e.to_string())?;
         Ok(dir.join(STATE_FILENAME))
     }
 
@@ -127,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn state_round_trips_through_the_config_dir() {
+    fn state_round_trips_through_the_state_directory() {
         let xcode_dir = temp_dir("state-rt");
         let _g = with_env(&std::env::temp_dir(), &xcode_dir);
 

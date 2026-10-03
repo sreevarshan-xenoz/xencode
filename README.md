@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2065 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2096 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -48,7 +48,7 @@ and fix your code — driven entirely from your terminal.
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
 - **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). What a manifest declares is checked, not ignored: adding a prompt prefix requires the `prompt` permission and registering a shell-running hook requires `hooks`, so a plugin that uses a capability it did not ask for — or names one the host does not recognise — is refused and contributes nothing to the loop. No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold and why the rest did not — including the exact lines of prompt text each one puts ahead of the system prompt, and the git commit an installed plugin is pinned to. `xencode plugin install <git-url>` clones, verifies the manifest, and prints that declaration *before* anything is copied into the plugin directory; `xencode plugin update <name>` fetches the repository again and shows a diff, refusing to apply an update that changes the prompt text or hooks until it is acknowledged with `--yes`.
-- **📚 Skills, listed always and read on request** — a skill is one directory holding a `SKILL.md`: a name and a one-line description of when to use it at the top, the instructions below it. Xencode scans `~/.xencode/skills` (or `$XCODE_SKILLS_DIR`) and `.xencode/skills` inside your workspace — a project skill replaces a user skill of the same name — and puts only the *list* (a heading plus one line per skill) ahead of the system prompt. The instructions themselves stay on disk until the model asks for one, by name, through the read-only `load_skill` tool. So thirty installed skills cost a turn a short list rather than thirty documents: measured here on a local model, 30 skills added 736 tokens to the prompt while their 22,380 tokens of instructions were never sent. `/skills` reports what loaded, what was refused and what the list costs; `/skills reload` re-scans both directories.
+- **📚 Skills, listed always and read on request** — a skill is one directory holding a `SKILL.md`: a name and a one-line description of when to use it at the top, the instructions below it. Xencode scans `skills/` in the settings directory (or `$XCODE_SKILLS_DIR`) and `.xencode/skills` inside your workspace — a project skill replaces a user skill of the same name — and puts only the *list* (a heading plus one line per skill) ahead of the system prompt. The instructions themselves stay on disk until the model asks for one, by name, through the read-only `load_skill` tool. So thirty installed skills cost a turn a short list rather than thirty documents: measured here on a local model, 30 skills added 736 tokens to the prompt while their 22,380 tokens of instructions were never sent. `/skills` reports what loaded, what was refused and what the list costs; `/skills reload` re-scans both directories.
 - **☁️ Rented GPUs, no infrastructure** — `xencode colab up` brings a Google Colab VM up with llama.cpp or Ollama serving an OpenAI endpoint and tunnels it to `127.0.0.1` over the official `colab ssh` bridge; the model picker, `remote:…` routing and Provider Health treat it like any other provider. No public URL, nothing exposed.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an append-only audit trail, plus a Dockerfile and Compose setup for the API server.
 - **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), memory+disk cache, streaming with exponential backoff.
@@ -160,7 +160,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 Ollama is what the binary talks to out of the box, not the only option: a local
 `llama-server` (`llamacpp:…`, managed by `xencode llamacpp`), Gemini, Qwen and
 any OpenAI-compatible endpoint through OpenRouter work instead — those need a
-key in `~/.xencode/config.json` and nothing local has to be running.
+key in the settings directory's `config.json` and nothing local has to be running.
 
 ### Option A: Rust binary (recommended)
 
@@ -392,9 +392,14 @@ flowchart TD
 
 ## 🔧 Configuration & Model Routing
 
-- One JSON file: `~/.xencode/config.json`. Point Xencode elsewhere with
-  `XCODE_CONFIG_DIR` — the conversation memory and the server's audit log
-  resolve to the same directory.
+- One JSON file: `config.json` in the settings directory —
+  `$XDG_CONFIG_HOME/xencode`, or `~/.xencode` for an installation that has never
+  been moved. Settings, session state, cache and downloaded models each have
+  their own directory (`$XDG_CONFIG_HOME`, `$XDG_STATE_HOME`, `$XDG_CACHE_HOME`,
+  `$XDG_DATA_HOME`), so clearing the cache cannot touch a config or a model
+  weight; `xencode paths` prints where the four are read from, and
+  `xencode migrate` moves an old `~/.xencode` into them. Point Xencode elsewhere
+  with `XCODE_CONFIG_DIR` — every kind then resolves inside that one directory.
 - `XCODE_HYBRID=0` ranks the workspace files for a turn by name, symbol and
   dependency distance alone, skipping the BM25 pass over each file's
   documentation. On by default; the `/ctx eval` command prints both numbers.
@@ -432,11 +437,12 @@ flowchart TD
   says why in a toast rather than quietly behaving like a preference that was
   ignored. `xencode config set layout <name>` prints the same sentence instead
   of leaving you to wonder. Templates live in the config file and inherit its
-  versioning; a `~/.xencode/layouts/` directory would be a file format, and
+  versioning; a `layouts/` directory beside the config would be a file format, and
   this project has no reason to promise one yet.
 - **A layout you resized comes back.** `Alt+Left`/`Alt+Right` grows or shrinks
   the focused pane, and that arrangement — tree, ratios, focused pane — is
-  written to `~/.xencode/layout.json` (owner-only, atomic, versioned) when you
+  written to `layout.json` in the settings directory (owner-only, atomic,
+  versioned) when you
   resize and when you quit, and restored at the next start. `Ctrl+U` clears it
   along with the tree on screen, a layout name you changed in the config wins
   over a stored tree, and a file written by a newer xencode is refused by
@@ -604,10 +610,14 @@ flowchart TD
 Start from the annotated example (it lists every real key):
 
 ```bash
-mkdir -p ~/.xencode
-cp .xencode.example.json ~/.xencode/config.json
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/xencode"
+cp .xencode.example.json "${XDG_CONFIG_HOME:-$HOME/.config}/xencode/config.json"
 xencode config show        # confirm the loader accepted it
 ```
+
+An installation that already has a `~/.xencode` keeps using it until you move it —
+`xencode paths` says which directory each kind of file is read from, and
+`xencode migrate --dry-run` prints what the move would do without doing it.
 
 Then point `xencode` at your Ollama server (`http://localhost:11434` by default)
 and open cloud access only if you want it — a key identifies you to a provider,
@@ -629,7 +639,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1789 passing)
+cargo test                          # Full workspace suite (2096 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -669,7 +679,7 @@ xencode/
 ├── images/                  # Screenshots
 ├── install.sh / install.ps1 # One-liner installers (Linux/macOS, Windows)
 ├── Dockerfile / docker-compose.yml
-└── .xencode.example.json    # Example of ~/.xencode/config.json
+└── .xencode.example.json    # Example of the settings directory's config.json
 ```
 
 ---
@@ -724,7 +734,7 @@ cd rust && cargo build -p xencode-cli 2>&1
 ### The interface crashed
 If the TUI panics, your terminal comes back normal — readable and scrollable,
 mouse and cursor as your shell expects — and the crash is written to
-`~/.xencode/last_panic.log` (owner-only) with the message, the source location,
+`last_panic.log` in the state directory (owner-only) with the message, the source location,
 and a backtrace when you ask for one:
 
 ```bash
@@ -735,7 +745,8 @@ RUST_BACKTRACE=1 xencode tui
 
 ## 🔒 Security
 
-- A provider credential lives in `api_keys` inside `~/.xencode/config.json`, and
+- A provider credential lives in `api_keys` inside the settings directory's
+  `config.json`, and
   `xencode config set openai_api_key …` writes it there — the value is stored and
   never printed back, and `config show` says only where the credential came from.
   To keep the secret out of the file, store a reference instead

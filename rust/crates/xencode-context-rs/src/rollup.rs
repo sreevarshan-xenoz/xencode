@@ -7,6 +7,10 @@
 //! of a refresh is proportional to what was written since the last time — one
 //! turn — rather than to everything ever recorded.
 //!
+//! A refresh also bounds the file: once it has grown to twice [`METRICS_KEEP_BYTES`]
+//! the rows that are already folded are cut off the front, so the record of every
+//! request the project has made stops being a record that never ends.
+//!
 //! What is kept is a sum plus a fixed-size window of the recent rate samples:
 //! the totals answer "how many tokens", the window answers "how fast, usually".
 //! Percentiles are exact over that window and say how long the window is; no
@@ -275,6 +279,82 @@ pub fn read_rollup(xencode_dir: &Path) -> Option<MetricsRollup> {
     (rollup.v == ROLLUP_VERSION).then_some(rollup)
 }
 
+/// How much of `metrics.jsonl` to keep once it has outgrown itself, in bytes.
+///
+/// The file is a record of every request the project has made, and it only ever
+/// grew: a year of daily use is thousands of lines that nothing reads, because
+/// the totals a person is shown come from the sidecar. This is the point where
+/// the newest rows stop being worth their weight in disk.
+pub const METRICS_KEEP_BYTES: u64 = 1024 * 1024;
+
+/// How far past the kept size the file has to grow before it is trimmed back,
+/// as a multiple of [`METRICS_KEEP_BYTES`]. Without the slack a file sitting at
+/// the limit would be rewritten on every single turn; with it, the rewrite
+/// happens once per limit's worth of requests rather than once per request.
+const METRICS_TRIM_AT: u64 = 2;
+
+/// Cut whole rows off the front of `metrics.jsonl` until it fits within
+/// `keep_bytes`, and report how many bytes went.
+///
+/// The sidecar already holds the totals for every row ever folded in, so
+/// discarding the oldest rows loses the lines rather than the figures — which is
+/// why this runs from [`refresh_rollup`] and nowhere else. A trim performed
+/// before the rows had been folded would delete records no one had summed.
+///
+/// Cutting starts at the first row boundary at or after the point `keep_bytes`
+/// from the end, so what remains is complete rows. A file whose last line was
+/// torn off by a process killed mid-append is left alone: there is no boundary
+/// to cut at, and a row that cannot be read is not worth rewriting the file for.
+pub fn trim_metrics(xencode_dir: &Path, keep_bytes: u64) -> std::io::Result<u64> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let path = crate::metrics::metrics_path(xencode_dir);
+    let mut file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(failure) => return Err(failure),
+    };
+    let length = file.metadata()?.len();
+    if length <= keep_bytes.saturating_mul(METRICS_TRIM_AT) {
+        return Ok(0);
+    }
+
+    // One read of the window that is worth keeping, so the bytes written back
+    // are the bytes that were measured rather than a second look at a file that
+    // may have grown in between.
+    let window_start = length - keep_bytes;
+    file.seek(SeekFrom::Start(window_start))?;
+    let mut tail = Vec::with_capacity(keep_bytes as usize);
+    file.read_to_end(&mut tail)?;
+    let Some(newline) = tail.iter().position(|byte| *byte == b'\n') else {
+        // No row boundary in the whole window: the file is one enormous row, or
+        // shorter than a line. Leave it as it is.
+        return Ok(0);
+    };
+    // Everything up to and including that newline is older than the window.
+    let cut = window_start + newline as u64 + 1;
+    let mut kept = tail[newline + 1..].to_vec();
+    // A row torn by a kill stays at the end of the file, where it already was.
+    if !kept.last().is_some_and(|byte| *byte == b'\n') {
+        kept.push(b'\n');
+    }
+
+    let temp = path.with_extension("jsonl.trimming");
+    {
+        let mut opened = std::fs::File::create(&temp)?;
+        opened.write_all(&kept)?;
+        opened.sync_all()?;
+    }
+    // Bail rather than replace if a second writer appended in the meantime: the
+    // rows it added are not in `kept`, and skipping one trim costs nothing.
+    if std::fs::metadata(&path)?.len() != length {
+        let _ = std::fs::remove_file(&temp);
+        return Ok(0);
+    }
+    std::fs::rename(&temp, &path)?;
+    Ok(cut)
+}
+
 /// Fold whatever was appended since the last refresh, save the sidecar, and
 /// return it. This is the only way to get a current rollup.
 ///
@@ -299,6 +379,13 @@ pub fn refresh_rollup(xencode_dir: &Path) -> std::io::Result<MetricsRollup> {
     }
     rollup.byte_offset = offset;
     rollup.v = ROLLUP_VERSION;
+    // Rows older than the kept window can go now that every one of them has been
+    // folded: the cut removes lines, not figures, because their totals are in the
+    // sidecar. Carrying the position back by the same amount is what keeps the
+    // offset pointing inside the file that is left, so this happens before the
+    // single write below rather than after it.
+    let cut = trim_metrics(xencode_dir, METRICS_KEEP_BYTES)?;
+    rollup.byte_offset = rollup.byte_offset.saturating_sub(cut);
     write_rollup(xencode_dir, &rollup)?;
     Ok(rollup)
 }
@@ -718,6 +805,174 @@ mod tests {
             rollup.last_sampling.as_deref(),
             Some("temperature 0.2 · seed 7")
         );
+        fs_reset(&dir);
+    }
+
+    /// The same bytes `append_metrics` would have written, in one write, so a
+    /// test can build a file the size of a year of turns without a write per row.
+    fn write_rows(xencode_dir: &Path, count: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let line = serde_json::to_string(&record("LOW", 1000, 400, 50)).unwrap();
+        for _ in 0..count {
+            bytes.extend_from_slice(line.as_bytes());
+            bytes.push(b'\n');
+        }
+        std::fs::create_dir_all(xencode_dir.join("cache")).unwrap();
+        std::fs::write(crate::metrics::metrics_path(xencode_dir), &bytes).unwrap();
+        bytes
+    }
+
+    /// A file that has outgrown the window is cut back on the refresh that
+    /// catches up with it, and the figures still describe every turn — including
+    /// the rows that are no longer on disk.
+    #[test]
+    fn a_refresh_cuts_an_oversized_metrics_file_without_losing_its_totals() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        // Comfortably past the point where a trim is owed, at a row size the
+        // writer actually produces.
+        let rows = 12_000;
+        let written = write_rows(&xencode, rows);
+        let before = crate::metrics::metrics_path(&xencode)
+            .metadata()
+            .unwrap()
+            .len();
+        assert!(
+            before > METRICS_KEEP_BYTES * 2,
+            "the test file is only {before} bytes, which never triggers a trim"
+        );
+
+        let rollup = refresh_rollup(&xencode).unwrap();
+        let after = crate::metrics::metrics_path(&xencode)
+            .metadata()
+            .unwrap()
+            .len();
+
+        assert!(
+            after <= METRICS_KEEP_BYTES,
+            "{before} bytes came down to {after}, still over the window"
+        );
+        // Every record was folded before any was cut, so nothing was lost by the
+        // trim: 12 000 rows at 1 000 prompted and 50 completed tokens each.
+        assert_eq!(rollup.rows as usize, rows);
+        assert_eq!(rollup.totals.prompt_tokens, 1000 * rows as u64);
+        assert_eq!(rollup.totals.completion_tokens, 50 * rows as u64);
+        assert_eq!(rollup.byte_offset, after, "the position is past the file");
+        // What survives is the newest part of the file, byte for byte.
+        assert_eq!(
+            std::fs::read(crate::metrics::metrics_path(&xencode)).unwrap(),
+            written[written.len() - after as usize..]
+        );
+        fs_reset(&dir);
+    }
+
+    /// The trim is not the end of the story: the next turn appends to a smaller
+    /// file and the rollup keeps counting from where it was.
+    #[test]
+    fn the_rollup_keeps_counting_after_the_file_was_cut() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        write_rows(&xencode, 12_000);
+        let trimmed = refresh_rollup(&xencode).unwrap();
+        let prompted_before = trimmed.totals.prompt_tokens;
+
+        append(&xencode, &[record("LOW", 1000, 400, 50)]);
+        let after = refresh_rollup(&xencode).unwrap();
+
+        assert_eq!(after.rows, trimmed.rows + 1);
+        assert_eq!(
+            after.totals.prompt_tokens,
+            prompted_before + 1000,
+            "a row appended after the trim was not counted"
+        );
+        assert!(after.byte_offset > trimmed.byte_offset);
+        assert!(after.byte_offset < METRICS_KEEP_BYTES + 512);
+        fs_reset(&dir);
+    }
+
+    #[test]
+    fn a_metrics_file_that_still_fits_is_left_untouched() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        append(&xencode, &[record("LOW", 1000, 400, 50)]);
+        let before = std::fs::read(crate::metrics::metrics_path(&xencode)).unwrap();
+
+        let cut = trim_metrics(&xencode, 1024).unwrap();
+
+        assert_eq!(cut, 0);
+        assert_eq!(
+            std::fs::read(crate::metrics::metrics_path(&xencode)).unwrap(),
+            before,
+            "a file under the window was rewritten"
+        );
+        fs_reset(&dir);
+    }
+
+    /// The cut lands on a row boundary, and a row torn off by a process killed
+    /// mid-append stays where it was — the reader already knows to drop it.
+    #[test]
+    fn a_trim_cuts_at_a_row_boundary_and_keeps_a_torn_row() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        std::fs::create_dir_all(xencode.join("cache")).unwrap();
+        let mut bytes = Vec::new();
+        for index in 0..200 {
+            bytes.extend(
+                format!(
+                    "{{\"profile\":\"LOW\",\"prompt_tokens\":{},\"completion_tokens\":7}}\n",
+                    index
+                )
+                .into_bytes(),
+            );
+        }
+        // The last row is the one a kill left half-written.
+        bytes.extend(b"{\"profile\":\"LO");
+        std::fs::write(crate::metrics::metrics_path(&xencode), &bytes).unwrap();
+
+        let cut = trim_metrics(&xencode, 1000).unwrap();
+        let kept = std::fs::read(crate::metrics::metrics_path(&xencode)).unwrap();
+
+        assert!(cut > 0);
+        assert!(
+            kept.len() <= 1000,
+            "{} bytes kept of a 1000 cap",
+            kept.len()
+        );
+        // Whole rows only, ending with the torn one and a newline.
+        assert!(kept.starts_with(b"{"), "cut into the middle of a row");
+        assert!(
+            String::from_utf8_lossy(&kept)
+                .lines()
+                .all(|line| line.starts_with("{\"profile\"")),
+            "a fragment of a row survived the cut"
+        );
+        assert!(kept.last().is_some_and(|byte| *byte == b'\n'));
+        fs_reset(&dir);
+    }
+
+    /// A file with no row boundary inside the window is one row too big to cut
+    /// anywhere, so it is left alone rather than halved at an arbitrary byte.
+    #[test]
+    fn a_metrics_file_that_is_one_row_is_not_cut() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        std::fs::create_dir_all(xencode.join("cache")).unwrap();
+        let one_row = vec![b'x'; 4096];
+        std::fs::write(crate::metrics::metrics_path(&xencode), &one_row).unwrap();
+
+        assert_eq!(trim_metrics(&xencode, 1000).unwrap(), 0);
+        assert_eq!(
+            std::fs::read(crate::metrics::metrics_path(&xencode)).unwrap(),
+            one_row
+        );
+        fs_reset(&dir);
+    }
+
+    #[test]
+    fn trimming_a_file_that_is_not_there_is_not_a_failure() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        assert_eq!(trim_metrics(&xencode, 1024).unwrap(), 0);
         fs_reset(&dir);
     }
 

@@ -459,7 +459,7 @@ pub struct App<'a> {
     /// What is in here — a prompt prefix and `before`/`after` hooks — is in
     /// every agent turn; `reports()` says which manifests did not load and why.
     pub plugins: xencode_plugin_rs::PluginRuntime,
-    /// The skills found in `~/.xencode/skills` and `<workspace>/.xencode/skills`
+    /// The skills found in the user's skills directory and `<workspace>/.xencode/skills`
     /// when this app started (M-3). The prompt carries their menu and
     /// `load_skill` reads a body out of here; shared so a turn running on the
     /// loop's copy sees exactly what `/skills` reports.
@@ -2296,10 +2296,10 @@ impl<'a> App<'a> {
         self.skills = std::sync::Arc::new(xencode_plugin_rs::SkillRuntime::load(home, project));
     }
 
-    /// The two roots a session scans: `$XCODE_SKILLS_DIR` or `~/.xencode/skills`,
-    /// then `<workspace>/.xencode/skills`. The workspace is the directory
-    /// xencode was started in, which is what every other tool call is relative
-    /// to.
+    /// The two roots a session scans: `$XCODE_SKILLS_DIR` or the user's skills
+    /// directory, then `<workspace>/.xencode/skills`. The workspace is the
+    /// directory xencode was started in, which is what every other tool call is
+    /// relative to.
     fn skill_dirs() -> (std::path::PathBuf, std::path::PathBuf) {
         let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         (
@@ -5377,17 +5377,12 @@ impl<'a> App<'a> {
         let templates = xencode_analysis_rs::envdrift::read_templates(&root);
         let drift = xencode_analysis_rs::envdrift::compare(&refs, &templates);
 
-        let colab_route = if let Ok(home) = std::env::var("HOME") {
-            let colab_file = std::path::Path::new(&home)
-                .join(".xencode")
-                .join("colab_state.json");
-            if colab_file.exists() {
-                "state file present"
-            } else {
-                "none"
-            }
-        } else {
-            "none"
+        // Ask the bridge's own code where its state file is. This used to name a
+        // path under the home directory that nothing writes, so the row reported
+        // "none" for a bridge that was up.
+        let colab_route = match xencode_colab_rs::ColabState::state_path() {
+            Ok(path) if path.exists() => "state file present",
+            _ => "none",
         };
 
         let mut lines = Vec::new();
@@ -13465,6 +13460,59 @@ mod tests {
                 "profiler still lists {scripted}"
             );
         }
+    }
+
+    /// The panel that reads the metrics file is also what keeps that file from
+    /// growing forever. It may bound the file without losing the figures: the
+    /// rollup has folded every row before the oldest ones are cut.
+    #[tokio::test]
+    async fn the_profiler_bounds_the_metrics_file_it_reads() {
+        let dir = temp_dir("profiler-trim");
+        let xencode = dir.join(".xencode");
+        let row = xencode_context_rs::RequestMetrics::from_timings(
+            "BALANCED", 8192, 1000, 400, 50, 30.0, 900.0, 5,
+        );
+        // Rows until the file is past the point where a trim is owed, written
+        // one append at a time exactly as a turn writes one.
+        let mut written = 0usize;
+        loop {
+            xencode_context_rs::append_metrics(&xencode, &row).unwrap();
+            written += 1;
+            let length = std::fs::metadata(xencode.join("cache").join("metrics.jsonl"))
+                .unwrap()
+                .len();
+            if length > xencode_context_rs::METRICS_KEEP_BYTES * 2 {
+                break;
+            }
+            assert!(
+                written < 50_000,
+                "the file stopped growing at {written} rows"
+            );
+        }
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_profiler(xencode.clone(), tx).await;
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+
+        let length_after = std::fs::metadata(xencode.join("cache").join("metrics.jsonl"))
+            .unwrap()
+            .len();
+        assert!(
+            length_after <= xencode_context_rs::METRICS_KEEP_BYTES,
+            "{written} rows were cut to {length_after} bytes, still over the window"
+        );
+        // The panel counts every turn ever recorded, not the rows left on disk.
+        assert!(
+            messages
+                .iter()
+                .any(|m| m == &format!("[PROFILER]row:metrics|recorded turns|{written}")),
+            "the panel lost the older turns: {messages:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A scratch project for the cost work: a real `.xencode` directory, real

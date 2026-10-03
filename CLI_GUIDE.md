@@ -1375,10 +1375,10 @@ repository's default branch.
 
 The table ages in public: `advice` prints the date it was checked and how many
 days old that is, and answers from a table older than six months say so. Replace
-it by writing your own at `~/.xencode/model_advice.json` (same shape: `as_of`,
-`ollama_preference`, `tiers[]` of `max_file_bytes` and `gguf` entries) — xencode
-then reads yours and the `from:` line says which file it answered from. A user
-file that fails to parse is refused out loud and the shipped table is used
+it by writing your own `model_advice.json` in the settings directory (same shape:
+`as_of`, `ollama_preference`, `tiers[]` of `max_file_bytes` and `gguf` entries) —
+xencode then reads yours and the `from:` line says which file it answered from. A
+user file that fails to parse is refused out loud and the shipped table is used
 instead, because a typo in a JSON file should not cost the answer. The same
 preference list decides which installed Ollama tag `xencode models default`
 picks.
@@ -1533,7 +1533,7 @@ type a public-tunnel URL (paid tier) into Settings → Remote URL instead.
 ```bash
 xencode config set colab_enabled true  # opt in — `up` refuses while the bridge is off
 xencode colab preflight                # is the bridge usable? (exit 0 when green)
-xencode colab preflight --generate-key # also create ~/.xencode/colab_ed25519 if missing
+xencode colab preflight --generate-key # also create colab_ed25519 in the settings dir if missing
 xencode colab up                       # create the VM, install the runtime, hold the tunnel
 xencode colab up --reconnect           # rebuild a broken bridge from colab.json (one key)
 xencode colab status                   # is the forward/session/endpoint alive?
@@ -1566,7 +1566,7 @@ before blaming the tunnel.
 `up` is the happy-path bring-up: `colab new --gpu <gpu> -s <name>` when the
 session is absent, pushes an ssh bootstrap that installs the runtime bound to
 `127.0.0.1` only *inside* the VM, holds an `ssh -N -l root -L` forward, waits
-until `/v1/models` answers, and writes `~/.xencode/colab.json` — then points
+until `/v1/models` answers, and writes `colab.json` to the state directory — then points
 the provider URLs at the forward (`llama_cpp_url`/`ollama_url` for the runtime,
 `remote_base_url` for the OpenAI-compatible remote). The ssh user is `root`
 because Colab injects the bridge key for root only. Flags override config;
@@ -1657,9 +1657,80 @@ llama.cpp reports the GGUF path it was started with as its model id, so on the
 `/root/...` because Colab injects the bridge key for root. Read it from
 `/v1/models` rather than assuming it.
 
+### Where xencode keeps its files
+Four kinds of file, in four directories, so that clearing one of them cannot
+take the others with it:
+
+| Kind | Directory | What lives there |
+| --- | --- | --- |
+| settings | `$XDG_CONFIG_HOME/xencode` | `config.json` and its backups, the Colab bridge key pair, `model_advice.json`, `skills/` |
+| state | `$XDG_STATE_HOME/xencode` | `audit.jsonl`, `conversation_memory.json`, `colab.json`, `last_panic.log`, `llamaserver.pid` |
+| cache | `$XDG_CACHE_HOME/xencode` | cached responses, and the advisory corpora under `advisories/` |
+| downloaded models | `$XDG_DATA_HOME/xencode` | GGUF weights — kept out of the cache so a cache cleaner can never delete a multi-gigabyte download |
+
+With the variable unset each one falls back to the usual place: `~/.config`,
+`~/.local/state`, `~/.cache`, `~/.local/share`.
+
+An installation that has never been migrated is still one `~/.xencode` directory,
+and xencode keeps reading it — a modern directory wins only once it exists,
+because a half-finished move is worse than an old layout. `xencode paths` prints
+which of the two answers each kind. `XCODE_CONFIG_DIR` points all four at one
+directory and takes precedence over everything above; `xencode doctor` then
+reports every kind as pinned to it.
+
+A project's own files do not move: `.xencode/` inside the workspace holds the
+retrieval index, the recorded sessions and `cache/metrics.jsonl`.
+
+### `xencode paths [--format text|json]`
+Print where each kind of file is read from, and name the ones that are still in
+`~/.xencode`.
+
+```bash
+xencode paths
+xencode paths --format json
+```
+
+The JSON form gives every kind twice — `in_use` is where the files actually are,
+`modern` is where they would go — with `legacy: true` on the ones the migration
+has not moved, and `override` set to the `XCODE_CONFIG_DIR` root when one is in
+effect.
+
+### `xencode migrate [--dry-run]`
+Move the contents of `~/.xencode` into the four directories above.
+
+```bash
+xencode migrate --dry-run   # print the whole report, change nothing
+xencode migrate
+```
+
+Nothing happens on its own; this is the only way files move. The rules the report
+holds itself to:
+
+- A destination that already has a file of that name is never overwritten. The
+  migration says so, names the file, and reports that xencode now reads the one
+  that was already there — which is true, since a directory that exists is what
+  makes the old one stop being read.
+- `~/.xencode/cache` and `~/.xencode/models` move as directories, onto the cache
+  and data directories, so every cached response and downloaded weight keeps the
+  name it has. Everything else is sorted by what it is.
+- A file that cannot be moved in one step is copied and then removed, and a copy
+  that fails partway removes its own half-written destination — an incomplete new
+  directory would otherwise be read as the finished one.
+- A directory's permissions come with it, so a `0600` `config.json` is still
+  `0600`. An existing destination directory is never made more readable than it
+  already was.
+- `~/.xencode` is deleted only when it is empty. A refusal, or anything you added
+  to it yourself, leaves the directory in place.
+- Under `XCODE_CONFIG_DIR` the command refuses, because there is nothing to move
+  and a person pointing xencode at a directory should not have it emptied.
+
+Both forms print the same report; the dry run only says it would happen.
+
 ### `xencode config <action>`
-Configuration management. Config lives in `~/.xencode/config.json`;
-set `XCODE_CONFIG_DIR` to point Xencode at a different directory.
+Configuration management. Config is a setting, so it lives in the settings
+directory above — `$XDG_CONFIG_HOME/xencode/config.json`, or `~/.xencode` for an
+installation that has not been migrated; set `XCODE_CONFIG_DIR` to point xencode
+at a different directory.
 
 ```bash
 xencode config show
@@ -1869,12 +1940,23 @@ whose `tool_input.path` is `.env` is stopped before anything is written, and not
 about the event is passed in the command line itself.
 
 ### `xencode cache <action>`
-Response cache management: `stats`, `clear`.
+Response cache management: `stats`, `clear`, `gc`.
 
 ```bash
 xencode cache stats
 xencode cache clear
+xencode cache gc --max-mb 500
 ```
+
+`gc` drops the oldest cached responses until the ones left fit under the size you
+asked for (`--max-mb` counts 1 048 576 bytes to the megabyte), and prints how much
+went. Oldest means last written: a read refreshes an entry in the running process
+but is not recorded in the file, so the file cannot claim to know which answers
+were read recently. The advisory corpora under `advisories/` are not counted and
+cannot be removed — they are a download, not an answer — so the cap is a cap on
+the responses. Only the cache directory is touched: the settings, the session
+records and a downloaded model are in other directories, which is what makes a
+command like this safe to run.
 
 ### `xencode replay <run-id> [--run-tools]`
 Run a recorded agent turn again from the bytes it was made of. Turn on
@@ -1937,7 +2019,7 @@ report the request it could not answer.
 Check the session server's audit log for records that were changed after they
 were written. Each record carries a digest of its own contents and the digest of
 the record before it, so editing, removing or moving a line is reported on a
-specific line. Defaults to `~/.xencode/audit.jsonl`. Exits non-zero when
+specific line. Defaults to `audit.jsonl` in the state directory. Exits non-zero when
 something does not add up.
 
 ```bash
@@ -2016,7 +2098,8 @@ that contains its own grader, so the expected values are readable by it; nothing
 here stops a model from reading them, and the diff check is what notices.
 
 ### `xencode memory <action>`
-Conversation memory (persisted under `~/.xencode`): `list`, `show <session>`.
+Conversation memory (kept as `conversation_memory.json` in the state directory):
+`list`, `show <session>`.
 
 ```bash
 xencode memory list
@@ -2091,7 +2174,7 @@ xencode server --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https +
 | `--port <PORT>` | Listen port (default `8765`) |
 | `--host <HOST>` | Bind address (default `127.0.0.1`; IP or `localhost`) |
 | `--cert <PEM>` / `--key <PEM>` | TLS material — both or neither; enables `https://`/`wss://` |
-| `--audit-path <PATH\|none>` | JSONL audit trail (default `~/.xencode/audit.jsonl`; `none` disables) |
+| `--audit-path <PATH\|none>` | JSONL audit trail (default `audit.jsonl` in the state directory; `none` disables) |
 | `--allow-insecure-public` | Escape hatch: bind a non-loopback address over plain ws:// |
 
 Posture rules, enforced at startup: a non-loopback `--host` without TLS
@@ -2260,7 +2343,8 @@ List the commits oldest first. Quote a commit's subject, never its hash.
 ```
 
 Xencode scans two directories when the TUI starts —
-`~/.xencode/skills` (set `$XCODE_SKILLS_DIR` to move it) and `.xencode/skills`
+`skills/` in the settings directory (set `$XCODE_SKILLS_DIR` to move it) and
+`.xencode/skills`
 inside the workspace — and a project skill replaces a user skill of the same
 name rather than sitting beside it. What goes into the system prompt is a list:
 one heading, then one line per skill (`name — description`, a description longer
@@ -2396,7 +2480,7 @@ $ xencode doctor
 ```
 
 Every one of those sentences came from the machine: the free space is a real
-`statvfs` of the volume holding `~/.xencode`, the mode is the file's own
+`statvfs` of the volume holding the state directory, the mode is the file's own
 permission bits, the sizes are a walk of the directory, and the Colab rows are
 the answers of the installed `colab` 0.7.2 — which is asked through the same
 preflight `xencode colab up` runs through, so the report and the gate cannot
@@ -2444,7 +2528,7 @@ git, providers, MCP servers, the default model, metrics, cache. Same rows, same
 
 Each check goes through the code path the feature uses, so a row says something
 about the real route rather than about a guess. Providers are dialled at the
-addresses in `~/.xencode/config.json` — `ollama_url`, `llama_cpp_url`, and
+addresses in the settings directory's `config.json` — `ollama_url`, `llama_cpp_url`, and
 `remote_base_url` when it is set — not at a remembered port, and a cloud
 provider is dialled only when a key is configured for it. An MCP server is
 started by the same client `/mcp` uses, asked to introduce itself, and killed;

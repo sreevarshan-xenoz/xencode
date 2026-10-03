@@ -74,10 +74,10 @@ pub fn install_panic_hook(record: impl Into<PathBuf>) {
     }));
 }
 
-/// Path used by the CLI: alongside the config, so one directory holds
-/// everything a bug report needs.
+/// Path used by the CLI: in the directory xencode keeps its records in, beside
+/// the audit trail — a crash is something that happened, not a setting.
 pub fn default_record_path() -> Option<PathBuf> {
-    xencode_config_rs::XencodeConfig::config_dir()
+    xencode_config_rs::paths::state_dir()
         .ok()
         .map(|dir| dir.join("last_panic.log"))
 }

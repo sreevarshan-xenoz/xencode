@@ -64,7 +64,8 @@ pub const RUSTSEC_REPO: &str = "https://github.com/RustSec/advisory-db.git";
 pub const OSV_ZIP_URL: &str =
     "https://osv-vulnerabilities.storage.googleapis.com/crates.io/all.zip";
 
-/// Directory under the user's config dir that holds both corpora.
+/// Directory under the cache directory that holds both corpora: a corpus is a
+/// download that `sync` can repeat, so it belongs with what can be thrown away.
 pub const CORPUS_DIRNAME: &str = "advisories";
 pub const RUSTSEC_SUBDIR: &str = "advisory-db";
 pub const OSV_SUBDIR: &str = "osv";
@@ -564,9 +565,9 @@ impl Lookup {
     }
 }
 
-/// Where the corpus lives for a given config directory.
-pub fn corpus_dir(config_dir: &Path) -> PathBuf {
-    config_dir.join(CORPUS_DIRNAME)
+/// Where the corpus lives for a given cache directory.
+pub fn corpus_dir(cache_dir: &Path) -> PathBuf {
+    cache_dir.join(CORPUS_DIRNAME)
 }
 
 /// Read the sync record, or [`AdvisoryError::Missing`] when there is no usable

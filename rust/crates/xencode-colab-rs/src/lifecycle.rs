@@ -12,7 +12,7 @@
 //!    run as `bash -s`,
 //! 3. `ssh -N -L` forward spawned (the far endpoint appears on the laptop),
 //! 4. `/v1/models` probed until the endpoint answers,
-//! 5. state written to `~/.xencode/colab.json` (carrying which backend owns
+//! 5. state written to `colab.json` in the state directory (carrying which backend owns
 //!    it, so a second backend never inherits a live Colab bridge).
 //!
 //! I/O is only ever argv/stdin/stdout against `colab`/`ssh` fakes on `$PATH`
@@ -357,7 +357,11 @@ pub async fn bridge_status<B: Backend>(backend: &B, asked_session: &str) -> Stat
     });
 
     let Some(state) = state else {
-        lines.push("not up (no ~/.xencode/colab.json — run `xencode colab up`)".to_string());
+        // Name the file that is missing, wherever this machine keeps it.
+        let absent = ColabState::state_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|_| "the xencode state directory".to_string());
+        lines.push(format!("not up (no {absent} — run `xencode colab up`)"));
         return StatusReport {
             forward_alive: false,
             session_present: false,

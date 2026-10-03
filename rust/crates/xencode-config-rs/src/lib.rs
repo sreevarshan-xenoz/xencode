@@ -1,5 +1,6 @@
 pub mod config;
 pub mod files;
+pub mod paths;
 pub mod secrets;
 
 pub use config::{

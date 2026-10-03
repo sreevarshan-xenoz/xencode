@@ -318,7 +318,7 @@ enum Commands {
         #[arg(long)]
         key: Option<PathBuf>,
 
-        /// Audit log path; "none" disables (default: ~/.xencode/audit.jsonl)
+        /// Audit log path; "none" disables (default: <state dir>/audit.jsonl)
         #[arg(long)]
         audit_path: Option<String>,
 
@@ -476,6 +476,22 @@ enum Commands {
     Session {
         #[command(subcommand)]
         action: SessionAction,
+    },
+
+    /// Where xencode keeps its own files: settings, session records, cache and
+    /// downloaded models, and whether they are still in `~/.xencode`
+    Paths {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Move the files in `~/.xencode` to the four directories they belong in.
+    /// Nothing is overwritten and the old directory is only removed once empty.
+    Migrate {
+        /// Print what would move and change nothing
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Run the machine-checkable checklist: test, lint, fmt — each verified, none graded
@@ -1101,13 +1117,21 @@ enum CacheAction {
     Stats,
     /// Clear all cached responses
     Clear,
+    /// Drop the oldest cached responses until the cache directory fits under a
+    /// size. The downloaded advisory corpora are not counted and cannot be
+    /// removed by this command.
+    Gc {
+        /// Largest the cached responses may be, in megabytes
+        #[arg(long)]
+        max_mb: u64,
+    },
 }
 
 #[derive(Subcommand)]
 enum AuditAction {
     /// Check an audit log for records that were changed after they were written
     Verify {
-        /// Log to check (default: ~/.xencode/audit.jsonl)
+        /// Log to check (default: <state dir>/audit.jsonl)
         path: Option<PathBuf>,
     },
 }
@@ -1374,6 +1398,8 @@ async fn main() {
             format,
         } => run_doctor(env, deps, selfcheck, format).await,
         Commands::Session { action } => run_session(action),
+        Commands::Paths { format } => run_paths(format),
+        Commands::Migrate { dry_run } => run_migrate(dry_run),
         Commands::Verify {
             skip,
             timeout,
@@ -1529,6 +1555,161 @@ fn parse_u16(value: &str, key: &str) -> Result<u16, String> {
         return Err(format!("{key} must be 1..=65535"));
     }
     Ok(port)
+}
+
+/// Print where each kind of xencode's own files is kept, and say in as many
+/// words when they are still in the single directory this layout replaced.
+fn run_paths(format: OutputFormat) -> Result<(), String> {
+    use xencode_config_rs::paths;
+
+    let places = paths::locations();
+    let override_root = paths::override_root();
+    if matches!(format, OutputFormat::Json) {
+        let out = serde_json::json!({
+            "override": override_root.as_ref().map(|root| root.display().to_string()),
+            "legacy_in_use": paths::legacy_in_use(),
+            "locations": places.iter().map(|place| serde_json::json!({
+                "kind": place.kind.label(),
+                "in_use": place.in_use.display().to_string(),
+                "modern": place.modern.display().to_string(),
+                "legacy": place.legacy,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    println!("\n  Where xencode keeps its own files:");
+    for place in &places {
+        println!("  • {:>17}  {}", place.kind.label(), place.in_use.display());
+    }
+    if let Some(root) = &override_root {
+        println!(
+            "\n  $XCODE_CONFIG_DIR is set to {}, so all four are read from that one tree.",
+            root.display()
+        );
+        println!("  The XDG locations above are where they would go without it.");
+        return Ok(());
+    }
+    let still_old: Vec<_> = places
+        .iter()
+        .filter(|place| place.legacy)
+        .map(|place| place.kind.label())
+        .collect();
+    if still_old.is_empty() {
+        println!("  Nothing is left in the old single directory.");
+    } else {
+        println!("\n  Still in ~/.xencode: {}", still_old.join(", "));
+        println!(
+            "  Run `xencode migrate --dry-run` to see what would move, then `xencode migrate`."
+        );
+        println!("  Until you run it, nothing moves: xencode keeps reading the old directory.");
+    }
+    Ok(())
+}
+
+/// Move an existing installation's files out of `~/.xencode` into the four
+/// directories they belong in, printing every entry the migration could not
+/// complete rather than hiding it.
+fn run_migrate(dry_run: bool) -> Result<(), String> {
+    use xencode_config_rs::paths;
+
+    let report = if dry_run {
+        paths::plan_migration()
+    } else {
+        paths::migrate()
+    }
+    .map_err(|e| e.to_string())?;
+
+    if report.is_empty() {
+        println!(
+            "  {} holds nothing to migrate.",
+            report.old_directory.display()
+        );
+        println!("  Run `xencode paths` to see where each kind of file is read from.");
+        return Ok(());
+    }
+    if report.moved.is_empty() {
+        println!(
+            "  {} from {}.",
+            if dry_run {
+                "Nothing would move"
+            } else {
+                "Nothing moved"
+            },
+            report.old_directory.display()
+        );
+    } else {
+        println!(
+            "  {} {} {} from {}:",
+            if dry_run { "Would move" } else { "Moved" },
+            report.moved.len(),
+            if report.moved.len() == 1 {
+                "entry"
+            } else {
+                "entries"
+            },
+            report.old_directory.display()
+        );
+    }
+    for kind in paths::ALL {
+        let moved: Vec<_> = report
+            .moved
+            .iter()
+            .filter(|entry| entry.kind == kind)
+            .collect();
+        if moved.is_empty() {
+            continue;
+        }
+        // The destination, not `paths::dir`: before the move that still answers
+        // with the old directory, which is the thing being left.
+        let where_to = paths::locations()
+            .into_iter()
+            .find(|place| place.kind == kind)
+            .map(|place| place.modern)
+            .unwrap_or_default();
+        println!("  {} → {}", kind.label(), where_to.display());
+        for entry in moved {
+            let name = entry
+                .from
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            println!("    {name}");
+        }
+    }
+    for left in &report.left {
+        println!("  Left where it is: {}", left.path.display());
+        println!("      {}", left.reason);
+    }
+    if dry_run {
+        println!(
+            "  {} {}.",
+            report.old_directory.display(),
+            if report.left.is_empty() {
+                "is empty afterwards and would be removed"
+            } else {
+                "would be kept, because the entries above cannot all move"
+            }
+        );
+    } else if report.old_directory_removed {
+        println!(
+            "  {} is now empty and has been removed.",
+            report.old_directory.display()
+        );
+    } else {
+        println!(
+            "  {} is kept, because not everything in it moved.",
+            report.old_directory.display()
+        );
+    }
+    if dry_run {
+        println!("\n  Nothing above has happened yet — run `xencode migrate` to do it.");
+    }
+    Ok(())
 }
 
 fn run_config(action: ConfigAction) -> Result<(), String> {
@@ -2037,12 +2218,12 @@ fn run_models_advice() -> Result<(), String> {
     Ok(())
 }
 
-/// Where a fetched model lands by default, under the cache directory xencode
-/// already uses for its own state.
+/// Where a fetched model lands by default: the directory xencode keeps the
+/// things it fetched, which is not the cache — a weight costs a long download to
+/// replace, and a cache cleaner is meant to be able to throw a cache away.
 fn default_gguf_path(file_name: &str) -> String {
-    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    home.join(".xencode")
-        .join("models")
+    xencode_config_rs::paths::data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join(file_name)
         .display()
         .to_string()
@@ -2510,9 +2691,8 @@ async fn fetch_model(url: &str, path: &str, expected_sha256: Option<&str>) -> Re
 
 async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
     fn pid_file() -> std::path::PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".xencode")
+        xencode_config_rs::paths::state_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join("llamaserver.pid")
     }
 
@@ -3161,6 +3341,47 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
             }
             Ok(())
         }
+        CacheAction::Gc { max_mb } => {
+            let dir = ResponseCache::persistence_dir().map_err(|e| e.to_string())?;
+            let cap_bytes = max_mb.saturating_mul(1024 * 1024);
+            let report =
+                xencode_cache_rs::collect_to_size(&dir, cap_bytes).map_err(|e| e.to_string())?;
+            println!("cache:   {}", dir.display());
+            if report.was_within_cap() {
+                println!(
+                    "Cached responses take {}, which fits under the {} cap. Nothing removed.",
+                    megabytes_label(report.bytes_before),
+                    megabytes_label(cap_bytes)
+                );
+            } else {
+                println!(
+                    "Removed {} cached response{}, oldest first: {} down to {} ({} freed), to fit \
+                     under {}.",
+                    report.removed,
+                    if report.removed == 1 { "" } else { "s" },
+                    megabytes_label(report.bytes_before),
+                    megabytes_label(report.bytes_after),
+                    megabytes_label(report.freed_bytes()),
+                    megabytes_label(cap_bytes)
+                );
+                println!(
+                    "The advisory corpora under advisories/ are a separate download and were not \
+                     counted or touched."
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+/// A size in the unit a person asked in. Under a mebibyte the exact byte count
+/// is printed, because "0.0 MiB" for 300 KiB reads as though there were nothing there.
+fn megabytes_label(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    if bytes < MIB {
+        format!("{bytes} B")
+    } else {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
     }
 }
 
@@ -3327,14 +3548,15 @@ fn run_audit(action: AuditAction) -> Result<(), String> {
     }
 }
 
-/// Where the advisory corpora live. `--dir` exists so a corpus can be kept on a
-/// shared or offline path without touching the config directory.
+/// Where the advisory corpora live: the cache directory, because they are a
+/// download that `advisories sync` can repeat. `--dir` exists so a corpus can be
+/// kept on a shared or offline path without touching it.
 fn advisory_corpus(dir: Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(dir) = dir {
         return Ok(dir);
     }
-    let config_dir = XencodeConfig::config_dir().map_err(|e| e.to_string())?;
-    Ok(xencode_analysis_rs::advisories::corpus_dir(&config_dir))
+    let cache_dir = xencode_config_rs::paths::cache_dir().map_err(|e| e.to_string())?;
+    Ok(xencode_analysis_rs::advisories::corpus_dir(&cache_dir))
 }
 
 async fn run_advisories(action: AdvisoryAction) -> Result<(), String> {
@@ -4314,15 +4536,16 @@ fn resolve_bind(
 }
 
 /// Where the audit log goes: `--audit-path none` disables, an explicit path
-/// is taken verbatim, and the default is the user-level config directory
-/// (`~/.xencode/audit.jsonl`) — sessions are not repo-scoped, so neither is
-/// the trail.
+/// is taken verbatim, and the default is the directory xencode keeps its
+/// records in — `~/.local/state/xencode/audit.jsonl`, or `~/.xencode/audit.jsonl`
+/// for a person still on the old layout. Sessions are not repo-scoped, so
+/// neither is the trail.
 fn resolve_audit_path(audit_path: Option<&str>) -> Result<Option<PathBuf>, String> {
     match audit_path {
         Some("none") => Ok(None),
         Some(p) => Ok(Some(PathBuf::from(p))),
         None => Ok(Some(
-            XencodeConfig::config_dir()
+            xencode_config_rs::paths::state_dir()
                 .map_err(|e| e.to_string())?
                 .join("audit.jsonl"),
         )),
@@ -4757,7 +4980,7 @@ fn run_doctor_deps(format: OutputFormat) -> Result<(), String> {
 
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let manifest = xencode_context_rs::verify::manifest_dir(&root)?;
-    let corpus = xencode_config_rs::XencodeConfig::config_dir()
+    let corpus = xencode_config_rs::paths::cache_dir()
         .map(|dir| xencode_analysis_rs::advisories::corpus_dir(&dir))
         .ok();
     let report = deps::doctor_deps(&manifest, corpus.as_deref())?;
@@ -5240,15 +5463,31 @@ async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
 async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let (config, read) = load_config();
-    let state_dir = xencode_config_rs::XencodeConfig::config_dir().ok();
+    // Three directories, because three kinds of file live in them: the settings
+    // this report is about, the records the free-space row cares about, and the
+    // cache whose size is worth naming. Asking only for the settings directory
+    // and guessing the rest with `join("cache")` is how a report ends up
+    // measuring a directory that holds nothing.
+    let settings_dir = xencode_config_rs::paths::settings_dir().ok();
+    let state_dir = xencode_config_rs::paths::state_dir().ok();
+    let cache_dir = xencode_config_rs::paths::cache_dir().ok();
 
     let mut checks = Vec::new();
-    let config_path = state_dir
+    let config_path = settings_dir
         .as_ref()
         .map(|dir| dir.join("config.json"))
         .unwrap_or_default();
     checks.push(doc::check_config(&config_path, read));
-    if let Some(dir) = state_dir.as_ref() {
+    let still_old: Vec<String> = xencode_config_rs::paths::locations()
+        .iter()
+        .filter(|place| place.legacy)
+        .map(|place| place.kind.label().to_string())
+        .collect();
+    checks.push(doc::check_layout(
+        &still_old,
+        xencode_config_rs::paths::override_root().as_deref(),
+    ));
+    if let Some(dir) = settings_dir.as_ref() {
         checks.push(doc::check_config_version(
             &config_path,
             xencode_config_rs::XencodeConfig::version_of(&config_path),
@@ -5270,12 +5509,16 @@ async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
             &key_path,
             doc::file_mode(&key_path),
         ));
+    }
+    if let Some(dir) = state_dir.as_ref() {
         checks.push(doc::check_free_disk(
             "state",
             dir,
             xencode_context_rs::hwprobe::free_disk_bytes(&dir.display().to_string()),
         ));
-        checks.push(doc::check_dir_size("cache", &dir.join("cache")));
+    }
+    if let Some(dir) = cache_dir.as_ref() {
+        checks.push(doc::check_dir_size("cache", dir));
     }
     checks.extend(spine_checks(&root, &config).await);
     checks.extend(colab_checks().await);
@@ -7841,6 +8084,8 @@ mod tests {
             "generate",
             "session",
             "envcheck",
+            "paths",
+            "migrate",
         ] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
@@ -7859,6 +8104,22 @@ mod tests {
     fn agents_parses() {
         let cli = Cli::try_parse_from(["xencode", "agents"]).unwrap();
         assert!(matches!(cli.command, Some(Commands::Agents { .. })));
+    }
+
+    #[test]
+    fn paths_and_migrate_parse() {
+        let cli = Cli::try_parse_from(["xencode", "paths"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Paths { .. })));
+        let cli = Cli::try_parse_from(["xencode", "migrate"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Migrate { dry_run: false })
+        ));
+        let cli = Cli::try_parse_from(["xencode", "migrate", "--dry-run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Migrate { dry_run: true })
+        ));
     }
 
     #[test]
@@ -8379,12 +8640,13 @@ mod tests {
             resolve_audit_path(Some("/tmp/x.jsonl")).unwrap(),
             Some(path("/tmp/x.jsonl"))
         );
-        // The default lands in the user config dir, never the repo.
+        // The default lands in the directory xencode keeps its records in,
+        // never the repo.
         let default = resolve_audit_path(None).unwrap().unwrap();
         assert_eq!(default.file_name().unwrap(), "audit.jsonl");
         assert_eq!(
             default.parent().unwrap(),
-            xencode_config_rs::XencodeConfig::config_dir().unwrap()
+            xencode_config_rs::paths::state_dir().unwrap()
         );
     }
 

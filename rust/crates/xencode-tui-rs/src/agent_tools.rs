@@ -180,7 +180,8 @@ fn resolve_path(root: &Path, raw: &str) -> PathBuf {
 }
 
 /// Whether `raw` (relative paths resolve against `root`) lands inside the
-/// workspace and outside the forbidden zones (`.git/`, the config dir).
+/// workspace and outside the forbidden zones (`.git/`, xencode's own
+/// directories).
 /// Best-effort lexical check — symlinks are not resolved — which is why
 /// in-workspace writes still prompt in `ask` mode instead of running blindly.
 pub fn path_allowed(root: &Path, raw: &str) -> bool {
@@ -196,10 +197,12 @@ pub fn path_allowed(root: &Path, raw: &str) -> bool {
     {
         return false;
     }
-    if let Ok(config_dir) = xencode_config_rs::XencodeConfig::config_dir() {
-        if joined.starts_with(normalize(&absolutize(&config_dir))) {
-            return false;
-        }
+    // Every directory xencode keeps in the person's home, not only the settings
+    // one: the records, the cache and the downloaded weights are not there any
+    // more, and a tool that could write into any of them could delete the audit
+    // trail or replace a model file the next turn reads.
+    if xencode_config_rs::paths::is_internal(&joined) {
+        return false;
     }
     true
 }
@@ -713,15 +716,15 @@ fn tool_lookup_advisory(root: &Path, args: &serde_json::Map<String, serde_json::
     let Some(name) = arg_str(args, "crate").map(str::trim) else {
         return err("lookup_advisory needs a string \"crate\", as in {\"crate\": \"chrono\"}");
     };
-    let config_dir = match xencode_config_rs::XencodeConfig::config_dir() {
+    let cache_dir = match xencode_config_rs::paths::cache_dir() {
         Ok(dir) => dir,
         Err(e) => {
             return err(format!(
-                "lookup_advisory cannot locate the config directory: {e}"
+                "lookup_advisory cannot locate the cache directory: {e}"
             ))
         }
     };
-    let corpus = adv::corpus_dir(&config_dir);
+    let corpus = adv::corpus_dir(&cache_dir);
     let asked = arg_str(args, "version")
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -4921,7 +4924,9 @@ patched = ["{fixed}"]
             .cloned()
             .expect("this workspace has a Cargo.lock with a single-versions crate");
         write_advisory(
-            &xencode_analysis_rs::advisories::corpus_dir(&config),
+            &xencode_analysis_rs::advisories::corpus_dir(
+                &xencode_config_rs::paths::cache_dir().expect("the guard points at a cache dir"),
+            ),
             &name,
             ">= 99.0.0",
         );
@@ -5032,7 +5037,9 @@ patched = ["{fixed}"]
             .cloned()
             .unwrap();
         write_advisory(
-            &xencode_analysis_rs::advisories::corpus_dir(&config),
+            &xencode_analysis_rs::advisories::corpus_dir(
+                &xencode_config_rs::paths::cache_dir().expect("the guard points at a cache dir"),
+            ),
             &name,
             ">= 99.0.0",
         );

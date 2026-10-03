@@ -145,8 +145,9 @@ pub use repo_map::{
 };
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
 pub use rollup::{
-    read_rollup, refresh_rollup, rollup_path, write_rollup, MetricsRollup, Percentiles,
-    ProfileSample, SessionTotals, TokenTotals, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
+    read_rollup, refresh_rollup, rollup_path, trim_metrics, write_rollup, MetricsRollup,
+    Percentiles, ProfileSample, SessionTotals, TokenTotals, METRICS_KEEP_BYTES, RATE_SAMPLE_WINDOW,
+    ROLLUP_VERSION,
 };
 pub use scanner::{
     detect_language, language_for_extension, language_has_semantic_tier, scan_tree,

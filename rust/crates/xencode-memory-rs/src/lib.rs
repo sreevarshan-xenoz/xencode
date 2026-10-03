@@ -77,21 +77,16 @@ impl ConversationMemory {
         }
     }
 
-    /// The directory conversation memory persists to: `$XCODE_CONFIG_DIR` when
-    /// set (same override as `XencodeConfig::config_dir`, so tests and portable
-    /// installs never touch `~/.xencode`), else `~/.xencode/`.
+    /// The directory conversation memory persists to: the place the paths
+    /// module keeps the record of what has happened, which is
+    /// `~/.local/state/xencode`, or `~/.xencode` for a person who has never
+    /// moved off the old layout. `$XCODE_CONFIG_DIR` puts it back under one tree,
+    /// so tests and portable installs never touch a real home directory.
     pub fn memory_dir() -> Result<PathBuf, MemoryError> {
-        if let Ok(dir) = std::env::var("XCODE_CONFIG_DIR") {
-            if !dir.is_empty() {
-                return Ok(PathBuf::from(dir));
-            }
-        }
-        dirs::home_dir()
-            .map(|home| home.join(".xencode"))
-            .ok_or(MemoryError::NoHomeDir)
+        xencode_config_rs::paths::state_dir().map_err(|_| MemoryError::NoHomeDir)
     }
 
-    /// Create an instance that persists to `<config dir>/conversation_memory.json`.
+    /// Create an instance that persists to `<state dir>/conversation_memory.json`.
     pub fn with_persistence(max_items: usize) -> Result<Self, MemoryError> {
         let xencode_dir = Self::memory_dir()?;
 

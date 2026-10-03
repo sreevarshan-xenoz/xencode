@@ -9,7 +9,8 @@
 //! model still gets the full text of whichever one the task calls for.
 //!
 //! Two places are scanned, project last so it wins on a name clash: the user's
-//! `~/.xencode/skills/` and `<workspace>/.xencode/skills/`.
+//! `<settings dir>/skills/` (see [`default_home_dir`]) and
+//! `<workspace>/.xencode/skills/`.
 //!
 //! There is no YAML parser in this workspace, and adding one to read two keys
 //! would cost more than it saves, so the frontmatter is handled by
@@ -33,7 +34,7 @@ pub const MENU_DESCRIPTION_MAX_CHARS: usize = 220;
 /// repository can pin its own version of a skill a user also has installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillScope {
-    /// `~/.xencode/skills`
+    /// `<settings dir>/skills`
     Home,
     /// `<workspace>/.xencode/skills`
     Project,
@@ -470,8 +471,9 @@ fn flush_pending(fields: &mut BTreeMap<String, String>, pending: &mut Option<Pen
 }
 
 /// The user's skill directory: `$XCODE_SKILLS_DIR` when set (tests, portable
-/// installs), else `<config dir>/skills` — which is `~/.xencode/skills` unless
-/// `$XCODE_CONFIG_DIR` moved it. Same override shape as `$XCODE_PLUGIN_DIR`.
+/// installs), else `<settings dir>/skills` — which is `~/.config/xencode/skills`,
+/// or `~/.xencode/skills` for a person who has never moved off the old layout.
+/// Same override shape as `$XCODE_PLUGIN_DIR`.
 pub fn default_home_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("XCODE_SKILLS_DIR") {
         if !dir.is_empty() {
@@ -488,14 +490,7 @@ pub fn project_skills_dir(workspace: &Path) -> PathBuf {
 }
 
 fn config_home() -> PathBuf {
-    if let Ok(dir) = std::env::var("XCODE_CONFIG_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".xencode")
+    xencode_config_rs::paths::settings_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 #[cfg(test)]
@@ -765,6 +760,12 @@ mod tests {
         }
         let dir = default_home_dir();
         assert_eq!(dir.file_name().unwrap(), "skills");
-        assert_eq!(dir.parent().unwrap().file_name().unwrap(), ".xencode");
+        // Which directory counts as the person's settings is the paths module's
+        // answer, not a name this crate may assume: it is the new location on a
+        // fresh installation and `~/.xencode` on one that has never moved.
+        assert_eq!(
+            dir.parent().unwrap(),
+            xencode_config_rs::paths::settings_dir().unwrap().as_path()
+        );
     }
 }
