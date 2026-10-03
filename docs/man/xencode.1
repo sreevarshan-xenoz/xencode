@@ -130,6 +130,9 @@ Run a recorded session again from the bytes it was made of
 xencode\-runs(1)
 Which runs happened, what each asked a person, and the commit trailer naming it. Reads `.xencode/cache/runs.jsonl` only, so it works with every model server down
 .TP
+xencode\-run(1)
+Run an agent turn from the command line, in the foreground or detached so it survives the terminal. A detached run persists every completed round under `.xencode/cache/detached/<run\-id>/`, so a kill is resumed with `\-\-resume` instead of restarted, and stops on round, wall\-clock and cost caps as well as the model finishing
+.TP
 xencode\-eval(1)
 Score the agent on defects that were seeded on purpose
 .TP

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `LF-4`: `xencode run` starts an agent turn that survives the terminal, and `--resume` continues a killed one
+
+`xencode run "the task"` runs an agent turn from the command line; `--detach`
+forks a child into a new session so the terminal may go away. Every completed
+round is appended to `.xencode/cache/detached/<run-id>/rounds.jsonl` in
+provider-neutral form, and a kill is resumed — not restarted — with `xencode
+run --resume`: prior rounds become the fresh loop's history and their tool
+results are replayed, never re-executed. Status is derived from the exit file
+and `/proc`, never stored, so a kill reads as `crashed`. Three caps end a run
+besides the model finishing — `--max-rounds`, `--max-minutes` of wall-clock
+(system time, so suspend counts), and `--max-cost` in dollars — checked
+between rounds, each naming itself in the exit. `--max-cost` is refused up
+front without a price for the model and a route that reports tokens, because
+a cap that cannot count cannot stop. Approvals run `edit-allow` with nobody
+to ask (`--allow-shell` opts into `all-allow`).
+
+Verified against a live llama-server the way the done-when demands: SIGKILL
+mid-round-2 read as `crashed` with round 1 intact, and the resume appended
+round 2 with the numbering continued; `--max-rounds 1` ended a run after its
+one tool round, `--max-minutes 0.02` after 7.6 s, and `--max-cost 0.0001`
+after one round priced at 4,097,000 microdollars off a written rate.
+
 ### Added — `QTR-5`: a run ledger joins run-id to model to approvals, and `xencode runs` reads it
 
 When an agent turn ends in the TUI, one row is now appended to

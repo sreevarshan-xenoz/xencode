@@ -9298,7 +9298,33 @@ Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal or
 | **L-3** | remote capability probe | capability | remote capability probe on the box |
 | **L-4** | SSH hardening: TOFU pinning + connection reuse | capability | SSH TOFU pinning + reuse |
 | **LF-2** | approval round-trip to a phone | core | approval round-trip to a phone (the file says "AM-5 is LF-2") |
-| **LF-4** | `xencode run --detach` | core | detached queue with resume-after-crash — the gate under goals |
+| **LF-4** | `xencode run --detach` | core | detached queue with resume-after-crash — the gate under goals; done 2026-10-03 — see the note below |
+
+#### W12 progress
+
+- [x] `LF-4` — 2026-10-03. `xencode run "the task"` runs an agent turn from
+  the command line; `--detach` forks a setsid child of the same binary
+  (`run --child`, hidden) that outlives the terminal. State is
+  `.xencode/cache/detached/<run-id>/`: an atomic `spec.json` (with a `kind`
+  field reading `run`, held for `GL-4`'s future row type), one `rounds.jsonl`
+  line per completed round in provider-neutral `AgentTurn` form, an
+  `exit.json` written once on finishing, a pid hint, a stop-request flag and
+  the log — and status is derived from the exit file and `/proc` in that
+  order, never stored, which is the trap the item names. The loop reports
+  each round through a `round_hook` beside the two `record_round` sites and
+  honours a `stop_flag` at the top of each trip; a resume hands the persisted
+  turns back as `resume_history`. Caps are rounds, wall-clock (system time,
+  so suspend counts) and microdollars, checked between rounds by a pure
+  `check_caps`. `--max-cost` is refused without a price for the model and a
+  route that reports tokens. Approvals run `edit-allow` with the prompt
+  channel dropped, `--allow-shell` for `all-allow`.
+
+  Verified live against llama-server the way the done-when demands: SIGKILL
+  mid-round-2 read as `crashed` with round 1 intact, `--resume` appended
+  round 2 with the numbering continued, and each cap stopped a runaway
+  (`round_cap` after one tool round, `wall_cap` after 7.6 s against 1.2 s,
+  `cost_cap` after one round priced at 4,097,000 microdollars). Twelve unit
+  tests on the caps arithmetic, the derived status and the history join.
 
 #### W13 — Agent pipelines, not graphs — 3 items
 

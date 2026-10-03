@@ -1228,6 +1228,30 @@ esac
     ;;
 esac
 ;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+'--resume=[Continue a crashed run from its last completed round. Refuses a run that finished, was stopped, or is still going]:RESUME:_default' \
+'--show=[Show one run\: its spec, its status, its rounds and its exit]:SHOW:_default' \
+'--log=[Print the tail of one run'\''s log]:LOG:_default' \
+'--stop=[Ask one running run to stop. Reads as stopped, not crashed]:STOP:_default' \
+'--model=[Run with this model instead of the configured default]:MODEL:_default' \
+'--tool-root=[The tree the run works in (default\: this project)]:TOOL_ROOT:_files' \
+'--max-rounds=[Stop after this many completed rounds]:MAX_ROUNDS:_default' \
+'--max-minutes=[Stop after this many minutes of wall-clock time. System time, so a suspended laptop counts — a cap that slept through suspend would be a way past it]:MAX_MINUTES:_default' \
+'--max-cost=[Stop after spending this many dollars. Needs a model \`pricing.json\` (or the fetched listing) names and a route that reports token counts; without both the run is refused, because a cap that cannot count cannot stop]:MAX_COST:_default' \
+'--tail=[How many log lines \`run --log\` prints]:TAIL:_default' \
+'--ollama-url=[Where an Ollama server is, for a model id with no prefix]:OLLAMA_URL:_default' \
+'--llamacpp-url=[Where a llama.cpp server is, for a \`llamacpp\:\` model id]:LLAMACPP_URL:_default' \
+'--child=[The detached worker itself. Forked by \`run --detach\`, never typed]:CHILD:_default' \
+'--xencode-dir=[Where the detached worker'\''s run lives. Passed by the forking parent, because the worker'\''s own working directory is the run'\''s tree rather than the project]:XENCODE_DIR:_files' \
+'--detach[Start the run in the background and print its id. The terminal may go away; the run keeps going under its caps]' \
+'--list[List detached runs and what each is doing]' \
+'--allow-shell[Pre-approve shell commands. Without this a detached run has nobody to ask, so shell calls are refused where they stand]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::prompt -- The task, in plain words. Foreground unless `--detach`:_default' \
+&& ret=0
+;;
 (eval)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -2160,6 +2184,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (eval)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__help__subcmd__eval_commands" \
@@ -2386,6 +2414,7 @@ _xencode_commands() {
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
 'runs:Which runs happened, what each asked a person, and the commit trailer naming it. Reads \`.xencode/cache/runs.jsonl\` only, so it works with every model server down' \
+'run:Run an agent turn from the command line, in the foreground or detached so it survives the terminal. A detached run persists every completed round under \`.xencode/cache/detached/<run-id>/\`, so a kill is resumed with \`--resume\` instead of restarted, and stops on round, wall-clock and cost caps as well as the model finishing' \
 'eval:Score the agent on defects that were seeded on purpose' \
 'plugin:Manage plugins' \
 'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
@@ -2801,6 +2830,7 @@ _xencode__subcmd__help_commands() {
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
 'runs:Which runs happened, what each asked a person, and the commit trailer naming it. Reads \`.xencode/cache/runs.jsonl\` only, so it works with every model server down' \
+'run:Run an agent turn from the command line, in the foreground or detached so it survives the terminal. A detached run persists every completed round under \`.xencode/cache/detached/<run-id>/\`, so a kill is resumed with \`--resume\` instead of restarted, and stops on round, wall-clock and cost caps as well as the model finishing' \
 'eval:Score the agent on defects that were seeded on purpose' \
 'plugin:Manage plugins' \
 'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
@@ -3270,6 +3300,11 @@ _xencode__subcmd__help__subcmd__replay_commands() {
 _xencode__subcmd__help__subcmd__review_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help review commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__run_commands] )) ||
+_xencode__subcmd__help__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help run commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__runs_commands] )) ||
 _xencode__subcmd__help__subcmd__runs_commands() {
@@ -3958,6 +3993,11 @@ _xencode__subcmd__replay_commands() {
 _xencode__subcmd__review_commands() {
     local commands; commands=()
     _describe -t commands 'xencode review commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__run_commands] )) ||
+_xencode__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode run commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__runs_commands] )) ||
 _xencode__subcmd__runs_commands() {

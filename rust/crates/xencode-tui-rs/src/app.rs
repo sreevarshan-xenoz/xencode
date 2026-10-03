@@ -257,6 +257,16 @@ pub(crate) struct AgentRun {
     /// Digest of the text that started the turn. The prompt itself is never
     /// recorded, only this, so a trace cannot become a copy of the conversation.
     pub(crate) prompt_digest: Option<String>,
+    /// History a previous attempt left behind (LF-4). A fresh run starts
+    /// empty; a resume starts here, so the new loop continues the old
+    /// conversation instead of restarting it.
+    pub(crate) resume_history: Vec<xencode_providers_rs::AgentTurn>,
+    /// Called after each completed round with the round's new turns (LF-4).
+    /// `None` everywhere except a detached child, which persists the round.
+    pub(crate) round_hook: Option<crate::detached::RoundHook>,
+    /// Checked at the top of each round (LF-4). A detached child sets it
+    /// when a cap is spent; the loop then reports `[STOPPED]` and ends.
+    pub(crate) stop_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Whether the prompt that started the turn carried the `[d]` decision
     /// marker — the same reading compaction uses to decide what always survives.
     /// It is a fact about the user's own words, never about anything the model
@@ -2345,7 +2355,7 @@ impl<'a> App<'a> {
     /// The one place an `App` is built. `plugin_dir` is where plugins are
     /// loaded from; `App::new()` loads that directory, `for_tests()` hands in an
     /// empty one so nothing on the developer's machine is read.
-    fn with_config_and_memory(
+    pub(crate) fn with_config_and_memory(
         config: XencodeConfig,
         memory: ConversationMemory,
         plugin_dir: std::path::PathBuf,
@@ -3440,6 +3450,22 @@ impl<'a> App<'a> {
         context_messages: Vec<ChatMessage>,
         prompt: &str,
     ) -> AgentRun {
+        // Named before the recording starts, so the two cannot disagree about
+        // what this run is called (QTR-5).
+        let run_id = xencode_context_rs::new_run_id(prompt);
+        self.agent_run_with_id(sink, context_messages, prompt, run_id)
+    }
+
+    /// The same run under a caller-chosen id. A detached child (LF-4) names
+    /// the run before the fork so attempts share one id; everything else
+    /// generates one above.
+    pub(crate) fn agent_run_with_id(
+        &self,
+        sink: LoopSink,
+        context_messages: Vec<ChatMessage>,
+        prompt: &str,
+        run_id: String,
+    ) -> AgentRun {
         let root = xencode_context_rs::default_root();
         // A saved profile marked for the kind of work this prompt reads as takes
         // the turn, when the user turned that on (MI-7). It is decided here, at
@@ -3463,9 +3489,6 @@ impl<'a> App<'a> {
             .and_then(|profile| profile.max_tokens)
             .or(self.config.llama_cpp_max_tokens);
         let (ollama_asks, ollama_setting_problem) = self.ollama_request_for_turn(&model);
-        // Named before the recording starts, so the two cannot disagree about
-        // what this run is called (QTR-5).
-        let run_id = xencode_context_rs::new_run_id(prompt);
         AgentRun {
             sink,
             run_id: run_id.clone(),
@@ -3507,6 +3530,11 @@ impl<'a> App<'a> {
             ollama_asks,
             ollama_setting_problem,
             profile_note: choice.note(),
+            // A fresh run starts with no prior history and no detached
+            // machinery; a resume and a child set these after construction.
+            resume_history: Vec::new(),
+            round_hook: None,
+            stop_flag: None,
         }
     }
 
@@ -8481,6 +8509,27 @@ fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<St
 /// under the last of them — that is the answer which asked for them. A round that
 /// switched models through the fallback chain leaves a line for each attempt that
 /// came back, because each one was a real request the session paid for.
+/// Hand a completed round to the detached child's hook (LF-4), if one is
+/// attached. Reports the history turns appended since the last report, so a
+/// resume replays rounds rather than re-reading the whole conversation.
+/// Without a hook this is nothing, which is every run but a detached child's.
+fn report_round(
+    hook: Option<&crate::detached::RoundHook>,
+    round: u32,
+    history: &[xencode_providers_rs::AgentTurn],
+    reported_len: &mut usize,
+    round_tokens: Option<(u64, u64)>,
+) {
+    let Some(hook) = hook else { return };
+    hook(&crate::detached::RoundReport {
+        round,
+        new_turns: history[*reported_len..].to_vec(),
+        prompt_tokens: round_tokens.map(|(prompt, _)| prompt),
+        completion_tokens: round_tokens.map(|(_, completion)| completion),
+    });
+    *reported_len = history.len();
+}
+
 fn record_round(
     session: Option<&mut xencode_context_rs::SessionWriter>,
     recorder: Option<&xencode_providers_rs::traffic::TrafficRecorder>,
@@ -8593,6 +8642,9 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         retrieved_files,
         mut session,
         run_id,
+        resume_history,
+        round_hook,
+        stop_flag,
     } = run;
     let turn_started = std::time::Instant::now();
     // Open the power window beside the clock, so both cover the same span: what
@@ -8671,13 +8723,29 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         .map(|def| (def.name.clone(), def.parameters.clone()))
         .collect();
 
-    let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
+    let mut history: Vec<xencode_providers_rs::AgentTurn> = resume_history;
+    // Where the hook has read up to. A resume starts mid-conversation, so the
+    // first report must carry only the new turns, not the ones read back.
+    let mut reported_len = history.len();
+    // This round's token counts as the route reported them, if it did. Set
+    // at the top of every trip; the hook takes them with the round.
+    let mut round_tokens: Option<(u64, u64)>;
     let mut final_text = String::new();
     let spawn_id = match sink {
         LoopSink::Spawn(id) => Some(id),
         _ => None,
     };
     for round in 0..=max_rounds {
+        // A detached child sets this when a cap is spent (LF-4). The check
+        // sits before the round is counted, so an untaken round is not one.
+        if stop_flag
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            let _ = tx.send("[STOPPED]".to_string());
+            break;
+        }
+        round_tokens = None;
         rounds += 1;
         let offer: &[xencode_providers_rs::ToolDefinition] =
             if round == max_rounds { &[] } else { &tools };
@@ -8717,6 +8785,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         // `[TIMINGS]` line at the end of the run reports, as before.
         if let Some(ts) = manager.take_llamacpp_timings() {
             reported_tokens = Some(reported_tokens.unwrap_or(0) + ts.tokens_generated);
+            round_tokens = Some((ts.prompt_tokens, ts.tokens_generated));
             last_timings = Some(ts);
         }
         if sink == LoopSink::ByteBot || spawn_id.is_some() {
@@ -8746,6 +8815,15 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             // The answer that ended the run is still a model call worth
             // keeping, with no tool results under it.
             record_round(session.as_mut(), recorder.as_ref(), Vec::new());
+            // A detached child persists the round here, where the recording
+            // does — a completed round is one the loop will never revisit.
+            report_round(
+                round_hook.as_ref(),
+                rounds,
+                &history,
+                &mut reported_len,
+                round_tokens,
+            );
             // L-7: the model's claim of completion does not end the turn if the
             // turn edited project files. The project's own test and lint
             // commands run through the same approval gate as any shell call,
@@ -9017,6 +9095,13 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             session.as_mut(),
             recorder.as_ref(),
             std::mem::take(&mut recorded),
+        );
+        report_round(
+            round_hook.as_ref(),
+            rounds,
+            &history,
+            &mut reported_len,
+            round_tokens,
         );
     }
     // Close the power window before anything is reported, so the span it covers is
