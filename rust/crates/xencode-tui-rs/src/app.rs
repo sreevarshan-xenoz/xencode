@@ -216,6 +216,10 @@ fn bytebot_progress(steps: &[(String, String)]) -> f64 {
 /// Owned, because the loop runs on its own task.
 pub(crate) struct AgentRun {
     pub(crate) sink: LoopSink,
+    /// This run's own id (QTR-5). Named once, here, so the run ledger row, the
+    /// recording, and the trailer a commit carries all speak the same id — and
+    /// so `xencode replay <run id>` reaches the run the ledger describes.
+    pub(crate) run_id: String,
     pub(crate) model: String,
     pub(crate) context_messages: Vec<ChatMessage>,
     pub(crate) approval: crate::agent_tools::ApprovalCtx,
@@ -3328,6 +3332,7 @@ impl<'a> App<'a> {
             schemas: std::collections::HashMap::new(),
             online_docs: self.config.allow_online_docs,
             session_id: self.memory.current_session().cloned(),
+            approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -3458,8 +3463,12 @@ impl<'a> App<'a> {
             .and_then(|profile| profile.max_tokens)
             .or(self.config.llama_cpp_max_tokens);
         let (ollama_asks, ollama_setting_problem) = self.ollama_request_for_turn(&model);
+        // Named before the recording starts, so the two cannot disagree about
+        // what this run is called (QTR-5).
+        let run_id = xencode_context_rs::new_run_id(prompt);
         AgentRun {
             sink,
+            run_id: run_id.clone(),
             model,
             context_messages,
             approval: self.approval_ctx(),
@@ -3475,7 +3484,7 @@ impl<'a> App<'a> {
             prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
             is_decision: xencode_context_rs::has_decision_marker(prompt),
             retrieved_files: Vec::new(),
-            session: self.begin_recording(prompt),
+            session: self.begin_recording(prompt, &run_id),
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
             timeout: self.config.response_timeout,
@@ -3508,7 +3517,11 @@ impl<'a> App<'a> {
     /// copy of a session this program can make: prompts, raw answers, full tool
     /// output. It goes under the project's `.xencode/cache/`, which is kept out
     /// of version control, and nowhere else.
-    fn begin_recording(&self, prompt: &str) -> Option<xencode_context_rs::SessionWriter> {
+    fn begin_recording(
+        &self,
+        prompt: &str,
+        run_id: &str,
+    ) -> Option<xencode_context_rs::SessionWriter> {
         if !self.config.session_recording {
             return None;
         }
@@ -3517,7 +3530,7 @@ impl<'a> App<'a> {
         let root = xencode_context_rs::default_root();
         let run = xencode_context_rs::RecordedRun {
             format: xencode_context_rs::SESSION_FORMAT.to_string(),
-            run_id: xencode_context_rs::new_run_id(prompt),
+            run_id: run_id.to_string(),
             recorded_at_unix_ms: xencode_context_rs::conversation::now_millis(),
             prompt_version: xencode_context_rs::prompts::set_version().to_string(),
             model,
@@ -8579,6 +8592,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         is_decision,
         retrieved_files,
         mut session,
+        run_id,
     } = run;
     let turn_started = std::time::Instant::now();
     // Open the power window beside the clock, so both cover the same span: what
@@ -9034,6 +9048,33 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     trace.retrieved_files = retrieved_files;
     trace.is_decision = is_decision;
     let _ = xencode_context_rs::append_trace(&trace_dir, &trace);
+    // One row per run in `.xencode/cache/runs.jsonl` (QTR-5): the run's own
+    // id, the model that answered it, and the questions a person answered
+    // while it went. Written beside the turn trace so a run asked about
+    // later can be joined to its session's verification rows; a write that
+    // fails is not a turn that fails.
+    let approvals = approval
+        .approvals
+        .lock()
+        .map(|rows| rows.clone())
+        .unwrap_or_default();
+    let recording = session
+        .as_ref()
+        .map(|writer| format!(".xencode/cache/sessions/{}.jsonl", writer.run_id()));
+    let run_record = xencode_context_rs::RunRecord {
+        run_id: run_id.clone(),
+        ts_unix_ms: xencode_context_rs::conversation::now_millis(),
+        duration_ms: turn_started.elapsed().as_millis() as u64,
+        rounds,
+        session: trace.session_id.clone(),
+        model: trace.model.clone(),
+        provider: trace.provider.clone(),
+        source: trace.source,
+        approvals,
+        recording,
+        note: String::new(),
+    };
+    let _ = xencode_context_rs::append_run(&trace_dir, &run_record);
     let _ = tx.send(match sink {
         LoopSink::Chat => "[DONE]".to_string(),
         LoopSink::ByteBot => "[BYTEBOT_DONE]".to_string(),
@@ -10222,7 +10263,7 @@ mod tests {
             Some("http://127.0.0.1:11434"),
             "the route is still recordable; the user's choice is what stops it"
         );
-        assert!(app.begin_recording("hello").is_none());
+        assert!(app.begin_recording("hello", "1-aaaa1111").is_none());
     }
 
     /// K-3: the provider-health panel seeds a Remote/Colab forward row the same
@@ -10289,6 +10330,7 @@ mod tests {
             schemas: std::collections::HashMap::new(),
             online_docs: false,
             session_id: None,
+            approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -11065,6 +11107,7 @@ mod tests {
             schemas: std::collections::HashMap::new(),
             online_docs: false,
             session_id: None,
+            approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),
@@ -12301,6 +12344,15 @@ mod tests {
         let app = App::for_tests();
         let secret_prompt = "log in as admin with password=hunter2hunter2";
         let run = app.agent_run(LoopSink::Chat, Vec::new(), secret_prompt);
+        // The run names itself once (QTR-5), so the ledger row, a recording
+        // and `xencode replay` can all speak the same id afterwards.
+        assert!(!run.run_id.is_empty());
+        assert!(
+            run.run_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "the id is typed into `xencode replay`, so it stays typable"
+        );
         assert_eq!(
             run.prompt_digest.as_deref(),
             Some(xencode_context_rs::prompt_digest(secret_prompt).as_str())

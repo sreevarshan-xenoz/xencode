@@ -1155,6 +1155,79 @@ _arguments "${_arguments_options[@]}" : \
 '::run_id -- Which run\: its full id, or enough of the start to be unique. Omit it with --list to see what has been recorded:_default' \
 && ret=0
 ;;
+(runs)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__runs_commands" \
+"*::: :->runs" \
+&& ret=0
+
+    case $state in
+    (runs)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-runs-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'--limit=[How many of the newest runs to print]:LIMIT:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':run_id -- Which run\: its full id, or enough of the start to name one run and no other — the same rule `xencode replay` uses:_default' \
+&& ret=0
+;;
+(trailer)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':run_id -- Which run\: its full id, or an unambiguous prefix of it:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__runs__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-runs-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(trailer)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (eval)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -2059,6 +2132,34 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(runs)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__runs_commands" \
+"*::: :->runs" \
+&& ret=0
+
+    case $state in
+    (runs)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-runs-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(trailer)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (eval)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__help__subcmd__eval_commands" \
@@ -2284,6 +2385,7 @@ _xencode_commands() {
 'release-notes:Draft the release notes from the commits since the last release and the changelog block this project keeps, and report where the two disagree' \
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
+'runs:Which runs happened, what each asked a person, and the commit trailer naming it. Reads \`.xencode/cache/runs.jsonl\` only, so it works with every model server down' \
 'eval:Score the agent on defects that were seeded on purpose' \
 'plugin:Manage plugins' \
 'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
@@ -2698,6 +2800,7 @@ _xencode__subcmd__help_commands() {
 'release-notes:Draft the release notes from the commits since the last release and the changelog block this project keeps, and report where the two disagree' \
 'review:Review the diff between a base branch and HEAD, file by file' \
 'replay:Run a recorded session again from the bytes it was made of' \
+'runs:Which runs happened, what each asked a person, and the commit trailer naming it. Reads \`.xencode/cache/runs.jsonl\` only, so it works with every model server down' \
 'eval:Score the agent on defects that were seeded on purpose' \
 'plugin:Manage plugins' \
 'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
@@ -3167,6 +3270,30 @@ _xencode__subcmd__help__subcmd__replay_commands() {
 _xencode__subcmd__help__subcmd__review_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help review commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__runs_commands] )) ||
+_xencode__subcmd__help__subcmd__runs_commands() {
+    local commands; commands=(
+'list:List recent runs, oldest first. The window is not a cap\: \`run_by_id\` reaches past it, and so does \`show\` with a full id' \
+'show:Show one run\: its model, every question a person answered while it went, and the verification rows its session left behind' \
+'trailer:Print the commit trailer block naming one run, for pasting into a commit message. Every line is a \`Token\: value\` trailer, so \`git interpret-trailers\` reads it as trailers' \
+    )
+    _describe -t commands 'xencode help runs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__runs__subcmd__list_commands] )) ||
+_xencode__subcmd__help__subcmd__runs__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help runs list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__runs__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__runs__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help runs show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__runs__subcmd__trailer_commands] )) ||
+_xencode__subcmd__help__subcmd__runs__subcmd__trailer_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help runs trailer commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__scan_commands] )) ||
 _xencode__subcmd__help__subcmd__scan_commands() {
@@ -3831,6 +3958,61 @@ _xencode__subcmd__replay_commands() {
 _xencode__subcmd__review_commands() {
     local commands; commands=()
     _describe -t commands 'xencode review commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs_commands] )) ||
+_xencode__subcmd__runs_commands() {
+    local commands; commands=(
+'list:List recent runs, oldest first. The window is not a cap\: \`run_by_id\` reaches past it, and so does \`show\` with a full id' \
+'show:Show one run\: its model, every question a person answered while it went, and the verification rows its session left behind' \
+'trailer:Print the commit trailer block naming one run, for pasting into a commit message. Every line is a \`Token\: value\` trailer, so \`git interpret-trailers\` reads it as trailers' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode runs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__help_commands] )) ||
+_xencode__subcmd__runs__subcmd__help_commands() {
+    local commands; commands=(
+'list:List recent runs, oldest first. The window is not a cap\: \`run_by_id\` reaches past it, and so does \`show\` with a full id' \
+'show:Show one run\: its model, every question a person answered while it went, and the verification rows its session left behind' \
+'trailer:Print the commit trailer block naming one run, for pasting into a commit message. Every line is a \`Token\: value\` trailer, so \`git interpret-trailers\` reads it as trailers' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode runs help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__runs__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__help__subcmd__list_commands] )) ||
+_xencode__subcmd__runs__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs help list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__runs__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__help__subcmd__trailer_commands] )) ||
+_xencode__subcmd__runs__subcmd__help__subcmd__trailer_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs help trailer commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__list_commands] )) ||
+_xencode__subcmd__runs__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__show_commands] )) ||
+_xencode__subcmd__runs__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__runs__subcmd__trailer_commands] )) ||
+_xencode__subcmd__runs__subcmd__trailer_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode runs trailer commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__scan_commands] )) ||
 _xencode__subcmd__scan_commands() {

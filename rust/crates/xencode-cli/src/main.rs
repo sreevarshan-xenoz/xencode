@@ -735,6 +735,14 @@ enum Commands {
         out: Option<PathBuf>,
     },
 
+    /// Which runs happened, what each asked a person, and the commit trailer
+    /// naming it. Reads `.xencode/cache/runs.jsonl` only, so it works with
+    /// every model server down.
+    Runs {
+        #[command(subcommand)]
+        action: Option<RunsAction>,
+    },
+
     /// Score the agent on defects that were seeded on purpose
     Eval {
         #[command(subcommand)]
@@ -1256,6 +1264,43 @@ enum PriceAction {
     },
 }
 
+/// What `xencode runs` can do. Bare `xencode runs` lists, the way bare
+/// `xencode prices` shows: the common question needs no verb.
+#[derive(Subcommand)]
+enum RunsAction {
+    /// List recent runs, oldest first. The window is not a cap: `run_by_id`
+    /// reaches past it, and so does `show` with a full id.
+    List {
+        /// How many of the newest runs to print
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Show one run: its model, every question a person answered while it
+    /// went, and the verification rows its session left behind.
+    Show {
+        /// Which run: its full id, or enough of the start to name one run
+        /// and no other — the same rule `xencode replay` uses.
+        run_id: String,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Print the commit trailer block naming one run, for pasting into a
+    /// commit message. Every line is a `Token: value` trailer, so `git
+    /// interpret-trailers` reads it as trailers.
+    Trailer {
+        /// Which run: its full id, or an unambiguous prefix of it.
+        run_id: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum WorktreeAction {
     /// List git worktrees of the current repository
@@ -1496,6 +1541,7 @@ async fn main() {
             tool_root,
             out,
         } => run_replay(run_id, list, run_tools, tool_root, out).await,
+        Commands::Runs { action } => run_runs(action),
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Mcp { action } => run_mcp(action).await,
         Commands::Eval { action } => run_eval(action).await,
@@ -7634,6 +7680,122 @@ fn list_recordings(xencode_dir: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Read the run ledger, nothing else: no model is asked, no server is
+/// dialled, so this works with everything down.
+fn run_runs(action: Option<RunsAction>) -> Result<(), String> {
+    let xencode_dir = project_xencode_dir();
+    let action = action.unwrap_or(RunsAction::List {
+        limit: xencode_context_rs::RUNS_WINDOW,
+        format: OutputFormat::Text,
+    });
+    match action {
+        RunsAction::List { limit, format } => {
+            let rows = xencode_context_rs::recent_runs(&xencode_dir, limit);
+            if rows.is_empty() {
+                println!(
+                    "no runs in {}",
+                    xencode_context_rs::runs_path(&xencode_dir).display()
+                );
+                println!("a row is written when an agent turn ends in the TUI.");
+                return Ok(());
+            }
+            if matches!(format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+            for row in &rows {
+                let granted = row
+                    .approvals
+                    .iter()
+                    .filter(|a| a.decision.granted())
+                    .count();
+                let denied = row.approvals.len() - granted;
+                println!(
+                    "{}  {}  {} asked ({} allowed, {} denied)  {}",
+                    row.run_id,
+                    row.model.as_deref().unwrap_or("model ?"),
+                    row.approvals.len(),
+                    granted,
+                    denied,
+                    row.recording.as_deref().unwrap_or("no recording"),
+                );
+            }
+            Ok(())
+        }
+        RunsAction::Show { run_id, format } => {
+            let row = xencode_context_rs::run_by_id(&xencode_dir, &run_id).ok_or_else(|| {
+                format!(
+                    "no run {run_id} in {}",
+                    xencode_context_rs::runs_path(&xencode_dir).display()
+                )
+            })?;
+            let evidence = xencode_context_rs::run_evidence(&xencode_dir, &row);
+            if matches!(format, OutputFormat::Json) {
+                let doc = serde_json::json!({
+                    "run": row,
+                    "checks": evidence.checks,
+                    "verified": evidence.verified(),
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+            println!("run {}", row.run_id);
+            println!("  model: {}", row.model.as_deref().unwrap_or("?"));
+            println!(
+                "  session: {}",
+                row.session.as_deref().unwrap_or("(none open)")
+            );
+            println!(
+                "  recording: {}",
+                row.recording.as_deref().unwrap_or("none")
+            );
+            if row.approvals.is_empty() {
+                println!("  approvals: none asked");
+            } else {
+                println!("  approvals:");
+                for a in &row.approvals {
+                    println!("    {} [{}]: {}", a.tool, a.class, a.decision.as_str());
+                }
+            }
+            // The join the ledger exists to make: the run names a session, and
+            // the session's verification rows are read from the EVd-1 ledger,
+            // not copied here.
+            if evidence.checks.is_empty() {
+                println!("  checks: none — nothing verified this run");
+            } else {
+                println!(
+                    "  checks: {} ({} passed)",
+                    evidence.checks.len(),
+                    evidence.checks.iter().filter(|c| c.passed()).count(),
+                );
+                for check in &evidence.checks {
+                    println!("    exit {}  {}", check.exit_code, check.log_ref);
+                }
+            }
+            Ok(())
+        }
+        RunsAction::Trailer { run_id } => {
+            let row = xencode_context_rs::run_by_id(&xencode_dir, &run_id).ok_or_else(|| {
+                format!(
+                    "no run {run_id} in {}",
+                    xencode_context_rs::runs_path(&xencode_dir).display()
+                )
+            })?;
+            println!(
+                "{}",
+                xencode_context_rs::accountability_trailer(&row, env!("CARGO_PKG_VERSION"))
+            );
+            Ok(())
+        }
+    }
+}
+
 async fn run_replay(
     run_id: Option<String>,
     list: bool,
@@ -8186,7 +8348,8 @@ mod tests {
     use super::{
         attach_images_to_final_user_message, compute_advise, doc, format_image_text,
         human_duration, join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind,
-        Cli, Commands, GenerateShell, OutputFormat, PerfAction, PriceAction, SessionAction,
+        Cli, Commands, GenerateShell, OutputFormat, PerfAction, PriceAction, RunsAction,
+        SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -8900,6 +9063,33 @@ mod tests {
                 action: Some(PriceAction::Fetch { url }),
             }) => assert_eq!(url.as_deref(), Some("http://127.0.0.1:9/models")),
             _ => panic!("expected prices fetch"),
+        }
+    }
+
+    /// Bare `xencode runs` lists, the way bare `xencode prices` shows: the
+    /// common question needs no verb, and nothing here dials out.
+    #[test]
+    fn runs_alone_lists_and_show_takes_an_id() {
+        let cli = Cli::try_parse_from(["xencode", "runs"]).unwrap();
+        match cli.command {
+            Some(Commands::Runs { action }) => {
+                assert!(action.is_none(), "no action means the listing one");
+            }
+            _ => panic!("expected runs"),
+        }
+        let cli = Cli::try_parse_from(["xencode", "runs", "show", "1700000000-aaaa1111"]).unwrap();
+        match cli.command {
+            Some(Commands::Runs {
+                action: Some(RunsAction::Show { run_id, .. }),
+            }) => assert_eq!(run_id, "1700000000-aaaa1111"),
+            _ => panic!("expected runs show"),
+        }
+        let cli = Cli::try_parse_from(["xencode", "runs", "trailer", "1700000000-aaaa"]).unwrap();
+        match cli.command {
+            Some(Commands::Runs {
+                action: Some(RunsAction::Trailer { run_id }),
+            }) => assert_eq!(run_id, "1700000000-aaaa"),
+            _ => panic!("expected runs trailer"),
         }
     }
 
