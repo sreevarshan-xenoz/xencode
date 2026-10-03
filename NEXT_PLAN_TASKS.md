@@ -5061,7 +5061,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 82 | Agent Chaos Testing | new | QA-6 — `fail`-crate failpoints at four seams + six real kill tests (none of `fail`/proptest/quickcheck is in `Cargo.lock`) |
 | 83 | Prompt Injection Firewall | reject | Classifier-based defense is unsound. CaMeL's guarantee comes from control/data flow and egress capabilities — which is PR-1/SE-4 |
 | 84 | Untrusted Tool Output Isolation | planned | SE-2 + SE-4 |
-| 85 | Supply-Chain Security for Agents | planned | M-4 (hash pinning) + SE-6 + EV-11; QTR-1 wires the already-parsed `permissions` field |
+| 85 | Supply-Chain Security for Agents | planned | M-4 (hash pinning) + SE-6 + EV-11; the `permissions` field is now enforced at load and at install (QTR-1, done) — what is left here is the hash pinning and the advisory work |
 | 86 | Capability Marketplace | reject | Already rejected at `:1348`; the malicious-extension/MCP-server record makes it worse, not better |
 | 87 | Skill Verification | narrowed | Disclosure + hash-pin + locally-signed (M-4). A solo maintainer cannot run a verification authority |
 | 88 | Agent Identity | narrowed | QTR-5 — a local run ledger; D3-03 already gives spawned agents ids. No PKI/CA (the collaboration server is auth-free by design) |
@@ -5799,6 +5799,33 @@ and PR-1: refuse at the source class, never grade with a classifier.
   already-parsed field (`xencode-plugin-rs/src/manifest.rs:47`, read nowhere)
   into `classify()` — this is CAP-2 and a prerequisite for SE-4. *Done-when:* a
   test denies an undeclared `run_command` from a plugin's hook.
+  - **Done, with the check in a different place than this row assumed.** The
+    field is no longer read and dropped: `PluginRuntime::load` refuses the whole
+    load (`rust/crates/xencode-plugin-rs/src/runtime.rs:176`) and `xencode plugin
+    install` refuses before copying anything (`install.rs:258`), so `classify()` —
+    which is the tool-approval classifier, in a different crate and about
+    different objects — was never the right home. CAP-2 and M-2 are the same
+    enforcement and are closed by this. The refusal is one shared sentence,
+    `missing_permission_note`, so the list, the installer and the TUI cannot word
+    it three ways.
+  - **Done-when, met literally.** A hook keyed on `run_command` with the `hooks`
+    permission undeclared is denied by
+    `plugin_command_reports_a_permission_refusal_and_keeps_it_out_of_the_loop`
+    (`xencode-tui-rs/src/app.rs:10949`), which checks both halves: the plugin is
+    reported NOT LOADED, and `run_command` is absent from the hooks every turn
+    carries. Two more at the loader level (`runtime.rs:473`, `:506`) cover the
+    same rule for a `write_file`-keyed and a `*`-keyed hook, and one (`:531`) for a
+    capability name the host does not recognise.
+  - **Verified live 2026-10-03** in a sandboxed config tree. A manifest that adds
+    a prompt prefix and a `run_command` hook without asking:
+    `guardrails v1.0.0 — NOT LOADED. it contributes nothing: adds a prompt prefix
+    and declares hooks that run a shell command but did not declare the "prompt",
+    "hooks" permissions in its manifest`, and `0 of 1 loaded`. The same file with
+    `"permissions": ["prompt", "hooks"]` added: `loaded`, and it reports the one
+    prompt line and the one before hook it will install — the check is a gate, not
+    a ban. `xencode plugin install` on that same unasked-for manifest exits 1
+    before copying, and now says "in its manifest" once rather than twice (the
+    installer wrapped the shared sentence in a copy of its own ending).
 - **QTR-2 — Locality filter on `fallback_chain`.** *Effort: S.*
   `retry.rs:126-139` interleaves local and cloud candidates by config order with
   no route awareness, so a local-first user with a cloud fallback silently leaks
@@ -9026,14 +9053,14 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | ID | item | bucket | placement note |
 |---|---|---|---|
 | **CAP-1** | Capabilities as the *vocabulary* of the gate: `filesystem.read` | core | capability vocabulary for the gate |
-| **CAP-2** | Make `permissions` real for plugins (fact 9): refuse to load | core | fold into QTR-1 |
+| **CAP-2** | Make `permissions` real for plugins (fact 9): refuse to load | core | fold into QTR-1 — done, see QTR-1's note |
 | **M-1** | give hooks their payload | capability | hook payload (before hooks can run anything: SE-4/QTR-3) |
-| **M-2** | enforce what a manifest declares | core | fold into QTR-1 |
+| **M-2** | enforce what a manifest declares | core | fold into QTR-1 — done, see QTR-1's note |
 | **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants |
 | **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN |
 | **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers |
 | **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
-| **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement) |
+| **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement); done — enforced at load and at install, see the note in Q-9 |
 | **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7 |
 | **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo) |
 | **QTR-5** | Accountability as trailers + a run ledger | capability | accountability trailers + run ledger (rides GH-5's format) |

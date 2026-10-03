@@ -2463,7 +2463,16 @@ The install is pinned to one commit and says which, so what is installed can be
 named exactly later; `--rev <branch|tag|commit>` installs at that ref instead of
 the repository's default branch. A repository with no readable manifest, or a
 second copy of a plugin that is already installed, is refused — the latter points
-you at `update` or `remove` instead of overwriting.
+you at `update` or `remove` instead of overwriting. The permission check runs at
+install too, not only at load, so a manifest that would be denied the moment it
+was read is never copied into the plugin directory in the first place:
+
+```console
+$ xencode plugin install /srv/plugins/guardrails
+error: 'guardrails' adds a prompt prefix and declares hooks that run a shell command but did not declare the "prompt", "hooks" permissions in its manifest, so this build would not load it
+```
+
+That exits 1 and leaves the plugin directory without a `guardrails` entry.
 
 ```console
 $ xencode plugin install file:///srv/plugins/guardrails
