@@ -124,6 +124,9 @@ _xencode() {
             xencode,review)
                 cmd="xencode__subcmd__review"
                 ;;
+            xencode,run)
+                cmd="xencode__subcmd__run"
+                ;;
             xencode,runs)
                 cmd="xencode__subcmd__runs"
                 ;;
@@ -399,6 +402,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,review)
                 cmd="xencode__subcmd__help__subcmd__review"
+                ;;
+            xencode__subcmd__help,run)
+                cmd="xencode__subcmd__help__subcmd__run"
                 ;;
             xencode__subcmd__help,runs)
                 cmd="xencode__subcmd__help__subcmd__runs"
@@ -935,7 +941,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs eval plugin mcp llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1959,7 +1965,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs eval plugin mcp llamacpp hw history tui help"
+            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3079,6 +3085,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__review)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__run)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -4955,6 +4975,76 @@ _xencode() {
                     ;;
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__run)
+            opts="-h --detach --resume --list --show --log --stop --model --tool-root --max-rounds --max-minutes --max-cost --allow-shell --tail --ollama-url --llamacpp-url --child --xencode-dir --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --resume)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --show)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --log)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --stop)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --model)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --tool-root)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-rounds)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-minutes)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-cost)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --tail)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ollama-url)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --llamacpp-url)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --child)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --xencode-dir)
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 *)

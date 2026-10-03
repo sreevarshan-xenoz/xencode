@@ -743,6 +743,94 @@ enum Commands {
         action: Option<RunsAction>,
     },
 
+    /// Run an agent turn from the command line, in the foreground or detached
+    /// so it survives the terminal. A detached run persists every completed
+    /// round under `.xencode/cache/detached/<run-id>/`, so a kill is resumed
+    /// with `--resume` instead of restarted, and stops on round, wall-clock
+    /// and cost caps as well as the model finishing.
+    Run {
+        /// The task, in plain words. Foreground unless `--detach`.
+        prompt: Option<String>,
+
+        /// Start the run in the background and print its id. The terminal
+        /// may go away; the run keeps going under its caps.
+        #[arg(long)]
+        detach: bool,
+
+        /// Continue a crashed run from its last completed round. Refuses a
+        /// run that finished, was stopped, or is still going.
+        #[arg(long)]
+        resume: Option<String>,
+
+        /// List detached runs and what each is doing.
+        #[arg(long)]
+        list: bool,
+
+        /// Show one run: its spec, its status, its rounds and its exit.
+        #[arg(long)]
+        show: Option<String>,
+
+        /// Print the tail of one run's log.
+        #[arg(long)]
+        log: Option<String>,
+
+        /// Ask one running run to stop. Reads as stopped, not crashed.
+        #[arg(long)]
+        stop: Option<String>,
+
+        /// Run with this model instead of the configured default.
+        #[arg(long)]
+        model: Option<String>,
+
+        /// The tree the run works in (default: this project).
+        #[arg(long)]
+        tool_root: Option<PathBuf>,
+
+        /// Stop after this many completed rounds.
+        #[arg(long)]
+        max_rounds: Option<u32>,
+
+        /// Stop after this many minutes of wall-clock time. System time, so
+        /// a suspended laptop counts — a cap that slept through suspend
+        /// would be a way past it.
+        #[arg(long)]
+        max_minutes: Option<f64>,
+
+        /// Stop after spending this many dollars. Needs a model
+        /// `pricing.json` (or the fetched listing) names and a route that
+        /// reports token counts; without both the run is refused, because a
+        /// cap that cannot count cannot stop.
+        #[arg(long)]
+        max_cost: Option<f64>,
+
+        /// Pre-approve shell commands. Without this a detached run has
+        /// nobody to ask, so shell calls are refused where they stand.
+        #[arg(long)]
+        allow_shell: bool,
+
+        /// How many log lines `run --log` prints.
+        #[arg(long, default_value_t = 40)]
+        tail: usize,
+
+        /// Where an Ollama server is, for a model id with no prefix.
+        #[arg(long)]
+        ollama_url: Option<String>,
+
+        /// Where a llama.cpp server is, for a `llamacpp:` model id.
+        #[arg(long)]
+        llamacpp_url: Option<String>,
+
+        /// The detached worker itself. Forked by `run --detach`, never typed.
+        #[arg(long, hide = true)]
+        child: Option<String>,
+
+        /// Where the detached worker's run lives. Passed by the forking
+        /// parent, because the worker's own working directory is the run's
+        /// tree rather than the project.
+        #[arg(long, hide = true)]
+        xencode_dir: Option<PathBuf>,
+    },
+
     /// Score the agent on defects that were seeded on purpose
     Eval {
         #[command(subcommand)]
@@ -1542,6 +1630,48 @@ async fn main() {
             out,
         } => run_replay(run_id, list, run_tools, tool_root, out).await,
         Commands::Runs { action } => run_runs(action),
+        Commands::Run {
+            prompt,
+            detach,
+            resume,
+            list,
+            show,
+            log,
+            stop,
+            model,
+            tool_root,
+            max_rounds,
+            max_minutes,
+            max_cost,
+            allow_shell,
+            tail,
+            ollama_url,
+            llamacpp_url,
+            child,
+            xencode_dir: child_xencode_dir,
+        } => {
+            run_detached_command(DetachedCommandOptions {
+                prompt,
+                detach,
+                resume,
+                list,
+                show,
+                log,
+                stop,
+                model,
+                tool_root,
+                max_rounds,
+                max_minutes,
+                max_cost,
+                allow_shell,
+                tail,
+                ollama_url,
+                llamacpp_url,
+                child,
+                child_xencode_dir,
+            })
+            .await
+        }
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Mcp { action } => run_mcp(action).await,
         Commands::Eval { action } => run_eval(action).await,
@@ -7796,6 +7926,437 @@ fn run_runs(action: Option<RunsAction>) -> Result<(), String> {
     }
 }
 
+/// The flags `xencode run` takes, as the dispatcher hands them over.
+struct DetachedCommandOptions {
+    prompt: Option<String>,
+    detach: bool,
+    resume: Option<String>,
+    list: bool,
+    show: Option<String>,
+    log: Option<String>,
+    stop: Option<String>,
+    model: Option<String>,
+    tool_root: Option<PathBuf>,
+    max_rounds: Option<u32>,
+    max_minutes: Option<f64>,
+    max_cost: Option<f64>,
+    allow_shell: bool,
+    tail: usize,
+    ollama_url: Option<String>,
+    llamacpp_url: Option<String>,
+    child: Option<String>,
+    child_xencode_dir: Option<PathBuf>,
+}
+
+use xencode_tui_rs::detached as detached_runs;
+
+/// Run an agent turn from the command line: foreground, detached, resumed,
+/// or reported on. Exactly one action per invocation — a prompt with `--log`
+/// is two things being asked at once, and gets an error saying so.
+async fn run_detached_command(options: DetachedCommandOptions) -> Result<(), String> {
+    if let Some(run_id) = options.child {
+        // The forked worker. Its log file carries the transcript; the
+        // process exit only says whether the spec was even readable. The
+        // state directory rides along because the worker's cwd is the
+        // run's tree, not the project.
+        let xencode_dir = options
+            .child_xencode_dir
+            .unwrap_or_else(project_xencode_dir);
+        let exit = detached_runs::run_child(&xencode_dir, &run_id).await;
+        if matches!(exit.reason, xencode_tui_rs::detached::ExitReason::Error) {
+            return Err(exit.note.clone());
+        }
+        return Ok(());
+    }
+    let DetachedCommandOptions {
+        prompt,
+        detach,
+        resume,
+        list,
+        show,
+        log,
+        stop,
+        model,
+        tool_root,
+        max_rounds,
+        max_minutes,
+        max_cost,
+        allow_shell,
+        tail,
+        ollama_url,
+        llamacpp_url,
+        child: _,
+        child_xencode_dir: _,
+    } = options;
+    let actions = prompt.is_some() as u8
+        + resume.is_some() as u8
+        + list as u8
+        + show.is_some() as u8
+        + log.is_some() as u8
+        + stop.is_some() as u8;
+    if actions != 1 {
+        return Err(
+            "pick one: a prompt to run, --resume, --list, --show, --log or --stop".to_string(),
+        );
+    }
+    let xencode_dir = project_xencode_dir();
+    if list {
+        return list_detached_runs(&xencode_dir);
+    }
+    if let Some(given) = show {
+        return show_detached_run(&xencode_dir, &given);
+    }
+    if let Some(given) = log {
+        return log_detached_run(&xencode_dir, &given, tail);
+    }
+    if let Some(given) = stop {
+        return stop_detached_run(&xencode_dir, &given);
+    }
+    if let Some(given) = &resume {
+        let run_id = detached_runs::resolve_run_id(&xencode_dir, given).ok_or_else(|| {
+            format!(
+                "no detached run {given} in {}",
+                detached_runs::detached_dir(&xencode_dir).display()
+            )
+        })?;
+        return resume_detached_run(&xencode_dir, &run_id, detach).await;
+    }
+    let prompt = prompt.expect("clap counted exactly one action, and it is the prompt");
+    start_detached_run(
+        &xencode_dir,
+        &prompt,
+        StartOptions {
+            detach,
+            model,
+            tool_root,
+            max_rounds,
+            max_minutes,
+            max_cost,
+            allow_shell,
+            ollama_url,
+            llamacpp_url,
+        },
+    )
+    .await
+}
+
+struct StartOptions {
+    detach: bool,
+    model: Option<String>,
+    tool_root: Option<PathBuf>,
+    max_rounds: Option<u32>,
+    max_minutes: Option<f64>,
+    max_cost: Option<f64>,
+    allow_shell: bool,
+    ollama_url: Option<String>,
+    llamacpp_url: Option<String>,
+}
+
+/// Check the caps before anything runs: a cap that cannot count cannot stop,
+/// so it refuses the run instead of starting one it cannot end.
+fn build_caps(
+    xencode_dir: &std::path::Path,
+    model: &str,
+    max_rounds: Option<u32>,
+    max_minutes: Option<f64>,
+    max_cost: Option<f64>,
+) -> Result<xencode_tui_rs::detached::DetachedCaps, String> {
+    let config = XencodeConfig::load().unwrap_or_default();
+    let mut caps = xencode_tui_rs::detached::DetachedCaps {
+        max_rounds: max_rounds.unwrap_or(config.agent_max_rounds.clamp(1, 64) as u32),
+        ..Default::default()
+    };
+    if caps.max_rounds == 0 {
+        return Err("--max-rounds stops nothing at 0; pass at least 1".to_string());
+    }
+    if let Some(minutes) = max_minutes {
+        if !minutes.is_finite() || minutes <= 0.0 {
+            return Err("--max-minutes stops nothing at 0; pass a positive number".to_string());
+        }
+        caps.max_wall_ms = (minutes * 60_000.0).round().max(1.0) as u64;
+    }
+    if let Some(dollars) = max_cost {
+        if !dollars.is_finite() || dollars <= 0.0 {
+            return Err("--max-cost stops nothing at 0; pass a positive amount".to_string());
+        }
+        let table =
+            xencode_context_rs::PriceTable::load_with_lookup(xencode_dir, config.price_lookup);
+        if table.price_for_model(model).is_none() {
+            return Err(format!(
+                "no price for {model} in pricing.json or the fetched listing, so --max-cost \
+                 cannot count it — name a price first, or run without the cap"
+            ));
+        }
+        caps.max_cost_micros = Some((dollars * 1_000_000.0).round().max(1.0) as u64);
+    }
+    Ok(caps)
+}
+
+/// Write the spec and either run it here or fork it. Both paths persist the
+/// same state, so a foreground run killed from another terminal resumes the
+/// same way a detached one does.
+async fn start_detached_run(
+    xencode_dir: &std::path::Path,
+    prompt: &str,
+    options: StartOptions,
+) -> Result<(), String> {
+    let config = XencodeConfig::load().unwrap_or_default();
+    let model = options
+        .model
+        .unwrap_or_else(|| config.default_model.clone());
+    if model.trim().is_empty() {
+        return Err("no model: pass --model or set one in the config".to_string());
+    }
+    let tool_root = options
+        .tool_root
+        .unwrap_or_else(xencode_context_rs::default_root);
+    if !tool_root.is_dir() {
+        return Err(format!("{} is not a directory", tool_root.display()));
+    }
+    let caps = build_caps(
+        xencode_dir,
+        &model,
+        options.max_rounds,
+        options.max_minutes,
+        options.max_cost,
+    )?;
+    let run_id = xencode_context_rs::new_run_id(prompt);
+    let dir = detached_runs::run_dir(xencode_dir, &run_id);
+    let spec = xencode_tui_rs::detached::DetachedSpec {
+        kind: xencode_tui_rs::detached::DETACHED_KIND_RUN.to_string(),
+        prompt: prompt.to_string(),
+        model,
+        tool_root: tool_root.to_string_lossy().into_owned(),
+        caps,
+        allow_shell: options.allow_shell,
+        ollama_url: options.ollama_url,
+        llamacpp_url: options.llamacpp_url,
+        created_ms: xencode_context_rs::conversation::now_millis(),
+    };
+    detached_runs::write_spec(&dir, &spec)
+        .map_err(|e| format!("could not write the run spec in {}: {e}", dir.display()))?;
+    if !options.detach {
+        let exit = detached_runs::run_child(xencode_dir, &run_id).await;
+        print_detached_exit(&run_id, &exit);
+        return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("cannot re-run this binary: {e}"))?;
+    let pid = detached_runs::spawn_child(
+        &exe,
+        &run_id,
+        xencode_dir,
+        &tool_root,
+        &detached_runs::log_path(&dir),
+    )
+    .map_err(|e| format!("could not fork the run: {e}"))?;
+    let _ = detached_runs::write_pid(&dir, pid);
+    println!("detached run {run_id} (pid {pid})");
+    println!(
+        "watch it with `xencode run --log {run_id}`, stop it with `xencode run --stop {run_id}`"
+    );
+    Ok(())
+}
+
+/// Continue a run that died: same spec, same caps minus what is spent, prior
+/// rounds as history. Anything but a crash is refused with the reason.
+async fn resume_detached_run(
+    xencode_dir: &std::path::Path,
+    run_id: &str,
+    detach: bool,
+) -> Result<(), String> {
+    let dir = detached_runs::run_dir(xencode_dir, run_id);
+    match detached_runs::derive_status(&dir) {
+        xencode_tui_rs::detached::DetachedStatus::Missing => {
+            return Err(format!("no detached run {run_id}"));
+        }
+        xencode_tui_rs::detached::DetachedStatus::Finished(exit) => {
+            return Err(format!(
+                "run {run_id} already finished ({:?}); there is nothing to resume",
+                exit.reason
+            ));
+        }
+        xencode_tui_rs::detached::DetachedStatus::Stopped { .. } => {
+            return Err(format!(
+                "run {run_id} was stopped; resume a crash, not a decision"
+            ));
+        }
+        xencode_tui_rs::detached::DetachedStatus::Running { pid } => {
+            return Err(format!("run {run_id} is still going under pid {pid}"));
+        }
+        xencode_tui_rs::detached::DetachedStatus::NeverRan
+        | xencode_tui_rs::detached::DetachedStatus::Crashed { .. } => {}
+    }
+    let spec = detached_runs::read_spec(&dir).ok_or_else(|| format!("no detached run {run_id}"))?;
+    let (used_rounds, used_wall_ms, used_cost) = detached_runs::used_totals(&dir);
+    // The caps are spent by the run, not the attempt: resuming into an
+    // already-spent budget would start a loop its first round must end.
+    if xencode_tui_rs::detached::check_caps(used_rounds, used_wall_ms, used_cost, &spec.caps)
+        .is_some()
+    {
+        return Err(format!(
+            "run {run_id} already spent its caps ({used_rounds} rounds); there is nothing to resume under"
+        ));
+    }
+    // The cost rate is re-read, not trusted from the attempt that died: the
+    // file may have changed underfoot, and spending unpriced is what the
+    // start-time check exists to refuse.
+    if spec.caps.max_cost_micros.is_some() {
+        let config = XencodeConfig::load().unwrap_or_default();
+        let table =
+            xencode_context_rs::PriceTable::load_with_lookup(xencode_dir, config.price_lookup);
+        if table.price_for_model(&spec.model).is_none() {
+            return Err(format!(
+                "no price for {} anymore, so the cost cap cannot count — name a price first",
+                spec.model
+            ));
+        }
+    }
+    if !detach {
+        let exit = detached_runs::run_child(xencode_dir, run_id).await;
+        print_detached_exit(run_id, &exit);
+        return Ok(());
+    }
+    let tool_root = PathBuf::from(&spec.tool_root);
+    let exe = std::env::current_exe().map_err(|e| format!("cannot re-run this binary: {e}"))?;
+    let pid = detached_runs::spawn_child(
+        &exe,
+        run_id,
+        xencode_dir,
+        &tool_root,
+        &detached_runs::log_path(&dir),
+    )
+    .map_err(|e| format!("could not fork the run: {e}"))?;
+    let _ = detached_runs::write_pid(&dir, pid);
+    println!("resumed detached run {run_id} (pid {pid}) from {used_rounds} completed rounds");
+    Ok(())
+}
+
+fn print_detached_exit(run_id: &str, exit: &xencode_tui_rs::detached::DetachedExit) {
+    use xencode_tui_rs::detached::ExitReason;
+    let why = match &exit.reason {
+        ExitReason::Done => "done".to_string(),
+        ExitReason::RoundCap => format!("stopped: spent its {} rounds", exit.rounds),
+        ExitReason::WallCap => "stopped: spent its wall-clock budget".to_string(),
+        ExitReason::CostCap => "stopped: spent its cost budget".to_string(),
+        ExitReason::Stopped => "stopped on request".to_string(),
+        ExitReason::Error => format!("could not run: {}", exit.note),
+    };
+    println!(
+        "run {run_id}: {why} ({} {})",
+        exit.rounds,
+        count_word(exit.rounds as usize, "round", "rounds")
+    );
+}
+
+fn list_detached_runs(xencode_dir: &std::path::Path) -> Result<(), String> {
+    let ids = detached_runs::list_run_ids(xencode_dir);
+    if ids.is_empty() {
+        println!(
+            "no detached runs in {}",
+            detached_runs::detached_dir(xencode_dir).display()
+        );
+        println!("start one with `xencode run \"the task\" --detach`.");
+        return Ok(());
+    }
+    for id in ids {
+        let dir = detached_runs::run_dir(xencode_dir, &id);
+        let status = detached_runs::derive_status(&dir);
+        let rounds = detached_runs::read_rounds(&dir).len();
+        let model = detached_runs::read_spec(&dir)
+            .map(|spec| spec.model)
+            .unwrap_or_else(|| "?".to_string());
+        println!("{id}  {}  {rounds} rounds  {model}", status.label());
+    }
+    Ok(())
+}
+
+fn show_detached_run(xencode_dir: &std::path::Path, given: &str) -> Result<(), String> {
+    let run_id = detached_runs::resolve_run_id(xencode_dir, given)
+        .ok_or_else(|| format!("no detached run {given}"))?;
+    let dir = detached_runs::run_dir(xencode_dir, &run_id);
+    let spec = detached_runs::read_spec(&dir).ok_or_else(|| format!("no detached run {run_id}"))?;
+    let status = detached_runs::derive_status(&dir);
+    let rounds = detached_runs::read_rounds(&dir);
+    println!("run {run_id}");
+    println!("  status: {}", status.label());
+    println!("  model: {}", spec.model);
+    println!("  prompt: {}", spec.prompt);
+    println!("  tree: {}", spec.tool_root);
+    println!(
+        "  caps: {} rounds, {} minutes wall-clock{}",
+        spec.caps.max_rounds,
+        spec.caps.max_wall_ms as f64 / 60_000.0,
+        spec.caps
+            .max_cost_micros
+            .map(|micros| format!(", ${:.2} cost", micros as f64 / 1_000_000.0))
+            .unwrap_or_default(),
+    );
+    println!(
+        "  approvals: {}",
+        if spec.allow_shell {
+            "shell pre-approved (--allow-shell)"
+        } else {
+            "edits pre-approved; shell refused unasked"
+        }
+    );
+    if rounds.is_empty() {
+        println!("  rounds: none completed");
+    } else {
+        println!("  rounds:");
+        for row in &rounds {
+            println!(
+                "    {:>3}  {} new turns  {} prompt + {} completion tokens",
+                row.round,
+                row.turns.len(),
+                row.prompt_tokens
+                    .map(|tokens| tokens.to_string())
+                    .as_deref()
+                    .unwrap_or("?"),
+                row.completion_tokens
+                    .map(|tokens| tokens.to_string())
+                    .as_deref()
+                    .unwrap_or("?"),
+            );
+        }
+    }
+    if let xencode_tui_rs::detached::DetachedStatus::Finished(exit) = &status {
+        println!("  exit: {:?} after {} rounds", exit.reason, exit.rounds);
+    }
+    Ok(())
+}
+
+fn log_detached_run(xencode_dir: &std::path::Path, given: &str, tail: usize) -> Result<(), String> {
+    let run_id = detached_runs::resolve_run_id(xencode_dir, given)
+        .ok_or_else(|| format!("no detached run {given}"))?;
+    let dir = detached_runs::run_dir(xencode_dir, &run_id);
+    if detached_runs::read_spec(&dir).is_none() {
+        return Err(format!("no detached run {run_id}"));
+    }
+    for line in detached_runs::read_log_tail(&dir, tail) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn stop_detached_run(xencode_dir: &std::path::Path, given: &str) -> Result<(), String> {
+    let run_id = detached_runs::resolve_run_id(xencode_dir, given)
+        .ok_or_else(|| format!("no detached run {given}"))?;
+    let dir = detached_runs::run_dir(xencode_dir, &run_id);
+    match detached_runs::derive_status(&dir) {
+        xencode_tui_rs::detached::DetachedStatus::Missing => {
+            return Err(format!("no detached run {run_id}"));
+        }
+        xencode_tui_rs::detached::DetachedStatus::Running { pid } => {
+            println!("{}", detached_runs::stop_child(&dir, pid));
+            Ok(())
+        }
+        status => Err(format!(
+            "run {run_id} is {}, not running; only a running run can be stopped",
+            status.label()
+        )),
+    }
+}
+
 async fn run_replay(
     run_id: Option<String>,
     list: bool,
@@ -9090,6 +9651,58 @@ mod tests {
                 action: Some(RunsAction::Trailer { run_id }),
             }) => assert_eq!(run_id, "1700000000-aaaa"),
             _ => panic!("expected runs trailer"),
+        }
+    }
+
+    /// `xencode run` takes one action per invocation: a prompt with `--log`
+    /// is refused by the dispatcher, not guessed at.
+    #[test]
+    fn run_takes_a_prompt_and_caps_or_one_reporting_flag() {
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "run",
+            "fix the typo",
+            "--detach",
+            "--max-rounds",
+            "4",
+            "--max-minutes",
+            "10",
+            "--max-cost",
+            "0.5",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Run {
+                prompt,
+                detach,
+                max_rounds,
+                max_minutes,
+                max_cost,
+                ..
+            }) => {
+                assert_eq!(prompt.as_deref(), Some("fix the typo"));
+                assert!(detach);
+                assert_eq!(max_rounds, Some(4));
+                assert_eq!(max_minutes, Some(10.0));
+                assert_eq!(max_cost, Some(0.5));
+            }
+            _ => panic!("expected run"),
+        }
+        let cli = Cli::try_parse_from(["xencode", "run", "--resume", "1700000000-aaaa"]).unwrap();
+        match cli.command {
+            Some(Commands::Run { resume, .. }) => {
+                assert_eq!(resume.as_deref(), Some("1700000000-aaaa"))
+            }
+            _ => panic!("expected run --resume"),
+        }
+        // The worker is forked, never typed — but it parses, because the
+        // forked child is this same binary.
+        let cli = Cli::try_parse_from(["xencode", "run", "--child", "1700000000-aaaa"]).unwrap();
+        match cli.command {
+            Some(Commands::Run { child, .. }) => {
+                assert_eq!(child.as_deref(), Some("1700000000-aaaa"))
+            }
+            _ => panic!("expected run --child"),
         }
     }
 

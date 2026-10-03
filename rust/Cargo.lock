@@ -4238,6 +4238,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "futures-util",
+ "libc",
  "ratatui",
  "regex",
  "reqwest",

@@ -2235,6 +2235,44 @@ recorded command must therefore be one that gives the same output every time —
 `date`, `git log` and anything over the network make a recording that can only ever
 report the request it could not answer.
 
+### `xencode run "the task" [--detach] [--resume ID]`
+Run an agent turn from the command line. Foreground by default; `--detach`
+forks a child that survives the terminal, persisting every completed round
+under `.xencode/cache/detached/<run-id>/` — the spec, one `rounds.jsonl`
+line per round, an `exit.json` the child writes only when it finishes, a pid
+hint, and the log. Status is derived from the exit file and `/proc`, never
+stored, so a kill reads as `crashed` rather than as whatever it said before
+it died. `--resume` continues a crashed run from its last completed round:
+prior rounds' turns become the fresh loop's history, and their tool results
+are replayed, never re-executed.
+
+```bash
+xencode run "fix the typo in README" --max-rounds 8
+xencode run "migrate the schema" --detach --max-minutes 30 --max-cost 2.00
+xencode run --list
+xencode run --show 1790240197
+xencode run --log 1790240197 --tail 20
+xencode run --resume 1790240197
+xencode run --stop 1790240197
+```
+
+Three caps end a run besides the model finishing: `--max-rounds`,
+`--max-minutes` (wall-clock, system time — a suspended laptop counts), and
+`--max-cost` in dollars. Caps are checked between rounds, and a spent cap
+ends the loop with `[STOPPED]` and an exit naming which one. `--max-cost`
+needs a model `pricing.json` (or the fetched listing) names and a route that
+reports token counts; without both the run is refused up front, because a
+cap that cannot count cannot stop. A resume spends the same caps minus what
+is already used — resuming into a spent budget is refused rather than
+started so its first round can end it.
+
+Nobody is listening on a detached run, so approvals run `edit-allow`: file
+edits are pre-approved and anything else is refused where it stands, exactly
+as the eval harness runs headless. `--allow-shell` opts into `all-allow`.
+`--stop` asks the child to die with SIGTERM and leaves a stop request behind,
+so the run reads as `stopped`, not `crashed`. Resuming a finished, stopped
+or still-running run is refused with the reason.
+
 ### `xencode runs [list|show|trailer]`
 Which runs happened, what each asked a person, and the commit trailer naming
 it. When an agent turn ends in the TUI, one row is appended to
@@ -2259,8 +2297,7 @@ Every line `trailer` prints is a `Token: value` trailer, so `git
 interpret-trailers` reads it as trailers when it sits at the end of a commit
 message.
 
-### `xencode audit verify [PATH]`
-Check the session server's audit log for records that were changed after they
+### `xencode audit verify [PATH]`Check the session server's audit log for records that were changed after they
 were written. Each record carries a digest of its own contents and the digest of
 the record before it, so editing, removing or moving a line is reported on a
 specific line. Defaults to `audit.jsonl` in the state directory. Exits non-zero when

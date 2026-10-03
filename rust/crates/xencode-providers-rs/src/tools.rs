@@ -46,7 +46,7 @@ impl ToolDefinition {
 /// `arguments` preserves the wire shape (string for OpenAI-compatible,
 /// object for Ollama) so history can be echoed back verbatim; use
 /// [`ToolCall::arguments_object`] to execute.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ToolCall {
     /// OpenAI `tool_calls[].id` — generated (`call_{index}`) when the backend
     /// supplies none (Ollama), so results can always be paired.
@@ -136,7 +136,7 @@ fn short_quote(text: &str) -> String {
 
 /// Extra turns of an agentic exchange: the assistant turn that requested
 /// tools, and each tool's result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AgentTurn {
     Assistant { text: String, calls: Vec<ToolCall> },
     ToolResult { id: String, content: String },
