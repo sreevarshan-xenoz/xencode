@@ -14,12 +14,13 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-03: it lists 41 subcommands — the
+  (verified against `xencode --help` on 2026-10-03: it lists 44 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
-  `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
-  built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2128 tests passing, zero warnings (re-verified 2026-10-03, after CX-7)
+  `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
+  `paths`, `migrate` — and clap's
+  built-in `help`, 45 entries in the list)
+- [x] Workspace gates green — 16 crates, 2141 tests passing, zero warnings (re-verified 2026-10-03, after CX-4)
 
 ## Model Catalog Honesty
 
@@ -3654,6 +3655,26 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
   config. **M**. Trap: a scraped price list goes stale silently and its
   redistribution terms are unclear. UNVERIFIED: whether OpenRouter's `pricing`
   fields distinguish cache-read from cache-write rates.
+  *(Done 2026-10-03 — see W11. That UNVERIFIED question is answered: they are two
+  separate fields, `input_cache_read` and `input_cache_write`, and only the read one
+  is used, because the metrics count cached input tokens and nothing a write rate
+  could be multiplied by. The stale-list trap is closed by refusing the list rather
+  than by ageing it politely: past `PRICE_TTL_DAYS` = 7 days nothing is priced from
+  the copy on disk, so the model's spend reports as unknown instead of as last
+  month's figure — and instead of as zero, which is what the old `pricing.json`
+  miss-ing model already protected against. `xencode prices fetch` is the only
+  thing that dials out, is asked for, sends no key and no project data; `price_lookup`
+  (off by default) only decides whether the copy already on disk is read; a rate
+  written in `pricing.json` outranks a looked-up one; and every cost line built from
+  the listing names the catalogue, the day it was read and its age now. Verified on
+  a live fetch — 459 prices off 466 entries, 7 in a shape no price could be read out
+  of — and on the same project nine days later with the file still on disk untouched,
+  where the run's one model moved from `$0.117 in / $0.455 out per million tokens` to
+  `no price. A cost is reported as unknown, never as nothing.` A local tag
+  (`llamacpp:qwen3-0.6b`) matches nothing in a catalogue and is never priced from
+  one. The redistribution half of the trap is not closed by anything here: the cache
+  stays a private copy on your disk that nothing sends anywhere, and it is only read
+  because you asked for it.)*
 - **CX-5 A Colab spend ledger** — record elapsed VM-hours on up/down/status so
   `status` can say "rented 7.4 h of 12 h". **S**, and a prerequisite for AM-6's
   "GPU still up" alert; the data is already computed and discarded (fact 11).
@@ -9082,14 +9103,14 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 13 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 14 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
 | **CX-3** | Honest local cost as time plus watt-hours | capability | local cost as time + watt-hours; done 2026-10-03 |
-| **CX-4** | Cloud price lookup, never a vendored table | capability | cloud price lookup, never a vendored table |
+| **CX-4** | Cloud price lookup, never a vendored table | capability | cloud price lookup, never a vendored table; done 2026-10-03 — the TTL refuses the listing rather than trusting it a little, see the note |
 | **CX-5** | A Colab spend ledger | capability | Colab spend ledger |
 | **CX-6** | Dead-man's-switch teardown | capability | dead-man's-switch teardown (belongs with MI-5 if MI-5 ever ships) |
 | **CX-7** | Budgets that act — daily token/energy/dollar/wall-clock caps | capability | budgets that act; done 2026-10-03 on the profile half — the smaller-model swap is not built, see the note |
@@ -9187,6 +9208,31 @@ because a cap of nothing is a way to switch the product off. **What is not built
 the smaller-model swap.** This machine has one quantised model file on it, so a
 model change could be described but never watched happening, and the row's other
 half is a real behaviour on its own.
+
+**CX-4, done 2026-10-03** — a rate for a model `pricing.json` does not name can now
+be looked up, and the lookup is the part that is fenced in. `xencode prices fetch`
+reads OpenRouter's public model listing (no key sent, nothing about the project
+sent, 20-second wait, 8 MiB ceiling on an answer) and writes
+`.xencode/cache/price-lookup.json` with the moment it was read; a live fetch here
+took 466 entries in, of which 459 carried a price and 7 were counted and left out.
+`price_lookup` is off by default and only decides whether a report consults that
+copy — it authorises no trip, and the documented offline path is untouched. A rate
+written by hand outranks anything looked up. Past `PRICE_TTL_DAYS` = 7 days the copy
+on disk prices **nothing**: the model's cost comes back as unknown, which is the same
+shape as "no price in `pricing.json`" and specifically not a zero, and the report
+names the age and the command that would read the rates again. Verified as the same
+project nine days on with the file untouched — `$0.117 in / $0.455 out per million
+tokens` became `no price. A cost is reported as unknown, never as nothing.` Every
+cost line built from the listing says which catalogue, which day, and how old that
+copy is now, in the CLI (`xencode prices show`, `--format json` included) and in the
+TUI's `/cost`, from one shared sentence in `context-rs` so the two reports cannot
+describe one rate differently. The row's UNVERIFIED question is settled: cache-read
+and cache-write are two fields in that document, and only the read one is used,
+because the metrics count cached input tokens and a write rate has nothing to be
+multiplied by. Local tags (`llamacpp:qwen3-0.6b`, `qwen2.5:7b`) are never priced from
+a catalogue. What is **not** built is any consent to redistribute: the cache is a
+private copy on your disk that nothing sends anywhere, which is the only answer to
+the listing's unclear terms that this project can give without a lawyer.
 
 #### W12 — Long-running autonomy — 15 items
 

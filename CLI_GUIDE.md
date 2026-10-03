@@ -70,7 +70,9 @@ reported — read from `.xencode/cache/turns.jsonl` in the project,
 so it answers with every model server down), `/cost` (tokens, KV-cache reuse,
 p50/p95 speed and spend for the turns recorded in this project, read from
 `.xencode/cache/metrics.jsonl` through its rollup sidecar and priced by
-`.xencode/pricing.json`; a model with no price there is shown as unpriced, never
+`.xencode/pricing.json` — or, with `price_lookup` on, by a listing
+`xencode prices fetch` read off a public catalogue, which every such line names
+with its age; a model with no rate in either document is shown as unpriced, never
 as free, and it too answers with every model server down), and
 `/spawn <task> [#branch]` (run a subagent in a fresh
 git worktree next to the project, e.g. `proj-spawn-1` on branch
@@ -1878,7 +1880,8 @@ is what used to happen.
 | `ollama_reasoning` | string | whether a model served by Ollama may think before answering: `auto` or empty to leave the model's own default in charge, `off` for `"think": false`, `on` for `"think": true` — which is only sent when `/api/show` says the model can think. A number is refused: Ollama has no thinking budget, so use `llama_cpp_reasoning` for that — see [What a request to Ollama carries](#what-a-request-to-ollama-carries) |
 | `ollama_keep_alive` | string | how long the server keeps this model loaded after an answer, in the server's own words (`10m`, `30s`, `0` to unload immediately). Must contain a digit; empty leaves out the field and the server's five minutes rule. Decides whether the next request pays for a reload — see [What a request to Ollama carries](#what-a-request-to-ollama-carries) |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
-| `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
+| `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced the way every cost report prices it — from `.xencode/pricing.json` in the project, and from the fetched listing for a model that file does not name when `price_lookup` is on — see [Where a price comes from](#where-a-price-comes-from). **Not a `config set` key** — edit it in the JSON. |
+| `price_lookup` | bool | Whether a cost report is allowed to read a price off `.xencode/cache/price-lookup.json`, the copy of a public catalogue that `xencode prices fetch` wrote. `true`/`false`; empty is refused (`invalid boolean: `), because there is no sensible reading of "clear it" for a switch that already defaults off. Off by default, and turning it on authorises nothing to dial out: it decides only whether the copy already on disk is consulted, and a rate you wrote in `pricing.json` still outranks anything in it — see [Where a price comes from](#where-a-price-comes-from) |
 | `power_cents_per_kwh` | number | What a kilowatt-hour costs where this machine runs, in cents — `12.5` for 12½¢. Used to price the electricity a **local** generation drew, from the kernel's own power counter: the `⚡` line a finished turn prints and the `energy_uj` field on its metrics row. Unset, the line still shows the watt-hours and says `no $/kWh set`, because the machine drew the power either way and only the price is unknown. `config set power_cents_per_kwh ""` clears it again; a negative tariff, or one above 1000 cents, is refused where it is written — see [What a local turn cost in power](#what-a-local-turn-cost-in-power) |
 | `budget_tokens_per_day` | number | What one calendar day may spend, in prompt plus completion tokens. One of four daily caps — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed). Anywhere from 1 to a billion tokens; an empty value clears it again |
 | `budget_energy_wh_per_day` | number | What one calendar day may draw at the wall, in watt-hours, from the kernel's own package counter. On a machine that publishes no counter nothing can ever be weighed against it, and `config set` says so as it is written. From 1 to 24000 watt-hours; empty clears — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed) |
@@ -2021,6 +2024,93 @@ append-only. `/cost` prices the same turns by tokens from `.xencode/pricing.json
 — that is the provider's bill, and this is yours; the two are never added
 together.
 
+### Where a price comes from
+
+A cost report reads its rates out of two documents, and they are not the same
+kind of document:
+
+| Document | Written by | What it is trusted for |
+| --- | --- | --- |
+| `.xencode/pricing.json` | you, by hand | every model it names, forever, until you edit it |
+| `.xencode/cache/price-lookup.json` | `xencode prices fetch` | a model `pricing.json` does not name, for 7 days |
+
+Nothing is fetched on its own. `xencode prices fetch` is the only thing in
+xencode that dials out for a price, and it is asked for; the request carries no
+key and sends nothing about this project, because the catalogue it reads
+(OpenRouter's public model listing) is published for anybody. What it writes is a
+copy of what a third party charged on that day, so two rules hold it in check:
+
+- **A rate you wrote by hand always wins.** The fetched list is only consulted for
+  a model `pricing.json` does not name, and the report says which of the two every
+  figure came from.
+- **The copy expires after 7 days** (`PRICE_TTL_DAYS`). Past that it is a document
+  about what something used to cost, so those models come back as *no price* —
+  reported as unknown, never as free — until the list is fetched again. Nothing is
+  re-fetched behind your back to fix that, and the report says what to do.
+
+Whether the fetched copy is read at all is the `price_lookup` setting, which is
+off by default: a project that never sets it behaves exactly as it did before the
+listing could be fetched.
+
+A model whose records name it as a local tag — `llamacpp:qwen3-0.6b`, `qwen2.5:7b`
+— matches nothing in a catalogue and is never priced from one. Guessing that a
+local model is some distant model with a similar name is how a wrong price gets
+believed.
+
+Only the dimensions the records actually count are read: input, output, and cached
+input where the catalogue publishes a cache-read rate of its own. What it also
+lists and xencode deliberately does not read — a price for *writing* to the cache,
+higher rates for long-context tiers, audio, images and web searches — has no
+counter in the metrics, so a figure built from it would be invented rather than
+looked up.
+
+```bash
+$ xencode prices fetch
+459 prices read off https://openrouter.ai/api/v1/models and written to /tmp/cx4-live/.xencode/cache/price-lookup.json
+  7 entries the listing gave in a shape no price could be read out of, counted and left out
+note: a report reads that file for 7 days, then stops pricing from it until it is fetched again.
+
+$ xencode prices
+pricing.json — /tmp/cx4-live/.xencode/pricing.json
+  nothing there yet, so no model is priced by hand
+fetched listing — /tmp/cx4-live/.xencode/cache/price-lookup.json
+  459 prices off openrouter, read on 2026-10-03, 0 days ago
+  7 entries carried no readable price
+models this project has run: 1; priced from the listing: 1; with no price in either document: 0
+  • llamacpp:qwen/qwen3-8b — the listing's qwen/qwen3-8b: $0.117 in / $0.455 out per million tokens, no cache rate — reads billed as input, which is an upper bound
+
+$ xencode prices
+pricing.json — /tmp/cx4-live/.xencode/pricing.json
+  nothing there yet, so no model is priced by hand
+fetched listing — /tmp/cx4-live/.xencode/cache/price-lookup.json
+  459 prices off openrouter, read on 2026-09-24, 9 days ago
+  7 entries carried no readable price
+  • the listing on disk is 9 days old, past the 7 days a looked-up rate is taken for — nothing is priced from it, and `xencode prices fetch` reads them again
+models this project has run: 1; priced from the listing: 0; with no price in either document: 1
+  • llamacpp:qwen/qwen3-8b — no price. A cost is reported as unknown, never as nothing.
+```
+
+The second run is the same project nine days later with the list untouched, and
+the last line is the point of the whole design: the spend for that model went from
+a figure to *unknown*, not to zero.
+
+`/cost` in the TUI says the same thing where the money is. Under `Per model:` a
+looked-up rate carries its own line, and so does the day's dollar cap. (Both
+transcripts above were driven by a local `llama-server` publishing the
+catalogue's own model name, so the price path could be checked end to end without
+sending a prompt off the machine — the token counts are real, the answers were
+never OpenRouter's.)
+
+```text
+  Per model:
+    llamacpp:qwen/qwen3-8b — 6830 prompted · 348 generated · $0.000957 · in $0.117/M · out $0.455/M · cache reads at the input price
+    • 1 price read off the openrouter catalogue on 2026-10-03, 0 days ago
+Everything recorded: $0.000957
+Today (2026-10-03), against the caps set in the config:
+  • dollar cap $5 · today $0.000957 · room left
+  • 1 price read off the openrouter catalogue on 2026-10-03, 0 days ago
+```
+
 ### What a day's caps do when they are passed
 
 Four settings put a limit on one calendar day's usage, in the four units xencode
@@ -2030,7 +2120,7 @@ can actually measure it in:
 | --- | --- |
 | `budget_tokens_per_day` | prompt plus completion tokens |
 | `budget_energy_wh_per_day` | watt-hours off the kernel's package counter |
-| `budget_usd_micros_per_day` | what the day's tokens cost at `pricing.json`, in millionths of a dollar |
+| `budget_usd_micros_per_day` | what the day's tokens cost at the rates a cost report uses — `pricing.json`, then the fetched listing — in millionths of a dollar |
 | `budget_minutes_per_day` | the seconds the day's turns ran, added up |
 
 **A passed cap buys the next turn down; it never refuses one.** The day's records
@@ -3054,6 +3144,79 @@ those is the mistake this command exists to prevent.
 `--format json` emits the machine-readable form: for `check`, the medians in
 nanoseconds, the delta, the p-value with its method, the spread and the outcome
 per path; for `show`, the stored samples per path, unscaled.
+
+### `xencode prices [show|fetch] [--url <URL>] [--format text|json]`
+
+Which two documents a cost report reads its rates out of, what each of them
+says, and which of the models this project has actually run have no rate in
+either. Nothing is computed here — no spend, no totals. The command exists for
+provenance: a number on a cost report is only as good as the paper it came from,
+and one of those two papers is somebody else's catalogue read on a day that has
+already passed. See [Where a price comes from](#where-a-price-comes-from) for
+what the two documents are and the two rules that hold the fetched one in check.
+
+```bash
+xencode prices                       # the same as `prices show`
+xencode prices show --format json    # the same answer, machine-readable
+xencode prices fetch                 # read the public catalogue again
+xencode prices fetch --url <URL>     # …from somewhere that publishes the same document
+```
+
+`show` reads the disk and nothing else; it never dials out, and it prints the
+listing's age in days rather than asking anybody whether it is still right.
+
+```
+$ xencode prices
+pricing.json — /tmp/cx4-live/.xencode/pricing.json
+  nothing there yet, so no model is priced by hand
+fetched listing — /tmp/cx4-live/.xencode/cache/price-lookup.json
+  459 prices off openrouter, read on 2026-10-03, 0 days ago
+  7 entries carried no readable price
+models this project has run: 1; priced from the listing: 1; with no price in either document: 0
+  • llamacpp:qwen/qwen3-8b — the listing's qwen/qwen3-8b: $0.117 in / $0.455 out per million tokens, no cache rate — reads billed as input, which is an upper bound
+```
+
+The models named at the end are the ones read out of this project's own records,
+so `show` answers "what would my next `/cost` say" for the models that were
+actually run — not the 459 the catalogue happens to list. A run model with no
+rate in either document is named as unpriced rather than counted as free.
+
+`--format json` prints `pricing_json` (path, whether it is present, the models it
+names, and any entry it refused to read with the reason), `listing` (source,
+`fetched_at_unix_ms`, `fetched_on`, `age_days`, `expired`, `priced_models`,
+`unreadable` — or `null` when nothing has been fetched), `price_lookup`,
+`listing_is_read` (whether a report is consulting the listing *right now*, which
+needs the setting on and the copy inside its 7 days), and then `models_run`,
+`priced_from_listing` and `unpriced`.
+
+`fetch` is the only thing in xencode that dials out for a price, and it is asked
+for. The request carries no key and sends nothing about this project — the
+listing is published for anybody to read — just a `User-Agent` of
+`Xencode/<version> (price lookup)`. It waits 20 seconds for an answer and refuses
+one larger than 8 MiB: the document it fetched here is 764,719 bytes covering 466
+models, so eight megabytes is the same listing several times over, which is a
+server that has started answering a different question. A fetch that fails leaves
+the previous copy exactly where it is, ages and all; the three ways it can fail,
+and what each says. The first two are from a live run against an address nothing
+is listening on; the third is checked by a test that serves a real 503 over a
+socket, because it would need somebody else's server to be broken to show it
+here:
+
+```
+$ xencode prices fetch --url ftp://openrouter.ai/models
+error: only http/https can be fetched: ftp://openrouter.ai/models
+
+$ xencode prices fetch --url http://127.0.0.1:1/api/v1/models
+error: the price listing could not be reached: error sending request for url (http://127.0.0.1:1/api/v1/models)
+
+error: the price listing answered 503 instead of a body
+```
+
+Each exits 1. The `--url` is there for a gateway that publishes the same
+document, and for pointing the command at an address you control; it is not a
+way to make a cost report read a price from somewhere you have not checked, since
+what arrives is parsed for the same three fields and cached with the same 7-day
+life.
 
 ### `xencode release-notes [--from <ref>] [--to <ref>] [--release <version>] [--out <path>] [--force] [--format text|json]`
 

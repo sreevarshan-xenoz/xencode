@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `CX-4`: a cost report says which paper each rate came from, and stops trusting a looked-up one after 7 days
+
+There is still no price list compiled into this binary, and there never will be: a
+list that ships inside a program goes stale without anybody noticing and keeps
+being printed as fact. Rates come from `.xencode/pricing.json`, which you write.
+For a model that file does not name, xencode can now read a price off a public
+catalogue — but only from a copy you asked for, only for 7 days, and never without
+saying so on the line that uses it.
+
+```
+$ xencode prices fetch
+459 prices read off https://openrouter.ai/api/v1/models and written to /tmp/cx4-live/.xencode/cache/price-lookup.json
+  7 entries the listing gave in a shape no price could be read out of, counted and left out
+note: a report reads that file for 7 days, then stops pricing from it until it is fetched again.
+```
+
+That request carried no key and sent nothing about the project, because the
+OpenRouter model listing is published for anybody to read; it is the only thing in
+xencode that dials out for a price, and it is asked for. What it writes is cached
+with the moment it was read, and `price_lookup` — off by default, so a project that
+never sets it behaves exactly as before — decides whether a cost report consults
+that copy at all. A rate you wrote by hand always outranks a looked-up one, and the
+report names which of the two every figure came from.
+
+The age is not a note, it is a rule. The same project nine days later, with the
+listing untouched on disk:
+
+```
+fetched listing — /tmp/cx4-live/.xencode/cache/price-lookup.json
+  459 prices off openrouter, read on 2026-09-24, 9 days ago
+  • the listing on disk is 9 days old, past the 7 days a looked-up rate is taken for — nothing is priced from it, and `xencode prices fetch` reads them again
+models this project has run: 1; priced from the listing: 0; with no price in either document: 1
+  • llamacpp:qwen/qwen3-8b — no price. A cost is reported as unknown, never as nothing.
+```
+
+The spend for that model went from a figure to *unknown*, not to zero, and nothing
+re-fetched it in the background to smooth that over. `/cost` in the TUI prints the
+same provenance under `Per model:` — `• 1 price read off the openrouter catalogue
+on 2026-10-03, 0 days ago` — and under today's dollar cap, in the same words the
+CLI uses, because two reports that describe one rate differently is how a number
+gets believed that shouldn't be.
+
+`xencode prices show` (which reads the disk and never the network) prints both
+documents, the listing's age, and which of the models this project has *actually
+run* have no rate in either — 466 catalogue entries are not the interesting number,
+your own records are. A model whose records name it as a local tag
+(`llamacpp:qwen3-0.6b`, `qwen2.5:7b`) is never priced from a catalogue at all:
+guessing that a local model is some distant model with a similar name is how a
+wrong price gets believed.
+
+Only the rates the metrics can be multiplied by are read — input, output, and
+cached *input* where the catalogue publishes a cache-read price of its own. Cache
+reads and cache writes are two separate fields in that document, and only the read
+one is used, because the records count cached input tokens and nothing else; a
+price for writing to the cache, the long-context tiers, audio, images and web
+searches are left unread rather than turned into a figure with nothing behind it.
+Where a listing gives a cache-read rate, the report says so; where it does not, it
+says reads are billed at the input price, which is an upper bound and not a bill.
+
 ### Added — `CX-7`: a day's budget now changes what the next turn does
 
 Four settings exist so that a cap you set is a thing that happens, rather than a

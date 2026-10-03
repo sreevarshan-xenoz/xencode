@@ -1050,6 +1050,66 @@ esac
     ;;
 esac
 ;;
+(prices)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__prices_commands" \
+"*::: :->prices" \
+&& ret=0
+
+    case $state in
+    (prices)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-prices-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(fetch)
+_arguments "${_arguments_options[@]}" : \
+'--url=[Read from somewhere other than OpenRouter'\''s listing — a gateway that publishes the same document, or an address for testing]:URL:_default' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__prices__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-prices-help-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(fetch)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (test)
 _arguments "${_arguments_options[@]}" : \
 '*--package=[Only these packages (repeatable)]:PACKAGES:_default' \
@@ -1959,6 +2019,30 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(prices)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__prices_commands" \
+"*::: :->prices" \
+&& ret=0
+
+    case $state in
+    (prices)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-prices-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(fetch)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (test)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2195,6 +2279,7 @@ _xencode_commands() {
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
 'perf:Measure the hot paths against a stored baseline, and refuse the verdict when the run is too noisy to support one' \
+'prices:Where the prices a cost report uses come from, and reading them again' \
 'test:Run the tests, and never call a test that only passed on retry a pass' \
 'release-notes:Draft the release notes from the commits since the last release and the changelog block this project keeps, and report where the two disagree' \
 'review:Review the diff between a base branch and HEAD, file by file' \
@@ -2608,6 +2693,7 @@ _xencode__subcmd__help_commands() {
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
 'perf:Measure the hot paths against a stored baseline, and refuse the verdict when the run is too noisy to support one' \
+'prices:Where the prices a cost report uses come from, and reading them again' \
 'test:Run the tests, and never call a test that only passed on retry a pass' \
 'release-notes:Draft the release notes from the commits since the last release and the changelog block this project keeps, and report where the two disagree' \
 'review:Review the diff between a base branch and HEAD, file by file' \
@@ -3038,6 +3124,24 @@ _xencode__subcmd__help__subcmd__plugin__subcmd__remove_commands() {
 _xencode__subcmd__help__subcmd__plugin__subcmd__update_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help plugin update commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__prices_commands] )) ||
+_xencode__subcmd__help__subcmd__prices_commands() {
+    local commands; commands=(
+'show:Show every price a cost report would use, which document each came from, and which of the models this project has actually run are unpriced' \
+'fetch:Read the public catalogue again and replace the cached listing with it' \
+    )
+    _describe -t commands 'xencode help prices commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__prices__subcmd__fetch_commands] )) ||
+_xencode__subcmd__help__subcmd__prices__subcmd__fetch_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help prices fetch commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__prices__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__prices__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help prices show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__query_commands] )) ||
 _xencode__subcmd__help__subcmd__query_commands() {
@@ -3659,6 +3763,49 @@ _xencode__subcmd__plugin__subcmd__remove_commands() {
 _xencode__subcmd__plugin__subcmd__update_commands() {
     local commands; commands=()
     _describe -t commands 'xencode plugin update commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices_commands] )) ||
+_xencode__subcmd__prices_commands() {
+    local commands; commands=(
+'show:Show every price a cost report would use, which document each came from, and which of the models this project has actually run are unpriced' \
+'fetch:Read the public catalogue again and replace the cached listing with it' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode prices commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices__subcmd__fetch_commands] )) ||
+_xencode__subcmd__prices__subcmd__fetch_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode prices fetch commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices__subcmd__help_commands] )) ||
+_xencode__subcmd__prices__subcmd__help_commands() {
+    local commands; commands=(
+'show:Show every price a cost report would use, which document each came from, and which of the models this project has actually run are unpriced' \
+'fetch:Read the public catalogue again and replace the cached listing with it' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode prices help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices__subcmd__help__subcmd__fetch_commands] )) ||
+_xencode__subcmd__prices__subcmd__help__subcmd__fetch_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode prices help fetch commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__prices__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode prices help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__prices__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode prices help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__prices__subcmd__show_commands] )) ||
+_xencode__subcmd__prices__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode prices show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__query_commands] )) ||
 _xencode__subcmd__query_commands() {

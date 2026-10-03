@@ -1326,6 +1326,7 @@ mod tests {
             per_model: Vec::new(),
             known_micros: 0,
             unpriced: vec!["qwen3-0.6b".to_string()],
+            ..Default::default()
         };
         assert_eq!(
             budgets.today_lines(&day, &unpriced),
@@ -1343,6 +1344,7 @@ mod tests {
             per_model: Vec::new(),
             known_micros: 486,
             unpriced: Vec::new(),
+            ..Default::default()
         };
         let quiet = DailyBudgets {
             tokens: Some(10_000),
