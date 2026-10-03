@@ -3704,7 +3704,18 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
   RSS at TUI boot (already readable — `app.rs:979` uses `/proc/self/statm`),
   and a tok/s sanity check behind `#[ignore]`. **M**. Trap: shared runners give
   ~20 % noise, so thresholds must be relative and paired (`critcmp`-style), not
-  absolute. Today there is no `benches/` and CI is fmt+clippy+test only.
+  absolute. **Blocked on a decision, not on code** (recorded 2026-10-03): the
+  trap is already answered by `QO-4`'s `xencode perf check`, which compares ten
+  samples against a stored baseline by Mann-Whitney and prints `NO VERDICT` when
+  the machine was too busy to be compared at all — so the paired-comparison half
+  of this item is built and lives in CI's reach. What is missing is two vendor
+  tools this machine does not have (`hyperfine`, `cargo-bloat`; `size` and
+  `readelf` do exist), and the fact that a workflow file can only be *watched*
+  green or red by pushing it, which is the user's call on a public repository.
+  The plan's older sentence about the tree is now false and is corrected here:
+  `rust/crates/xencode-context-rs/benches/hot_paths.rs` exists, and
+  `.github/workflows/ci.yml` runs fmt, clippy, `cargo test --workspace` and a
+  generated-completions/man drift check.
 
 **Rejected here:** autonomous commit/push/PR off a file-watch trigger
 (unsupervised *writes* are where ambient agents actually hurt people, and the
@@ -9103,7 +9114,13 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 14 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 16 done
+
+Four are left, and none of the four is waiting on code: `CX-5` needs a rented GPU
+hour, which is the user's money and his call; `CX-6` needs a live Colab bridge to
+watch the idle reap take the forward down; `CX-8` wants `hyperfine` and
+`cargo bloat`, neither of which is installed here, and a CI job that only a push
+can prove; `EV-9` stays blocked while the Anthropic provider stays parked.
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -9121,14 +9138,14 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **DB-6** | `xencode doctor` as the single bug report | capability | the flag is `--format json`; done 2026-10-03 |
 | **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0); done 2026-10-03 |
 | **EV-9** | API prompt-cache accounting | capability | API prompt-cache accounting — blocked while AnthropicProvider stays parked |
-| **QO-1** | `xencode doctor --deps` | capability | xencode doctor --deps |
-| **QO-4** | Minimal regression harness | capability | minimal criterion regression harness |
-| **QO-5** | `xencode doctor --env` | capability | doctor --env probe and display |
-| **QO-6** | Release notes as a draft generator | capability | release-notes draft generator |
-| **QO-7** | `doctor` as the self-debug slice | capability | doctor as the self-debug slice |
-| **U-3** | The `doctor` surface for configuration drift | capability | from U — the W3 entry builds the graph; this is where its result is shown, alongside QO-5's machine probe |
-| **U-5** | Dependency impact report: transitive delta and duplicate versions | capability | from U — a report into QO-1's composition, after SE-6; asks, never blocks |
-| **V-8** | Event-driven render: stop the unconditional 30 fps redraw | capability | from V — `app.rs:8111` polls at 33 ms and draws every frame; no dependencies, so it can be pulled forward |
+| **QO-1** | `xencode doctor --deps` | capability | xencode doctor --deps; done 2026-09-28 |
+| **QO-4** | Minimal regression harness | capability | minimal criterion regression harness; done 2026-10-02 — see the note below |
+| **QO-5** | `xencode doctor --env` | capability | doctor --env probe and display; done 2026-09-28 |
+| **QO-6** | Release notes as a draft generator | capability | release-notes draft generator; done 2026-10-03 — see the note below |
+| **QO-7** | `doctor` as the self-debug slice | capability | doctor as the self-debug slice; done 2026-10-03 — see the note below |
+| **U-3** | The `doctor` surface for configuration drift | capability | from U — the W3 entry builds the graph; this is where its result is shown, alongside QO-5's machine probe; done 2026-09-28 as `xencode envcheck` and one `config_drift` row in `doctor --json` |
+| **U-5** | Dependency impact report: transitive delta and duplicate versions | capability | from U — a report into QO-1's composition, after SE-6; asks, never blocks; done 2026-09-28 — see §U-5 |
+| **V-8** | Event-driven render: stop the unconditional 30 fps redraw | capability | from V — `app.rs:8111` polls at 33 ms and draws every frame; no dependencies, so it can be pulled forward; done 2026-09-29 — see the note below |
   **Done 2026-09-29** — the loop draws only when a `FrameSignals` report says
   so: event handled, messages or approvals drained, toast count changed, toast
   on screen (TTL expiry has no other signal), or a spinner-showing operation

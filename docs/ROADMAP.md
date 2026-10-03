@@ -7,7 +7,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-> **Verified against the tree on 2026-09-29** — 16 crates and 1694 tests passing
+> **Verified against the tree on 2026-10-03** — 16 crates and 2141 tests passing
 > (`cargo test --workspace`). Every line
 > below is marked with what the code does today, and the entry points are the
 > real ones (`xencode --help`, `?` in the TUI).
