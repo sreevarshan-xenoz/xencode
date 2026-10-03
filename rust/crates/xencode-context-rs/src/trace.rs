@@ -243,6 +243,29 @@ pub fn redact_secrets(text: &str) -> String {
         .into_owned()
 }
 
+/// Whether text holds anything shaped like a credential, by the same patterns
+/// [`redact_secrets`] scrubs with — one predicate, one pattern list, so the
+/// taint gate (SE-4) and the scrubber cannot disagree about what a secret
+/// looks like. A `KEYED_VALUE` match only counts when its name is
+/// secret-shaped, exactly as the scrubber insists.
+pub fn contains_secret(text: &str) -> bool {
+    if PEM_KEY_RE.is_match(text) {
+        return true;
+    }
+    if BEARER_RE.is_match(text) {
+        return true;
+    }
+    if PREFIXED_TOKEN_RE.is_match(text) {
+        return true;
+    }
+    KEYED_VALUE_RE.captures_iter(text).any(|caps| {
+        caps.get(1).is_some_and(|name| {
+            let name = name.as_str().to_lowercase();
+            SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
+        })
+    })
+}
+
 /// The last `cap` bytes of `text` on a character boundary, as one line, with
 /// credentials removed. Redaction runs first so a secret cannot survive by
 /// being cut in half.
@@ -371,6 +394,32 @@ mod tests {
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         );
         std::env::temp_dir().join(format!("xencode-trace-test-{unique}"))
+    }
+
+    /// `contains_secret` and `redact_secrets` agree: whatever one flags,
+    /// the other scrubs, because they read the same patterns.
+    #[test]
+    fn secret_detection_matches_secret_scrubbing() {
+        let secrets = [
+            "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig",
+            "OPENAI_API_KEY=\"sk-live-abcdef1234567890\"",
+            "AKIAIOSFODNN7EXAMPLE",
+        ];
+        for secret in secrets {
+            assert!(contains_secret(secret), "{secret} must taint");
+            assert!(
+                !redact_secrets(secret).contains("sk-live-abcdef1234567890"),
+                "and must scrub"
+            );
+        }
+        for plain in ["fn main() {}", "the monkey ate a secret banana", "count=5"] {
+            assert!(!contains_secret(plain), "{plain} must not taint");
+        }
+        // Deliberately over-broad, as the scrubber's own docs admit: a
+        // harmless `key_count` taints, because leaving a real key costs
+        // an exfiltration and taint only buys a prompt.
+        assert!(contains_secret("key_count=500"));
     }
 
     #[test]
