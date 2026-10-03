@@ -2235,6 +2235,30 @@ recorded command must therefore be one that gives the same output every time —
 `date`, `git log` and anything over the network make a recording that can only ever
 report the request it could not answer.
 
+### `xencode runs [list|show|trailer]`
+Which runs happened, what each asked a person, and the commit trailer naming
+it. When an agent turn ends in the TUI, one row is appended to
+`.xencode/cache/runs.jsonl`: the run's own id, the model that answered it,
+every approval question a person answered while it went, and where its
+recording is (when one was made). It joins rather than copies: `show` reads
+the run's session verification rows out of the evidence ledger instead of
+storing a second copy of them. A recording exists only with
+`session_recording` on; the run row exists either way. Reads files only, so
+it works with every model server down.
+
+```bash
+xencode runs                       # the newest twenty runs, oldest first
+xencode runs list --limit 5        # fewer of them
+xencode runs show 1700000000-aaaa  # one run: model, decisions, checks
+xencode runs trailer 1700000000-aaaa  # the Assisted-by block for a commit message
+```
+
+An id is the full run id or enough of its start to name one run and no other
+— the same rule `xencode replay` uses, so an id that works there works here.
+Every line `trailer` prints is a `Token: value` trailer, so `git
+interpret-trailers` reads it as trailers when it sits at the end of a commit
+message.
+
 ### `xencode audit verify [PATH]`
 Check the session server's audit log for records that were changed after they
 were written. Each record carries a digest of its own contents and the digest of

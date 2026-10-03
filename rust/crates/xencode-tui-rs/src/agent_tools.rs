@@ -58,6 +58,20 @@ pub enum ToolClass {
     External,
 }
 
+impl ToolClass {
+    /// The words the approval overlay shows for this class. One definition,
+    /// because the overlay and the run ledger (QTR-5) describe the same call and
+    /// must not describe it two ways.
+    pub fn overlay_label(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::Edit => "file change",
+            Self::Shell => "shell command",
+            Self::External => "external tool",
+        }
+    }
+}
+
 /// The outcome of the policy for one call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Permission {
@@ -101,12 +115,7 @@ pub struct ApprovalRequest {
 
 impl ApprovalRequest {
     pub fn class_label(&self) -> &'static str {
-        match self.class {
-            ToolClass::ReadOnly => "read-only",
-            ToolClass::Edit => "file change",
-            ToolClass::Shell => "shell command",
-            ToolClass::External => "external tool",
-        }
+        self.class.overlay_label()
     }
 }
 
@@ -2955,6 +2964,10 @@ pub struct ApprovalCtx {
     /// The session this turn belongs to, handed to hooks on stdin (M-1) so a
     /// hook can tell runs apart. `None` where no session is open.
     pub session_id: Option<String>,
+    /// Every question this run asked a person and what they answered (QTR-5).
+    /// Built fresh per run by `App::approval_ctx`, so the list a run's own tool
+    /// tasks append to is that run's and nobody else's.
+    pub approvals: Arc<std::sync::Mutex<Vec<xencode_context_rs::ApprovalRow>>>,
 }
 
 impl ApprovalCtx {
@@ -2970,6 +2983,26 @@ impl ApprovalCtx {
             if !grants.contains(&class) {
                 grants.push(class);
             }
+        }
+    }
+
+    /// Write one answered question into this run's ledger list (QTR-5). A lock
+    /// that will not take is not worth failing a tool over: the call still runs
+    /// or refuses as answered, and the row is the record, not the decision.
+    fn record_approval(&self, tool: &str, class: ToolClass, answer: ApprovalAnswer) {
+        let decision = match answer {
+            ApprovalAnswer::Approved => xencode_context_rs::ApprovalDecision::Allowed,
+            ApprovalAnswer::ApprovedForSession => {
+                xencode_context_rs::ApprovalDecision::AlwaysAllowed
+            }
+            ApprovalAnswer::Denied => xencode_context_rs::ApprovalDecision::Denied,
+        };
+        if let Ok(mut rows) = self.approvals.lock() {
+            rows.push(xencode_context_rs::ApprovalRow {
+                tool: tool.to_string(),
+                class: class.overlay_label().to_string(),
+                decision,
+            });
         }
     }
 
@@ -3131,17 +3164,29 @@ pub async fn execute_tool_call_approved(
             let (responder, answer) = oneshot::channel();
             if ctx.prompts.send((request, responder)).is_err() {
                 // Nothing is listening — no TUI attached. The strictest
-                // possible answer is the only honest one.
+                // possible answer is the only honest one, and it is an answer:
+                // the run went ahead having been refused, so the ledger says so.
+                ctx.record_approval(&call.name, class, ApprovalAnswer::Denied);
                 return DENIED_RESULT.to_string();
             }
-            match answer.await {
-                Ok(ApprovalAnswer::Approved) => run_and_checkpoint(rt, root, call, ctx, mcp).await,
-                Ok(ApprovalAnswer::ApprovedForSession) => {
+            let decision = match answer.await {
+                Ok(answer) => {
+                    ctx.record_approval(&call.name, class, answer);
+                    answer
+                }
+                // A dropped responder means the prompt vanished with the app.
+                Err(_) => {
+                    ctx.record_approval(&call.name, class, ApprovalAnswer::Denied);
+                    ApprovalAnswer::Denied
+                }
+            };
+            match decision {
+                ApprovalAnswer::Approved => run_and_checkpoint(rt, root, call, ctx, mcp).await,
+                ApprovalAnswer::ApprovedForSession => {
                     ctx.grant(class);
                     run_and_checkpoint(rt, root, call, ctx, mcp).await
                 }
-                // A dropped responder means the prompt vanished with the app.
-                Ok(ApprovalAnswer::Denied) | Err(_) => DENIED_RESULT.to_string(),
+                ApprovalAnswer::Denied => DENIED_RESULT.to_string(),
             }
         }
     }
@@ -5663,6 +5708,7 @@ patched = ["{fixed}"]
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
                 session_id: None,
+                approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             },
             prompts: rx,
         }
@@ -6146,6 +6192,7 @@ patched = ["{fixed}"]
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
                 session_id: None,
+                approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(

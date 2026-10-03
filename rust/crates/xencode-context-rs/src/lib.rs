@@ -47,6 +47,7 @@ pub mod releasenotes;
 pub mod repo_map;
 pub mod retrieve;
 pub mod rollup;
+pub mod runledger;
 pub mod scanner;
 pub mod seeds;
 pub mod session;
@@ -151,6 +152,10 @@ pub use rollup::{
     local_day_key, read_rollup, refresh_rollup, rollup_path, trim_metrics, write_rollup, DayTotals,
     MetricsRollup, Percentiles, ProfileSample, SessionTotals, TokenTotals, DAYS_KEPT,
     METRICS_KEEP_BYTES, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
+};
+pub use runledger::{
+    accountability_trailer, append_run, read_runs, recent_runs, run_by_id, run_evidence, runs_path,
+    ApprovalDecision, ApprovalRow, RunEvidence, RunRecord, RUNS_FILE, RUNS_WINDOW,
 };
 pub use scanner::{
     detect_language, language_for_extension, language_has_semantic_tier, scan_tree,

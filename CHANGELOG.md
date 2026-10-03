@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QTR-5`: a run ledger joins run-id to model to approvals, and `xencode runs` reads it
+
+When an agent turn ends in the TUI, one row is now appended to
+`.xencode/cache/runs.jsonl`: the run's own id, the model that answered it,
+every approval question a person answered while it went, and where its
+recording is when one was made. The row joins rather than copies — the run
+names its session, and the session's verification rows are read out of the
+evidence ledger when asked, so there is no second exit-code store to disagree
+with the first. A recording exists only with `session_recording` on; the run
+row exists either way. The free-text note is scrubbed for secrets on the way
+in, and the prompt itself is never stored.
+
+```bash
+$ xencode runs show 1700000000-aaaa
+run 1700000000-aaaa1111
+  model: llamacpp:qwen/qwen3-8b
+  session: s1
+  recording: none
+  approvals:
+    run_command [shell command]: allowed
+    write_file [file change]: denied
+  checks: none — nothing verified this run
+```
+
+`xencode runs trailer <run-id>` prints the commit trailer block naming the
+run — an `Assisted-by` line with the run id and the approval tally, plus
+`Xencode-Model` and (for a recorded run) `Xencode-Replay` lines — every one a
+`Token: value` trailer that `git interpret-trailers` reads as trailers.
+
 ### Fixed — a plugin refused for an undeclared permission was told the same thing twice
 
 `xencode plugin install` on a manifest that runs a shell hook or adds a prompt
