@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a plugin refused for an undeclared permission was told the same thing twice
+
+`xencode plugin install` on a manifest that runs a shell hook or adds a prompt
+prefix without declaring the matching permission already refused it, before
+copying anything, and exited 1. The sentence was wrong: the installer wrapped the
+host's own refusal phrase in a second copy of its ending, so the error read
+`... did not declare the "prompt", "hooks" permissions in its manifest in its
+manifest, so this build would not load it`. It now reads
+`'guardrails' adds a prompt prefix and declares hooks that run a shell command
+but did not declare the "prompt", "hooks" permissions in its manifest, so this
+build would not load it` — one sentence, in the installer's mouth and `xencode
+plugin list`'s alike, since both are built from the same
+`missing_permission_note`. A test pins the phrase to appearing once.
+
 ### Added — `CX-4`: a cost report says which paper each rate came from, and stops trusting a looked-up one after 7 days
 
 There is still no price list compiled into this binary, and there never will be: a

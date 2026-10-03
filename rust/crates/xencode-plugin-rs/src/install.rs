@@ -258,7 +258,7 @@ fn verify(manifest: &PluginManifest, xencode_version: &str) -> Result<(), Instal
     let undeclared = manifest.undeclared_permissions();
     if !undeclared.is_empty() {
         return Err(InstallError::Install(format!(
-            "'{}' {} in its manifest, so this build would not load it",
+            "'{}' {}, so this build would not load it",
             manifest.name,
             missing_permission_note(&undeclared)
         )));
@@ -946,6 +946,11 @@ mod tests {
         let err = prepare_git(plugins.path(), &url_of(&repo), None, "0.1.0")
             .expect_err("a prefix without its permission must not install");
         assert!(err.to_string().contains("did not declare"), "{err}");
+        assert_eq!(
+            err.to_string().matches("in its manifest").count(),
+            1,
+            "the refusal repeats itself: {err}"
+        );
         assert!(!plugins.path().join("guardrails").exists());
     }
 
