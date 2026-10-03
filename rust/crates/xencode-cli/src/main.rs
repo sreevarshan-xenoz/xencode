@@ -8344,7 +8344,7 @@ fn stop_detached_run(xencode_dir: &std::path::Path, given: &str) -> Result<(), S
     let dir = detached_runs::run_dir(xencode_dir, &run_id);
     match detached_runs::derive_status(&dir) {
         xencode_tui_rs::detached::DetachedStatus::Missing => {
-            return Err(format!("no detached run {run_id}"));
+            Err(format!("no detached run {run_id}"))
         }
         xencode_tui_rs::detached::DetachedStatus::Running { pid } => {
             println!("{}", detached_runs::stop_child(&dir, pid));

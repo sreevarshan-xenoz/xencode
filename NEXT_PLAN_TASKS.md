@@ -9072,6 +9072,19 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper) |
 | **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement |
 
+#### W7 progress
+
+- [x] `CAP-1` — 2026-10-03. `classify()` now decides through a `Capability`
+  vocabulary (`filesystem.read`, `filesystem.write`, `shell.execute`,
+  `network.request`, `external.mcp`): `tool_capabilities` maps every offered
+  tool, a per-mode table prices each capability, most restrictive wins, and
+  the session-grant shortcut is unchanged. Outcomes are bit-identical — every
+  pre-existing `classify` test passes unmodified, including the `read_docs`
+  one — so this is groundwork, not a behavior change, and takes no docs
+  updates. `network.request` is mapped by nothing yet and fails closed in
+  every mode; RS-1's tools inherit the strict row. SE-4 reads the same words
+  the gate enforced.
+
 #### W8 — Outward research capability — 6 items
 
 Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate change, or network-returned content enters the exact path SE-4 is supposed to control.

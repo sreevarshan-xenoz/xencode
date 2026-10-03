@@ -218,6 +218,80 @@ pub fn path_allowed(root: &Path, raw: &str) -> bool {
 
 /// The policy decision for one call. `granted` lists classes the user
 /// approved for the whole session at an earlier prompt.
+/// What a tool can do, in the gate's own vocabulary (CAP-1). `classify`
+/// decides through these, so SE-4's trifecta check and RS-1's network tools
+/// read the same words the gate enforced — not a second taxonomy that can
+/// drift from the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Capability {
+    FilesystemRead,
+    FilesystemWrite,
+    ShellExecute,
+    NetworkRequest,
+    ExternalMcp,
+}
+
+impl Capability {
+    /// The word the gate, the broker's refusals and the plan all use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::FilesystemRead => "filesystem.read",
+            Self::FilesystemWrite => "filesystem.write",
+            Self::ShellExecute => "shell.execute",
+            Self::NetworkRequest => "network.request",
+            Self::ExternalMcp => "external.mcp",
+        }
+    }
+}
+
+/// Every capability a tool may exercise. Derived from the tool's class, with
+/// one rule the class cannot carry: anything from an MCP server is a
+/// stranger's code, whatever its shape claims.
+///
+/// `network.request` is currently mapped by nothing: no built-in tool is a
+/// pure network tool (`read_docs` fetches only through its own consent flag
+/// and stays a read here), and the `sh -c` strings whose network use would
+/// need prefix matching are SE-7's kernel job by the item's own trap, not
+/// the gate's. RS-1's network tools map onto the existing variant and its
+/// table row — that is the "for free" the plan promises.
+pub fn tool_capabilities(tool: &str) -> Vec<Capability> {
+    if crate::mcp::is_mcp_tool(tool) {
+        return vec![Capability::ExternalMcp];
+    }
+    match tool_class(tool) {
+        ToolClass::ReadOnly => vec![Capability::FilesystemRead],
+        ToolClass::Edit => vec![Capability::FilesystemWrite],
+        ToolClass::Shell => vec![Capability::ShellExecute],
+        // Unreachable today — the MCP check above owns every external name —
+        // and kept so a future external class cannot fall through silently.
+        ToolClass::External => vec![Capability::ExternalMcp],
+    }
+}
+
+/// What one capability costs in one mode: free, or a prompt. `network.request`
+/// asks in every mode even though nothing maps to it yet — fail closed, so
+/// when RS-1's tools arrive they inherit the strict row, and widening it is
+/// RS-1's decision to make with its own tests, not a side effect found later.
+fn capability_gate(capability: Capability, mode: ApprovalMode) -> Permission {
+    match mode {
+        ApprovalMode::Ask => match capability {
+            Capability::FilesystemRead => Permission::Allow,
+            _ => Permission::Ask,
+        },
+        ApprovalMode::EditAllow => match capability {
+            Capability::FilesystemRead | Capability::FilesystemWrite => Permission::Allow,
+            _ => Permission::Ask,
+        },
+        // Everything is free except a stranger's server or the network,
+        // which always ask: "all-allow" never meant "anyone's code" and
+        // never meant "anywhere off this machine".
+        ApprovalMode::AllAllow => match capability {
+            Capability::ExternalMcp | Capability::NetworkRequest => Permission::Ask,
+            _ => Permission::Allow,
+        },
+    }
+}
+
 pub fn classify(
     root: &Path,
     tool: &str,
@@ -236,21 +310,23 @@ pub fn classify(
     if !external && escapes_workspace(root, tool, args) {
         return Permission::Deny;
     }
+    // Decided through the capability vocabulary, most restrictive wins: a
+    // tool is free only where every capability it carries is free. The
+    // session-grant shortcut below is unchanged — an "always allow" answer
+    // still replaces the prompt for its class.
+    let mut decision = Permission::Allow;
+    for capability in tool_capabilities(tool) {
+        decision = match (decision, capability_gate(capability, mode)) {
+            (Permission::Deny, _) | (_, Permission::Deny) => Permission::Deny,
+            (Permission::Ask, _) | (_, Permission::Ask) => Permission::Ask,
+            _ => Permission::Allow,
+        };
+    }
     let class = tool_class(tool);
-    let base = match class {
-        // A third-party binary's side effects are neither previewable nor
-        // rewindable, so no autonomy tier waves them through: the user sees
-        // every call. "Always allow for this session" (`a`) still applies.
-        ToolClass::External => Permission::Ask,
-        ToolClass::ReadOnly => Permission::Allow,
-        ToolClass::Edit if mode == ApprovalMode::Ask => Permission::Ask,
-        ToolClass::Shell if mode != ApprovalMode::AllAllow => Permission::Ask,
-        _ => Permission::Allow,
-    };
-    if base == Permission::Ask && granted.contains(&class) {
+    if decision == Permission::Ask && granted.contains(&class) {
         Permission::Allow
     } else {
-        base
+        decision
     }
 }
 
@@ -4136,6 +4212,85 @@ mod tests {
         // Dot-git anywhere below the root is off-limits, even for reads.
         assert!(!path_allowed(root, "x/.git/config"));
         assert!(!path_allowed(root, ".git/HEAD"));
+    }
+
+    /// The gate speaks capabilities (CAP-1): every offered tool carries at
+    /// least one, the words are the plan's words, and the network row fails
+    /// closed for the RS-1 tools that will inherit it.
+    #[test]
+    fn capabilities_cover_every_tool_in_the_plans_words() {
+        use Capability::*;
+        let mut names: Vec<String> = Vec::new();
+        for def in xencode_providers_rs::background_tools()
+            .into_iter()
+            .chain(xencode_providers_rs::advise_tools())
+            .chain(xencode_providers_rs::file_tools())
+            .chain(xencode_providers_rs::command_tools())
+            .chain(xencode_providers_rs::plan_tools())
+            .chain(xencode_providers_rs::skill_tools())
+        {
+            names.push(def.name);
+        }
+        names.push("rename".to_string());
+        names.push("mcp__server__prompt".to_string());
+        assert!(names.len() > 15, "the audit must see the whole menu");
+        for name in &names {
+            assert!(
+                !tool_capabilities(name).is_empty(),
+                "{name} reaches the gate with no capability at all"
+            );
+        }
+        assert_eq!(
+            tool_capabilities("read_file"),
+            vec![FilesystemRead],
+            "a read is exactly a read"
+        );
+        assert_eq!(
+            tool_capabilities("write_file"),
+            vec![FilesystemWrite],
+            "an edit is exactly a write"
+        );
+        assert_eq!(
+            tool_capabilities("run_command"),
+            vec![ShellExecute],
+            "a command is exactly a shell"
+        );
+        assert_eq!(
+            tool_capabilities("mcp__server__prompt"),
+            vec![ExternalMcp],
+            "a stranger's tool is external whatever its shape claims"
+        );
+        for capability in [
+            FilesystemRead,
+            FilesystemWrite,
+            ShellExecute,
+            NetworkRequest,
+            ExternalMcp,
+        ] {
+            assert!(
+                capability
+                    .name()
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '.'),
+                "{} is not a plan word",
+                capability.name()
+            );
+        }
+        assert_eq!(FilesystemRead.name(), "filesystem.read");
+        assert_eq!(NetworkRequest.name(), "network.request");
+        // The strict row nothing uses yet: RS-1 inherits it, it does not
+        // discover it needs one.
+        for mode in [
+            ApprovalMode::Ask,
+            ApprovalMode::EditAllow,
+            ApprovalMode::AllAllow,
+        ] {
+            assert_eq!(
+                capability_gate(NetworkRequest, mode),
+                Permission::Ask,
+                "network fails closed in {mode:?} until RS-1 says otherwise"
+            );
+        }
     }
 
     #[test]
