@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2096 tests passing, zero warnings (re-verified 2026-10-03, after DB-4)
+- [x] Workspace gates green — 16 crates, 2112 tests passing, zero warnings (re-verified 2026-10-03, after CX-3)
 
 ## Model Catalog Honesty
 
@@ -3636,6 +3636,19 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
   `nvmlDeviceGetPowerUsage` is a poll, not an attribution — so label every
   number an estimate. Zero-dollar local lines should read as *zero-dollar, not
   free*.
+  *(Done 2026-10-03. Two placements differ from the wording above, both to keep
+  the number honest: the counter is read at the two ends of the turn and the
+  joules between them integrated, rather than sampled continuously, and the
+  graphics card is polled through `nvidia-smi` at both ends and averaged rather
+  than through a linked NVML — no new dependency for two readings. Measured here,
+  on a 15-second local answer at 12.5 ¢/kWh: `⚡ ≈ 0.03 Wh · ≈ $0.000004 · 15 s —
+  CPU package only; no graphics power was reported · estimated, this machine
+  only`, with `energy_uj` 110473656, `elapsed_ms` 14726, `power_w` 7.5 and
+  `est_cost_micros` 4 on the metrics row. The MX250 in this laptop answers `[N/A]`
+  to `power.draw`, so the graphics half is proven only by unit tests here. A
+  machine with no package counter gets `energy unknown` and no price at all, and a
+  sub-milliwatt-hour turn prints in mWh rather than rounding to `0.00 Wh`, which
+  is the rendering that would read as free.)*
 - **CX-4 Cloud price lookup, never a vendored table** — fetch provider or
   OpenRouter pricing at runtime, cache with a TTL, allow a per-model override in
   config. **M**. Trap: a scraped price list goes stale silently and its
@@ -9061,13 +9074,13 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 11 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 12 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
-| **CX-3** | Honest local cost as time plus watt-hours | capability | local cost as time + watt-hours |
+| **CX-3** | Honest local cost as time plus watt-hours | capability | local cost as time + watt-hours; done 2026-10-03 |
 | **CX-4** | Cloud price lookup, never a vendored table | capability | cloud price lookup, never a vendored table |
 | **CX-5** | A Colab spend ledger | capability | Colab spend ledger |
 | **CX-6** | Dead-man's-switch teardown | capability | dead-man's-switch teardown (belongs with MI-5 if MI-5 ever ships) |

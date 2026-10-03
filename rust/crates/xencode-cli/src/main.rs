@@ -1930,6 +1930,26 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // because a model the user did not choose answering a query is a
                 // surprise a script cannot see in its own output.
                 "model_routing" => config.model_routing = parse_bool(&value)?,
+                // The electricity tariff, in cents per kilowatt-hour. Empty clears
+                // it, which leaves a local turn showing its watt-hours with no
+                // price next to them — the honest rendering, not a free one.
+                "power_cents_per_kwh" => {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        config.power_cents_per_kwh = None;
+                    } else {
+                        let cents: f64 = trimmed
+                            .parse()
+                            .map_err(|_| format!("invalid number: {value}"))?;
+                        if !cents.is_finite() || cents < 0.0 || cents > 1_000.0 {
+                            return Err(
+                                "power_cents_per_kwh must be a tariff between 0 and 1000 cents"
+                                    .to_string(),
+                            );
+                        }
+                        config.power_cents_per_kwh = Some(cents);
+                    }
+                }
                 "mcp_timeout" => {
                     let seconds: u64 = value
                         .parse()

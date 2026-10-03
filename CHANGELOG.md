@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `CX-3`: a local answer now says what it drew at the wall
+
+A model running on this machine produces no invoice, which is not the same thing
+as costing nothing. The electricity went through your meter and you paid the rate
+on your bill, and until now xencode had no way to say either number.
+
+A chat turn off a local model now ends with one line. This is the real output of
+a 15-second answer from `llama-server` on the machine this was built on:
+
+```
+⚡ ≈ 0.03 Wh · ≈ $0.000004 · 15 s — CPU package only; no graphics power was reported · estimated, this machine only
+```
+
+The number is a reading, not an estimate of what the turn should have cost: the
+kernel's own package energy counter (`/sys/class/powercap/intel-rapl:*`) is taken
+when the turn starts and again when it ends, and the watt-hours are the
+difference. Wrapping the counter over a long compile is handled by the range the
+kernel publishes for it. Three limits come out of that method and each one is
+printed on the line instead of left out:
+
+- the counter counts the whole CPU package, so a browser tab and a compile ride
+  in the same figure — which is why the line ends `estimated, this machine only`;
+- a discrete graphics card is polled with `nvidia-smi` at both ends of the window
+  and the two readings averaged, and where the card answers `[N/A]` — switched
+  off at the connector, as on this machine — the line says so rather than adding
+  it to the total as zero;
+- a machine that publishes no package counter at all gets `energy unknown` with
+  the reason next to it, and gets no price even when a tariff is set, because the
+  setting is not what is missing.
+
+The price needs the rate, which is a number only you know. It is an ordinary
+setting: settable from the command line, previewable with `--dry-run` before it
+is written, readable back with `config show`, and clearable again.
+
+```
+$ xencode config set power_cents_per_kwh 12.5
+set power_cents_per_kwh = 12.5
+
+$ xencode config set power_cents_per_kwh -3
+error: power_cents_per_kwh must be a tariff between 0 and 1000 cents
+
+$ xencode config set power_cents_per_kwh 25 --dry-run
+would set power_cents_per_kwh = 25 — nothing written (--dry-run)
+```
+
+A rate above a thousand cents an hour is refused rather than taken, because a
+number that large means a decimal point went in the wrong place. Without a rate
+the line still gives the watt-hours and says `no $/kWh set` — the electricity was
+bought, the tariff just was not written down.
+
+The same four numbers are recorded per turn in the metrics log `/cost` reads —
+`energy_uj`, `elapsed_ms`, `power_w` and `est_cost_micros` — on the rows for turns
+whose prompt stayed on this machine. A cloud turn is left unpriced here on
+purpose: its electricity went onto a provider's meter, and putting this reading on
+that row would charge the same seconds twice, once for the model's work and once
+for a CPU that spent them waiting on a socket. `/cost` keeps pricing those turns
+by tokens from `pricing.json`. The bill and the meter reading are two different
+documents and are never added together.
+
 ### Added — `DB-4`: xencode keeps four kinds of file in four directories, and says where
 
 Settings, session state, cache and downloaded models all lived in one `~/.xencode`

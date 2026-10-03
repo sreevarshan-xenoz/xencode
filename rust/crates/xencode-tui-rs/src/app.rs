@@ -728,6 +728,13 @@ pub struct App<'a> {
     /// Retrieved files in the last assembly (recorded into metrics row).
     pub last_ctx_retrieved_files: u8,
 
+    /// What the hardware drew during the turn that just finished, waiting for the
+    /// metrics row it belongs to. The energy arrives on `[POWER]` and the row is
+    /// written when `[TIMINGS]` follows it on the same channel, so this is the
+    /// hand-off between the two — and it is cleared either way, because a stale
+    /// window must never price a later turn.
+    pub pending_power: Option<xencode_context_rs::power::PowerUse>,
+
     /// What the parts of a turn that are not retrieved files cost, averaged over
     /// what the server said recent turns cost. This is what the next turn's
     /// retrieval is sized against, because retrieval happens before the prompt is
@@ -2618,6 +2625,7 @@ impl<'a> App<'a> {
             task_runtime: crate::agent_tools::new_task_runtime(),
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
+            pending_power: None,
             prompt_overhead: xencode_context_rs::PromptOverhead::default(),
             last_prompt_chars: 0,
             last_prompt_retrieved_chars: 0,
@@ -8431,6 +8439,12 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         mut session,
     } = run;
     let turn_started = std::time::Instant::now();
+    // Open the power window beside the clock, so both cover the same span: what
+    // the machine drew while this turn ran, from the kernel's own counter at the
+    // two ends of it. A turn whose prompt went to a cloud provider is not priced
+    // from this reading — `PowerUse::apply_to` says why — but the window is still
+    // what it is, and closing it costs nothing.
+    let power_window = xencode_context_rs::power::PowerWindow::begin();
     // What this turn actually did, written to `.xencode/cache/turns.jsonl` when
     // the loop ends (EV-2). `rounds` counts trips through the loop, including a
     // last one that failed; the token total adds up only what a server
@@ -8848,6 +8862,17 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             recorder.as_ref(),
             std::mem::take(&mut recorded),
         );
+    }
+    // Close the power window before anything is reported, so the span it covers is
+    // the turn and not the turn plus whatever ran the report. Chat shows it; the
+    // other sinks only have the metrics row to go into, and the row is written by
+    // the same chat drain loop, so sending it there would be a message in a
+    // transcript that is not rendered from this channel.
+    let power_use = power_window.finish();
+    if sink == LoopSink::Chat {
+        if let Ok(json) = serde_json::to_string(&power_use) {
+            let _ = tx.send(format!("[POWER]{json}"));
+        }
     }
     // Report llama.cpp tok/s stats if this was a llama.cpp request
     if let Some(ts) = last_timings {
@@ -9451,6 +9476,38 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                 // something else than it was asked to; ask its window again
                 // instead of keeping the number from before.
                 app.probe_context_window(tx.clone());
+            } else if let Some(body) = token.strip_prefix("[POWER]") {
+                // What the machine drew while the turn ran, read from the kernel's
+                // energy counter at both ends of it. A package-wide figure — a
+                // compile running beside xencode is in the same total — so it is
+                // labelled an estimate here and in the row it is kept in, and a
+                // machine that reports no counter is said so rather than drawn as
+                // a turn that cost nothing.
+                match serde_json::from_str::<xencode_context_rs::power::PowerUse>(body) {
+                    Ok(use_) => {
+                        let line = xencode_context_rs::power::power_line(
+                            &use_,
+                            app.config.power_cents_per_kwh,
+                        );
+                        app.pending_power = Some(use_);
+                        app.messages.push(UiMessage {
+                            role: "system".to_string(),
+                            content: format!("⚡ {line}"),
+                        });
+                    }
+                    Err(e) => {
+                        // A window that could not be read back is dropped, not
+                        // guessed at: the row keeps its empty energy fields, which
+                        // is the same answer a machine with no counter gives.
+                        app.pending_power = None;
+                        app.messages.push(UiMessage {
+                            role: "system".to_string(),
+                            content: format!(
+                                "⚡ the power reading for this turn was unusable: {e}"
+                            ),
+                        });
+                    }
+                }
             } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
                 if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
                     app.last_llamacpp_timings = Some(ts.clone());
@@ -9498,6 +9555,14 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                     // plainly that nothing was pinned.
                     m.temperature = app.config.llama_cpp_temperature;
                     m.seed = app.config.llama_cpp_seed;
+                    // The window taken here is the one that closed with this turn,
+                    // on the same channel a moment earlier. `take`, not `clone`:
+                    // the next turn brings its own, and a row priced from a
+                    // previous turn's electricity would be a wrong number rather
+                    // than a missing one.
+                    if let Some(use_) = app.pending_power.take() {
+                        use_.apply_to(app.config.power_cents_per_kwh, &mut m);
+                    }
                     let _ = xencode_context_rs::append_metrics(&xencode, &m);
                 }
             } else if token == "[HEALTH_DONE]" {
