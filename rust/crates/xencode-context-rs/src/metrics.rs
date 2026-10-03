@@ -81,15 +81,32 @@ pub struct RequestMetrics {
     /// Whether the prompt left this machine.
     #[serde(default)]
     pub source: Option<MetricSource>,
-    /// Estimated cost in micro-dollars. Nothing computes a price yet, so this
-    /// is `None` on every row written today; it exists so the cost work has
-    /// somewhere to land without changing the schema again.
+    /// Estimated cost in micro-dollars. For a local turn this is the
+    /// electricity the generation drew at the tariff in
+    /// `power_cents_per_kwh`; a cloud turn's price comes from the token table in
+    /// `pricing.json` and is reported by `/cost`, not written onto the row, so
+    /// the two are never added to each other's figure. `None` means neither was
+    /// known: no tariff, or no counter, or no price for that model.
     #[serde(default)]
     pub est_cost_micros: Option<u64>,
-    /// Power draw sampled while the request ran, in watts. Also unmeasured
-    /// until the hardware sampling exists.
+    /// Power draw sampled while the request ran, in watts — the mean over the
+    /// window, from the energy in [`Self::energy_uj`] divided by
+    /// [`Self::elapsed_ms`]. Package-wide on a CPU, an average of two polls on a
+    /// GPU, so an estimate rather than a meter reading, and `None` where the
+    /// hardware would not answer.
     #[serde(default)]
     pub power_w: Option<f32>,
+    /// Energy the CPU package used during the turn, read from the kernel's power
+    /// counter at both ends of the window. A reading, not a model of what the
+    /// turn should have cost — which is why it includes anything else the machine
+    /// was doing at the time.
+    #[serde(default)]
+    pub energy_uj: Option<u64>,
+    /// How long the window that [`Self::energy_uj`] was measured over stayed
+    /// open. Without it a wattage cannot be recovered from the energy, and the
+    /// seconds cannot be shown beside the watt-hours.
+    #[serde(default)]
+    pub elapsed_ms: Option<u64>,
     /// The temperature this turn was asked to sample at, as it was sent. `None`
     /// means nothing went over the wire, which is different from `0.0` — the
     /// server picked its own, so the answer cannot be repeated.
@@ -129,6 +146,8 @@ impl RequestMetrics {
             source: None,
             est_cost_micros: None,
             power_w: None,
+            energy_uj: None,
+            elapsed_ms: None,
             temperature: None,
             seed: None,
             prompt_version: Some(crate::prompts::set_version().to_string()),

@@ -1879,6 +1879,7 @@ is what used to happen.
 | `ollama_keep_alive` | string | how long the server keeps this model loaded after an answer, in the server's own words (`10m`, `30s`, `0` to unload immediately). Must contain a digit; empty leaves out the field and the server's five minutes rule. Decides whether the next request pays for a reload — see [What a request to Ollama carries](#what-a-request-to-ollama-carries) |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
 | `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
+| `power_cents_per_kwh` | number | What a kilowatt-hour costs where this machine runs, in cents — `12.5` for 12½¢. Used to price the electricity a **local** generation drew, from the kernel's own power counter: the `⚡` line a finished turn prints and the `energy_uj` field on its metrics row. Unset, the line still shows the watt-hours and says `no $/kWh set`, because the machine drew the power either way and only the price is unknown. `config set power_cents_per_kwh ""` clears it again; a negative tariff, or one above 1000 cents, is refused where it is written — see [What a local turn cost in power](#what-a-local-turn-cost-in-power) |
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |
 | `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
 | `layout` | string | TUI body arrangement: `classic`, `chat-first`, `zen`, or a name declared in `layout_templates` (unknown → classic at render, with the reason printed by `config set` and toasted in the TUI) |
@@ -1957,6 +1958,64 @@ cannot be removed — they are a download, not an answer — so the cap is a cap
 the responses. Only the cache directory is touched: the settings, the session
 records and a downloaded model are in other directories, which is what makes a
 command like this safe to run.
+
+### What a local turn cost in power
+
+A local model is not free because no invoice arrives for it: the machine drew
+power while it answered, and somebody paid for that at the meter. When a chat
+turn on a local model finishes, xencode prints one line saying what it drew:
+
+```
+⚡ ≈ 0.03 Wh · ≈ $0.000004 · 15 s — CPU package only; no graphics power was
+reported · estimated, this machine only
+```
+
+That is real output from a 15-second answer off a local `llama-server`, with the
+tariff below set to `12.5`. The figure is a **reading**, not a model of what the
+turn should have cost. It
+comes from the kernel's own energy counter (`/sys/class/powercap/intel-rapl:*`),
+read when the turn started and again when it ended, so the number is the joules
+between those two readings. Three things follow from that, and each of them is
+said out loud in the line rather than left for you to discover:
+
+- **The counter is the whole CPU package.** A compile, a browser, or your
+  neighbour's container all sit in the same total. Nothing in userspace can take
+  them back out, so the figure is an estimate of the turn's share, and it is
+  labelled as one.
+- **A discrete GPU is polled, not metered.** Where `nvidia-smi` will answer
+  `power.draw`, the two polls at the ends of the window are averaged and added to
+  the total. Where it answers `[N/A]` — which is what a laptop whose card is
+  switched off at the connector does — the line ends with `CPU package only; no
+  graphics power was reported`, and the card is missing from the total rather
+  than counted as zero.
+- **A machine with no counter has no number.** An AMD or Arm box that publishes
+  no package domain reads `energy unknown · 46 s — this machine reports no energy
+  counter to read` — the seconds are the only thing such a machine can be
+  measured against — with the reason on the same line, and no price on it even
+  when a tariff is set, because the setting is not what is missing here. Nothing
+  is drawn as a turn that cost nothing, and a three-digit watt-hour figure is
+  never rounded down to `0.00 Wh`, because that rendering is the one that reads
+  as free.
+
+The price comes from `power_cents_per_kwh` in your settings (see the table
+above). Without it you get the watt-hours and the words `no $/kWh set` — the
+electricity was bought, the tariff just was not written down. Set it from your
+own bill:
+
+```bash
+xencode config set power_cents_per_kwh 12.5
+```
+
+What is measured is also recorded, in the same per-project metrics log `/cost`
+reads: `energy_uj`, `elapsed_ms`, `power_w` (mean watts over the window) and
+`est_cost_micros`. Only a turn whose prompt stayed on this machine is priced
+that way; a cloud turn's electricity went into a provider's meter, so putting
+this reading on its row would bill the same seconds twice — once for the work
+and once for a CPU that was only waiting on a socket. Rows written before this
+existed have none of the four fields and still read, which is why the log stays
+append-only. `/cost` prices the same turns by tokens from `.xencode/pricing.json`
+— that is the provider's bill, and this is yours; the two are never added
+together.
 
 ### `xencode replay <run-id> [--run-tools]`
 Run a recorded agent turn again from the bytes it was made of. Turn on

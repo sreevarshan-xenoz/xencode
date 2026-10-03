@@ -27,6 +27,7 @@ libc = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+tempfile = "3"
 
 [[bench]]
 name = "hot_paths"

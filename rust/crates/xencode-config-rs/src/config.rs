@@ -488,6 +488,19 @@ pub struct XencodeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_budget_usd_micros: Option<u64>,
 
+    /// What a kilowatt-hour costs where this machine runs, in cents, used to put
+    /// a price on the electricity a local generation drew — the counter reading
+    /// lives in `xencode_context_rs::power`. Set it from your own bill: a typical
+    /// figure is 12 to 30 cents.
+    ///
+    /// Unset means the watt-hours are shown without a price beside them, which is
+    /// a different statement from "this cost nothing": the machine drew the power
+    /// either way, and the only unknown is what the meter charge was. A negative
+    /// or not-a-number value is refused when it is written down, because it would
+    /// price a turn below zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_cents_per_kwh: Option<f64>,
+
     /// Whether a prompt may be sent to an internet service at all.
     ///
     /// This is consent, not credentials: `api_keys` says who you are to a cloud
@@ -836,6 +849,7 @@ impl Default for XencodeConfig {
             memory_enabled: true,
             max_memory_items: default_memory_items(),
             cost_budget_usd_micros: None,
+            power_cents_per_kwh: None,
             allow_cloud_models: false,
             allow_online_docs: false,
             api_keys: ApiKeys::default(),
