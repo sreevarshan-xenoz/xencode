@@ -178,6 +178,21 @@ impl HardwareProfile {
             HardwareProfile::High
         }
     }
+
+    /// The profile one rung down, or `None` at the bottom rung.
+    ///
+    /// This is the whole of what a crossed daily budget can do to a turn: give
+    /// up some of the next one's room rather than refuse it. A refusal strands a
+    /// half-finished edit, and the profile is the one dial that changes every
+    /// part of a turn at once — the window it fills, how many files it retrieves,
+    /// how much of each file it sends.
+    pub fn step_down(self) -> Option<HardwareProfile> {
+        match self {
+            HardwareProfile::High => Some(HardwareProfile::Balanced),
+            HardwareProfile::Balanced => Some(HardwareProfile::Low),
+            HardwareProfile::Low => None,
+        }
+    }
 }
 
 /// Total RAM this machine reports, in KiB. `None` where the kernel's own file is
@@ -482,6 +497,259 @@ pub fn truncate_tail_to_tokens(text: &str, max_tokens: u64, is_code: bool) -> (S
     let cut = tail.find('\n').map(|i| i + 1).unwrap_or(0);
     let tail = &tail[cut.min(tail.len())..];
     (tail.to_string(), est_tokens(tail.len(), is_code))
+}
+
+/// The four caps a person can set for one day, each in the unit its own source
+/// reports. Every one is unset by default, and none of them stops a turn.
+///
+/// A cap that refused a turn would strand whatever that turn had already changed
+/// on disk, which is the documented way agent frameworks lose people's work. So a
+/// crossed cap buys down the next turn instead — see [`DailyBudgets::breach`] and
+/// [`HardwareProfile::step_down`] — and the day keeps being spent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DailyBudgets {
+    /// Prompt plus completion tokens.
+    pub tokens: Option<u64>,
+    /// Watt-hours the CPU package counted. Only a machine with a readable
+    /// counter can ever cross this one; see [`crate::power::package_energy_uj`].
+    pub energy_wh: Option<u64>,
+    /// What the day's tokens cost at the rates in `pricing.json`, in millionths
+    /// of a dollar. Provider spend alone: the electricity a local turn drew is
+    /// what [`Self::energy_wh`] weighs, and the two are different documents.
+    pub usd_micros: Option<u64>,
+    /// Wall-clock the turns ran, in minutes. Time the interface sat open is not
+    /// usage and is not counted.
+    pub minutes: Option<u64>,
+}
+
+/// Which of the four caps was passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetDimension {
+    Tokens,
+    Energy,
+    ProviderCost,
+    WallClock,
+}
+
+impl BudgetDimension {
+    /// The word the cap is set by, for a message that has to be searchable in
+    /// the manual.
+    pub fn label(self) -> &'static str {
+        match self {
+            BudgetDimension::Tokens => "token",
+            BudgetDimension::Energy => "energy",
+            BudgetDimension::ProviderCost => "dollar",
+            BudgetDimension::WallClock => "wall-clock",
+        }
+    }
+}
+
+/// A cap today's usage has reached, with both numbers worded in the same unit so
+/// they read as one sentence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BudgetBreach {
+    pub dimension: BudgetDimension,
+    pub used: String,
+    pub cap: String,
+    /// `used / cap`, which is how the worst of several crossings is picked.
+    pub over: f64,
+}
+
+impl DailyBudgets {
+    /// Whether any cap is set at all — the cheap answer that lets a caller skip
+    /// the rest when nothing is configured.
+    pub fn any_set(&self) -> bool {
+        self.tokens.is_some()
+            || self.energy_wh.is_some()
+            || self.usd_micros.is_some()
+            || self.minutes.is_some()
+    }
+
+    /// The cap today has passed by the widest margin, or `None` while every set
+    /// cap still has room.
+    ///
+    /// `priced_micros` is what the day's tokens cost at `pricing.json` counting
+    /// only the models the table knows. A model with no price contributes
+    /// nothing, so a day of unpriced models cannot cross a dollar cap: the figure
+    /// is a floor, and a floor is allowed to fire but never to say the day stayed
+    /// under. `/cost` names the unpriced models; this does not invent them.
+    ///
+    /// The energy cap works the same way in reverse — it is compared against
+    /// nothing when the machine reports no counter, which is a counter that
+    /// stayed silent rather than a day that used no power.
+    pub fn breach(
+        &self,
+        day: &crate::rollup::DayTotals,
+        priced_micros: u64,
+    ) -> Option<BudgetBreach> {
+        let tokens = day.tokens.prompt_tokens + day.tokens.completion_tokens;
+        let watt_hours = day.watt_hours();
+        let minutes = day.active_ms as f64 / 60_000.0;
+        [
+            crossing(
+                BudgetDimension::Tokens,
+                tokens as f64,
+                self.tokens.map(|cap| cap as f64),
+                BudgetUnit::Tokens,
+            ),
+            crossing(
+                BudgetDimension::Energy,
+                watt_hours.unwrap_or(0.0),
+                self.energy_wh.map(|cap| cap as f64),
+                BudgetUnit::WattHours,
+            ),
+            crossing(
+                BudgetDimension::ProviderCost,
+                priced_micros as f64,
+                self.usd_micros.map(|cap| cap as f64),
+                BudgetUnit::Dollars,
+            ),
+            crossing(
+                BudgetDimension::WallClock,
+                minutes,
+                self.minutes.map(|cap| cap as f64),
+                BudgetUnit::Minutes,
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by(|a, b| a.over.total_cmp(&b.over))
+    }
+
+    /// Today's figure against every cap that is set, as the lines `/cost` prints
+    /// so a bought-down turn can be checked against the numbers that bought it
+    /// down. A dimension the day has no figure for is said as that, and not as
+    /// zero: a machine publishing no energy counter has not used no power, and a
+    /// model with no entry in `pricing.json` has not cost nothing.
+    pub fn today_lines(
+        &self,
+        day: &crate::rollup::DayTotals,
+        report: &crate::pricing::CostReport,
+    ) -> Vec<String> {
+        // Whether a day of unpriced models has anything to weigh against the
+        // dollar cap. A partial table still weighs what it knows, which is a
+        // floor, and the line says which models are missing.
+        let priced =
+            (report.complete() || report.known_micros > 0).then_some(report.known_micros as f64);
+        let cost_note = if report.unpriced.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " — price unknown for {} model{}",
+                report.unpriced.len(),
+                if report.unpriced.len() == 1 { "" } else { "s" }
+            )
+        };
+        [
+            (
+                BudgetDimension::Tokens,
+                self.tokens,
+                Some((day.tokens.prompt_tokens + day.tokens.completion_tokens) as f64),
+                String::new(),
+            ),
+            (BudgetDimension::Energy, self.energy_wh, day.watt_hours(), String::new()),
+            (
+                BudgetDimension::ProviderCost,
+                self.usd_micros,
+                priced,
+                cost_note,
+            ),
+            (
+                BudgetDimension::WallClock,
+                self.minutes,
+                Some(day.active_ms as f64 / 60_000.0),
+                String::new(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(dimension, cap, used, note)| {
+            let cap = cap?;
+            let unit = BudgetUnit::of(dimension);
+            let cap_words = unit.words(cap as f64);
+            Some(match used {
+                Some(used) => format!(
+                    "  • {} cap {cap_words} · today {} · {}",
+                    dimension.label(),
+                    unit.words(used),
+                    if used >= cap as f64 {
+                        "passed"
+                    } else {
+                        "room left"
+                    }
+                ) + &note,
+                None => format!(
+                    "  • {} cap {cap_words} · nothing this machine reported to weigh against it today",
+                    dimension.label()
+                ) + &note,
+            })
+        })
+        .collect()
+    }
+}
+
+/// The unit a dimension is written in, so a cap and its figure always read alike.
+impl BudgetUnit {
+    fn of(dimension: BudgetDimension) -> BudgetUnit {
+        match dimension {
+            BudgetDimension::Tokens => BudgetUnit::Tokens,
+            BudgetDimension::Energy => BudgetUnit::WattHours,
+            BudgetDimension::ProviderCost => BudgetUnit::Dollars,
+            BudgetDimension::WallClock => BudgetUnit::Minutes,
+        }
+    }
+}
+
+/// One usage figure against one cap. `None` when no cap is set for the
+/// dimension, or when the day has not reached it yet — and never for a day that
+/// recorded nothing, since 0 against a 0-token cap has not been crossed, it has
+/// not started.
+fn crossing(
+    dimension: BudgetDimension,
+    used: f64,
+    cap: Option<f64>,
+    unit: BudgetUnit,
+) -> Option<BudgetBreach> {
+    let cap = cap?;
+    if used <= 0.0 || used < cap {
+        return None;
+    }
+    Some(BudgetBreach {
+        dimension,
+        used: unit.words(used),
+        cap: unit.words(cap),
+        over: used / cap,
+    })
+}
+
+/// The unit a cap is written in, so `used` and `cap` always read the same way.
+#[derive(Debug, Clone, Copy)]
+enum BudgetUnit {
+    Tokens,
+    WattHours,
+    Dollars,
+    Minutes,
+}
+
+impl BudgetUnit {
+    fn words(self, value: f64) -> String {
+        match self {
+            BudgetUnit::Tokens => format!("{} tokens", trim_count(value)),
+            BudgetUnit::WattHours => format!("{} Wh", trim_count(value)),
+            // Money goes through the same formatter `/cost` uses, because a
+            // second one would be a second opinion about the same figure.
+            BudgetUnit::Dollars => crate::pricing::format_usd(value.round() as u64),
+            BudgetUnit::Minutes => format!("{} min", trim_count(value)),
+        }
+    }
+}
+
+/// A count that should not wear a decimal point it did not ask for: 12000 tokens
+/// prints as `12000 tokens`, and 2.5 Wh prints as `2.5 Wh`.
+fn trim_count(value: f64) -> String {
+    if value >= 999_999.5 || (value - value.round()).abs() >= 0.05 {
+        return format!("{value:.1}");
+    }
+    format!("{}", value.round() as u64)
 }
 
 #[cfg(test)]
@@ -945,5 +1213,158 @@ mod tests {
         );
         assert_eq!(fill_target(HardwareProfile::Balanced, Some(2_048)), 1_536);
         assert_eq!(fill_target(HardwareProfile::Low, Some(2_048)), 1_228);
+    }
+
+    /// A day of usage, built in the units the caps are written in.
+    fn a_day(tokens: u64, energy_uj: u64, active_ms: u64) -> crate::rollup::DayTotals {
+        crate::rollup::DayTotals {
+            tokens: crate::rollup::TokenTotals {
+                requests: 1,
+                prompt_tokens: tokens,
+                cached_tokens: 0,
+                completion_tokens: 0,
+            },
+            by_model: std::collections::BTreeMap::new(),
+            energy_uj,
+            est_cost_micros: 0,
+            active_ms,
+        }
+    }
+
+    #[test]
+    fn the_profile_ladder_has_a_bottom_and_never_a_refusal() {
+        assert_eq!(
+            HardwareProfile::High.step_down(),
+            Some(HardwareProfile::Balanced)
+        );
+        assert_eq!(
+            HardwareProfile::Balanced.step_down(),
+            Some(HardwareProfile::Low)
+        );
+        assert_eq!(HardwareProfile::Low.step_down(), None);
+    }
+
+    #[test]
+    fn a_cap_fires_at_the_number_it_names_and_not_before() {
+        let budgets = DailyBudgets {
+            tokens: Some(1000),
+            ..Default::default()
+        };
+        assert!(budgets.breach(&a_day(999, 0, 0), 0).is_none());
+        let breach = budgets.breach(&a_day(1000, 0, 0), 0).expect("at the cap");
+        assert_eq!(breach.dimension, BudgetDimension::Tokens);
+        assert_eq!(breach.used, "1000 tokens");
+        assert_eq!(breach.cap, "1000 tokens");
+
+        // A day that recorded nothing has not crossed even a zero cap: nothing
+        // was spent, which is not the same as the limit being reached.
+        assert!(budgets.breach(&a_day(0, 0, 0), 0).is_none());
+        // And a cap nobody set cannot fire.
+        assert!(!DailyBudgets::default().any_set());
+        assert!(DailyBudgets::default()
+            .breach(&a_day(9_999_999, 0, 0), 0)
+            .is_none());
+    }
+
+    #[test]
+    fn the_widest_crossing_is_the_one_that_gets_said() {
+        let budgets = DailyBudgets {
+            tokens: Some(1000),
+            minutes: Some(60),
+            ..Default::default()
+        };
+        // 2000 of 1000 tokens is twice over; 66 of 60 minutes is 1.1 times over.
+        let breach = budgets
+            .breach(&a_day(2000, 0, 66 * 60_000), 0)
+            .expect("both caps are passed");
+        assert_eq!(breach.dimension, BudgetDimension::Tokens);
+        assert!((breach.over - 2.0).abs() < 1e-9, "{}", breach.over);
+    }
+
+    #[test]
+    fn a_figure_the_machine_or_the_price_table_never_reported_cannot_cross() {
+        // An energy cap against a silent counter: the day used power, and there
+        // is no reading to compare. This is not a pass, and it is never said as
+        // one — the cap simply has nothing to fire on.
+        let energy_only = DailyBudgets {
+            energy_wh: Some(1),
+            ..Default::default()
+        };
+        assert!(energy_only.breach(&a_day(0, 0, 0), 0).is_none());
+        // 3.6 MJ is exactly one watt-hour, so the same cap fires on a reading.
+        let breach = energy_only
+            .breach(&a_day(0, 3_600_000_000, 0), 0)
+            .expect("one Wh against a one Wh cap");
+        assert_eq!(breach.dimension, BudgetDimension::Energy);
+        assert_eq!(breach.used, "1 Wh");
+
+        // A dollar cap with nothing priced is a floor of zero, and a floor of
+        // zero cannot be over a limit. The same cap fires once the table knows
+        // the model.
+        let dollars = DailyBudgets {
+            usd_micros: Some(500_000),
+            ..Default::default()
+        };
+        assert!(dollars.breach(&a_day(10_000, 0, 0), 0).is_none());
+        let breach = dollars
+            .breach(&a_day(10_000, 0, 0), 600_000)
+            .expect("$0.60 against a $0.50 budget");
+        assert_eq!(breach.used, "$0.6");
+        assert_eq!(breach.cap, "$0.5");
+    }
+
+    #[test]
+    fn today_lines_weigh_every_cap_that_can_be_weighed_and_name_the_ones_that_cannot() {
+        let budgets = DailyBudgets {
+            tokens: Some(1000),
+            energy_wh: Some(50),
+            usd_micros: Some(500_000),
+            minutes: Some(1),
+        };
+        let day = a_day(1200, 0, 95_000);
+        let unpriced = crate::pricing::CostReport {
+            per_model: Vec::new(),
+            known_micros: 0,
+            unpriced: vec!["qwen3-0.6b".to_string()],
+        };
+        assert_eq!(
+            budgets.today_lines(&day, &unpriced),
+            vec![
+                "  • token cap 1000 tokens · today 1200 tokens · passed",
+                "  • energy cap 50 Wh · nothing this machine reported to weigh against it today",
+                "  • dollar cap $0.5 · nothing this machine reported to weigh against it today — price unknown for 1 model",
+                "  • wall-clock cap 1 min · today 1.6 min · passed",
+            ]
+        );
+
+        // A day inside its caps says so in the same shape, and a cap nobody set
+        // takes up no line at all.
+        let priced = crate::pricing::CostReport {
+            per_model: Vec::new(),
+            known_micros: 486,
+            unpriced: Vec::new(),
+        };
+        let quiet = DailyBudgets {
+            tokens: Some(10_000),
+            usd_micros: Some(500_000),
+            ..Default::default()
+        };
+        assert_eq!(
+            quiet.today_lines(&day, &priced),
+            vec![
+                "  • token cap 10000 tokens · today 1200 tokens · room left",
+                "  • dollar cap $0.5 · today $0.000486 · room left",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_count_wears_a_decimal_point_only_when_it_asked_for_one() {
+        assert_eq!(trim_count(12_000.0), "12000");
+        assert_eq!(trim_count(2.5), "2.5");
+        assert_eq!(trim_count(41.49), "41.5");
+        // Past a point a rounded figure is a lie about precision, so it is
+        // printed as the size it is.
+        assert_eq!(trim_count(1_500_000.0), "1500000.0");
     }
 }

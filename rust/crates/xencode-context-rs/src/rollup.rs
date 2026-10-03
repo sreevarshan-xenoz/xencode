@@ -25,11 +25,22 @@ use std::path::{Path, PathBuf};
 /// rollup written by another version is rebuilt from the records rather than
 /// trusted. Version 2 added the repeatability counts, which a version 1 file
 /// would read back as zeros — a wrong answer rather than a missing one.
-pub const ROLLUP_VERSION: u8 = 2;
+/// What the sidecar on disk holds. A file written by another version is rebuilt
+/// from `metrics.jsonl` rather than read, because `by_day` groups records that a
+/// version-2 fold never sorted that way — and a daily budget computed from a
+/// partial day would fire late, or not at all.
+pub const ROLLUP_VERSION: u8 = 3;
 
 /// How many of the most recent rate samples are kept for the percentiles. The
 /// window is the whole of what a percentile here can claim to cover.
 pub const RATE_SAMPLE_WINDOW: usize = 512;
+
+/// How many days [`MetricsRollup::by_day`] keeps. The sidecar is a bounded file
+/// by intent — the rows it summarises are themselves cut at
+/// [`METRICS_KEEP_BYTES`] — and a daily budget only ever asks about today. The
+/// limit is set well past that so the days beside the one in question are still
+/// there to be read, and is roughly a year of use.
+pub const DAYS_KEPT: usize = 400;
 
 /// Token counts added up over some scope: everything, one session, one model.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +94,76 @@ pub struct SessionTotals {
     pub by_model: BTreeMap<String, TokenTotals>,
 }
 
+/// What one calendar day used, in every unit a daily budget can be set in.
+///
+/// A budget that has to be answered from `metrics.jsonl` is a budget that reads
+/// the whole log on every turn, which is the thing the sidecar exists to prevent.
+/// `energy_uj`, `est_cost_micros` and `active_ms` are sums over the records that
+/// reported them: a cloud turn writes no energy, and a machine whose counter is
+/// silent writes none either, so a day of such turns carries zero watt-hours
+/// without that meaning the machine drew no power.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", default)]
+pub struct DayTotals {
+    pub tokens: TokenTotals,
+    /// Split by model because a price is per model, and one of the four daily
+    /// caps is in dollars.
+    pub by_model: BTreeMap<String, TokenTotals>,
+    /// Energy the CPU package counted over the day, in microjoules.
+    pub energy_uj: u64,
+    /// What that energy cost at the tariff in force when each turn ran, in
+    /// millionths of a dollar. Provider spend is not here — that is priced from
+    /// `pricing.json` over [`Self::tokens`], and the two are kept apart because
+    /// one is a bill and the other is a meter reading.
+    pub est_cost_micros: u64,
+    /// Wall-clock the turns themselves ran, in milliseconds, on a local or a
+    /// cloud turn alike: the seconds belong to the turn, not to whichever machine
+    /// hosted the model.
+    pub active_ms: u64,
+}
+
+impl DayTotals {
+    fn add_record(&mut self, row: &RequestMetrics) {
+        self.tokens.add_record(row);
+        self.energy_uj += row.energy_uj.unwrap_or(0);
+        self.est_cost_micros += row.est_cost_micros.unwrap_or(0);
+        self.active_ms += row.elapsed_ms.unwrap_or(0);
+    }
+
+    /// Watt-hours the package counter counted over the day, `None` when it
+    /// counted nothing at all — which is a silent counter, not a free day.
+    pub fn watt_hours(&self) -> Option<f64> {
+        (self.energy_uj > 0).then(|| self.energy_uj as f64 / 3.6e9)
+    }
+}
+
+/// The local calendar date a record was written, as `YYYY-MM-DD`, which is the
+/// key [`MetricsRollup::by_day`] groups by.
+///
+/// The day is the one on the clock above the machine, not the one in UTC,
+/// because a cap that tips over at midnight UTC charges an evening's work to the
+/// following day for anyone west of Greenwich. `ts_unix_ms == 0` is a record that
+/// named no time; it groups under the empty string rather than under a date it
+/// did not claim.
+pub fn local_day_key(ts_unix_ms: u64) -> String {
+    if ts_unix_ms == 0 {
+        return String::new();
+    }
+    let mut when: libc::tm = unsafe { std::mem::zeroed() };
+    let secs = (ts_unix_ms / 1000) as libc::time_t;
+    if unsafe { libc::localtime_r(&secs, &mut when) }.is_null() {
+        // No zone could be read. Grouping these together is still better than
+        // dropping them, and the empty string is where they go.
+        return String::new();
+    }
+    format!(
+        "{:04}-{:02}-{:02}",
+        when.tm_year + 1900,
+        when.tm_mon + 1,
+        when.tm_mday
+    )
+}
+
 /// The sidecar itself. Every field has a default so a partially written or
 /// older file degrades to a rebuild rather than an error.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +183,10 @@ pub struct MetricsRollup {
     /// Grouped by the model id as it was asked for. The empty string again means
     /// the record did not name one.
     pub by_model: BTreeMap<String, TokenTotals>,
+    /// Grouped by the local date the record was written, oldest key first, so a
+    /// daily budget can be answered from the sidecar. The empty key is the day
+    /// whose records claimed no time at all. See [`DAYS_KEPT`].
+    pub by_day: BTreeMap<String, DayTotals>,
     pub last_by_profile: BTreeMap<String, ProfileSample>,
     /// Oldest first, truncated to [`RATE_SAMPLE_WINDOW`] from the front. A
     /// record that reported no rate contributes nothing here — a zero measured
@@ -140,6 +225,7 @@ impl MetricsRollup {
             totals: TokenTotals::default(),
             by_session: BTreeMap::new(),
             by_model: BTreeMap::new(),
+            by_day: BTreeMap::new(),
             last_by_profile: BTreeMap::new(),
             generation_tok_s: Vec::new(),
             prompt_tok_s: Vec::new(),
@@ -170,7 +256,16 @@ impl MetricsRollup {
             .entry(model.clone())
             .or_default()
             .add_record(row);
-        self.by_model.entry(model).or_default().add_record(row);
+        self.by_model
+            .entry(model.clone())
+            .or_default()
+            .add_record(row);
+        let day = self
+            .by_day
+            .entry(local_day_key(row.ts_unix_ms))
+            .or_default();
+        day.add_record(row);
+        day.by_model.entry(model).or_default().add_record(row);
         self.last_by_profile.insert(
             row.profile.clone(),
             ProfileSample {
@@ -198,6 +293,39 @@ impl MetricsRollup {
     /// Share of prompt tokens served from the KV cache over everything folded.
     pub fn kv_reuse_ratio(&self) -> Option<f64> {
         self.totals.kv_reuse_ratio()
+    }
+
+    /// What was used on the local date `key`. A day nothing was recorded for
+    /// returns zeroed totals, which is the answer — not an unknown.
+    pub fn day(&self, key: &str) -> DayTotals {
+        self.by_day.get(key).cloned().unwrap_or_default()
+    }
+
+    /// The key today's records are filed under, as the words a person reads it
+    /// by: `2026-10-03`. Empty where the machine's clock or zone cannot be read,
+    /// which is the same answer [`Self::today`] gives and says nothing about a day.
+    pub fn today_key() -> String {
+        local_day_key(crate::conversation::now_millis())
+    }
+
+    /// The day a daily budget applies to: the local date this moment falls in.
+    pub fn today(&self) -> DayTotals {
+        self.day(&Self::today_key())
+    }
+
+    /// Drop the oldest days once the group outgrows [`DAYS_KEPT`].
+    ///
+    /// Keys are ISO dates, so the front of the map is the oldest day — except for
+    /// the empty key, which holds records that claimed no time at all and goes
+    /// first of all. That is the right order to lose in: a day nobody can date
+    /// cannot be compared against a day's budget anyway.
+    fn prune_days(&mut self) {
+        let excess = self.by_day.len().saturating_sub(DAYS_KEPT);
+        for _ in 0..excess {
+            if let Some(oldest) = self.by_day.keys().next().cloned() {
+                self.by_day.remove(&oldest);
+            }
+        }
     }
 
     /// p50 and p95 over the samples kept, with how many samples that is. The
@@ -379,6 +507,7 @@ pub fn refresh_rollup(xencode_dir: &Path) -> std::io::Result<MetricsRollup> {
     }
     rollup.byte_offset = offset;
     rollup.v = ROLLUP_VERSION;
+    rollup.prune_days();
     // Rows older than the kept window can go now that every one of them has been
     // folded: the cut removes lines, not figures, because their totals are in the
     // sidecar. Carrying the position back by the same amount is what keeps the
@@ -974,6 +1103,129 @@ mod tests {
         let xencode = dir.join(".xencode");
         assert_eq!(trim_metrics(&xencode, 1024).unwrap(), 0);
         fs_reset(&dir);
+    }
+
+    /// Two timestamps 36 hours apart cannot fall on the same local date, even
+    /// across a daylight-saving change, so a test built on them says the same
+    /// thing in every zone the machine might be set to.
+    const AN_HOUR: u64 = 3_600_000;
+
+    #[test]
+    fn a_day_key_is_the_local_date_and_no_time_is_no_date() {
+        let morning = 1_789_000_000_000;
+        let key = local_day_key(morning);
+        assert_eq!(key.len(), 10, "{key} should read YYYY-MM-DD");
+        assert!(
+            key.chars().enumerate().all(|(i, c)| if i == 4 || i == 7 {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }),
+            "{key} is not a date"
+        );
+        assert_ne!(
+            local_day_key(morning + 36 * AN_HOUR),
+            key,
+            "36 hours apart is a different day anywhere"
+        );
+        // The hour a daylight-saving shift adds or removes is not a day, so the
+        // gap above is the smallest one this can promise in every zone.
+        assert_eq!(local_day_key(0), "");
+    }
+
+    #[test]
+    fn the_day_group_adds_up_every_unit_a_daily_budget_is_written_in() {
+        let base = 1_789_000_000_000;
+        let today = local_day_key(base);
+        let later = local_day_key(base + 36 * AN_HOUR);
+
+        let mut first = record("LOW", 1000, 400, 50);
+        first.ts_unix_ms = base;
+        first.model = Some("llamacpp:qwen3-0.6b".to_string());
+        first.energy_uj = Some(3_600_000_000); // one watt-hour
+        first.est_cost_micros = Some(12);
+        first.elapsed_ms = Some(40_000);
+
+        let mut second = record("LOW", 500, 500, 10);
+        second.ts_unix_ms = base + AN_HOUR;
+        second.model = Some("llamacpp:qwen3-0.6b".to_string());
+        second.energy_uj = Some(600_000_000);
+        second.est_cost_micros = Some(2);
+        second.elapsed_ms = Some(20_000);
+
+        let mut next_day = record("LOW", 200, 200, 4);
+        next_day.ts_unix_ms = base + 36 * AN_HOUR;
+        next_day.model = Some("llamacpp:qwen3-0.6b".to_string());
+
+        let mut rollup = MetricsRollup::empty();
+        rollup.fold(&first);
+        rollup.fold(&second);
+        rollup.fold(&next_day);
+
+        let day = rollup.day(&today);
+        assert_eq!(day.tokens.requests, 2);
+        assert_eq!(day.tokens.prompt_tokens, 1500);
+        assert_eq!(day.tokens.completion_tokens, 60);
+        assert_eq!(day.energy_uj, 4_200_000_000);
+        assert_eq!(day.est_cost_micros, 14);
+        assert_eq!(day.active_ms, 60_000);
+        // A day's tokens are priceable, which is why the group carries the model
+        // split the price table is keyed on.
+        assert_eq!(
+            day.by_model["llamacpp:qwen3-0.6b"].prompt_tokens,
+            day.tokens.prompt_tokens
+        );
+        let watt_hours = day.watt_hours().expect("the records reported energy");
+        assert!(
+            (watt_hours - 1.166_666_7).abs() < 1e-6,
+            "4.2 kJ is 1.1667 Wh, not {watt_hours}"
+        );
+
+        assert_eq!(rollup.day(&later).tokens.requests, 1);
+        assert_eq!(rollup.day(&later).energy_uj, 0);
+        // A day nothing was recorded for is a day that spent nothing, not an
+        // unknown.
+        assert_eq!(rollup.day("1970-01-01"), DayTotals::default());
+        assert!(rollup.day("1970-01-01").watt_hours().is_none());
+    }
+
+    #[test]
+    fn today_is_the_group_the_current_clock_falls_in() {
+        let mut rollup = MetricsRollup::empty();
+        let mut row = record("LOW", 100, 100, 1);
+        row.ts_unix_ms = crate::conversation::now_millis();
+        row.elapsed_ms = Some(1_500);
+        rollup.fold(&row);
+        assert_eq!(rollup.today().tokens.requests, 1);
+        assert_eq!(rollup.today().active_ms, 1_500);
+    }
+
+    #[test]
+    fn the_day_group_stays_bounded_as_the_days_go_by() {
+        let mut rollup = MetricsRollup::empty();
+        let base = 1_789_000_000_000;
+        // One record every 36 hours, so every record is its own local date.
+        let count = DAYS_KEPT + 5;
+        for index in 0..count {
+            let mut row = record("LOW", 10, 10, 1);
+            row.ts_unix_ms = base + index as u64 * 36 * AN_HOUR;
+            rollup.fold(&row);
+        }
+        assert_eq!(rollup.by_day.len(), count);
+        rollup.prune_days();
+        assert_eq!(rollup.by_day.len(), DAYS_KEPT);
+        // The newest day survives and the oldest five, which were over the limit,
+        // do not: index 4 is the last one dropped, index 5 the first one kept.
+        assert!(rollup
+            .by_day
+            .contains_key(&local_day_key(base + (count - 1) as u64 * 36 * AN_HOUR)));
+        assert!(!rollup.by_day.contains_key(&local_day_key(base)));
+        assert!(!rollup
+            .by_day
+            .contains_key(&local_day_key(base + 4 * 36 * AN_HOUR)));
+        assert!(rollup
+            .by_day
+            .contains_key(&local_day_key(base + 5 * 36 * AN_HOUR)));
     }
 
     fn fs_reset(dir: &Path) {

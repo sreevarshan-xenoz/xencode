@@ -197,22 +197,26 @@ impl PowerUse {
     }
 
     /// Stamp what this window measured onto the metrics row that describes the
-    /// turn it covered, and say whether anything was written.
+    /// turn it covered, and say whether the energy figure went with it.
     ///
-    /// Only a turn whose prompt stayed on this machine is priced here. A cloud
-    /// turn's electricity went into a provider's meter, not this one, so
-    /// attaching this window's reading to it would bill the same seconds twice —
-    /// once for the work, once for a CPU that was only waiting on a socket.
+    /// The wall-clock always goes: how long a turn ran is true of the turn, not
+    /// of the machine that happened to host the model, and a daily time budget
+    /// has to be able to count a day spent against a cloud provider. The energy,
+    /// the mean watts and their price go only onto a turn whose prompt stayed on
+    /// this machine. A cloud turn's electricity went into a provider's meter, not
+    /// this one, so attaching this window's reading to it would bill the same
+    /// seconds twice — once for the work, once for a CPU that was only waiting on
+    /// a socket.
     pub fn apply_to(
         &self,
         cents_per_kwh: Option<f64>,
         row: &mut crate::metrics::RequestMetrics,
     ) -> bool {
+        row.elapsed_ms = Some(self.elapsed.as_millis() as u64);
         if !matches!(row.source, Some(crate::metrics::MetricSource::Local)) {
             return false;
         }
         row.energy_uj = self.cpu_energy_uj;
-        row.elapsed_ms = Some(self.elapsed.as_millis() as u64);
         row.power_w = self.mean_power_w();
         row.est_cost_micros = self.cost_micros(cents_per_kwh);
         true
@@ -669,6 +673,9 @@ mod tests {
         assert_eq!(cloud.energy_uj, None);
         assert_eq!(cloud.power_w, None);
         assert_eq!(cloud.est_cost_micros, None);
+        // The seconds are still the turn's own, so a daily time budget can count
+        // a day spent against a provider.
+        assert_eq!(cloud.elapsed_ms, Some(40_000));
 
         // A local turn with no tariff still reports what it drew; only the price
         // is unknown.

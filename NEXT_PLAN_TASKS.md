@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2112 tests passing, zero warnings (re-verified 2026-10-03, after CX-3)
+- [x] Workspace gates green — 16 crates, 2128 tests passing, zero warnings (re-verified 2026-10-03, after CX-7)
 
 ## Model Catalog Honesty
 
@@ -3670,6 +3670,14 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
   tree. Enforce only at turn boundaries between tool calls, never between
   `apply_patch` and its verification, and roll back through the worktree
   support in D3.
+  *(Done 2026-10-03 on the profile half — see W11. The step-down lands at the turn
+  boundary, which is the trap's whole point, and was watched happening twice on a
+  live local run: `HIGH → BALANCED → LOW`, with `context_limit` 16384 → 8192 → 4096
+  in the metrics rows. Rollback through D3 is not involved, because nothing is
+  refused and no turn is cut in half. The smaller-model swap named in the first
+  sentence is **not** built: this machine has one quantised model file, so a model
+  change could be described but never watched, and a cap that downgrades the
+  context is behaviour enough to ship on its own.)*
 - **CX-8 A GPU-free performance gate in CI** — startup time via `hyperfine` on
   `--version`/`--help`, `cargo bloat` text size against a checked-in baseline,
   RSS at TUI boot (already readable — `app.rs:979` uses `/proc/self/statm`),
@@ -9074,7 +9082,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 12 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 13 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -9084,7 +9092,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **CX-4** | Cloud price lookup, never a vendored table | capability | cloud price lookup, never a vendored table |
 | **CX-5** | A Colab spend ledger | capability | Colab spend ledger |
 | **CX-6** | Dead-man's-switch teardown | capability | dead-man's-switch teardown (belongs with MI-5 if MI-5 ever ships) |
-| **CX-7** | Budgets that act — daily token/energy/dollar/wall-clock caps | capability | budgets that act |
+| **CX-7** | Budgets that act — daily token/energy/dollar/wall-clock caps | capability | budgets that act; done 2026-10-03 on the profile half — the smaller-model swap is not built, see the note |
 | **CX-8** | A GPU-free performance gate in CI | capability | GPU-free performance gate in CI |
 | **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3); done 2026-10-03 |
 | **DB-3** | Honest secrets tiering | capability | secrets tiering — the keyring through `command:`, not a Secret Service dependency; done 2026-10-03 |
@@ -9161,6 +9169,24 @@ server \`ghost\`: No such file or directory (os error 2)`, and a declaration tha
 says nothing about how it is reached fails before anything is started. Exit code
 stays zero either way — a laptop with nothing serving on the model ports is a
 normal laptop.
+
+**CX-7, done 2026-10-03 on the profile half** — four settings (`budget_tokens_per_day`,
+`budget_energy_wh_per_day`, `budget_usd_micros_per_day`, `budget_minutes_per_day`)
+and a step at the turn boundary that answers a passed cap by taking the next turn
+down one rung of `HardwareProfile` — `HIGH` → `BALANCED` → `LOW` — instead of
+refusing it. Verified by a live run against `llama-server` on this machine with the
+token cap set to 100: two consecutive turns printed the step-down line and the
+metrics rows carry the window it bought (`context_limit` 16384 → 8192 → 4096),
+with the measured turn cost falling from `≈ 0.03 Wh · 13 s` to `≈ 0.01 Wh · 2.3 s`.
+The trap in the row is the reason the check sits where it does: the step-down runs
+before a turn is built, never between an `apply_patch` and the reading back of what
+it changed. `/cost` reports the day against every cap, naming a dimension this
+machine cannot weigh rather than drawing it as no use, and the cap that acts is the
+one passed by the largest proportion. A cap of 0 is refused on `config set`,
+because a cap of nothing is a way to switch the product off. **What is not built:
+the smaller-model swap.** This machine has one quantised model file on it, so a
+model change could be described but never watched happening, and the row's other
+half is a real behaviour on its own.
 
 #### W12 — Long-running autonomy — 15 items
 
