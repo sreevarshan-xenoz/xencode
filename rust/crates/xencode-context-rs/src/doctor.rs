@@ -245,6 +245,10 @@ pub enum ConfigRead {
     Loaded,
     /// No file at all: every setting is a default.
     Absent,
+    /// A file written by a newer xencode than this one. It is neither read nor
+    /// overwritten, so every setting a person made is unread until they run the
+    /// binary that can see it.
+    TooNew { found: u32, known: u32 },
     /// A file that the loader refused, with the loader's sentence.
     Unparseable(String),
 }
@@ -259,9 +263,22 @@ pub fn check_config(path: &std::path::Path, read: ConfigRead) -> SelfCheck {
             format!("no {} — running on defaults", path.display()),
             Some("run `xencode config set <key> <value>` to create one".to_string()),
         ),
+        ConfigRead::TooNew { .. } => (
+            "fail",
+            format!(
+                "{} holds settings this xencode cannot read, so this run is on defaults (see the \
+                 version row)",
+                path.display()
+            ),
+            Some(
+                "run the xencode that wrote this file, or point XCODE_CONFIG_DIR at a config this \
+                 one can read"
+                    .to_string(),
+            ),
+        ),
         ConfigRead::Unparseable(problem) => (
             "fail",
-            format!("{} does not parse: {problem}", path.display()),
+            format!("{} cannot be loaded: {problem}", path.display()),
             Some(format!(
                 "repair the JSON at {}, or move the file aside to start from defaults",
                 path.display()
@@ -273,6 +290,69 @@ pub fn check_config(path: &std::path::Path, read: ConfigRead) -> SelfCheck {
         state: state.to_string(),
         detail,
         fix,
+    }
+}
+
+/// What the version the config file declares means next to the one this binary
+/// writes.
+///
+/// `declared` is what the file itself says, or `None` when there is no readable
+/// file to ask. `Some(0)` is the answer for a file written before the key
+/// existed. Below `current` the file will be brought up to this shape on read
+/// and stamped the next time it is saved; above it, this binary refuses to read
+/// or write it, which is the only thing standing between a newer config and an
+/// older xencode dropping the fields it cannot see.
+pub fn check_config_version(
+    path: &std::path::Path,
+    declared: Option<u32>,
+    current: u32,
+) -> SelfCheck {
+    let name = "config:version".to_string();
+    match declared {
+        None => SelfCheck {
+            name,
+            state: "absent".to_string(),
+            detail: format!("no configuration at {} to ask", path.display()),
+            fix: None,
+        },
+        Some(found) if found > current => SelfCheck {
+            name,
+            state: "fail".to_string(),
+            detail: format!(
+                "{path} declares version {found}; this xencode only knows up to {current}, so it \
+                 neither reads nor overwrites the file",
+                path = path.display()
+            ),
+            fix: Some(
+                "run the xencode that wrote this file, or point XCODE_CONFIG_DIR at a config this \
+                 one can read"
+                    .to_string(),
+            ),
+        },
+        Some(found) if found == current => SelfCheck {
+            name,
+            state: "pass".to_string(),
+            detail: format!("version {found} — the shape this xencode writes"),
+            fix: None,
+        },
+        Some(0) => SelfCheck {
+            name,
+            state: "pass".to_string(),
+            detail: format!(
+                "no version key — written before versions existed, so it is migrated on read and \
+                 stamped {current} on the next save"
+            ),
+            fix: None,
+        },
+        Some(found) => SelfCheck {
+            name,
+            state: "pass".to_string(),
+            detail: format!(
+                "version {found} — older than the {current} this xencode writes, so it is migrated \
+                 on read"
+            ),
+            fix: None,
+        },
     }
 }
 
@@ -771,6 +851,53 @@ mod tests {
             broken.detail
         );
         assert!(broken.fix.unwrap().contains("config.json"));
+
+        let too_new = check_config(path, ConfigRead::TooNew { found: 9, known: 1 });
+        assert_eq!(too_new.state, "fail");
+        assert!(too_new.detail.contains("cannot read"), "{}", too_new.detail);
+        assert!(too_new.detail.contains("defaults"), "{}", too_new.detail);
+        assert!(
+            too_new.fix.unwrap().contains("XCODE_CONFIG_DIR"),
+            "the fix has to name the only knob that helps here"
+        );
+    }
+
+    #[test]
+    fn a_config_version_is_reported_as_migrating_current_or_refused() {
+        let path = std::path::Path::new("/home/sree/.xencode/config.json");
+
+        let absent = check_config_version(path, None, 1);
+        assert_eq!(absent.state, "absent");
+        assert!(absent.detail.contains("to ask"), "{}", absent.detail);
+        assert!(absent.fix.is_none());
+
+        // A file from a newer xencode is the one case the report must fail:
+        // nothing was read and nothing was written.
+        let ahead = check_config_version(path, Some(4), 1);
+        assert_eq!(ahead.state, "fail");
+        assert!(ahead.detail.contains("4"), "{}", ahead.detail);
+        assert!(
+            ahead.fix.unwrap().contains("XCODE_CONFIG_DIR"),
+            "the person needs the escape hatch, not just the number"
+        );
+
+        let current = check_config_version(path, Some(1), 1);
+        assert_eq!(current.state, "pass");
+        assert!(current.detail.contains("1"), "{}", current.detail);
+
+        // Keyless, and one rung behind: both are work this binary does on its
+        // own, so they pass and say what will happen.
+        let legacy = check_config_version(path, Some(0), 1);
+        assert_eq!(legacy.state, "pass");
+        assert!(
+            legacy.detail.contains("migrated on read"),
+            "{}",
+            legacy.detail
+        );
+
+        let behind = check_config_version(path, Some(1), 2);
+        assert_eq!(behind.state, "pass");
+        assert!(behind.detail.contains("older"), "{}", behind.detail);
     }
 
     #[cfg(unix)]

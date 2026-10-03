@@ -5071,6 +5071,17 @@ fn load_config() -> (xencode_config_rs::XencodeConfig, doc::ConfigRead) {
     let read = match &outcome {
         Ok(_) if path.is_file() => doc::ConfigRead::Loaded,
         Ok(_) => doc::ConfigRead::Absent,
+        Err(xencode_config_rs::ConfigError::NewerFile { found, known, .. }) => {
+            doc::ConfigRead::TooNew {
+                found: *found,
+                known: *known,
+            }
+        }
+        Err(xencode_config_rs::ConfigError::NotAConfig { found, .. }) => {
+            doc::ConfigRead::Unparseable(format!(
+                "it holds a JSON {found}, where an object of settings was expected"
+            ))
+        }
         Err(problem) => doc::ConfigRead::Unparseable(problem.to_string()),
     };
     (outcome.unwrap_or_default(), read)
@@ -5103,6 +5114,11 @@ async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
         .unwrap_or_default();
     checks.push(doc::check_config(&config_path, read));
     if let Some(dir) = state_dir.as_ref() {
+        checks.push(doc::check_config_version(
+            &config_path,
+            xencode_config_rs::XencodeConfig::version_of(&config_path),
+            xencode_config_rs::CURRENT_CONFIG_VERSION,
+        ));
         checks.push(doc::check_permissions(
             "config",
             &dir.join("config.json"),

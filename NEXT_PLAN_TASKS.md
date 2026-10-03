@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2034 tests passing, zero warnings (re-verified 2026-10-03, after DB-6)
+- [x] Workspace gates green — 16 crates, 2042 tests passing, zero warnings (re-verified 2026-10-03, after DB-2)
 
 ## Model Catalog Honesty
 
@@ -3308,12 +3308,24 @@ There is no server to fall back on. This is the trust layer.
   rename, or it reopens the very window SE-1 closes; NFS/SMB rename atomicity
   is weak; `tempfile` is already a dependency (`xencode-server-rs/Cargo.toml:24`)
   and its `persist` handles the Windows rename semantics.
-- **DB-2 `config_version: u32` plus a migration ladder** — with
+- **DB-2 `config_version: u32` plus a migration ladder** — **Done 2026-10-03.**
+  `CURRENT_CONFIG_VERSION` is `1` and a file with no key is `0`, so the ladder is
+  one rung. With
   **reject-and-explain when the file is newer than the binary**, which is the
   only defence against an older binary silently rewriting a newer config.
-  **M**, and it must start with the container-level `#[serde(default)]` the
-  struct lacks today (fact 12) — otherwise the first new field breaks everyone
-  before any migration can run. Trap: each v→v+1 step must be total and tested.
+  **M**. The planned first step — the container-level `#[serde(default)]` the
+  struct was said to lack (fact 12) — turned out to be already true: all 46
+  fields carried a per-field default, which is exactly why a *new* field is safe
+  and why the row had to be written as `#[serde(default = "legacy_config_version")]`
+  (default `0`, "predates the key") while `Default::default()` writes `1`. The
+  trap was honoured: the ladder is a total function over `serde_json::Value`
+  with a test that walks every rung. Two findings this row did not predict:
+  rejecting on read is not enough, because ~14 call sites do
+  `XencodeConfig::load().unwrap_or_default()` and the TUI drops the save error, so
+  any of them would write defaults over a newer file — `save_to()` refuses too;
+  and `serde_json` happily deserialises a *struct* from a JSON **array** when every
+  field has a default, so a corrupt file became "all defaults" and would have been
+  written back, which `ConfigError::NotAConfig` now blocks.
 - **DB-3 Honest secrets tiering** — 0600 file (SE-1) stays the documented
   baseline; optionally read from `XENCODE_API_KEY` / `API_KEY_<PROVIDER>` env,
   or a `command:` helper (`pass`, `op`, `pinentry`) where **only the reference
@@ -3348,10 +3360,11 @@ There is no server to fall back on. This is the trust layer.
   `preflight()` (`preflight.rs:85-258`), never a second copy of its version
   floor or keypair judgement. Three corrections found while building it: the
   flag is `--format json`, not `--json` — this CLI has never had a `--json`
-  flag, and `xencode doctor --env --json` is an error; `XencodeConfig` has no
-  version field, so "version is supported" is met by the delegated Colab floor
-  (`MIN_COLAB_VERSION`, `preflight.rs:12`) rather than by inventing a config
-  field to compare; and the per-model health check this row folded in is
+  flag, and `xencode doctor --env --json` is an error; `XencodeConfig` had no
+  version field when this shipped, so "version is supported" is met by the
+  delegated Colab floor (`MIN_COLAB_VERSION`, `preflight.rs:12`) rather than by
+  inventing a config field to compare — `DB-2` landed that field the same day,
+  and `doctor` reports it as its own row; and the per-model health check this row folded in is
   `ModelAction::Health` at `main.rs:955`, handled at `main.rs:1842`, not
   `main.rs:784-815`. The trap was honoured: `--format json` serialises the
   `SelfCheck` list itself and the text listing renders that same list, so there
@@ -8987,7 +9000,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 7 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 8 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -8999,7 +9012,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **CX-6** | Dead-man's-switch teardown | capability | dead-man's-switch teardown (belongs with MI-5 if MI-5 ever ships) |
 | **CX-7** | Budgets that act — daily token/energy/dollar/wall-clock caps | capability | budgets that act |
 | **CX-8** | A GPU-free performance gate in CI | capability | GPU-free performance gate in CI |
-| **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3) |
+| **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3); done 2026-10-03 |
 | **DB-3** | Honest secrets tiering | capability | secrets tiering — Secret Service now that SE-1 is done |
 | **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene |
 | **DB-6** | `xencode doctor` as the single bug report | capability | the flag is `--format json`; done 2026-10-03 |
