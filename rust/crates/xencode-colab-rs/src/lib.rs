@@ -37,7 +37,8 @@ pub use lifecycle::{
     UpOptions,
 };
 pub use orchestrate::{
-    forward_url, pid_alive, resolve_binaries, shell_quote, spawn_forward_cmd, terminate, Binaries,
+    effective_remote_port, forward_url, pid_alive, resolve_binaries, shell_quote,
+    spawn_forward_cmd, terminate, Binaries,
 };
 pub use preflight::{preflight, which, Check, PreflightReport, KEY_FILENAME};
 pub use state::{remove_state, save_state, ColabState, STATE_FILENAME};

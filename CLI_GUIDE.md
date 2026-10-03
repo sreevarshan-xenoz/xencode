@@ -1581,6 +1581,25 @@ xencode colab up --local-port 18001   # laptop side of the forward
 xencode colab up --remote-port 18080  # VM-side port (0 = runtime-native)
 xencode colab up --weights hf         # llama.cpp weights from Hugging Face
 xencode colab up --quant Q6_K         # which GGUF quant to serve (default Q4_K_M)
+xencode colab up --dry-run            # what would start and what config.json would gain
+```
+
+`--dry-run` stops before anything happens: no preflight (which would create the
+SSH keypair), no session, no forward, no state file, no config write. It prints
+the resolved session, runtime, GPU, model, weights source, quant, and the ports,
+then the keys a successful bring-up would rewrite and what they would become —
+computed by the same code the real bring-up calls, so the preview cannot disagree
+with it:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/db8 xencode colab up --dry-run
+colab up --dry-run — nothing was started and nothing was written.
+  session:   xencode-vm
+  runtime:   llama.cpp   gpu: T4   model: Qwen/Qwen2.5-7B-Instruct-GGUF
+  weights:   hf   quant: Q4_K_M (the default the VM serves)
+  forward:   http://127.0.0.1:18000 → the VM's port 18080
+  config.json would change: llama_cpp_url: http://localhost:8080 → http://127.0.0.1:18000
+  config.json would change: remote_base_url:  → http://127.0.0.1:18000/v1
 ```
 
 `up` refuses unless the bridge is switched on (`xencode config set
@@ -1647,7 +1666,28 @@ xencode config show
 xencode config set default_model qwen3:4b
 xencode config set mcp_timeout 30
 xencode config set llama_cpp_args "--n-gpu-layers all --device Vulkan1"
+xencode config set --dry-run default_model qwen3:4b
 xencode config reset
+```
+
+`--dry-run` recognises the key, validates the value against the configuration on
+disk, and prints the change without writing anything:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/db8 xencode config set --dry-run default_model qwen3:4b
+would set default_model = qwen3:4b — nothing written (--dry-run)
+```
+
+Every save that replaces the file first copies what was there to a timestamped
+`config.json.bak.<UTC time>` beside it, owner-only like the config itself, and
+keeps the newest five. A save that would write exactly the bytes already on disk
+adds no copy — the settings panel saves on every change, and unchanged copies
+would push the useful ones out. So the file you just overwrote is one `cp` away:
+
+```
+$ ls -l /tmp/db8 | grep config.json.bak
+-rw------- 1 sree sree   49 Oct  3 10:40 config.json.bak.20261003T051028.493226852Z
+-rw------- 1 sree sree 1510 Oct  3 10:40 config.json.bak.20261003T051028.499388198Z
 ```
 
 A value that begins with a dash is taken as the value rather than as an option to

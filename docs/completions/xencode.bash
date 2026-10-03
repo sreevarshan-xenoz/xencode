@@ -1421,7 +1421,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__colab__subcmd__up)
-            opts="-h --session --gpu --runtime --model --weights --quant --local-port --remote-port --reconnect --help"
+            opts="-h --session --gpu --runtime --model --weights --quant --local-port --remote-port --reconnect --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1565,7 +1565,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__config__subcmd__set)
-            opts="-h --help"
+            opts="-h --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
