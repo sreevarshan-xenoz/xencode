@@ -214,6 +214,13 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(gc)
+_arguments "${_arguments_options[@]}" : \
+'--max-mb=[Largest the cached responses may be, in megabytes]:MAX_MB:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__cache__subcmd__help_commands" \
@@ -231,6 +238,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (clear)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(gc)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -264,7 +275,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
-'::path -- Log to check (default\: ~/.xencode/audit.jsonl):_files' \
+'::path -- Log to check (default\: <state dir>/audit.jsonl):_files' \
 && ret=0
 ;;
 (help)
@@ -731,7 +742,7 @@ _arguments "${_arguments_options[@]}" : \
 '--host=[Address to bind (default\: loopback only)]:HOST:_default' \
 '--cert=[TLS certificate in PEM form; requires --key]:CERT:_files' \
 '--key=[TLS private key in PEM form; requires --cert]:KEY:_files' \
-'--audit-path=[Audit log path; "none" disables (default\: ~/.xencode/audit.jsonl)]:AUDIT_PATH:_default' \
+'--audit-path=[Audit log path; "none" disables (default\: <state dir>/audit.jsonl)]:AUDIT_PATH:_default' \
 '--allow-insecure-public[Allow a non-loopback bind without TLS — tokens and activity then travel in clear text; read the warning before reaching for this]' \
 '-h[Print help]' \
 '--help[Print help]' \
@@ -870,6 +881,20 @@ esac
         esac
     ;;
 esac
+;;
+(paths)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(migrate)
+_arguments "${_arguments_options[@]}" : \
+'--dry-run[Print what would move and change nothing]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
 ;;
 (verify)
 _arguments "${_arguments_options[@]}" : \
@@ -1618,6 +1643,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(gc)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
         esac
     ;;
 esac
@@ -1857,6 +1886,14 @@ _arguments "${_arguments_options[@]}" : \
         esac
     ;;
 esac
+;;
+(paths)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(migrate)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
 ;;
 (verify)
 _arguments "${_arguments_options[@]}" : \
@@ -2146,6 +2183,8 @@ _xencode_commands() {
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
+'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
+'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
 'agents:List installed agents with versions and install provenance' \
@@ -2294,6 +2333,7 @@ _xencode__subcmd__cache_commands() {
     local commands; commands=(
 'stats:Show cache statistics' \
 'clear:Clear all cached responses' \
+'gc:Drop the oldest cached responses until the cache directory fits under a size. The downloaded advisory corpora are not counted and cannot be removed by this command' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode cache commands' commands "$@"
@@ -2303,11 +2343,17 @@ _xencode__subcmd__cache__subcmd__clear_commands() {
     local commands; commands=()
     _describe -t commands 'xencode cache clear commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__cache__subcmd__gc_commands] )) ||
+_xencode__subcmd__cache__subcmd__gc_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode cache gc commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__cache__subcmd__help_commands] )) ||
 _xencode__subcmd__cache__subcmd__help_commands() {
     local commands; commands=(
 'stats:Show cache statistics' \
 'clear:Clear all cached responses' \
+'gc:Drop the oldest cached responses until the cache directory fits under a size. The downloaded advisory corpora are not counted and cannot be removed by this command' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode cache help commands' commands "$@"
@@ -2316,6 +2362,11 @@ _xencode__subcmd__cache__subcmd__help_commands() {
 _xencode__subcmd__cache__subcmd__help__subcmd__clear_commands() {
     local commands; commands=()
     _describe -t commands 'xencode cache help clear commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__cache__subcmd__help__subcmd__gc_commands] )) ||
+_xencode__subcmd__cache__subcmd__help__subcmd__gc_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode cache help gc commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__cache__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__cache__subcmd__help__subcmd__help_commands() {
@@ -2545,6 +2596,8 @@ _xencode__subcmd__help_commands() {
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
+'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
+'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
 'agents:List installed agents with versions and install provenance' \
@@ -2637,6 +2690,7 @@ _xencode__subcmd__help__subcmd__cache_commands() {
     local commands; commands=(
 'stats:Show cache statistics' \
 'clear:Clear all cached responses' \
+'gc:Drop the oldest cached responses until the cache directory fits under a size. The downloaded advisory corpora are not counted and cannot be removed by this command' \
     )
     _describe -t commands 'xencode help cache commands' commands "$@"
 }
@@ -2644,6 +2698,11 @@ _xencode__subcmd__help__subcmd__cache_commands() {
 _xencode__subcmd__help__subcmd__cache__subcmd__clear_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help cache clear commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__cache__subcmd__gc_commands] )) ||
+_xencode__subcmd__help__subcmd__cache__subcmd__gc_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help cache gc commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__cache__subcmd__stats_commands] )) ||
 _xencode__subcmd__help__subcmd__cache__subcmd__stats_commands() {
@@ -2881,6 +2940,11 @@ _xencode__subcmd__help__subcmd__memory__subcmd__show_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help memory show commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__help__subcmd__migrate_commands] )) ||
+_xencode__subcmd__help__subcmd__migrate_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help migrate commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__help__subcmd__models_commands] )) ||
 _xencode__subcmd__help__subcmd__models_commands() {
     local commands; commands=(
@@ -2915,6 +2979,11 @@ _xencode__subcmd__help__subcmd__models__subcmd__list_commands() {
 _xencode__subcmd__help__subcmd__mutants_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help mutants commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__paths_commands] )) ||
+_xencode__subcmd__help__subcmd__paths_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help paths commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__perf_commands] )) ||
 _xencode__subcmd__help__subcmd__perf_commands() {
@@ -3387,6 +3456,11 @@ _xencode__subcmd__memory__subcmd__show_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory show commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__migrate_commands] )) ||
+_xencode__subcmd__migrate_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode migrate commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__models_commands] )) ||
 _xencode__subcmd__models_commands() {
     local commands; commands=(
@@ -3458,6 +3532,11 @@ _xencode__subcmd__models__subcmd__list_commands() {
 _xencode__subcmd__mutants_commands() {
     local commands; commands=()
     _describe -t commands 'xencode mutants commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__paths_commands] )) ||
+_xencode__subcmd__paths_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode paths commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__perf_commands] )) ||
 _xencode__subcmd__perf_commands() {

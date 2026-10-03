@@ -929,25 +929,20 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl XencodeConfig {
-    /// Returns the path to the xencode config directory: `$XCODE_CONFIG_DIR`
-    /// when set (tests and portable installs), else `~/.xencode/`.
+    /// Returns the directory the settings file lives in: `$XCODE_CONFIG_DIR`
+    /// when set (tests and portable installs), else the location
+    /// [`crate::paths`] resolves for settings — `~/.config/xencode`, or
+    /// `~/.xencode` for a person who has never moved off it.
     pub fn config_dir() -> Result<PathBuf, ConfigError> {
-        if let Ok(dir) = std::env::var("XCODE_CONFIG_DIR") {
-            if !dir.is_empty() {
-                return Ok(PathBuf::from(dir));
-            }
-        }
-        dirs::home_dir()
-            .map(|home| home.join(".xencode"))
-            .ok_or(ConfigError::NoHomeDir)
+        crate::paths::settings_dir()
     }
 
-    /// Returns the path to the config file (`~/.xencode/config.json`).
+    /// Returns the path to the config file (`<settings dir>/config.json`).
     pub fn config_path() -> Result<PathBuf, ConfigError> {
         Ok(Self::config_dir()?.join("config.json"))
     }
 
-    /// Load configuration from `~/.xencode/config.json`.
+    /// Load configuration from the file [`Self::config_path`] names.
     ///
     /// Returns defaults if the file doesn't exist.
     pub fn load() -> Result<Self, ConfigError> {
@@ -1016,7 +1011,7 @@ impl XencodeConfig {
         value.is_object().then(|| declared_version(&value))
     }
 
-    /// Save configuration to `~/.xencode/config.json`.
+    /// Save configuration to the file [`Self::config_path`] names.
     ///
     /// The write is atomic and the resulting file is owner-only: this config
     /// holds provider API keys as plain text, so a partly-written file or a
@@ -1862,11 +1857,13 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The env override is process-global, so this is the one test that
-    /// touches `XCODE_CONFIG_DIR`; no other test in this binary calls
-    /// `config_dir()`.
+    /// The env override is process-global, so this test holds the same lock the
+    /// paths tests use; it cannot assume which directory the machine's home
+    /// resolves to, because [`crate::paths`] answers that from what already
+    /// exists on disk.
     #[test]
     fn xcode_config_dir_env_overrides_the_default_location() {
+        let _guard = crate::paths::env_lock();
         let dir = temp_dir();
         std::env::set_var("XCODE_CONFIG_DIR", &dir);
         let result = (|| {
@@ -1879,12 +1876,10 @@ mod tests {
             config.save()?;
             let loaded = XencodeConfig::load()?;
             assert_eq!(loaded, config);
-            // An empty override is not an override: home wins again.
+            // An empty override is not an override: the directory this machine's
+            // layout resolves to wins again, whichever one that is.
             std::env::set_var("XCODE_CONFIG_DIR", "");
-            assert_eq!(
-                XencodeConfig::config_dir()?,
-                dirs::home_dir().unwrap().join(".xencode")
-            );
+            assert_ne!(XencodeConfig::config_dir()?, dir);
             Ok::<(), ConfigError>(())
         })();
         std::env::remove_var("XCODE_CONFIG_DIR");

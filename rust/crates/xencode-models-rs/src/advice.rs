@@ -8,8 +8,8 @@
 //! about.
 //!
 //! Two files can answer: the one embedded at build time, and a replacement at
-//! `~/.xencode/model_advice.json` for a person who wants different advice than
-//! the shipped table gives. The answer always names which file it came from.
+//! `<settings dir>/model_advice.json` for a person who wants different advice
+//! than the shipped table gives. The answer always names which file it came from.
 //!
 //! The GGUF entries carry more than names: each one stores the repository
 //! revision and the file's SHA256 as published by the host on the assembly
@@ -173,8 +173,9 @@ pub fn embedded_preference() -> Vec<String> {
     parse_embedded().ollama_preference
 }
 
-/// The preference order in force here: a person's own `~/.xencode/
-/// model_advice.json` when one parses, the shipped table otherwise. The two
+/// The preference order in force here: a person's own
+/// `<settings dir>/model_advice.json` when one parses, the shipped table
+/// otherwise. The two
 /// questions this file answers — which GGUF fits this machine, and which Ollama
 /// tag to reach for — are decided by the same table, so an override cannot leave
 /// one answering from a file the other ignored.
@@ -182,14 +183,14 @@ pub fn active_preference() -> Vec<String> {
     Advice::load(&default_path()).file.ollama_preference
 }
 
-/// Where a person's own table lives, if they write one: `~/.xencode/
-/// model_advice.json`. This crate does not depend on the config crate, so the
-/// location is derived from the home directory here rather than imported.
+/// Where a person's own table lives, if they write one:
+/// `<settings dir>/model_advice.json` — `~/.config/xencode/model_advice.json`,
+/// or `~/.xencode/model_advice.json` for a person who has never moved off the old
+/// layout.
 pub fn default_path() -> std::path::PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    home.join(".xencode").join("model_advice.json")
+    xencode_config_rs::paths::settings_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("model_advice.json")
 }
 
 /// `YYYY-MM-DD` to days since the Unix epoch; `None` on anything else.
@@ -365,9 +366,10 @@ mod tests {
     fn a_replacement_table_is_looked_for_beside_the_rest_of_the_configuration() {
         let path = default_path();
         assert_eq!(path.file_name().unwrap(), "model_advice.json");
-        assert!(path
-            .to_string_lossy()
-            .ends_with(".xencode/model_advice.json"));
+        assert_eq!(
+            path.parent().unwrap(),
+            xencode_config_rs::paths::settings_dir().unwrap().as_path()
+        );
     }
 
     #[test]

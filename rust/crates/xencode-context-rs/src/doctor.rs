@@ -124,9 +124,9 @@ pub fn parse_nvidia_list(text: &str) -> Vec<String> {
 /// One self-debug check and what it found.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelfCheck {
-    /// `config`, `permissions:config`, `disk:state`, `size:cache`, `index`,
-    /// `git`, `provider:ollama`, `model`, `mcp:server-name`, `metrics`, `cache`,
-    /// `colab:<check>`.
+    /// `config`, `config:version`, `layout`, `permissions:config`, `disk:state`,
+    /// `size:cache`, `index`, `git`, `provider:ollama`, `model`,
+    /// `mcp:server-name`, `metrics`, `cache`, `colab:<check>`.
     pub name: String,
     /// `pass`, `fail`, or `absent` (not applicable here, not broken).
     pub state: String,
@@ -241,7 +241,7 @@ pub fn dir_usage(dir: &std::path::Path) -> Option<(u64, usize)> {
 /// it with the product's own loader; this is the wording of that outcome.
 #[derive(Debug, Clone)]
 pub enum ConfigRead {
-    /// `~/.xencode/config.json` loaded as the product would load it.
+    /// The settings file, loaded as the product would load it.
     Loaded,
     /// No file at all: every setting is a default.
     Absent,
@@ -382,6 +382,55 @@ pub fn check_permissions(label: &str, path: &std::path::Path, mode: Option<u32>)
             )
         },
         fix: (!private).then(|| format!("chmod 600 {}", path.display())),
+    }
+}
+
+/// Whether xencode is still reading its own files out of the single directory it
+/// used before settings, records, cache and downloaded models were split into
+/// four.
+///
+/// This is not a broken installation — everything works, and nothing has been
+/// lost, which is exactly why it needs its own row rather than silence: a report
+/// that says the configuration loads and the cache is a reasonable size would
+/// otherwise leave the person with no reason to expect that their history is
+/// still in `~/.xencode`, and that a machine-wide cleaner aimed at `~/.cache`
+/// cannot see it. `still_old` names the kinds that are; `override_root` is
+/// `$XCODE_CONFIG_DIR`, under which every kind is deliberately in one tree and
+/// no migration is offered.
+pub fn check_layout(still_old: &[String], override_root: Option<&std::path::Path>) -> SelfCheck {
+    let name = "layout".to_string();
+    if let Some(root) = override_root {
+        return SelfCheck {
+            name,
+            state: "pass".to_string(),
+            detail: format!(
+                "every kind is read from {0}, as $XCODE_CONFIG_DIR asks",
+                root.display()
+            ),
+            fix: None,
+        };
+    }
+    if still_old.is_empty() {
+        return SelfCheck {
+            name,
+            state: "pass".to_string(),
+            detail: "settings, records, cache and downloaded models are in their own directories"
+                .to_string(),
+            fix: None,
+        };
+    }
+    SelfCheck {
+        name,
+        state: "fail".to_string(),
+        detail: format!(
+            "{0} still read from ~/.xencode, where a cache cleaner cannot be aimed at one kind \
+             without risking the others",
+            still_old.join(", ")
+        ),
+        fix: Some(
+            "run `xencode paths` to see the directories, then `xencode migrate --dry-run`"
+                .to_string(),
+        ),
     }
 }
 
@@ -682,6 +731,32 @@ pub fn check_cache_writable(xencode_dir: &std::path::Path) -> SelfCheck {
 mod tests {
     use super::*;
 
+    /// A layout that still reads `~/.xencode` is not broken, and the row has to
+    /// say both things: that it works, and that the fix is named.
+    #[test]
+    fn a_layout_still_in_the_old_directory_names_the_command_that_moves_it() {
+        let row = check_layout(&["settings".to_string(), "state".to_string()], None);
+        assert_eq!(row.name, "layout");
+        assert_eq!(row.state, "fail");
+        assert!(row.detail.contains("settings, state"), "{}", row.detail);
+        let fix = row.fix.expect("a layout row always carries the command");
+        assert!(fix.contains("xencode paths"), "{fix}");
+        assert!(fix.contains("xencode migrate"), "{fix}");
+
+        let moved = check_layout(&[], None);
+        assert!(moved.passed(), "{}", moved.detail);
+        assert!(moved.fix.is_none(), "nothing is wrong to fix");
+
+        // Under the override one tree is the point, so it is not a finding.
+        let portable = check_layout(&[], Some(std::path::Path::new("/mnt/usb/xencode-config")));
+        assert!(portable.passed());
+        assert!(
+            portable.detail.contains("/mnt/usb/xencode-config"),
+            "{}",
+            portable.detail
+        );
+    }
+
     #[test]
     fn only_gpu_lines_count() {
         let text = "GPU 0: Tesla T4 (UUID: GPU-123)\nFailed to init\nGPU 1: L4 (UUID: GPU-456)\n";
@@ -831,7 +906,7 @@ mod tests {
 
     #[test]
     fn a_config_that_does_not_parse_says_so_and_says_what_to_do() {
-        let path = std::path::Path::new("/home/sree/.xencode/config.json");
+        let path = std::path::Path::new("/home/user/.config/xencode/config.json");
         let loaded = check_config(path, ConfigRead::Loaded);
         assert_eq!(loaded.state, "pass");
         assert!(loaded.fix.is_none());
@@ -864,7 +939,7 @@ mod tests {
 
     #[test]
     fn a_config_version_is_reported_as_migrating_current_or_refused() {
-        let path = std::path::Path::new("/home/sree/.xencode/config.json");
+        let path = std::path::Path::new("/home/user/.config/xencode/config.json");
 
         let absent = check_config_version(path, None, 1);
         assert_eq!(absent.state, "absent");

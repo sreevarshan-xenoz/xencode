@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2065 tests passing, zero warnings (re-verified 2026-10-03, after DB-3)
+- [x] Workspace gates green — 16 crates, 2096 tests passing, zero warnings (re-verified 2026-10-03, after DB-4)
 
 ## Model Catalog Honesty
 
@@ -3361,12 +3361,34 @@ There is no server to fall back on. This is the trust layer.
   user, because Secret Service answers anything in that session and is
   unavailable headless/over SSH. Encrypting the whole config with `sops`/`age`
   was left alone — it breaks the TUI's own save path.
-- **DB-4 XDG-correct paths plus state hygiene** — config →
-  `dirs::config_dir()`, state → `state_dir()`, cache → `cache_dir()`, with a
-  read-fallback to legacy `~/.xencode` and `XCODE_CONFIG_DIR` keeping
-  precedence (fact 12); plus `xencode cache gc --max-mb` and a size-trim on
-  `metrics.jsonl` (fact 10). **M**. Trap: a hard move orphans existing users'
-  checkpoints — that is a migration, not a rename.
+- **DB-4 XDG-correct paths plus state hygiene** — **Done 2026-10-03.** Four
+  kinds of file (`Files::{Settings,State,Cache,Data}` in the new
+  `xencode-config-rs/src/paths.rs`) resolve through one function: an
+  `XCODE_CONFIG_DIR` pin roots all four, else the modern directory **if it
+  exists**, else the legacy `~/.xencode` if that exists, else the modern one
+  anyway. The "exists" test is what lets an installation keep working — a half
+  move is worse than an old layout, and `xencode paths` prints which answer each
+  kind gave. Settings → `dirs::config_dir()`, state → `state_dir()` (falling
+  back to the settings directory, where `~/.local/state` is not a thing yet),
+  cache → `cache_dir()`, and downloaded models → `data_dir()` so a cache cleaner
+  cannot reach a weight. Every kind but data had files under `~/.xencode`;
+  `models/` and `cache/` were the two subdirectories, and they move whole.
+  `xencode migrate` is explicit only, never automatic, and refuses under a pin.
+  **What the row did not predict:** `xencode cache gc` had to become a free
+  function over the directory rather than a method — building a persistent
+  `ResponseCache` runs `load_from_disk`, which trims to its capacity, so a
+  housekeeping command that happened to construct one would have deleted
+  responses for a reason nobody asked for. It also counts only top-level
+  `*.json`, because the advisory corpora share the cache directory and are a
+  download, not an answer. The `metrics.jsonl` trim rides inside
+  `refresh_rollup` and only after the fold, with `byte_offset` pulled back by
+  what was cut so the totals stay cumulative over every turn ever recorded: a
+  5 128-row file came down to 1 048 267 bytes and the profiler still reported
+  5 128. Two things the row did not say: the workspace's own `.xencode/` —
+  retrieval index, recorded sessions, `cache/metrics.jsonl` — does not move, only
+  the four directories in the person's home do; and its "checkpoints" trap names
+  a thing this product does not have, so the loss a hard move would have caused
+  is to `cache/` and `models/`, which is why both move whole. **M**.
 - **DB-5 Keep JSONL, add torn-line discard** — append-only JSONL plus an atomic
   snapshot is right for a single binary; the reader drops a partial trailing
   line instead of failing. **S**. Rejected below the reasoning: redb is alive
@@ -9039,7 +9061,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 10 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 11 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -9053,7 +9075,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **CX-8** | A GPU-free performance gate in CI | capability | GPU-free performance gate in CI |
 | **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3); done 2026-10-03 |
 | **DB-3** | Honest secrets tiering | capability | secrets tiering — the keyring through `command:`, not a Secret Service dependency; done 2026-10-03 |
-| **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene |
+| **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene; done 2026-10-03 |
 | **DB-6** | `xencode doctor` as the single bug report | capability | the flag is `--format json`; done 2026-10-03 |
 | **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0); done 2026-10-03 |
 | **EV-9** | API prompt-cache accounting | capability | API prompt-cache accounting — blocked while AnthropicProvider stays parked |

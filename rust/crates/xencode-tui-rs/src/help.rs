@@ -114,7 +114,7 @@ const COMMANDS: &[Binding] = &[
     ),
     (
         "/skills [reload]",
-        "show which SKILL.md skills loaded from ~/.xencode and .xencode; reload re-scans",
+        "show which SKILL.md skills loaded from the user directory and the project; reload re-scans",
     ),
     (
         "/trace [turns]",

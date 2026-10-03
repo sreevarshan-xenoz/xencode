@@ -40,8 +40,9 @@ Launches the immersive TUI. Run `/init` once per project for project-aware
 answers, then just ask.
 
 Local models need nothing else. For cloud models, `xencode config set
-openai_api_key <key>` stores the key in the `api_keys` object of
-`~/.xencode/config.json` — the value is never printed back, and `config show`
+openai_api_key <key>` stores the key in the `api_keys` object of `config.json`
+in the settings directory (`$XDG_CONFIG_HOME/xencode`, or `~/.xencode` before it
+has been migrated) — the value is never printed back, and `config show`
 says only where each credential came from. To keep a key out of that file, store
 a reference to a program that prints it (`xencode config set qwen_api_key
 "command:pass show xencode/qwen"`) or leave it unset and export `API_KEY_QWEN`.
@@ -174,7 +175,8 @@ xencode colab down                       # ALWAYS run this: an unstopped VM keep
 ```
 
 `up` writes `remote_base_url` (and the matching local runtime URL) into
-`~/.xencode/config.json`, so after it succeeds the VM is just another provider:
+`config.json` in the settings directory, so after it succeeds the VM is just
+another provider:
 select it in the TUI model picker (`m`) or watch it in Provider Health
 (Ctrl+F → Provider Health). Colab gives a free-tier VM about 12 hours and wipes
 its disk, so when the row goes red run `xencode colab up --reconnect` — it
@@ -213,8 +215,8 @@ needs the mouse, and **Settings → `Mouse Capture`** gives it back to the
 terminal when a plain drag should select text instead.
 The same choice lives on the Settings panel (`s`) and the same list drives
 both, alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
-everything persists to `~/.xencode/config.json`. A layout you resized comes
-back next start from `~/.xencode/layout.json` (private, `0600`); `Ctrl+U`
+everything persists to `config.json` in the settings directory. A layout you
+resized comes back next start from `layout.json` beside it (private, `0600`); `Ctrl+U`
 clears it, and the file never stores your conversation or model state — only
 where the panes were. `Ctrl+0` lists every one of those changes this session has
 been through, each named by what caused it, with the pane widths before and

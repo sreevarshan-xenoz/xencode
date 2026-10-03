@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,39 @@ impl fmt::Display for CacheError {
 
 impl std::error::Error for CacheError {}
 
+/// What a size collection removed, in the numbers the person asked for: how
+/// many responses went, and how much the directory holds either side of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Collected {
+    /// Responses deleted, including any this version can no longer read.
+    pub removed: usize,
+    /// Bytes the response files took before.
+    pub bytes_before: u64,
+    /// Bytes they take now.
+    pub bytes_after: u64,
+    /// The cap the collection was asked to bring the responses under.
+    pub cap_bytes: u64,
+}
+
+impl Collected {
+    /// Whether the cap was already met, so nothing went.
+    pub fn was_within_cap(&self) -> bool {
+        self.removed == 0
+    }
+
+    /// How many bytes the collection freed.
+    pub fn freed_bytes(&self) -> u64 {
+        self.bytes_before.saturating_sub(self.bytes_after)
+    }
+}
+
+/// One response file on disk, with what it costs and when it was last useful.
+struct Victim {
+    path: PathBuf,
+    bytes: u64,
+    last_used: f64,
+}
+
 /// LRU response cache with TTL expiry and optional disk persistence.
 ///
 /// Mirrors the Python `ResponseCache` from `xencode/core/cache.py`.
@@ -100,12 +133,11 @@ impl ResponseCache {
         }
     }
 
-    /// Create a cache with disk persistence in `~/.xencode/cache/`.
+    /// Create a cache with disk persistence in the directory the paths module
+    /// resolves for throwaway data — `~/.cache/xencode`, or `~/.xencode/cache`
+    /// for a person who has never moved off the old layout.
     pub fn with_persistence(max_size: usize, ttl_seconds: f64) -> Result<Self, CacheError> {
-        let cache_dir = dirs::home_dir()
-            .ok_or(CacheError::NoHomeDir)?
-            .join(".xencode")
-            .join("cache");
+        let cache_dir = xencode_config_rs::paths::cache_dir().map_err(|_| CacheError::NoHomeDir)?;
         std::fs::create_dir_all(&cache_dir).map_err(CacheError::Io)?;
 
         let mut cache = Self {
@@ -210,6 +242,16 @@ impl ResponseCache {
     /// Get current cache statistics.
     pub fn stats(&self) -> &CacheStats {
         &self.stats
+    }
+
+    /// The directory a persistent cache uses, without loading or trimming it.
+    ///
+    /// A size collection needs the same place the cache writes to but must not
+    /// construct one: `with_persistence` reads every entry in and trims the
+    /// excess to its capacity, so a housekeeping command that happened to build a
+    /// cache would delete responses for a reason the person did not ask for.
+    pub fn persistence_dir() -> Result<PathBuf, CacheError> {
+        xencode_config_rs::paths::cache_dir().map_err(|_| CacheError::NoHomeDir)
     }
 
     /// Generate a deterministic cache key from prompt + model.
@@ -338,6 +380,94 @@ fn current_timestamp() -> f64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64()
+}
+
+/// When a cached response was last useful, as the file on disk tells it.
+///
+/// A read is a use in the running cache, but only a write reaches the disk, so
+/// the newest fact a file holds is when it was written. Entries written before
+/// `last_accessed` existed carry `0.0` there; those fall back to the write time,
+/// and a file that is neither falls back to when the filesystem last changed it.
+fn recorded_use(path: &Path, entry: Option<&CacheEntry>) -> f64 {
+    if let Some(entry) = entry {
+        let used = if entry.last_accessed > 0.0 {
+            entry.last_accessed
+        } else {
+            entry.timestamp
+        };
+        if used > 0.0 {
+            return used;
+        }
+    }
+    path.metadata()
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|when| when.duration_since(UNIX_EPOCH).ok())
+        .map(|since| since.as_secs_f64())
+        .unwrap_or(f64::MIN)
+}
+
+/// Delete cached responses from `cache_dir`, least recently useful first, until
+/// the responses it holds fit under `cap_bytes`, and report the numbers either
+/// side of it.
+///
+/// This is the whole point of splitting the cache directory out of the settings
+/// directory: a person can say "keep this under a gigabyte" about the throwaway
+/// answers without putting the configuration, the session records or a
+/// downloaded model at risk.
+///
+/// Only the top-level `*.json` files are counted and only they are deleted. The
+/// same directory holds the advisory corpora under `advisories/`, which the
+/// person downloaded on purpose and which cost a slow fetch to replace; a cap
+/// aimed at "the cache" that also discarded them would turn housekeeping into
+/// data loss.
+///
+/// A file that does not parse as a response is the least useful thing in the
+/// directory by definition — no read can use it — so it goes first.
+pub fn collect_to_size(cache_dir: &Path, cap_bytes: u64) -> Result<Collected, CacheError> {
+    let mut victims = Vec::new();
+    if cache_dir.exists() {
+        for entry in std::fs::read_dir(cache_dir).map_err(CacheError::Io)? {
+            let entry = entry.map_err(CacheError::Io)?;
+            let path = entry.path();
+            if path.is_dir() || !path.extension().is_some_and(|ext| ext == "json") {
+                continue;
+            }
+            let bytes = entry.metadata().map_err(CacheError::Io)?.len();
+            let parsed = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|content| serde_json::from_str::<CacheEntry>(&content).ok());
+            victims.push(Victim {
+                last_used: recorded_use(&path, parsed.as_ref()),
+                path,
+                bytes,
+            });
+        }
+    }
+    let bytes_before: u64 = victims.iter().map(|victim| victim.bytes).sum();
+    let mut report = Collected {
+        cap_bytes,
+        bytes_before,
+        bytes_after: bytes_before,
+        removed: 0,
+    };
+    // The name breaks a tie, so two responses written in the same instant are
+    // removed in the same order every run.
+    victims.sort_by(|a, b| {
+        a.last_used
+            .partial_cmp(&b.last_used)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    for victim in victims {
+        if report.bytes_after <= cap_bytes {
+            break;
+        }
+        std::fs::remove_file(&victim.path).map_err(CacheError::Io)?;
+        report.bytes_after -= victim.bytes;
+        report.removed += 1;
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -623,5 +753,169 @@ mod tests {
         );
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Write one cached response file directly, so a test controls both how big
+    /// it is and the use time the collection reads.
+    fn write_response(cache_dir: &Path, key: &str, last_used: f64, response: &str) {
+        fs::write(
+            cache_dir.join(format!("{key}.json")),
+            format!(
+                r#"{{"response":"{response}","model":"m","prompt_hash":"{key}","timestamp":{last_used},"last_accessed":{last_used},"hit_count":0}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    fn json_files(cache_dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(cache_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+            })
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_size_collection_removes_the_oldest_responses_until_the_cap_is_met() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        // Four responses, each one byte larger than the last and each newer, so
+        // the order they must go in is the reverse of the order they were made.
+        write_response(&cache_dir, "oldest", 1000.0, "a");
+        write_response(&cache_dir, "older", 2000.0, "bb");
+        write_response(&cache_dir, "newer", 3000.0, "ccc");
+        write_response(&cache_dir, "newest", 4000.0, "dddd");
+
+        let before: u64 = json_files(&cache_dir)
+            .iter()
+            .map(|name| fs::metadata(cache_dir.join(name)).unwrap().len())
+            .sum();
+
+        // A cap one response smaller than the total: exactly the oldest goes.
+        let one_oldest = fs::metadata(cache_dir.join("oldest.json")).unwrap().len();
+        let report = collect_to_size(&cache_dir, before - one_oldest).unwrap();
+
+        assert_eq!(report.removed, 1);
+        assert_eq!(report.bytes_before, before);
+        assert_eq!(report.bytes_after, before - one_oldest);
+        assert_eq!(report.freed_bytes(), one_oldest);
+        assert!(!report.was_within_cap());
+        assert_eq!(
+            json_files(&cache_dir),
+            vec!["newer.json", "newest.json", "older.json"]
+        );
+
+        // Asking for less than nothing takes the rest, oldest first.
+        let report = collect_to_size(&cache_dir, 0).unwrap();
+        assert_eq!(report.removed, 3);
+        assert_eq!(report.bytes_after, 0);
+        assert!(json_files(&cache_dir).is_empty());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_size_collection_that_is_already_met_removes_nothing() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        write_response(&cache_dir, "k1", 1000.0, "a");
+        write_response(&cache_dir, "k2", 2000.0, "b");
+
+        let total: u64 = json_files(&cache_dir)
+            .iter()
+            .map(|name| fs::metadata(cache_dir.join(name)).unwrap().len())
+            .sum();
+        let report = collect_to_size(&cache_dir, total).unwrap();
+
+        assert!(report.was_within_cap());
+        assert_eq!(report.removed, 0);
+        assert_eq!(report.bytes_after, total);
+        assert_eq!(json_files(&cache_dir).len(), 2);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A file no read can use is the least useful thing in the directory, so it
+    /// must go before a response that is merely old.
+    #[test]
+    fn a_size_collection_takes_an_unreadable_response_first() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        fs::write(cache_dir.join("broken.json"), "not a cache entry at all").unwrap();
+        write_response(&cache_dir, "ancient", 1.0, "still readable");
+
+        let report = collect_to_size(&cache_dir, 0).unwrap();
+        assert_eq!(report.removed, 2);
+        assert!(
+            !cache_dir.join("broken.json").exists(),
+            "the unreadable file survived"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn responses_written_in_the_same_instant_are_removed_in_a_stable_order() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        // Identical use times, so only the name can decide who goes first.
+        write_response(&cache_dir, "b", 5000.0, "x");
+        write_response(&cache_dir, "a", 5000.0, "x");
+        write_response(&cache_dir, "c", 5000.0, "x");
+
+        let kept_bytes = fs::metadata(cache_dir.join("c.json")).unwrap().len();
+        collect_to_size(&cache_dir, kept_bytes).unwrap();
+
+        assert_eq!(json_files(&cache_dir), vec!["c.json"]);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The advisory corpora live in the same directory and cost a slow fetch to
+    /// replace. A cap on "the cache" must not reach them.
+    #[test]
+    fn a_size_collection_leaves_the_advisory_corpora_alone() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        let advisories = cache_dir.join("advisories");
+        fs::create_dir_all(&advisories).unwrap();
+
+        fs::write(advisories.join("corpus.json"), vec![b'x'; 4096]).unwrap();
+        write_response(&cache_dir, "k", 1000.0, "a");
+
+        let report = collect_to_size(&cache_dir, 0).unwrap();
+        assert_eq!(
+            report.removed, 1,
+            "only the response should have been counted: {report:?}"
+        );
+        assert!(
+            advisories.join("corpus.json").exists(),
+            "the collection reached into advisories/"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_size_collection_on_a_directory_that_is_not_there_reports_nothing() {
+        let dir = temp_dir().join("never-created");
+        let report = collect_to_size(&dir, 1024).unwrap();
+        assert_eq!(report.removed, 0);
+        assert_eq!(report.bytes_before, 0);
+        assert!(report.was_within_cap());
     }
 }

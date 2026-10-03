@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `DB-4`: xencode keeps four kinds of file in four directories, and says where
+
+Settings, session state, cache and downloaded models all lived in one `~/.xencode`
+directory. That made three things harder than they should be: a cache cleaner had
+to be aimed at the whole directory, so clearing throwaway answers risked the
+config; a downloaded 20 GB model sat next to the keyring file; and nothing bounded
+how big the per-turn metrics file or the cached answers could get.
+
+They now have separate homes, in the places the platform already reserves for
+them — `$XDG_CONFIG_HOME/xencode`, `$XDG_STATE_HOME/xencode`,
+`$XDG_CACHE_HOME/xencode` and `$XDG_DATA_HOME/xencode`, falling back to
+`~/.config`, `~/.local/state`, `~/.cache` and `~/.local/share`.
+
+```
+$ xencode paths
+Where xencode keeps its own files:
+  •          settings  /home/me/.xencode
+  •             state  /home/me/.xencode
+  •             cache  /home/me/.xencode/cache
+  • downloaded models  /home/me/.local/share/xencode
+
+  Still in ~/.xencode: settings, state, cache
+  Run `xencode migrate --dry-run` to see what would move, then `xencode migrate`.
+  Until you run it, nothing moves: xencode keeps reading the old directory.
+```
+
+Nothing moves by itself — an existing installation keeps working, because the
+modern directory wins only once it exists, and a half-finished move is worse than
+an old layout. `xencode migrate` is the one thing that moves it, and
+`xencode migrate --dry-run` prints the whole report without touching a file:
+
+```
+$ xencode migrate --dry-run
+Would move 6 entries from /tmp/scratch/home/.xencode:
+  settings → /tmp/scratch/home/.config/xencode
+    layout.json
+    config.json
+  state → /tmp/scratch/home/.local/state/xencode
+    audit.jsonl
+    conversation_memory.json
+  cache → /tmp/scratch/home/.cache/xencode
+    cache
+  downloaded models → /tmp/scratch/home/.local/share/xencode
+    models
+  /tmp/scratch/home/.xencode is empty afterwards and would be removed.
+
+  Nothing above has happened yet — run `xencode migrate` to do it.
+```
+
+A destination that already holds a file of that name is never overwritten: the
+migration says so, names the path, and reports that xencode now reads the file
+that was already there. `cache` and `models` move as directories so every cached
+response and weight keeps its name, everything else is sorted by what it is, a
+file that cannot be renamed onto the new volume is copied and then removed, and
+`~/.xencode` is deleted only once it is empty. Permissions travel with the file,
+so a `0600` config is still `0600` afterwards, and an existing private directory
+is never made more readable on the way. Under `XCODE_CONFIG_DIR` the command
+refuses, since that pin is already the layout the person asked for.
+
+`xencode doctor` gained a `layout` row that names the kinds still in the old
+directory and points at the command that moves them, and `xencode paths
+--format json` gives every kind twice — where it is and where it would go — for
+anything reading the report programmatically.
+
+Two commands now bound what used to grow without limit:
+
+```
+$ xencode cache gc --max-mb 1
+cache:   /tmp/scratch/home/.cache/xencode
+Removed 5 cached responses, oldest first: 3.4 MiB down to 600106 B (2.9 MiB freed), to fit under 1.0 MiB.
+The advisory corpora under advisories/ are a separate download and were not counted or touched.
+```
+
+`gc` drops the oldest cached responses — oldest by when the file says it was
+written, since a read is not recorded on disk — and cannot reach the advisory
+corpora or anything outside the cache directory. And `metrics.jsonl`, the record
+of every request the project has made, is now trimmed while its totals are
+carried: once it grows past twice the window, the rows the rollup has already
+summed are cut off the front, so the figures keep covering every turn while the
+file stops growing. Measured on a project with 5 128 recorded turns: the file came
+down to 1 048 267 bytes and the profiler still reported all 5 128.
+
 ### Added — `DB-3`: a provider credential can stay out of `config.json`, and nothing prints a key
 
 `xencode config set` took no credential names at all, so the only way to give a

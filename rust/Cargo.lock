@@ -4039,10 +4039,10 @@ dependencies = [
 name = "xencode-cache-rs"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "xencode-config-rs",
  "xencode-core-rs",
 ]
 
@@ -4160,9 +4160,9 @@ name = "xencode-memory-rs"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dirs",
  "serde",
  "serde_json",
+ "xencode-config-rs",
  "xencode-core-rs",
 ]
 
@@ -4175,6 +4175,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "xencode-config-rs",
 ]
 
 [[package]]
@@ -4190,6 +4191,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "xencode-config-rs",
 ]
 
 [[package]]
@@ -4247,6 +4249,7 @@ dependencies = [
  "tui-textarea",
  "xencode-agents-rs",
  "xencode-analysis-rs",
+ "xencode-colab-rs",
  "xencode-collaboration-rs",
  "xencode-config-rs",
  "xencode-context-rs",

@@ -19,7 +19,7 @@ pub fn build_app_with_state(state: Arc<ws::AppState>) -> Router {
 }
 
 /// Tests for the config-reading routes must not see the developer's real
-/// `~/.xencode/config.json`: which local servers happen to be running (or a
+/// the settings file: which local servers happen to be running (or a
 /// Colab forward a live run left on the configured port) changes what
 /// `/api/models` returns. Pointing `$XCODE_CONFIG_DIR` at a temp dir holding a
 /// config whose local endpoints are closed makes those routes deterministic

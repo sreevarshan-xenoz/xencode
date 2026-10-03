@@ -122,7 +122,7 @@ async fn ws_handler(
 ///
 /// The llamacpp block deliberately omits `model_path`, `executable`, and
 /// `args`: those are host filesystem details, this endpoint is public, and
-/// the operator can read them in `~/.xencode/config` locally.
+/// the operator can read them in their own settings file locally.
 async fn get_config() -> Json<serde_json::Value> {
     let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     Json(serde_json::json!({

@@ -76,6 +76,12 @@ Write one bug report: configuration, secrets, disk, providers, models, MCP serve
 xencode\-session(1)
 Name sessions, resolve them, and export redacted transcripts
 .TP
+xencode\-paths(1)
+Where xencode keeps its own files: settings, session records, cache and downloaded models, and whether they are still in `~/.xencode`
+.TP
+xencode\-migrate(1)
+Move the files in `~/.xencode` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty
+.TP
 xencode\-verify(1)
 Run the machine\-checkable checklist: test, lint, fmt — each verified, none graded
 .TP
