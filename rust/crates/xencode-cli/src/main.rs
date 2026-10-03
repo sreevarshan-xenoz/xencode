@@ -11,6 +11,7 @@ use xencode_analysis_rs::security::VulnerabilityScanner;
 use xencode_analysis_rs::web::{fetch_url, FetchedPage};
 use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
+use xencode_context_rs::doctor as doc;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{find_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient};
@@ -451,7 +452,8 @@ enum Commands {
         format: OutputFormat,
     },
 
-    /// Probe and display this machine: cores, memory, GPUs, logs, colab route
+    /// Write one bug report: configuration, secrets, disk, providers, models,
+    /// MCP servers and the Colab bridge. Flags narrow it to one part.
     Doctor {
         /// Machine environment facts
         #[arg(long)]
@@ -4533,10 +4535,10 @@ async fn run_doctor(
     use xencode_context_rs::doctor;
 
     if !env && !deps && !selfcheck {
-        return Err(
-            "nothing to probe: `xencode doctor` needs `--env`, `--deps`, `--selfcheck`, or several"
-                .to_string(),
-        );
+        // Bare `xencode doctor` is the bug report: every check the other flags
+        // ask about, plus the state files, permissions and free space a person
+        // pastes into an issue. It is the superset, not a fourth thing.
+        return run_bug_report(format).await;
     }
     if selfcheck {
         return run_selfcheck(format).await;
@@ -4743,33 +4745,36 @@ fn run_doctor_deps(format: OutputFormat) -> Result<(), String> {
     }
 }
 
-async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
-    use xencode_context_rs::doctor as doc;
+/// One address the configuration says a model comes from, and what would start
+/// it if nothing answers. A cloud provider is the same shape with no start
+/// command: the server belongs to someone else.
+struct Endpoint {
+    name: &'static str,
+    url: String,
+    start_command: Option<&'static str>,
+}
 
-    let root = std::env::current_dir().map_err(|e| e.to_string())?;
-    let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
-    let mut checks = vec![
-        doc::check_index(&xencode_dir),
-        doc::check_git(&root),
-        doc::check_metrics(&xencode_dir),
-        doc::check_cache_writable(&xencode_dir),
-    ];
-
-    // Providers are dialled at the address the config points them at. This
-    // machine's llama.cpp server is not on the port a remembered default would
-    // guess, so a check that hardcoded an address proved nothing about the
-    // route the model would actually take.
-    let config = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
-    let mut locals: Vec<(&str, String, Option<&str>)> = vec![
-        ("ollama", config.ollama_url.clone(), Some("ollama serve")),
-        (
-            "llamacpp",
-            config.llama_cpp_url.clone(),
-            Some("llama-server --model <path>"),
-        ),
+/// Every endpoint this configuration would dial, in a fixed order so two runs of
+/// the same report line up.
+fn endpoints(config: &xencode_config_rs::XencodeConfig) -> Vec<Endpoint> {
+    let mut list = vec![
+        Endpoint {
+            name: "ollama",
+            url: config.ollama_url.clone(),
+            start_command: Some("ollama serve"),
+        },
+        Endpoint {
+            name: "llamacpp",
+            url: config.llama_cpp_url.clone(),
+            start_command: Some("llama-server --model <path>"),
+        },
     ];
     if !config.remote_base_url.trim().is_empty() {
-        locals.push(("remote", config.remote_base_url.clone(), None));
+        list.push(Endpoint {
+            name: "remote",
+            url: config.remote_base_url.clone(),
+            start_command: None,
+        });
     }
 
     // A cloud provider is only worth dialling when a key is configured —
@@ -4777,7 +4782,6 @@ async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
     // Env-resolved: a key living in NVIDIA_NIM_API_KEY counts as configured
     // here too, since the route would use it.
     let nvidia_key = config.api_keys.nvidia_api_key_resolved();
-    let mut clouds: Vec<(&str, &str)> = Vec::new();
     for (name, key, host) in [
         ("openai", &config.api_keys.openai_api_key, "api.openai.com"),
         (
@@ -4794,35 +4798,160 @@ async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
         ("nvidia", &nvidia_key, "integrate.api.nvidia.com"),
     ] {
         if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {
-            clouds.push((name, host));
+            list.push(Endpoint {
+                name,
+                url: format!("https://{host}"),
+                start_command: None,
+            });
         }
     }
+    list
+}
 
-    for (name, url, start_command) in locals {
-        match xencode_mcp_rs::address_of(&url) {
-            Some((host, port)) => checks.push(doc::check_provider(
-                name,
+/// Providers are dialled at the address the config points them at. This machine's
+/// llama.cpp server is not on the port a remembered default would guess, so a
+/// check that hardcoded an address proved nothing about the route the model
+/// would actually take.
+fn check_endpoints(config: &xencode_config_rs::XencodeConfig) -> Vec<doc::SelfCheck> {
+    use std::time::Duration;
+    endpoints(config)
+        .into_iter()
+        .map(|endpoint| match xencode_mcp_rs::address_of(&endpoint.url) {
+            Some((host, port)) => doc::check_provider(
+                endpoint.name,
                 &host,
                 port,
-                std::time::Duration::from_secs(2),
-                start_command,
-            )),
-            None => checks.push(doc::SelfCheck {
-                name: format!("provider:{name}"),
+                Duration::from_secs(2),
+                endpoint.start_command,
+            ),
+            None => doc::SelfCheck {
+                name: format!("provider:{}", endpoint.name),
                 state: "fail".to_string(),
-                detail: format!("{url} is not an http or https address to dial"),
-            }),
+                detail: format!("{} is not an http or https address to dial", endpoint.url),
+                fix: Some(format!(
+                    "xencode config set {}_url <http-or-https-address>",
+                    endpoint.name
+                )),
+            },
+        })
+        .collect()
+}
+
+/// The command that would actually work for each way Ollama can refuse the
+/// default model. A model id carrying the `ollama:` prefix is something this
+/// configuration can hold and Ollama cannot serve — it names its models without
+/// a provider prefix — so the row says which name to use rather than telling
+/// the reader to pull a model that will never exist.
+fn ollama_fix(error: &xencode_models_rs::OllamaError, model: &str) -> String {
+    match error {
+        xencode_models_rs::OllamaError::ModelNotFound(name) => match name.strip_prefix("ollama:") {
+            Some(bare) => format!(
+                "Ollama names its models without a provider prefix — set the default to \
+                 `{bare}` or `ollama pull {bare}`"
+            ),
+            None => format!("ollama pull {name}"),
+        },
+        xencode_models_rs::OllamaError::NotRunning(_) => "ollama serve".to_string(),
+        _ => format!("xencode model health {model}"),
+    }
+}
+
+/// Does the server that would serve the default model actually know it by name.
+/// This is the question `xencode model health` asks, asked of the model every
+/// turn starts on — and only of a server on this machine, because the answer for
+/// a model that lives with a service is that service's provider row.
+async fn model_check(config: &xencode_config_rs::XencodeConfig) -> doc::SelfCheck {
+    let model = config.default_model.trim().to_string();
+    if model.is_empty() {
+        return doc::check_model(
+            false,
+            "no default model is configured".to_string(),
+            Some("xencode config set default_model <name>".to_string()),
+        );
+    }
+    // The same prefix chain the router walks, so the report asks the server that
+    // a real turn would contact rather than the one a name looks like.
+    let routing = xencode_providers_rs::RoutingFacts {
+        openrouter_key: config.api_keys.openrouter_api_key.is_some(),
+        remote_host: (!config.remote_base_url.is_empty())
+            .then(|| xencode_providers_rs::url_host(&config.remote_base_url))
+            .flatten(),
+    };
+    match xencode_providers_rs::provider_for(&model, routing) {
+        "llamacpp" => {
+            let client = LlamaCppClient::new(&config.llama_cpp_url, 4);
+            if client.model_ready().await {
+                doc::check_model(
+                    true,
+                    format!(
+                        "{model}: llama-server at {} has a model loaded",
+                        config.llama_cpp_url
+                    ),
+                    None,
+                )
+            } else {
+                doc::check_model(
+                    false,
+                    format!(
+                        "llama-server at {} answers but has no model loaded",
+                        config.llama_cpp_url
+                    ),
+                    Some("xencode llamacpp load <gguf-path>".to_string()),
+                )
+            }
         }
+        "ollama" => {
+            let client = OllamaClient::new(&config.ollama_url, 4);
+            match client.show_model(&model).await {
+                Ok(show) => {
+                    let context = show
+                        .trained_context_tokens
+                        .map(|n| format!("{n} tokens"))
+                        .unwrap_or_else(|| "no context length reported".to_string());
+                    let capabilities = if show.capabilities.is_empty() {
+                        "nothing it declared".to_string()
+                    } else {
+                        show.capabilities.join(", ")
+                    };
+                    doc::check_model(
+                        true,
+                        format!("{model} is in Ollama's list: {context}, can do {capabilities}"),
+                        None,
+                    )
+                }
+                Err(error) => doc::check_model(
+                    false,
+                    format!("Ollama at {}: {error}", config.ollama_url),
+                    Some(ollama_fix(&error, &model)),
+                ),
+            }
+        }
+        other => doc::SelfCheck {
+            name: "model".to_string(),
+            state: "absent".to_string(),
+            detail: format!(
+                "{model} is served by {other}; provider:{other} is the row that dials it"
+            ),
+            fix: None,
+        },
     }
-    for (name, host) in clouds {
-        checks.push(doc::check_provider(
-            name,
-            host,
-            443,
-            std::time::Duration::from_secs(2),
-            None,
-        ));
-    }
+}
+
+/// The rows every `doctor` surface shares: the project's own state, the
+/// configured endpoints, the default model, and each declared MCP server.
+async fn spine_checks(
+    root: &std::path::Path,
+    config: &xencode_config_rs::XencodeConfig,
+) -> Vec<doc::SelfCheck> {
+    let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
+    let mut checks = vec![
+        doc::check_index(&xencode_dir),
+        doc::check_git(root),
+        doc::check_metrics(&xencode_dir),
+        doc::check_cache_writable(&xencode_dir),
+    ];
+    checks.extend(check_endpoints(config));
+    checks.push(model_check(config).await);
 
     // An MCP server is checked by the client the TUI uses: it is started, asked
     // to introduce itself, and killed. A pass is a completed handshake, and a
@@ -4837,10 +4966,16 @@ async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
                     name,
                     false,
                     format!("the declaration {problem}"),
+                    Some(format!(
+                        "give the server `{name}` either a command or a url in the configuration"
+                    )),
                 ));
                 continue;
             }
         };
+        let fix = server.command.as_ref().map(|command| {
+            format!("run `{command}` in a shell and check it answers, or remove `{name}`")
+        });
         match xencode_mcp_rs::McpClient::start(&spec, std::time::Duration::from_secs(5)).await {
             Ok(client) => {
                 let endpoint = client.endpoint();
@@ -4857,40 +4992,177 @@ async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
                             declared.join(", ")
                         }
                     ),
+                    None,
                 ));
             }
-            Err(error) => checks.push(doc::check_mcp(name, false, error.to_string())),
+            Err(error) => checks.push(doc::check_mcp(name, false, error.to_string(), fix)),
         }
     }
+    checks
+}
 
+/// The preflight's rows, restated as report rows. The preflight names its own
+/// checks "colab CLI" and "Colab API"; inside this report they are one group, so
+/// the word is said once.
+fn bridge_rows(report: xencode_colab_rs::PreflightReport) -> Vec<doc::SelfCheck> {
+    report
+        .checks
+        .into_iter()
+        .map(|check| {
+            let short = check
+                .name
+                .strip_prefix("colab ")
+                .or_else(|| check.name.strip_prefix("Colab "))
+                .unwrap_or(check.name);
+            doc::SelfCheck {
+                name: format!("colab:{short}"),
+                state: if check.ok { "pass" } else { "fail" }.to_string(),
+                detail: check.detail,
+                fix: check.fix,
+            }
+        })
+        .collect()
+}
+
+/// The Colab bridge, reported by the gate `xencode colab up` runs through. It is
+/// delegated rather than re-implemented: that preflight owns the version floor
+/// and the keypair, and a second copy of those judgements is a second truth. It
+/// is only asked when the bridge is real on this machine, because its probes
+/// reach the Google backend and a machine that never ran `colab up` has nothing
+/// to report.
+async fn colab_checks() -> Vec<doc::SelfCheck> {
+    let installed = xencode_colab_rs::which("colab").is_some();
+    let state_file = matches!(xencode_colab_rs::ColabState::load(), Ok(Some(_)));
+    let keypair = xencode_colab_rs::preflight::key_paths()
+        .map(|(private, _)| private.exists())
+        .unwrap_or(false);
+    if !(installed || state_file || keypair) {
+        return vec![doc::SelfCheck {
+            name: "colab".to_string(),
+            state: "absent".to_string(),
+            detail: "the Colab bridge is not installed here and has never been brought up"
+                .to_string(),
+            fix: None,
+        }];
+    }
+    // Never `generate_key`: a report reads the machine, it does not create
+    // secret material on it.
+    match xencode_colab_rs::preflight(false).await {
+        Ok(report) => bridge_rows(report),
+        Err(problem) => vec![doc::SelfCheck {
+            name: "colab".to_string(),
+            state: "fail".to_string(),
+            detail: format!("the bridge could not be probed: {problem}"),
+            fix: Some("xencode colab preflight".to_string()),
+        }],
+    }
+}
+
+/// The configuration and the words for how it went, as one pair: the report and
+/// the defaults it falls back to cannot then disagree about what was loaded.
+fn load_config() -> (xencode_config_rs::XencodeConfig, doc::ConfigRead) {
+    let Ok(path) = xencode_config_rs::XencodeConfig::config_path() else {
+        return (
+            xencode_config_rs::XencodeConfig::default(),
+            doc::ConfigRead::Unparseable("no home directory to hold the config".to_string()),
+        );
+    };
+    let outcome = xencode_config_rs::XencodeConfig::load();
+    let read = match &outcome {
+        Ok(_) if path.is_file() => doc::ConfigRead::Loaded,
+        Ok(_) => doc::ConfigRead::Absent,
+        Err(problem) => doc::ConfigRead::Unparseable(problem.to_string()),
+    };
+    (outcome.unwrap_or_default(), read)
+}
+
+/// `xencode doctor --selfcheck`: the slice a person runs when xencode itself
+/// looks broken.
+async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let (config, _) = load_config();
+    let checks = spine_checks(&root, &config).await;
+    render_checks("selfcheck", &checks, format);
+    Ok(())
+}
+
+/// `xencode doctor` with no flag: the whole bug report. Everything the slice
+/// checks, plus the state files this install owns — does the configuration
+/// parse, can its secrets be read by anyone else, is there room on the volume,
+/// how much disk the response cache has taken, and whether the Colab bridge is
+/// usable. The JSON is the report; the text is a rendering of the same rows.
+async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let (config, read) = load_config();
+    let state_dir = xencode_config_rs::XencodeConfig::config_dir().ok();
+
+    let mut checks = Vec::new();
+    let config_path = state_dir
+        .as_ref()
+        .map(|dir| dir.join("config.json"))
+        .unwrap_or_default();
+    checks.push(doc::check_config(&config_path, read));
+    if let Some(dir) = state_dir.as_ref() {
+        checks.push(doc::check_permissions(
+            "config",
+            &dir.join("config.json"),
+            doc::file_mode(&dir.join("config.json")),
+        ));
+        let (key_path, _) = xencode_colab_rs::preflight::key_paths().unwrap_or_else(|_| {
+            (
+                dir.join(xencode_colab_rs::KEY_FILENAME),
+                dir.join("unused.pub"),
+            )
+        });
+        checks.push(doc::check_permissions(
+            "colab-key",
+            &key_path,
+            doc::file_mode(&key_path),
+        ));
+        checks.push(doc::check_free_disk(
+            "state",
+            dir,
+            xencode_context_rs::hwprobe::free_disk_bytes(&dir.display().to_string()),
+        ));
+        checks.push(doc::check_dir_size("cache", &dir.join("cache")));
+    }
+    checks.extend(spine_checks(&root, &config).await);
+    checks.extend(colab_checks().await);
+
+    render_checks("report", &checks, format);
+    Ok(())
+}
+
+/// One list, two renderings. The rows are the report: `--format json` emits them
+/// as they are, and the text listing is the same list with a mark in front.
+fn render_checks(surface: &str, checks: &[doc::SelfCheck], format: OutputFormat) {
+    let failing: Vec<&str> = checks
+        .iter()
+        .filter(|check| check.state == "fail")
+        .map(|check| check.name.as_str())
+        .collect();
     if matches!(format, OutputFormat::Json) {
         println!(
             "{}",
             serde_json::json!({
-                "checks": checks.iter().map(|c| serde_json::json!({
-                    "name": c.name, "state": c.state, "detail": c.detail,
-                })).collect::<Vec<_>>(),
+                "doctor": surface,
+                "version": env!("CARGO_PKG_VERSION"),
+                "ok": failing.is_empty(),
+                "failing": failing,
+                "checks": checks,
             })
         );
-    } else {
-        for check in &checks {
-            let mark = match check.state.as_str() {
-                "pass" => "PASS",
-                "fail" => "FAIL",
-                _ => "ABSENT",
-            };
-            println!("  {:<6} {:<18} {}", mark, check.name, check.detail);
-        }
-        let failed: Vec<&str> = checks
-            .iter()
-            .filter(|c| c.state == "fail")
-            .map(|c| c.name.as_str())
-            .collect();
-        if !failed.is_empty() {
-            println!("\n  failing: {}", failed.join(", "));
+        return;
+    }
+    for check in checks {
+        println!("  {:<6} {:<22} {}", check.mark(), check.name, check.detail);
+        if let Some(fix) = &check.fix {
+            println!("         {:<22} fix: {fix}", "");
         }
     }
-    Ok(())
+    if !failing.is_empty() {
+        println!("\n  failing: {}", failing.join(", "));
+    }
 }
 
 fn run_session(action: SessionAction) -> Result<(), String> {
@@ -7178,9 +7450,9 @@ async fn run_tui() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        attach_images_to_final_user_message, compute_advise, format_image_text, human_duration,
-        join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind, Cli, Commands,
-        GenerateShell, OutputFormat, PerfAction, SessionAction,
+        attach_images_to_final_user_message, compute_advise, doc, format_image_text,
+        human_duration, join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind,
+        Cli, Commands, GenerateShell, OutputFormat, PerfAction, SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -8491,5 +8763,179 @@ mod tests {
             super::source_word(Egress::Cloud),
             "the stream and cache/metrics.jsonl disagree about what an off-machine route is called"
         );
+    }
+
+    /// The `nvidia` endpoint is resolved from `NVIDIA_NIM_API_KEY` as well as
+    /// from the configuration file, so a test cannot pin it without editing the
+    /// environment every other test reads. The rest are asserted on in full.
+    fn endpoint_names(config: &xencode_config_rs::XencodeConfig) -> Vec<&'static str> {
+        super::endpoints(config)
+            .iter()
+            .filter(|endpoint| endpoint.name != "nvidia")
+            .map(|endpoint| endpoint.name)
+            .collect()
+    }
+
+    #[test]
+    fn a_config_with_no_keys_dials_only_the_two_local_servers() {
+        let config = xencode_config_rs::XencodeConfig::default();
+        assert_eq!(endpoint_names(&config), ["ollama", "llamacpp"]);
+
+        // The start command is the row's fix, so it has to be the real one.
+        let list = super::endpoints(&config);
+        assert_eq!(list[0].start_command, Some("ollama serve"));
+        assert_eq!(
+            list[1].start_command,
+            Some("llama-server --model <path>"),
+            "the report must tell the reader to run the command that loads a model"
+        );
+        assert_eq!(list[0].url, config.ollama_url);
+        assert_eq!(list[1].url, config.llama_cpp_url);
+    }
+
+    #[test]
+    fn a_configured_remote_and_a_keyed_cloud_join_the_dial_list() {
+        let mut config = xencode_config_rs::XencodeConfig {
+            remote_base_url: "http://127.0.0.1:18000/v1".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(endpoint_names(&config), ["ollama", "llamacpp", "remote"]);
+        // A service the person may not have running is not something this
+        // machine can be told to start, so there is no command to name.
+        assert_eq!(super::endpoints(&config)[2].start_command, None);
+
+        config.api_keys.openai_api_key = Some("sk-not-a-real-key".to_string());
+        config.api_keys.google_gemini_api_key = Some("not-a-real-key".to_string());
+        assert_eq!(
+            endpoint_names(&config),
+            ["ollama", "llamacpp", "remote", "openai", "gemini"],
+            "clouds come after the local endpoints, in the order the code lists them"
+        );
+        let clouds: Vec<String> = super::endpoints(&config)
+            .iter()
+            .skip(3)
+            .map(|endpoint| endpoint.url.clone())
+            .collect();
+        assert_eq!(
+            clouds,
+            [
+                "https://api.openai.com".to_string(),
+                "https://generativelanguage.googleapis.com".to_string()
+            ],
+            "the address dialled is the provider's own host, not one the report guessed"
+        );
+    }
+
+    #[test]
+    fn a_key_that_is_only_whitespace_does_not_open_a_cloud_row() {
+        let config = xencode_config_rs::XencodeConfig {
+            api_keys: xencode_config_rs::ApiKeys {
+                openrouter_api_key: Some("   ".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            endpoint_names(&config),
+            ["ollama", "llamacpp"],
+            "a saved blank key is not a configured provider"
+        );
+    }
+
+    #[test]
+    fn the_bridge_rows_are_named_once_inside_the_report() {
+        let report = xencode_colab_rs::PreflightReport {
+            checks: vec![
+                xencode_colab_rs::Check {
+                    name: "colab CLI",
+                    ok: true,
+                    detail: "/home/someone/.local/bin/colab".to_string(),
+                    fix: None,
+                },
+                xencode_colab_rs::Check {
+                    name: "Colab API",
+                    ok: false,
+                    detail: "`colab sessions` failed — not signed in".to_string(),
+                    fix: Some("gcloud auth application-default login".to_string()),
+                },
+                xencode_colab_rs::Check {
+                    name: "OpenSSH",
+                    ok: true,
+                    detail: "ssh at /usr/bin/ssh".to_string(),
+                    fix: None,
+                },
+            ],
+        };
+        let rows = super::bridge_rows(report);
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["colab:CLI", "colab:API", "colab:OpenSSH"]);
+        assert_eq!(rows[1].state, "fail");
+        assert_eq!(
+            rows[1].fix.as_deref(),
+            Some("gcloud auth application-default login"),
+            "the remediation the bridge owns rides through unchanged"
+        );
+    }
+
+    #[test]
+    fn a_refused_model_is_answered_with_the_command_that_would_work() {
+        // The three ways Ollama can turn the default model away, each answered
+        // with what the reader should actually run.
+        use xencode_models_rs::OllamaError;
+        assert_eq!(
+            super::ollama_fix(
+                &OllamaError::NotRunning("error sending request".to_string()),
+                "ollama:qwen2.5:7b"
+            ),
+            "ollama serve"
+        );
+        // An id carrying the provider prefix is what the configuration can hold
+        // and Ollama cannot serve: `ollama pull ollama:qwen2.5:7b` would fetch
+        // nothing, so the row names the bare model instead.
+        let prefixed = super::ollama_fix(
+            &OllamaError::ModelNotFound("ollama:qwen2.5:7b".to_string()),
+            "ollama:qwen2.5:7b",
+        );
+        assert!(
+            prefixed.contains("set the default to `qwen2.5:7b`"),
+            "{prefixed}"
+        );
+        assert!(prefixed.contains("`ollama pull qwen2.5:7b`"), "{prefixed}");
+        assert!(
+            !prefixed.contains("pull ollama:"),
+            "the fix must not tell the reader to pull a prefixed name: {prefixed}"
+        );
+        assert_eq!(
+            super::ollama_fix(
+                &OllamaError::ModelNotFound("qwen3:4b".to_string()),
+                "qwen3:4b"
+            ),
+            "ollama pull qwen3:4b"
+        );
+        // Anything else is the Ollama client's own problem, and the command that
+        // explains it in full is the health check.
+        assert_eq!(
+            super::ollama_fix(&OllamaError::Timeout("20 s".to_string()), "qwen3:4b"),
+            "xencode model health qwen3:4b"
+        );
+    }
+
+    #[test]
+    fn the_json_report_omits_the_fix_key_only_where_there_is_nothing_to_fix() {
+        let passing = doc::check_model(true, "qwen3:4b is loaded".to_string(), None);
+        let json = serde_json::to_value(&passing).unwrap();
+        assert!(
+            json.get("fix").is_none(),
+            "a reader counting failures should not have to tell a null from an action: {json}"
+        );
+
+        let failing = doc::check_model(
+            false,
+            "nothing listening on 11434".to_string(),
+            Some("ollama serve".to_string()),
+        );
+        let json = serde_json::to_value(&failing).unwrap();
+        assert_eq!(json["fix"], serde_json::json!("ollama serve"));
+        assert_eq!(json["state"], serde_json::json!("fail"));
     }
 }

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `DB-6`: `xencode doctor` with no flag writes the whole bug report
+
+`doctor` could already probe the machine (`--env`), the dependencies (`--deps`)
+and the self-debug slice (`--selfcheck`). Run with no flag it used to say
+"nothing to probe". It now writes the report a person would otherwise assemble
+by hand from six commands: does `~/.xencode/config.json` parse, is it readable
+only by you, how much room is left on the volume your state lives on, how much
+disk the response cache has taken, the project's index, git, `metrics.jsonl` and
+cache directory, every endpoint your configuration would dial, whether the
+server behind your default model actually knows that model by name, each declared
+MCP server, and the Colab bridge.
+
+Every row is `{name, state, detail, fix}` — the same four fields the Colab
+preflight already used — and `--format json` serialises exactly that list, with
+the text listing printing the same rows. One shape, so the file attached to an
+issue cannot say something the screen did not. A `fix` is present only where
+there is something to run: a refused port names the server that would answer on
+it, a world-readable config file names the `chmod 600`, a default model Ollama
+has never heard of names the model id that would work. `ABSENT` is not failure —
+a machine that never recorded metrics, or never installed the Colab bridge, is
+not a broken machine — and the bridge is asked through the same preflight
+`xencode colab up` runs through, so the report and the gate cannot hold two
+different opinions about which `colab` version is acceptable. Its network probes
+are skipped entirely on a machine where the bridge has never existed, and a
+report never generates a keypair: it reads the machine, it does not create
+secret material on it.
+
+The failing branches were watched failing rather than inferred. Running the
+local `llama-server` and pointing `default_model` at a `llamacpp:` id turned
+three rows over (`provider:llamacpp`, `provider:remote`, `model` all `PASS`);
+`chmod 644` on the real `config.json` produced the `FAIL` row naming
+`chmod 600 /home/sree/.xencode/config.json`; the free-space row is a real
+`statvfs` of the volume holding `~/.xencode`, and the cache-size row a walk of
+that directory. Ollama is not installed on this machine, so the wording for a
+model a *running* Ollama does not know is pinned by tests over the function that
+chooses it, not by a live refusal — and that wording matters, because a default
+model saved as `ollama:qwen2.5:7b` is something the configuration can hold and
+Ollama cannot ever serve.
+
 ### Changed — `QO-7`: `xencode doctor --selfcheck` — every row now asks the real question
 
 The self-debug slice reported on six things, and two of them were guesses.

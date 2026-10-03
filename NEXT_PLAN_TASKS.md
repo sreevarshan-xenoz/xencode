@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2022 tests passing, zero warnings (re-verified 2026-10-03, after QO-7)
+- [x] Workspace gates green — 16 crates, 2034 tests passing, zero warnings (re-verified 2026-10-03, after DB-6)
 
 ## Model Catalog Honesty
 
@@ -3335,18 +3335,38 @@ There is no server to fall back on. This is the trust layer.
   but adds a storage engine for write volume this app does not have, sled has
   had no release since 2023, and SQLite WAL drags a C dependency into the
   binary. **L** only if real resume-after-crash grows past what JSONL gives.
-- **DB-6 `xencode doctor --json`** — reuse the `Check{ok, detail, fix}` shape
-  already in `xencode-colab-rs/src/preflight.rs:21-40` so every check is
-  evidence-producing rather than a vibe, and each carries a fix string. Scope:
-  config parses and version is supported, key file permissions, free disk on
-  the state dir, cache and metrics sizes, Ollama/llama.cpp reachability
-  (folding in the existing per-model `ModelAction::Health`, `main.rs:784-815`),
-  and the Colab bridge by delegation — because `ColabAction::Preflight`
-  (`preflight.rs:85-257`) checks **only** the bridge (the `colab` binary, its
-  version, auth, `ssh`/`ssh-keygen`, an ed25519 keypair) and says nothing about
-  config, disk or providers. **M**. Trap: `--json` is the bug-report surface;
-  design it before the human-readable one and the text version becomes a
-  rendering of it rather than a second truth.
+- **DB-6 `xencode doctor` as the single bug report** — **Done 2026-10-03.**
+  Reuses the `Check{ok, detail, fix}` shape from
+  `xencode-colab-rs/src/preflight.rs:23-31` as `SelfCheck{name, state, detail,
+  fix}` in `xencode-context-rs/src/doctor.rs`, so every check is
+  evidence-producing and carries the command that fixes it. Shipped scope: the
+  configuration parses, secret file permissions, free disk on the state
+  directory, the response cache's size, the project index, git, `metrics.jsonl`,
+  the cache directory being writable, every endpoint the config names, whether
+  the server behind the default model knows it by name, each declared MCP
+  server, and the Colab bridge by delegation to `ColabAction::Preflight`'s own
+  `preflight()` (`preflight.rs:85-258`), never a second copy of its version
+  floor or keypair judgement. Three corrections found while building it: the
+  flag is `--format json`, not `--json` — this CLI has never had a `--json`
+  flag, and `xencode doctor --env --json` is an error; `XencodeConfig` has no
+  version field, so "version is supported" is met by the delegated Colab floor
+  (`MIN_COLAB_VERSION`, `preflight.rs:12`) rather than by inventing a config
+  field to compare; and the per-model health check this row folded in is
+  `ModelAction::Health` at `main.rs:955`, handled at `main.rs:1842`, not
+  `main.rs:784-815`. The trap was honoured: `--format json` serialises the
+  `SelfCheck` list itself and the text listing renders that same list, so there
+  is one shape to attach to an issue. Verified by live runs, including the
+  failure branches: a real `chmod 644` on `config.json` produced the FAIL row
+  naming `chmod 600`, a real `llama-server` on `127.0.0.1:18000` turned
+  `provider:llamacpp`, `provider:remote` and `model` green, and a real
+  `statvfs` reported the free space. Not watchable here: Ollama is not
+  installed, so the wording for "the server answers but does not know this
+  model" — including the case of a default model id carrying the `ollama:`
+  prefix, which Ollama cannot serve — is pinned by a test of the pure function
+  `ollama_fix`, not by a live refusal. Two defects surfaced and deliberately
+  left for their own items: a configured `ollama:`-prefixed model id is sent to
+  Ollama verbatim by `xencode-providers-rs`, so it can never resolve; and
+  `main.rs` carries a mangled doc comment above `run_test`.
 - **DB-7 Panic hook plus terminal restore** — ratatui's own recipe: in the
   hook, disable raw mode and leave the alternate screen, then delegate to the
   default hook; record the last panic somewhere `doctor` can surface; add
@@ -4857,7 +4877,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 25 | Security Attack-Path Graph | narrowed | QD-4 — a Semgrep rule-pack plus a hand-written sink list, explicitly not a taint engine |
 | 26 | Regression Memory | planned | EV-7 + the EVd ledger; QT-6 is its retrieval form |
 | 27 | Failure Pattern Library | narrowed | Seed from RS-6 (rustc's own JSON known-error channel), not from git archaeology |
-| 28 | Self-Debugging Environment | partly shipped | DB-6 `xencode doctor --json` (+QO-7's probe list — the probes themselves ship as `doctor --selfcheck`, done 2026-10-03) |
+| 28 | Self-Debugging Environment | shipped | `xencode doctor` aggregates the report into one row shape and `--format json` serialises it (DB-6); the narrower probe list is `doctor --selfcheck` (QO-7). There is no `--json` flag |
 | 29 | Self-Benchmarking | narrowed | QO-4, gated on CX-8. "Agent success %" needs an eval corpus that does not exist yet |
 | 30 | Reproducible Agent Runs | planned | EV-8 (HTTP-boundary playback); QA-1 adds `xencode replay <run-id>` on top of it |
 | 31 | Deterministic Agent Mode | narrowed | QA-2 is done: `llama_cpp_seed` is sent and recorded, and a turn says whether it was pinned. Still only honest on CPU with fixed threads — MD-1 is the mode axis |
@@ -8967,7 +8987,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 6 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 7 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -8982,7 +9002,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3) |
 | **DB-3** | Honest secrets tiering | capability | secrets tiering — Secret Service now that SE-1 is done |
 | **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene |
-| **DB-6** | `xencode doctor --json` | capability | xencode doctor --json |
+| **DB-6** | `xencode doctor` as the single bug report | capability | the flag is `--format json`; done 2026-10-03 |
 | **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0) |
 | **EV-9** | API prompt-cache accounting | capability | API prompt-cache accounting — blocked while AnthropicProvider stays parked |
 | **QO-1** | `xencode doctor --deps` | capability | xencode doctor --deps |
