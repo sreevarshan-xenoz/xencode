@@ -9074,6 +9074,18 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 
 #### W7 progress
 
+- [x] `SE-4` — 2026-10-03. The lethal-trifecta gate lives in `classify()`:
+  a session-level taint bit (`ApprovalCtx.taint`, shared across a session's
+  runs like the grants) forces every shell call to `Ask` in every mode,
+  grants notwithstanding — the grant predates the secret read. The bit is
+  set by `note_tool_result` on three shapes: a file tool touching a
+  sensitive path (`~/.ssh`, `~/.xencode`, secret basenames), an env-dumping
+  command, and secret-shaped output by the same patterns the scrubber uses
+  (`contains_secret` in `trace.rs`, one pattern list). Reads, edits and MCP
+  tools are untouched. Seven tests, including the planted exfiltration end
+  to end: a secret read in all-allow mode, then the `curl` after it stopped
+  at the gate.
+
 - [x] `CAP-1` — 2026-10-03. `classify()` now decides through a `Capability`
   vocabulary (`filesystem.read`, `filesystem.write`, `shell.execute`,
   `network.request`, `external.mcp`): `tool_capabilities` maps every offered

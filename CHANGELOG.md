@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `SE-4`: a session that has touched secrets asks before every later shell call
+
+Once the agent's session has read a key file (`~/.ssh`, `~/.xencode`,
+secret-named files), dumped the environment, or seen secret-shaped output,
+every later shell call prompts in every approval mode — `all-allow`
+included, and past session grants given before the secrets were read. A
+one-shot approval at the prompt still runs the call; with nobody to ask,
+the call is denied as before. Reads, edits and MCP tools are unaffected.
+The taint is one coarse session bit, never persisted: quitting forgets it.
+
 ### Added — `LF-4`: `xencode run` starts an agent turn that survives the terminal, and `--resume` continues a killed one
 
 `xencode run "the task"` runs an agent turn from the command line; `--detach`

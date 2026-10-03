@@ -458,6 +458,10 @@ pub struct App<'a> {
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
     pub agent_grants: Arc<std::sync::Mutex<Vec<crate::agent_tools::ToolClass>>>,
+    /// Whether this session has touched secrets (SE-4). Session-only: never
+    /// persisted. Shared with the spawned tool loops like the grants, so a
+    /// secret read in one turn still poisons shell calls in the next.
+    pub secret_taint: Arc<std::sync::atomic::AtomicBool>,
     /// Byte-for-byte snapshots of what the agent changed, grouped per chat
     /// turn (I2-01). `/rewind` puts them back; quitting drops them.
     pub checkpoints: Arc<crate::agent_tools::CheckpointStore>,
@@ -2478,6 +2482,7 @@ impl<'a> App<'a> {
             layout_detail: false,
             layout_scroll: 0,
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
+            secret_taint: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
             mcp: Arc::new(crate::mcp::McpHub::new()),
@@ -3343,6 +3348,9 @@ impl<'a> App<'a> {
             online_docs: self.config.allow_online_docs,
             session_id: self.memory.current_session().cloned(),
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            // The session's secret bit, shared across runs (SE-4): a read
+            // in one turn still poisons shell calls in the next.
+            taint: self.secret_taint.clone(),
         }
     }
 
@@ -10416,6 +10424,7 @@ mod tests {
             online_docs: false,
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -11193,6 +11202,7 @@ mod tests {
             online_docs: false,
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),
@@ -12419,6 +12429,21 @@ mod tests {
             app.agent_run(LoopSink::Chat, Vec::new(), "which rule applies")
                 .egress
                 .allow_cloud
+        );
+    }
+
+    /// SE-4: the secret bit belongs to the session, not the turn. Every
+    /// approval context built while the session lives shares the one bit,
+    /// so a secret read in one turn still poisons shell calls in the next.
+    #[test]
+    fn taint_is_shared_across_contexts_of_one_session() {
+        let app = App::for_tests();
+        assert!(!app.approval_ctx().tainted());
+        app.secret_taint
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            app.approval_ctx().tainted(),
+            "the next turn inherits the poison"
         );
     }
 
