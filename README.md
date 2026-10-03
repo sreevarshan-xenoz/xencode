@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2047 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2065 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -581,14 +581,24 @@ flowchart TD
   only while nothing has streamed yet, and only to a provider that sends the
   conversation where the primary would have. A local model that is down does
   not hand your code to a cloud API.
-- API keys are stored as plain strings in that JSON file. There is **no
-  encrypted vault** in the Rust implementation. Xencode writes the file
-  owner-only (`0600`) and atomically, so a crash mid-save cannot leave a torn
-  config; a config that an older version left readable by others is tightened
-  the next time a setting is saved (`xencode config set`). Every save that
-  changes the file keeps the copy it replaced as
-  `config.json.bak.<UTC time>` next to it, also owner-only, newest five — a
-  saving gone wrong is recoverable without a backup tool. Keep it out of git
+- A provider credential comes from one of three places, read in that order: the
+  value in that JSON file, a `command:` reference naming a program that prints the
+  key (`command:pass show xencode/openai`, `command:secret-tool lookup …`), or the
+  environment variable named for the provider (`API_KEY_OPENAI`,
+  `API_KEY_OPENROUTER`, `API_KEY_GEMINI`, `API_KEY_QWEN`, `API_KEY_REMOTE` /
+  `XENCODE_API_KEY`, `API_KEY_NVIDIA` / `NVIDIA_NIM_API_KEY`). A reference is run
+  directly — no shell, so nothing in it expands — with no terminal and ten seconds
+  to answer, and its error output is dropped rather than printed. There is **no
+  encrypted vault** in the Rust implementation; a desktop keyring is reachable only
+  as a reference, which keeps the secret out of a file that gets backed up or
+  synced and does nothing against a process running as your own user.
+  `xencode config show` names which of the three a credential came from and never
+  prints the value. Xencode writes the file owner-only (`0600`) and atomically, so
+  a crash mid-save cannot leave a torn config; a config that an older version left
+  readable by others is tightened the next time a setting is saved
+  (`xencode config set`). Every save that changes the file keeps the copy it
+  replaced as `config.json.bak.<UTC time>` next to it, also owner-only, newest five
+  — a saving gone wrong is recoverable without a backup tool. Keep it out of git
   regardless — file permissions are the only layer.
 
 Start from the annotated example (it lists every real key):
@@ -725,11 +735,16 @@ RUST_BACKTRACE=1 xencode tui
 
 ## 🔒 Security
 
-- API keys live in `api_keys` inside `~/.xencode/config.json`. `xencode config set`
-  does not accept key names, so edit that file directly and keep it out of git.
-  Xencode saves it as `0600`, so there is no encryption layer to rely on and no
-  need to `chmod` it by hand — but anything that can read your user can read
-  your keys.
+- A provider credential lives in `api_keys` inside `~/.xencode/config.json`, and
+  `xencode config set openai_api_key …` writes it there — the value is stored and
+  never printed back, and `config show` says only where the credential came from.
+  To keep the secret out of the file, store a reference instead
+  (`xencode config set qwen_api_key "command:pass show xencode/qwen"`) or leave the
+  key unset and export `API_KEY_QWEN`. Xencode saves the file as `0600`, so there
+  is no encryption layer to rely on and no need to `chmod` it by hand — but
+  anything that can read your user can read your keys, and a keyring reached
+  through a `command:` reference answers anything running in your own desktop
+  session.
 - `xencode analyze` runs a pattern-based scanner over OWASP Top 10 categories
   (hardcoded secrets, injection, weak crypto, path traversal, SSRF). It matches
   source text — it does not consult a CVE database or your dependency tree.
