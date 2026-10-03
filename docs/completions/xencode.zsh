@@ -2142,7 +2142,7 @@ _xencode_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
-'doctor:Probe and display this machine\: cores, memory, GPUs, logs, colab route' \
+'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
@@ -2541,7 +2541,7 @@ _xencode__subcmd__help_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
-'doctor:Probe and display this machine\: cores, memory, GPUs, logs, colab route' \
+'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \

@@ -2217,12 +2217,100 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode doctor [--format text|json]`
+
+The bug report. One command, one list of rows, everything a person would have to
+type by hand to answer "what is wrong with my machine": does the configuration
+parse, can anyone else read the secrets in it, is there room on the volume the
+state lives on, how much disk the response cache has taken, the project's own
+index/git/metrics/cache rows, every endpoint the config would dial, whether the
+server behind the default model actually knows that model by name, each declared
+MCP server, and the Colab bridge.
+
+The rows are the same structure in both formats. `--format json` serialises
+`SelfCheck { name, state, detail, fix }` as it is, and the text listing prints
+that same list with a mark in front — so the file you attach to an issue and the
+screen you read cannot disagree. A `fix` key is present only where there is
+something to run: a size, or a finding whose remedy belongs to a provider rather
+than to this machine, carries no action.
+
+```
+$ xencode doctor
+  PASS   config                 /home/sree/.xencode/config.json
+  PASS   permissions:config     600 — owner only
+  PASS   permissions:colab-key  600 — owner only
+  PASS   disk:state             /home/sree/.xencode has 114 GiB free
+  PASS   size:cache             /home/sree/.xencode/cache holds 1 file(s), 364 B
+  ABSENT index                  no index manifest; run /init for project-aware answers
+                                fix: run /init in the TUI to build the project index
+  PASS   git                    /home/sree/Projects/xencode
+  ABSENT metrics                no metrics recorded yet
+  PASS   cache                  /home/sree/Projects/xencode/.xencode/cache
+  FAIL   provider:ollama        localhost:11434 refused: nothing is listening; start it with `ollama serve` or point the config elsewhere
+                                fix: ollama serve
+  FAIL   provider:llamacpp      127.0.0.1:18000 refused: nothing is listening; start it with `llama-server --model <path>` or point the config elsewhere
+                                fix: llama-server --model <path>
+  FAIL   provider:remote        127.0.0.1:18000 refused: the remote endpoint does not answer from here
+                                fix: check the network; the address dialed is the one the config names
+  FAIL   model                  Ollama at http://localhost:11434: Ollama not running: error sending request for url (http://localhost:11434/api/show)
+                                fix: ollama serve
+  PASS   colab:CLI              /home/sree/.local/bin/colab
+  PASS   colab:version          0.7.2 >= 0.7.0
+  PASS   colab:ssh bridge       `colab ssh` accepted (proxy-mode bridge available)
+  PASS   colab:API              `colab sessions` succeeded (backend reachable)
+  PASS   colab:OpenSSH          ssh at /usr/bin/ssh
+  PASS   colab:OpenSSH          ssh-keygen at /usr/bin/ssh-keygen
+  PASS   colab:SSH ed25519 key  /home/sree/.xencode/colab_ed25519 (+ .pub)
+
+  failing: provider:ollama, provider:llamacpp, provider:remote, model
+```
+
+Every one of those sentences came from the machine: the free space is a real
+`statvfs` of the volume holding `~/.xencode`, the mode is the file's own
+permission bits, the sizes are a walk of the directory, and the Colab rows are
+the answers of the installed `colab` 0.7.2 — which is asked through the same
+preflight `xencode colab up` runs through, so the report and the gate cannot
+drift apart on what version is acceptable. The bridge is only probed where it
+exists: on a machine that has never had `colab` installed, never written a state
+file and never made a keypair, its network probes would be traffic about
+somebody else's setup, and the report says one `ABSENT colab` row instead. It
+never generates a key — a report reads the machine, it does not create secret
+material on it.
+
+The failing branches were watched failing, not inferred. Running the local
+`llama-server` on `127.0.0.1:18000` and pointing `default_model` at
+`llamacpp:qwen3-0.6b` turned three of those rows over:
+
+```
+  PASS   provider:llamacpp      127.0.0.1:18000 accepts TCP
+  PASS   provider:remote        127.0.0.1:18000 accepts TCP
+  PASS   model                  llamacpp:qwen3-0.6b: llama-server at http://127.0.0.1:18000 has a model loaded
+```
+
+and making `config.json` world-readable turned the secret row over:
+
+```
+  FAIL   permissions:config     644 — readable beyond the owner, and it holds secrets
+                                fix: chmod 600 /home/sree/.xencode/config.json
+```
+
+`--format json` prints the same rows plus three summary keys:
+
+```
+$ xencode doctor --format json
+{"checks":[{"detail":"/home/sree/.xencode/config.json","name":"config","state":"pass"},…],
+ "doctor":"report","failing":["provider:ollama","provider:llamacpp","provider:remote","model"],
+ "ok":false,"version":"0.1.0"}
+```
+
+The exit code stays zero, because a laptop with no local model server running is
+a normal laptop. The FAIL rows are the signal.
+
 ### `xencode doctor --selfcheck [--format text|json]`
 
-Self-debug: index, git, providers, MCP servers, metrics, cache — each pass,
-fail, or absent with a named string. Absent is not failed. Exit code stays
-zero; the FAIL rows are the signal, because a machine without local servers
-is normal, not broken.
+The slice of that report a person runs when xencode itself looks broken: index,
+git, providers, MCP servers, the default model, metrics, cache. Same rows, same
+`fix` strings, none of the state-file or bridge checks. Absent is not failed.
 
 Each check goes through the code path the feature uses, so a row says something
 about the real route rather than about a guess. Providers are dialled at the
@@ -2234,15 +2322,21 @@ a row is a completed handshake, and a failure is the client's own sentence.
 
 ```
 $ xencode doctor --selfcheck
-  ABSENT index              no index manifest; run /init for project-aware answers
-  PASS   git                /home/sree/Projects/xencode
-  ABSENT metrics            no metrics recorded yet
-  PASS   cache              /home/sree/Projects/xencode/.xencode/cache
-  FAIL   provider:ollama    localhost:11434 refused: nothing is listening; start it with `ollama serve` or point the config elsewhere
-  FAIL   provider:llamacpp  127.0.0.1:18000 refused: nothing is listening; start it with `llama-server --model <path>` or point the config elsewhere
-  FAIL   provider:remote    127.0.0.1:18000 refused: the remote endpoint does not answer from here
+  ABSENT index                  no index manifest; run /init for project-aware answers
+                                fix: run /init in the TUI to build the project index
+  PASS   git                    /home/sree/Projects/xencode
+  ABSENT metrics                no metrics recorded yet
+  PASS   cache                  /home/sree/Projects/xencode/.xencode/cache
+  FAIL   provider:ollama        localhost:11434 refused: nothing is listening; start it with `ollama serve` or point the config elsewhere
+                                fix: ollama serve
+  FAIL   provider:llamacpp      127.0.0.1:18000 refused: nothing is listening; start it with `llama-server --model <path>` or point the config elsewhere
+                                fix: llama-server --model <path>
+  FAIL   provider:remote        127.0.0.1:18000 refused: the remote endpoint does not answer from here
+                                fix: check the network; the address dialed is the one the config names
+  FAIL   model                  Ollama at http://localhost:11434: Ollama not running: error sending request for url (http://localhost:11434/api/show)
+                                fix: ollama serve
 
-  failing: provider:ollama, provider:llamacpp, provider:remote
+  failing: provider:ollama, provider:llamacpp, provider:remote, model
 ```
 
 That run points at `127.0.0.1:18000` because that is where this machine's
@@ -2259,8 +2353,9 @@ four shapes, all from one live run:
   FAIL   mcp:undecided      the declaration names neither a "command" to spawn nor a "url" to reach
 ```
 
-`--format json` prints `{"checks":[{"detail":…,"name":…,"state":…}]}` with the
-same rows.
+`--format json` prints the same `checks` list and the same `doctor`, `failing`,
+`ok` and `version` keys, with `"doctor": "selfcheck"`.
+
 
 ### `xencode doctor --deps [--format text|json]`
 
