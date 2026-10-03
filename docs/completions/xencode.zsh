@@ -60,6 +60,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (set)
 _arguments "${_arguments_options[@]}" : \
+'--dry-run[Validate and report the change without writing config.json]' \
 '-h[Print help]' \
 '--help[Print help]' \
 ':key -- Configuration key (e.g., default_model, ollama_url):_default' \
@@ -658,6 +659,7 @@ _arguments "${_arguments_options[@]}" : \
 '--local-port=[Local port the SSH forward exposes (defaults to config / 18000)]:LOCAL_PORT:_default' \
 '--remote-port=[VM-side port the runtime binds (0 = runtime-native\: llama.cpp 18080, ollama 11434; defaults to config)]:REMOTE_PORT:_default' \
 '--reconnect[Rebuild a broken bridge from the recorded colab.json (re-spawn the forward, or re-create the VM if it was reaped) instead of a full up]' \
+'--dry-run[Report what a successful bring-up would start and would write to config.json, without touching the VM, the bridge or the config]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0

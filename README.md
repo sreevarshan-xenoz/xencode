@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2042 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2047 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -585,7 +585,10 @@ flowchart TD
   encrypted vault** in the Rust implementation. Xencode writes the file
   owner-only (`0600`) and atomically, so a crash mid-save cannot leave a torn
   config; a config that an older version left readable by others is tightened
-  the next time a setting is saved (`xencode config set`). Keep it out of git
+  the next time a setting is saved (`xencode config set`). Every save that
+  changes the file keeps the copy it replaced as
+  `config.json.bak.<UTC time>` next to it, also owner-only, newest five — a
+  saving gone wrong is recoverable without a backup tool. Keep it out of git
   regardless — file permissions are the only layer.
 
 Start from the annotated example (it lists every real key):

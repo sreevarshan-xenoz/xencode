@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2042 tests passing, zero warnings (re-verified 2026-10-03, after DB-2)
+- [x] Workspace gates green — 16 crates, 2047 tests passing, zero warnings (re-verified 2026-10-03, after DB-8)
 
 ## Model Catalog Honesty
 
@@ -3392,6 +3392,19 @@ There is no server to fall back on. This is the trust layer.
   **full-saves the user's config** (`main.rs:1152-1157`, and again in
   `lifecycle.rs:147`, `:250`) — that rewrite should go to a session-scoped
   overlay, not the user's file. A backup only bounds the symptom.
+  **Done 2026-10-03.** Three findings, all checked against the code rather
+  than the row:
+  1. The cited line numbers are stale. The rewrite is real but sits in
+     `run_colab_up_cli` (`main.rs:3031-3033`), and `point_config_at_forward`
+     is a second one at `main.rs:2879`.
+  2. `lifecycle.rs:147` and `:250` do **not** save the user's config — they
+     write the Colab *state* file (`save_state`). One command, one config
+     rewrite, not three.
+  3. The session-scoped overlay this row calls the real fix is **not done
+     here**: `colab up` still persists the forward URLs into
+     `~/.xencode/config.json`. What ships is the bound on the symptom (a
+     backup of exactly the bytes it replaced, newest five) plus `--dry-run`
+     on both commands, so the rewrite can be seen before it happens.
 
 ### O-6 — What "works on your machine" is allowed to mean
 
@@ -9000,7 +9013,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 8 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 9 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -9016,7 +9029,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **DB-3** | Honest secrets tiering | capability | secrets tiering — Secret Service now that SE-1 is done |
 | **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene |
 | **DB-6** | `xencode doctor` as the single bug report | capability | the flag is `--format json`; done 2026-10-03 |
-| **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0) |
+| **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0); done 2026-10-03 |
 | **EV-9** | API prompt-cache accounting | capability | API prompt-cache accounting — blocked while AnthropicProvider stays parked |
 | **QO-1** | `xencode doctor --deps` | capability | xencode doctor --deps |
 | **QO-4** | Minimal regression harness | capability | minimal criterion regression harness |

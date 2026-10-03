@@ -79,6 +79,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_s
 complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -f -a "reset" -d 'Reset configuration to defaults'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from show" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from set" -l dry-run -d 'Validate and report the change without writing config.json'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from set" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from reset" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "show" -d 'Display current configuration'
@@ -210,6 +211,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_s
 complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from up" -l local-port -d 'Local port the SSH forward exposes (defaults to config / 18000)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from up" -l remote-port -d 'VM-side port the runtime binds (0 = runtime-native: llama.cpp 18080, ollama 11434; defaults to config)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from up" -l reconnect -d 'Rebuild a broken bridge from the recorded colab.json (re-spawn the forward, or re-create the VM if it was reaped) instead of a full up'
+complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from up" -l dry-run -d 'Report what a successful bring-up would start and would write to config.json, without touching the VM, the bridge or the config'
 complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from up" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand colab; and __fish_seen_subcommand_from down" -s h -l help -d 'Print help'

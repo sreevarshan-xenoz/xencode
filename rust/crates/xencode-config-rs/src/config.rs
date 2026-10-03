@@ -15,6 +15,11 @@ pub const CURRENT_CONFIG_VERSION: u32 = 1;
 /// What a file with no `config_version` key is: written before the key existed.
 pub const LEGACY_CONFIG_VERSION: u32 = 0;
 
+/// How many `config.json.bak.<time>` files a save leaves behind. Bounded on
+/// purpose: the settings panel saves on every change, so an unkept history would
+/// fill the config directory with copies of a file that holds secrets.
+pub const CONFIG_BACKUPS_KEPT: usize = 5;
+
 /// The version a parsed file declares, read from the raw JSON rather than from
 /// the struct — the whole question is what the *file* claims, before any of it
 /// is dropped for being unknown to this binary.
@@ -41,6 +46,115 @@ fn migrate(value: &mut serde_json::Value, from: u32) {
     if from < 1 {
         value["config_version"] = serde_json::Value::Number(CURRENT_CONFIG_VERSION.into());
     }
+}
+
+/// Copy the file at `path` to `<name>.bak.<UTC time>` before `bytes` replaces it,
+/// then trim the directory to the newest [`CONFIG_BACKUPS_KEPT`] copies.
+///
+/// Does nothing when there is no file yet, and when the file already holds these
+/// exact bytes — the interface saves whenever a setting changes, and a key that
+/// is put back where it was must not cost a copy. The copy is created owner-only,
+/// the same rule the config file itself follows: a backup of a file holding API
+/// keys holds those keys.
+fn keep_backup_if_changed(path: &std::path::Path, bytes: &[u8]) -> Result<(), ConfigError> {
+    let existing = match std::fs::read(path) {
+        Ok(found) => found,
+        Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(problem) => return Err(ConfigError::Io(problem)),
+    };
+    if existing == bytes {
+        return Ok(());
+    }
+    let name = path
+        .file_name()
+        .map(|found| found.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config.json".to_string());
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let stamp = utc_stamp(now.as_secs() as i64, now.subsec_nanos());
+    // Same-second saves are possible, so a taken name gets a counter rather than
+    // a silent overwrite of the older copy.
+    let mut target = dir.join(format!("{name}.bak.{stamp}"));
+    let mut attempt = 2;
+    while target.exists() {
+        target = dir.join(format!("{name}.bak.{stamp}-{attempt}"));
+        attempt += 1;
+    }
+    write_owner_only(&target, &existing)?;
+    prune_backups(dir, &name)
+}
+
+/// Write `bytes` to `path` with the owner-only mode applied as the file is
+/// created, never afterwards: chmod after the write leaves a window in which the
+/// copy is readable by everyone, which is the window SE-1 exists to close.
+#[cfg(unix)]
+fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> Result<(), ConfigError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(ConfigError::Io)?;
+    std::io::Write::write_all(&mut file, bytes).map_err(ConfigError::Io)
+}
+
+#[cfg(not(unix))]
+fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> Result<(), ConfigError> {
+    std::fs::write(path, bytes).map_err(ConfigError::Io)
+}
+
+/// Delete the oldest copies beyond the kept count. The timestamps are fixed
+/// width and in UTC, so the names sort in the order they were written.
+fn prune_backups(dir: &std::path::Path, name: &str) -> Result<(), ConfigError> {
+    let prefix = format!("{name}.bak.");
+    let mut copies: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map_err(ConfigError::Io)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .map(|found| found.to_string_lossy().starts_with(&prefix))
+                .unwrap_or(false)
+        })
+        .collect();
+    copies.sort();
+    while copies.len() > CONFIG_BACKUPS_KEPT {
+        let oldest = copies.remove(0);
+        std::fs::remove_file(&oldest).map_err(ConfigError::Io)?;
+    }
+    Ok(())
+}
+
+/// `20261003T095901.123456789Z` from seconds and the sub-second part of the same
+/// instant. Howard Hinnant's `civil_from_days` in reverse of the
+/// `days_from_civil` already used by the advice table, so no calendar library is
+/// pulled in for a file name.
+///
+/// The nanoseconds are what make the naming safe to prune: a name that has been
+/// deleted is never handed out again, so the newest copy can't be written under
+/// the oldest copy's name and then trimmed as the oldest.
+fn utc_stamp(secs: i64, nanos: u32) -> String {
+    let days = secs.div_euclid(86_400);
+    let tod = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { year + 1 } else { year };
+    format!(
+        "{year:04}{m:02}{d:02}T{:02}{:02}{:02}.{nanos:09}Z",
+        tod / 3600,
+        (tod % 3600) / 60,
+        tod % 60
+    )
 }
 
 /// API key configuration for cloud model providers.
@@ -897,6 +1011,11 @@ impl XencodeConfig {
     /// the refusal hold: plenty of call sites fall back to defaults when a load
     /// fails, and without this they would save those defaults over a config this
     /// binary could not read.
+    ///
+    /// What is about to be replaced is copied to a timestamped
+    /// `config.json.bak.<time>` first, unless the bytes are already identical —
+    /// the interface saves whenever a setting changes, and copying a file it has
+    /// not changed would crowd out the copies of the ones it has.
     pub fn save_to(&self, path: impl AsRef<std::path::Path>) -> Result<(), ConfigError> {
         let path = path.as_ref();
         if let Some(found) = Self::version_of(path) {
@@ -909,6 +1028,7 @@ impl XencodeConfig {
             }
         }
         let json = serde_json::to_string_pretty(self).map_err(ConfigError::Json)?;
+        keep_backup_if_changed(path, json.as_bytes())?;
         xencode_core_rs::write_atomic(path, json.as_bytes()).map_err(ConfigError::Io)?;
         Ok(())
     }
@@ -1828,5 +1948,111 @@ mod tests {
             XencodeConfig::default()
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_stamp_is_the_utc_minute_the_epoch_second_falls_in() {
+        // Numbers taken from an independent clock, not from this function.
+        assert_eq!(utc_stamp(0, 0), "19700101T000000.000000000Z");
+        assert_eq!(utc_stamp(951_782_400, 0), "20000229T000000.000000000Z");
+        assert_eq!(utc_stamp(1_766_236_439, 0), "20251220T131359.000000000Z");
+        assert_eq!(utc_stamp(1_791_021_541, 0), "20261003T095901.000000000Z");
+        assert_eq!(utc_stamp(-86_401, 0), "19691230T235959.000000000Z");
+        // The sub-second part is fixed width, so names sort in the order written.
+        assert_eq!(utc_stamp(1_791_021_541, 7), "20261003T095901.000000007Z");
+        assert_eq!(
+            utc_stamp(1_791_021_541, 123_456_789),
+            "20261003T095901.123456789Z"
+        );
+    }
+
+    #[test]
+    fn a_save_keeps_the_file_it_replaced_and_an_identical_save_keeps_nothing() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+
+        let first = XencodeConfig {
+            default_model: "qwen3:0.6b".to_string(),
+            ..XencodeConfig::default()
+        };
+        first.save_to(&path).unwrap();
+        // Nothing was replaced, so nothing is backed up.
+        assert!(backups(&dir).is_empty(), "first save has no predecessor");
+
+        let original = fs::read(&path).unwrap();
+        let mut second = first.clone();
+        second.default_model = "qwen3:4b".to_string();
+        second.save_to(&path).unwrap();
+
+        let copies = backups(&dir);
+        assert_eq!(copies.len(), 1, "the replaced file is kept, once");
+        assert_eq!(fs::read(&copies[0]).unwrap(), original);
+        // The copy holds the same secrets as the file it came from.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&copies[0]).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "the backup is owner-only");
+        }
+
+        // Saving the same bytes again is not a change, so it adds no copy —
+        // this is what stops the interface writing a copy every time it saves.
+        second.save_to(&path).unwrap();
+        second.save_to(&path).unwrap();
+        assert_eq!(backups(&dir).len(), 1, "an unchanged save backs nothing up");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_backup_history_stays_bounded() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let mut before_last = String::new();
+        for n in 0..(CONFIG_BACKUPS_KEPT as u32 + 4) {
+            let config = XencodeConfig {
+                default_model: format!("model-{n}"),
+                ..XencodeConfig::default()
+            };
+            before_last = fs::read_to_string(&path).unwrap_or_default();
+            config.save_to(&path).unwrap();
+        }
+        let copies = backups(&dir);
+        assert_eq!(
+            copies.len(),
+            CONFIG_BACKUPS_KEPT,
+            "the newest {} are kept",
+            CONFIG_BACKUPS_KEPT
+        );
+        // What is kept is the newest, and the newest of them is the file as the
+        // last save found it.
+        let newest = fs::read_to_string(&copies[copies.len() - 1]).unwrap();
+        assert_eq!(
+            newest,
+            before_last,
+            "the newest copy is the state the last save replaced; copies were {:?}",
+            copies
+                .iter()
+                .map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect::<Vec<_>>()
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Every `config.json.bak.*` in the directory, oldest name first.
+    fn backups(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut found: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().starts_with("config.json.bak."))
+                    .unwrap_or(false)
+            })
+            .collect();
+        found.sort();
+        found
     }
 }

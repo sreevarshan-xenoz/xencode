@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `DB-8`: a config save keeps what it replaced, and two commands can show their change first
+
+Overwriting `config.json` used to be the last thing standing between a person and
+the file they had before. Now every save that actually changes the file first
+copies what was there to `config.json.bak.<UTC time>` beside it, created
+owner-only in the same step (a backup of a file holding API keys holds those
+keys), and keeps the newest five. A save that would write the bytes already on
+disk adds no copy — the settings panel saves on every change, and copies of an
+unchanged file would push the interesting ones out of the five.
+
+Two commands gained `--dry-run`, both verified to write nothing at all:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/db8 xencode config set --dry-run default_model qwen3:4b
+would set default_model = qwen3:4b — nothing written (--dry-run)
+
+$ XCODE_CONFIG_DIR=/tmp/db8 xencode colab up --dry-run
+colab up --dry-run — nothing was started and nothing was written.
+  session:   xencode-vm
+  runtime:   llama.cpp   gpu: T4   model: Qwen/Qwen2.5-7B-Instruct-GGUF
+  weights:   hf   quant: Q4_K_M (the default the VM serves)
+  forward:   http://127.0.0.1:18000 → the VM's port 18080
+  config.json would change: llama_cpp_url: http://localhost:8080 → http://127.0.0.1:18000
+  config.json would change: remote_base_url:  → http://127.0.0.1:18000/v1
+```
+
+`colab up` rewrites the provider URLs in the user's configuration as a side
+effect of bringing the bridge up, and `--dry-run` stops before the preflight —
+which would otherwise create the SSH keypair — before any session, forward,
+state file, or config write. The listed change is computed by the same function
+the real bring-up calls, so a preview and the thing it previews cannot disagree.
+
+What a backup only bounds: `colab up` still saves the whole configuration to
+record a forward that lasts as long as one VM. The change underneath is a
+session-scoped overlay, and that is not done here.
+
 ### Added — `DB-2`: a configuration declares its version, and an older xencode won't clobber a newer one
 
 `~/.xencode/config.json` now carries `config_version`, and the binary carries

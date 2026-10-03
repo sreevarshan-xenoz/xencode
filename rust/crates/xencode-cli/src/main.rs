@@ -892,6 +892,9 @@ enum ConfigAction {
         /// flag.
         #[arg(allow_hyphen_values = true)]
         value: String,
+        /// Validate and report the change without writing config.json
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Reset configuration to defaults
     Reset,
@@ -939,6 +942,10 @@ enum ColabAction {
         /// forward, or re-create the VM if it was reaped) instead of a full up
         #[arg(long)]
         reconnect: bool,
+        /// Report what a successful bring-up would start and would write to
+        /// config.json, without touching the VM, the bridge or the config
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Report the Colab bridge state: forward pid, `colab sessions`, and a
     /// /v1/models probe on the forward
@@ -1527,7 +1534,11 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
             println!("{json}");
             Ok(())
         }
-        ConfigAction::Set { key, value } => {
+        ConfigAction::Set {
+            key,
+            value,
+            dry_run,
+        } => {
             let mut config = XencodeConfig::load().map_err(|e| e.to_string())?;
             let mut secret = false;
             match key.as_str() {
@@ -1778,6 +1789,16 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 "colab_quant" => config.colab.quant = value.clone(),
                 "colab_auto_connect" => config.colab.auto_connect = parse_bool(&value)?,
                 _ => return Err(format!("unknown config key: {key}")),
+            }
+            if dry_run {
+                // Everything above ran — the key was recognised and the value
+                // validated against the real config — and nothing was written.
+                if secret {
+                    println!("would set {key} (value not shown) — nothing written (--dry-run)");
+                } else {
+                    println!("would set {key} = {value} — nothing written (--dry-run)");
+                }
+                return Ok(());
             }
             config.save().map_err(|e| e.to_string())?;
             if secret {
@@ -2829,6 +2850,7 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
             local_port,
             remote_port,
             reconnect,
+            dry_run,
         } => {
             run_colab_up_cli(
                 session,
@@ -2840,12 +2862,53 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
                 local_port,
                 remote_port,
                 reconnect,
+                dry_run,
             )
             .await
         }
         ColabAction::Status => run_colab_status_cli().await,
         ColabAction::Down => run_colab_down_cli().await,
     }
+}
+
+/// What a successful `colab up` would persist to config.json, computed by the
+/// same call the real bring-up makes — so the preview cannot disagree with the
+/// thing it previews. Only the keys that would actually change are listed.
+fn colab_up_config_preview(current: &XencodeConfig, runtime: &str, local_port: u16) -> Vec<String> {
+    let mut preview = current.clone();
+    xencode_colab_rs::point_config_at_forward(
+        &mut preview,
+        runtime,
+        &format!("http://127.0.0.1:{local_port}"),
+    );
+    let mut lines = Vec::new();
+    for (key, before, after) in [
+        (
+            "llama_cpp_url",
+            current.llama_cpp_url.as_str(),
+            preview.llama_cpp_url.as_str(),
+        ),
+        (
+            "ollama_url",
+            current.ollama_url.as_str(),
+            preview.ollama_url.as_str(),
+        ),
+        (
+            "remote_base_url",
+            current.remote_base_url.as_str(),
+            preview.remote_base_url.as_str(),
+        ),
+    ] {
+        if before != after {
+            lines.push(format!(
+                "config.json would change: {key}: {before} → {after}"
+            ));
+        }
+    }
+    if lines.is_empty() {
+        lines.push("config.json would not change".to_string());
+    }
+    lines
 }
 
 #[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to colab up flags; a struct would just rename them
@@ -2859,6 +2922,7 @@ async fn run_colab_up_cli(
     local_port: Option<u16>,
     remote_port: Option<u16>,
     reconnect: bool,
+    dry_run: bool,
 ) -> Result<(), String> {
     let config = XencodeConfig::load().map_err(|e| e.to_string())?;
     if !config.colab.enabled {
@@ -2887,6 +2951,36 @@ async fn run_colab_up_cli(
     let quant = quant.unwrap_or(config.colab.quant.clone());
     let local_port = local_port.unwrap_or(config.colab.local_port);
     let remote_port = remote_port.unwrap_or(config.colab.remote_port);
+
+    if dry_run {
+        // Deliberately before the preflight: preflight(true) would create the
+        // SSH keypair, and a preview writes nothing anywhere.
+        println!("colab up --dry-run — nothing was started and nothing was written.");
+        println!("  session:   {session}");
+        println!(
+            "  runtime:   {runtime}   gpu: {}   model: {model}",
+            gpu.as_deref().unwrap_or("T4")
+        );
+        println!(
+            "  weights:   {weights_source}   quant: {}",
+            if quant.is_empty() {
+                "Q4_K_M (the default the VM serves)"
+            } else {
+                quant.as_str()
+            }
+        );
+        println!(
+            "  forward:   http://127.0.0.1:{local_port} → the VM's port {}",
+            xencode_colab_rs::effective_remote_port(&runtime, remote_port)
+        );
+        for line in colab_up_config_preview(&config, &runtime, local_port) {
+            println!("  {line}");
+        }
+        if reconnect {
+            println!("  reconnect: reuses the URL in the recorded state when the forward is already live");
+        }
+        return Ok(());
+    }
 
     // Gate on the bridge being usable; preflight also ensures the SSH key.
     let report = xencode_colab_rs::preflight(true)
@@ -8953,5 +9047,45 @@ mod tests {
         let json = serde_json::to_value(&failing).unwrap();
         assert_eq!(json["fix"], serde_json::json!("ollama serve"));
         assert_eq!(json["state"], serde_json::json!("fail"));
+    }
+
+    #[test]
+    fn the_colab_preview_names_the_keys_a_bring_up_would_rewrite() {
+        let config = xencode_config_rs::XencodeConfig::default();
+        let lines = super::colab_up_config_preview(&config, "llama.cpp", 18000);
+        let text = lines.join("\n");
+        assert!(
+            text.contains("llama_cpp_url: http://localhost:8080 → http://127.0.0.1:18000"),
+            "{text}"
+        );
+        assert!(
+            text.contains("remote_base_url:  → http://127.0.0.1:18000/v1"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("ollama_url"),
+            "a llama.cpp forward does not move Ollama's endpoint: {text}"
+        );
+
+        let ollama = super::colab_up_config_preview(&config, "ollama", 19000);
+        let text = ollama.join("\n");
+        assert!(text.contains("ollama_url"), "{text}");
+        assert!(text.contains("http://127.0.0.1:19000"), "{text}");
+    }
+
+    #[test]
+    fn the_colab_preview_says_so_when_the_config_already_points_at_the_forward() {
+        let mut config = xencode_config_rs::XencodeConfig::default();
+        xencode_colab_rs::point_config_at_forward(
+            &mut config,
+            "llama.cpp",
+            "http://127.0.0.1:18000",
+        );
+        let lines = super::colab_up_config_preview(&config, "llama.cpp", 18000);
+        assert_eq!(
+            lines,
+            vec!["config.json would not change".to_string()],
+            "an up that changes nothing says that, instead of printing a diff of nothing"
+        );
     }
 }
