@@ -19,7 +19,7 @@
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `test`, `release-notes` — and clap's
   built-in `help`, 42 entries in the list)
-- [x] Workspace gates green — 16 crates, 2047 tests passing, zero warnings (re-verified 2026-10-03, after DB-8)
+- [x] Workspace gates green — 16 crates, 2065 tests passing, zero warnings (re-verified 2026-10-03, after DB-3)
 
 ## Model Catalog Honesty
 
@@ -3326,15 +3326,41 @@ There is no server to fall back on. This is the trust layer.
   and `serde_json` happily deserialises a *struct* from a JSON **array** when every
   field has a default, so a corrupt file became "all defaults" and would have been
   written back, which `ConfigError::NotAConfig` now blocks.
-- **DB-3 Honest secrets tiering** — 0600 file (SE-1) stays the documented
-  baseline; optionally read from `XENCODE_API_KEY` / `API_KEY_<PROVIDER>` env,
-  or a `command:` helper (`pass`, `op`, `pinentry`) where **only the reference
-  is stored, never the secret**. **S** for env+helper, **M** if `keyring` is
-  added. Trap and the thing to write in the manual: Linux `keyring` means D-Bus
-  Secret Service, which anything in the desktop session can read — it protects
-  against a backed-up or world-readable `~/.xencode`, *not* against malware
-  running as the user; and it is unavailable headless/over SSH. Encrypting the
-  whole config with `sops`/`age` breaks the TUI's own save path.
+- **DB-3 Honest secrets tiering** — **Done 2026-10-03.** Three places a
+  credential may live, read in order: the value in `config.json`, a `command:`
+  reference naming a program that prints the key, then the environment variable
+  named for the provider (`API_KEY_<PROVIDER>`; `XENCODE_API_KEY` fills only the
+  `remote:` endpoint — one name that applied to every provider could not say
+  which account the key belonged to, and would hand one provider's credential to
+  another's endpoint). Blank counts as unset on both sides, so an empty export
+  cannot shadow a configured key with nothing. **No `keyring` dependency was
+  added**: the Linux Secret Service is reached as `command:secret-tool lookup …`,
+  verified against the real keyring on this machine (store, reference, resolve,
+  clear). `xencode config set` had accepted *no* credential key names at all
+  before this — the only way in was hand-editing the JSON — and `config show`
+  printed the key values it found; both are fixed, and `config show` now says
+  which tier a credential came from and never the value.
+  Things found while building it, all of them now behaviour rather than accident:
+  the helper is spawned **without a shell** (`PATH` lookup, `*` and `$HOME` are
+  not expanded, one quoted argument is one argument) with stdin closed, both
+  output pipes drained on their own threads so a helper writing more than a pipe
+  buffer cannot deadlock against its own timeout, ten seconds to answer before it
+  is stopped, and its standard error dropped — a tool that leaks the key to
+  stderr cannot put it on the terminal. A helper that never answers is the
+  keyring-waiting-on-a-passphrase case, because there is no terminal to answer
+  it, and the message says so. `--dry-run` stores nothing and does not run the
+  command. Presence is asked through an accessor that never runs the helper, so
+  the provider panel and the status rows cost nothing per redraw; reading the key
+  runs it, and a read that fails is parked and said once in the chat pane —
+  otherwise a broken reference looks exactly like a provider nobody configured
+  and sends the person to paste the key in again. A script written moments ago
+  can still be open for writing when the key is asked for (`Text file busy`), so
+  the spawn retries briefly before calling it a failure. The manual states the
+  trap the plan named: the keyring keeps the secret out of a file that is backed
+  up, synced or shared and does nothing against a process running as the same
+  user, because Secret Service answers anything in that session and is
+  unavailable headless/over SSH. Encrypting the whole config with `sops`/`age`
+  was left alone — it breaks the TUI's own save path.
 - **DB-4 XDG-correct paths plus state hygiene** — config →
   `dirs::config_dir()`, state → `state_dir()`, cache → `cache_dir()`, with a
   read-fallback to legacy `~/.xencode` and `XCODE_CONFIG_DIR` keeping
@@ -9013,7 +9039,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 20 items, 9 done
+#### W11 — Self-diagnosis, cost and operations — 20 items, 10 done
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -9026,7 +9052,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **CX-7** | Budgets that act — daily token/energy/dollar/wall-clock caps | capability | budgets that act |
 | **CX-8** | A GPU-free performance gate in CI | capability | GPU-free performance gate in CI |
 | **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3); done 2026-10-03 |
-| **DB-3** | Honest secrets tiering | capability | secrets tiering — Secret Service now that SE-1 is done |
+| **DB-3** | Honest secrets tiering | capability | secrets tiering — the keyring through `command:`, not a Secret Service dependency; done 2026-10-03 |
 | **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene |
 | **DB-6** | `xencode doctor` as the single bug report | capability | the flag is `--format json`; done 2026-10-03 |
 | **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0); done 2026-10-03 |

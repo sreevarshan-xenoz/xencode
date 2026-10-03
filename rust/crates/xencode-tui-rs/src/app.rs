@@ -10,7 +10,7 @@ use ratatui::{backend::Backend, Terminal};
 use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, TextArea};
 
-use xencode_config_rs::XencodeConfig;
+use xencode_config_rs::{SecretProvider, XencodeConfig};
 use xencode_context_rs::{init_project, DocError, DocText, HardwareProfile};
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
@@ -382,6 +382,11 @@ pub struct App<'a> {
     /// The last save refusal, so a write that keeps failing says it once instead
     /// of once per keystroke. Cleared by the next save that works.
     pub(crate) last_config_save_note: Option<String>,
+    /// What a credential lookup complained about, waiting for a turn to say it.
+    /// A command reference whose helper is missing looks exactly like a provider
+    /// nobody configured, and the person would go and paste the key in again.
+    /// Held here because the keys are read while the transcript is borrowed.
+    pub(crate) secret_problems: std::sync::Mutex<Vec<String>>,
     /// Product builds persist config edits; `for_tests()` turns that off so a
     /// keystroke in a test never rewrites the developer's `config.json`.
     pub(crate) persist_config: bool,
@@ -1762,11 +1767,11 @@ impl SingleShot {
             llama_cpp_url: config.llama_cpp_url.clone(),
             remote_base_url: config.remote_base_url.clone(),
             timeout: config.response_timeout,
-            openrouter_key: config.api_keys.openrouter_api_key.clone(),
-            qwen_key: config.api_keys.qwen_api_key.clone(),
-            gemini_key: config.api_keys.google_gemini_api_key.clone(),
-            remote_api_key: config.api_keys.remote_api_key.clone(),
-            nvidia_api_key: config.api_keys.nvidia_api_key_resolved(),
+            openrouter_key: None,
+            qwen_key: None,
+            gemini_key: None,
+            remote_api_key: None,
+            nvidia_api_key: None,
             egress: EgressPolicy::new(config.allow_cloud_models),
             llama_opts: LlamaCppOptions {
                 temperature: config.llama_cpp_temperature,
@@ -2427,6 +2432,7 @@ impl<'a> App<'a> {
             theme,
             persist_config: true,
             last_config_save_note: None,
+            secret_problems: std::sync::Mutex::new(Vec::new()),
             config,
             show_terminal: false,
             last_body_focus: FocusArea::ChatInput,
@@ -2623,7 +2629,13 @@ impl<'a> App<'a> {
         };
         app.style_chat_input();
 
-        // Seed initial health entries for configured providers
+        // Seed initial health entries for configured providers. Whether a
+        // provider has a credential at all is asked of every tier — the file,
+        // or the variable named for it — and `has_secret` never runs a command
+        // reference, so seeding the panel stays cheap.
+        let openrouter_set = app.config.api_keys.has_secret(SecretProvider::OpenRouter);
+        let qwen_set = app.config.api_keys.has_secret(SecretProvider::Qwen);
+        let gemini_set = app.config.api_keys.has_secret(SecretProvider::Gemini);
         app.ollama_health_entries.insert(
             "ollama".to_string(),
             (HealthStatus::Unknown.to_string(), 0.0, None),
@@ -2631,48 +2643,48 @@ impl<'a> App<'a> {
         app.ollama_health_entries.insert(
             "openrouter".to_string(),
             (
-                if app.config.api_keys.openrouter_api_key.is_some() {
+                if openrouter_set {
                     HealthStatus::Unknown.to_string()
                 } else {
                     HealthStatus::Error.to_string()
                 },
                 0.0,
-                if app.config.api_keys.openrouter_api_key.is_none() {
-                    Some("API key not configured".to_string())
-                } else {
+                if openrouter_set {
                     None
+                } else {
+                    Some("API key not configured".to_string())
                 },
             ),
         );
         app.ollama_health_entries.insert(
             "qwen".to_string(),
             (
-                if app.config.api_keys.qwen_api_key.is_some() {
+                if qwen_set {
                     HealthStatus::Unknown.to_string()
                 } else {
                     HealthStatus::Error.to_string()
                 },
                 0.0,
-                if app.config.api_keys.qwen_api_key.is_none() {
-                    Some("API key not configured".to_string())
-                } else {
+                if qwen_set {
                     None
+                } else {
+                    Some("API key not configured".to_string())
                 },
             ),
         );
         app.ollama_health_entries.insert(
             "gemini".to_string(),
             (
-                if app.config.api_keys.google_gemini_api_key.is_some() {
+                if gemini_set {
                     HealthStatus::Unknown.to_string()
                 } else {
                     HealthStatus::Error.to_string()
                 },
                 0.0,
-                if app.config.api_keys.google_gemini_api_key.is_none() {
-                    Some("API key not configured".to_string())
-                } else {
+                if gemini_set {
                     None
+                } else {
+                    Some("API key not configured".to_string())
                 },
             ),
         );
@@ -2799,6 +2811,45 @@ impl<'a> App<'a> {
                     self.system_line(&note);
                 }
             }
+        }
+    }
+
+    /// The credential a provider is to use, read through the tiers: the value in
+    /// `config.json`, running it when what is stored there is a `command:`
+    /// reference, otherwise the environment variable named for the provider.
+    ///
+    /// A reference that cannot be read is parked in [`Self::secret_problems`] and
+    /// answered as no credential, because the alternative is a turn that spends
+    /// minutes failing to authenticate.
+    fn api_key(&self, provider: SecretProvider) -> Option<String> {
+        match self.config.api_keys.secret(provider) {
+            Ok(value) => value,
+            Err(problem) => {
+                let note = format!("the {} key is unusable — {problem}", provider.slug());
+                let mut held = self
+                    .secret_problems
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if !held.contains(&note) {
+                    held.push(note);
+                }
+                None
+            }
+        }
+    }
+
+    /// Say, once, what the last credential lookups complained about. The event
+    /// loop calls this on every frame, so a broken key helper is named in the
+    /// turn that hit it rather than waiting for the next one.
+    fn say_secret_problems(&mut self) {
+        let held = std::mem::take(
+            &mut *self
+                .secret_problems
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        for note in held {
+            self.system_line(&format!("configuration: {note}"));
         }
     }
 
@@ -3324,7 +3375,7 @@ impl<'a> App<'a> {
 
     fn routing_facts(&self) -> RoutingFacts<'_> {
         RoutingFacts {
-            openrouter_key: self.config.api_keys.openrouter_api_key.is_some(),
+            openrouter_key: self.config.api_keys.has_secret(SecretProvider::OpenRouter),
             remote_host: (!self.config.remote_base_url.is_empty())
                 .then(|| url_host(&self.config.remote_base_url))
                 .flatten(),
@@ -3408,12 +3459,12 @@ impl<'a> App<'a> {
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
             timeout: self.config.response_timeout,
-            openrouter_key: self.config.api_keys.openrouter_api_key.clone(),
-            qwen_key: self.config.api_keys.qwen_api_key.clone(),
-            gemini_key: self.config.api_keys.google_gemini_api_key.clone(),
+            openrouter_key: self.api_key(SecretProvider::OpenRouter),
+            qwen_key: self.api_key(SecretProvider::Qwen),
+            gemini_key: self.api_key(SecretProvider::Gemini),
             remote_base_url: self.config.remote_base_url.clone(),
-            remote_api_key: self.config.api_keys.remote_api_key.clone(),
-            nvidia_api_key: self.config.api_keys.nvidia_api_key_resolved(),
+            remote_api_key: self.api_key(SecretProvider::Remote),
+            nvidia_api_key: self.api_key(SecretProvider::Nvidia),
             llama_opts: LlamaCppOptions {
                 temperature,
                 top_k: self.config.llama_cpp_top_k,
@@ -6935,9 +6986,9 @@ impl<'a> App<'a> {
         let llama_cpp_url = self.config.llama_cpp_url.clone();
         let remote_base_url = self.config.remote_base_url.clone();
         let timeout = self.config.response_timeout;
-        let openrouter_key = self.config.api_keys.openrouter_api_key.clone();
-        let qwen_key = self.config.api_keys.qwen_api_key.clone();
-        let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
+        let openrouter_key = self.api_key(SecretProvider::OpenRouter);
+        let qwen_key = self.api_key(SecretProvider::Qwen);
+        let gemini_key = self.api_key(SecretProvider::Gemini);
         let default_model = self.config.default_model.clone();
 
         tokio::spawn(async move {
@@ -7181,8 +7232,17 @@ impl<'a> App<'a> {
 
     /// A one-shot request carrying the same window the chat turn is using, so a
     /// panel answer does not make Ollama reload the model at its own default.
+    ///
+    /// Credentials are read here rather than in `SingleShot::from_config`: a
+    /// stored value may name a command to run, and the complaint it raises needs
+    /// somewhere to go, which only the session has.
     fn single_shot(&self) -> SingleShot {
         let mut call = SingleShot::from_config(&self.config);
+        call.openrouter_key = self.api_key(SecretProvider::OpenRouter);
+        call.qwen_key = self.api_key(SecretProvider::Qwen);
+        call.gemini_key = self.api_key(SecretProvider::Gemini);
+        call.remote_api_key = self.api_key(SecretProvider::Remote);
+        call.nvidia_api_key = self.api_key(SecretProvider::Nvidia);
         call.ollama_asks = self.ollama_request_for_turn(&call.model).0;
         call
     }
@@ -7666,12 +7726,12 @@ impl<'a> App<'a> {
                 let ollama_url = self.config.ollama_url.clone();
                 let llama_cpp_url = self.config.llama_cpp_url.clone();
                 let timeout = self.config.response_timeout;
-                let or_key = self.config.api_keys.openrouter_api_key.clone();
-                let qwen_key = self.config.api_keys.qwen_api_key.clone();
-                let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
+                let or_key = self.api_key(SecretProvider::OpenRouter);
+                let qwen_key = self.api_key(SecretProvider::Qwen);
+                let gemini_key = self.api_key(SecretProvider::Gemini);
                 let remote_url = self.config.remote_base_url.clone();
-                let remote_key = self.config.api_keys.remote_api_key.clone();
-                let nvidia_key = self.config.api_keys.nvidia_api_key_resolved();
+                let remote_key = self.api_key(SecretProvider::Remote);
+                let nvidia_key = self.api_key(SecretProvider::Nvidia);
                 let egress = self.egress_policy();
                 let llama_opts = LlamaCppOptions {
                     temperature: self.config.llama_cpp_temperature,
@@ -9700,6 +9760,11 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
 
+        // A credential lookup that could not read its key says so on the frame
+        // after it was tried, so a broken helper is named in the turn that hit
+        // it rather than the next one the person has to send.
+        app.say_secret_problems();
+
         signals.toasts_after = app.toasts.len();
         signals.activity = app.activity_animating();
         if first_frame || should_draw(&signals) {
@@ -9709,32 +9774,51 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
     }
 }
 
-/// The API key a Settings `Secret` row edits. Labels are the single source
-/// of truth shared by the renderer and the key handler, so a row that is
-/// missing here simply has no stored value rather than a wrong one.
+/// The credential a Settings `Secret` row edits. Labels are the single source of
+/// truth shared by the renderer and the key handler, so a row that is missing
+/// here simply has no stored value rather than a wrong one.
+fn secret_row_provider(label: &str) -> Option<SecretProvider> {
+    match label {
+        "Remote Key" => Some(SecretProvider::Remote),
+        "Gemini Key" => Some(SecretProvider::Gemini),
+        "Qwen Key" => Some(SecretProvider::Qwen),
+        "OpenRouter Key" => Some(SecretProvider::OpenRouter),
+        _ => None,
+    }
+}
+
+/// The value a Settings `Secret` row holds in `config.json` — either a key, or a
+/// `command:` reference that names where the key is kept.
 pub fn secret_value<'a>(config: &'a XencodeConfig, label: &str) -> Option<&'a str> {
-    let key = match label {
-        "Remote Key" => &config.api_keys.remote_api_key,
-        "Gemini Key" => &config.api_keys.google_gemini_api_key,
-        "Qwen Key" => &config.api_keys.qwen_api_key,
-        "OpenRouter Key" => &config.api_keys.openrouter_api_key,
-        _ => return None,
-    };
-    key.as_deref().filter(|value| !value.is_empty())
+    let provider = secret_row_provider(label)?;
+    provider
+        .stored(&config.api_keys)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// Where this row's credential comes from when the row itself holds nothing:
+/// the environment variable named for the provider. `None` means the stored
+/// value is the whole story, which is the case the row can show as dots.
+pub fn secret_env_source(config: &XencodeConfig, label: &str) -> Option<String> {
+    let provider = secret_row_provider(label)?;
+    if secret_value(config, label).is_some() {
+        return None;
+    }
+    config.api_keys.secret_source(provider)
 }
 
 /// Store (or, for `None`, clear) the API key a `Secret` row edits. Returns
 /// false for an unknown label so the caller can ignore rows that were never
-/// meant to be secret.
+/// meant to be secret. Typing `command:<program> <args>` stores a reference
+/// rather than a secret, and xencode runs that program when it needs the key.
 pub fn set_secret_value(config: &mut XencodeConfig, label: &str, value: Option<String>) -> bool {
-    let slot = match label {
-        "Remote Key" => &mut config.api_keys.remote_api_key,
-        "Gemini Key" => &mut config.api_keys.google_gemini_api_key,
-        "Qwen Key" => &mut config.api_keys.qwen_api_key,
-        "OpenRouter Key" => &mut config.api_keys.openrouter_api_key,
-        _ => return false,
+    let Some(provider) = secret_row_provider(label) else {
+        return false;
     };
-    *slot = value;
+    config
+        .api_keys
+        .set_secret(provider, value.as_deref().unwrap_or_default());
     true
 }
 
@@ -9789,14 +9873,43 @@ pub(crate) async fn serve_scripted_answers(
 }
 
 #[cfg(test)]
+pub(crate) static CREDENTIAL_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Run `body` with `API_KEY_OPENROUTER` holding `value`, then put the developer's
+/// own environment back exactly as it was.
+///
+/// A credential now has three places it may live, so a test that means "this
+/// provider has no key" has to say so about the environment too — otherwise an
+/// exported variable on one machine turns a routing test into a different test.
+/// The lock is shared with any other test that touches a credential variable,
+/// because the environment belongs to the whole test process.
+#[cfg(test)]
+pub(crate) fn with_openrouter_env<T>(value: Option<&str>, body: impl FnOnce() -> T) -> T {
+    let _guard = CREDENTIAL_ENV
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = std::env::var_os("API_KEY_OPENROUTER");
+    match value {
+        Some(value) => std::env::set_var("API_KEY_OPENROUTER", value),
+        None => std::env::remove_var("API_KEY_OPENROUTER"),
+    }
+    let outcome = body();
+    match previous {
+        Some(value) => std::env::set_var("API_KEY_OPENROUTER", value),
+        None => std::env::remove_var("API_KEY_OPENROUTER"),
+    }
+    outcome
+}
+
+#[cfg(test)]
 mod tests {
     use super::{
         cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, offered_tools, parse_lesson_quiz,
         parse_llama_port, parse_porcelain_z, parse_term_suggestions, parse_voice_level,
         preview_repo_map, repo_map_tier_line, should_draw, split_prompt_arguments, trace_age,
-        trace_report, watch_warning_for, App, ConversationMemory, Egress, FocusArea, FrameSignals,
-        LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
+        trace_report, watch_warning_for, with_openrouter_env, App, ConversationMemory, Egress,
+        FocusArea, FrameSignals, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -11549,26 +11662,66 @@ mod tests {
     /// and `openai/gpt-4o` is off-machine only once an OpenRouter key exists.
     #[test]
     fn a_model_is_called_cloud_by_the_same_rules_the_router_uses() {
-        let mut app = App::for_tests();
-        app.config.api_keys.openrouter_api_key = None;
-        assert_eq!(
-            app.egress_of("openai/gpt-4o"),
-            Egress::Local,
-            "with no OpenRouter key the id falls through to local Ollama"
-        );
-        assert_eq!(
-            app.egress_of("qwen-72b-chat"),
-            Egress::Local,
-            "an Ollama model name that looks like the Qwen cloud prefix"
-        );
-        assert_eq!(
-            app.egress_of("qwen:qwen3-max"),
-            Egress::Cloud,
-            "the prefix is the route"
-        );
+        with_openrouter_env(None, || {
+            let mut app = App::for_tests();
+            app.config.api_keys.openrouter_api_key = None;
+            assert_eq!(
+                app.egress_of("openai/gpt-4o"),
+                Egress::Local,
+                "with no OpenRouter key the id falls through to local Ollama"
+            );
+            assert_eq!(
+                app.egress_of("qwen-72b-chat"),
+                Egress::Local,
+                "an Ollama model name that looks like the Qwen cloud prefix"
+            );
+            assert_eq!(
+                app.egress_of("qwen:qwen3-max"),
+                Egress::Cloud,
+                "the prefix is the route"
+            );
 
-        app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
-        assert_eq!(app.egress_of("openai/gpt-4o"), Egress::Cloud);
+            app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
+            assert_eq!(app.egress_of("openai/gpt-4o"), Egress::Cloud);
+        });
+    }
+
+    /// What a Settings `Secret` row stores, and what it says when the row itself
+    /// holds nothing. Typing `command:<program> <args>` into a row is the way to
+    /// keep the key out of `config.json` from inside the interface, and an empty
+    /// row is not "no credential" when the environment carries one.
+    #[test]
+    fn a_secret_row_stores_a_reference_and_names_the_environment_when_empty() {
+        use super::{secret_env_source, secret_value, set_secret_value, with_openrouter_env};
+        let reference = "command:secret-tool lookup service xencode account me";
+        with_openrouter_env(None, || {
+            let mut config = XencodeConfig::default();
+            assert!(set_secret_value(
+                &mut config,
+                "OpenRouter Key",
+                Some(reference.to_string()),
+            ));
+            assert_eq!(secret_value(&config, "OpenRouter Key"), Some(reference));
+            // The row holds the reference, so it has nothing to say about the
+            // environment: what is in the file decides this provider.
+            assert_eq!(secret_env_source(&config, "OpenRouter Key"), None);
+            assert!(set_secret_value(&mut config, "OpenRouter Key", None));
+            assert_eq!(secret_value(&config, "OpenRouter Key"), None);
+            // A row that was never meant to be a credential is refused.
+            assert!(!set_secret_value(
+                &mut config,
+                "Theme",
+                Some("x".to_string())
+            ));
+        });
+        // An empty row is not "no credential" when the environment carries one.
+        with_openrouter_env(Some("env-openrouter-key"), || {
+            let config = XencodeConfig::default();
+            assert_eq!(
+                secret_env_source(&config, "OpenRouter Key").as_deref(),
+                Some("set in the environment as API_KEY_OPENROUTER")
+            );
+        });
     }
 
     /// A window the llama.cpp server reported reaches the budget, for the run
@@ -11847,30 +12000,32 @@ mod tests {
     /// client served it, and whether the prompt left the machine.
     #[test]
     fn a_metrics_row_names_its_model_provider_and_destination() {
-        let mut app = App::for_tests();
-        app.config.api_keys.openrouter_api_key = None;
+        with_openrouter_env(None, || {
+            let mut app = App::for_tests();
+            app.config.api_keys.openrouter_api_key = None;
 
-        let local = app.metrics_identity("qwen2.5:7b");
-        assert_eq!(local.model.as_deref(), Some("qwen2.5:7b"));
-        assert_eq!(local.provider.as_deref(), Some("ollama"));
-        assert_eq!(local.source, Some(xencode_context_rs::MetricSource::Local));
-        // The test app holds an unpersisted conversation with no session, and
-        // the row says so rather than inventing an identifier.
-        assert_eq!(local.session_id, None);
+            let local = app.metrics_identity("qwen2.5:7b");
+            assert_eq!(local.model.as_deref(), Some("qwen2.5:7b"));
+            assert_eq!(local.provider.as_deref(), Some("ollama"));
+            assert_eq!(local.source, Some(xencode_context_rs::MetricSource::Local));
+            // The test app holds an unpersisted conversation with no session, and
+            // the row says so rather than inventing an identifier.
+            assert_eq!(local.session_id, None);
 
-        let cloud = app.metrics_identity("qwen:qwen3-max");
-        assert_eq!(cloud.provider.as_deref(), Some("qwen"));
-        assert_eq!(cloud.source, Some(xencode_context_rs::MetricSource::Cloud));
-        // A slashed id is OpenRouter only once a key makes that route real;
-        // the recorded provider moves with the route, not the name.
-        assert_eq!(
-            app.metrics_identity("openai/gpt-4o").provider.as_deref(),
-            Some("ollama")
-        );
-        app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
-        let routed = app.metrics_identity("openai/gpt-4o");
-        assert_eq!(routed.provider.as_deref(), Some("openrouter"));
-        assert_eq!(routed.source, Some(xencode_context_rs::MetricSource::Cloud));
+            let cloud = app.metrics_identity("qwen:qwen3-max");
+            assert_eq!(cloud.provider.as_deref(), Some("qwen"));
+            assert_eq!(cloud.source, Some(xencode_context_rs::MetricSource::Cloud));
+            // A slashed id is OpenRouter only once a key makes that route real;
+            // the recorded provider moves with the route, not the name.
+            assert_eq!(
+                app.metrics_identity("openai/gpt-4o").provider.as_deref(),
+                Some("ollama")
+            );
+            app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
+            let routed = app.metrics_identity("openai/gpt-4o");
+            assert_eq!(routed.provider.as_deref(), Some("openrouter"));
+            assert_eq!(routed.source, Some(xencode_context_rs::MetricSource::Cloud));
+        });
     }
 
     /// The real writer: a row the TUI would actually record for an assembled

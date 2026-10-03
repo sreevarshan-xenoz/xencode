@@ -9,6 +9,7 @@ use ratatui::{
     Frame,
 };
 
+use xencode_config_rs::{is_secret_reference, SecretProvider};
 use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
@@ -1218,14 +1219,27 @@ fn setting_display(app: &App, idx: usize) -> String {
         SettingKind::Secret => {
             if editing_here {
                 // Bullets, not characters: the key must never reach the screen.
-                format!(
-                    "{}| (Enter to save, Esc to cancel)",
-                    "•".repeat(app.settings_url_buffer.chars().count())
-                )
+                // A `command:` reference names a program rather than holding a
+                // secret, so it is shown as it is typed.
+                let typed = &app.settings_url_buffer;
+                let shown = if is_secret_reference(typed) {
+                    typed.clone()
+                } else {
+                    "•".repeat(typed.chars().count())
+                };
+                format!("{shown}| (Enter to save, Esc to cancel)")
             } else {
                 match crate::app::secret_value(&app.config, row.label) {
+                    // The reference is the thing to edit, so it reads in full.
+                    Some(value) if is_secret_reference(value) => {
+                        format!("{}  (Enter to edit)", value)
+                    }
                     Some(key) => format!("{}  (Enter to edit)", mask_secret(key)),
-                    None => "⚠️  Not set (Enter to edit)".to_string(),
+                    // Nothing in the file, but a tier below it answers.
+                    None => match crate::app::secret_env_source(&app.config, row.label) {
+                        Some(source) => format!("✅ {source}  (Enter to edit)"),
+                        None => "⚠️  Not set (Enter to edit)".to_string(),
+                    },
                 }
             }
         }
@@ -1342,36 +1356,26 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     )));
     provider_lines.push(Line::from(""));
 
+    // Whether each provider has a credential, counting every tier it may live
+    // in. Asking is cheap by design — a stored command reference is never run
+    // here — so this panel costs nothing per redraw.
+    let openrouter_set = app.config.api_keys.has_secret(SecretProvider::OpenRouter);
+    let gemini_set = app.config.api_keys.has_secret(SecretProvider::Gemini);
+    let qwen_set = app.config.api_keys.has_secret(SecretProvider::Qwen);
+    let key_note = |configured: bool| -> &'static str {
+        if configured {
+            "✅ Key set"
+        } else {
+            "❌ No key"
+        }
+    };
+
     let checks: [(&str, bool, &str); 5] = [
         ("Ollama   ", true, &app.config.ollama_url),
         ("Llama.cpp ", true, &app.config.llama_cpp_url),
-        (
-            "OpenRouter",
-            app.config.api_keys.openrouter_api_key.is_some(),
-            if app.config.api_keys.openrouter_api_key.is_some() {
-                "✅ Key set"
-            } else {
-                "❌ No key"
-            },
-        ),
-        (
-            "Gemini   ",
-            app.config.api_keys.google_gemini_api_key.is_some(),
-            if app.config.api_keys.google_gemini_api_key.is_some() {
-                "✅ Key set"
-            } else {
-                "❌ No key"
-            },
-        ),
-        (
-            "Qwen     ",
-            app.config.api_keys.qwen_api_key.is_some(),
-            if app.config.api_keys.qwen_api_key.is_some() {
-                "✅ Key set"
-            } else {
-                "❌ No key"
-            },
-        ),
+        ("OpenRouter", openrouter_set, key_note(openrouter_set)),
+        ("Gemini   ", gemini_set, key_note(gemini_set)),
+        ("Qwen     ", qwen_set, key_note(qwen_set)),
     ];
 
     for &(name, configured, detail) in &checks {
@@ -2559,7 +2563,7 @@ fn provider_health_lines(app: &App) -> Vec<Line<'static>> {
     )));
     lines.push(Line::from(format!(
         "   OpenRouter:   {}",
-        if app.config.api_keys.openrouter_api_key.is_some() {
+        if app.config.api_keys.has_secret(SecretProvider::OpenRouter) {
             "\u{2705} Key configured"
         } else {
             "\u{274C} No API key"
@@ -4902,6 +4906,54 @@ mod tests {
             "forward URI rendered: {text}"
         );
         assert!(text.contains("Remote URI:"), "details row: {text}");
+    }
+
+    /// What a Settings credential row puts on screen: a stored key as dots, a
+    /// `command:` reference in full, and the variable name when the file holds
+    /// nothing. Never the key itself.
+    #[test]
+    fn a_credential_row_shows_where_the_key_lives_and_never_the_key() {
+        use super::setting_display;
+        use crate::app::with_openrouter_env;
+        use crate::focus::SETTINGS_ITEMS;
+
+        let row = SETTINGS_ITEMS
+            .iter()
+            .position(|item| item.label == "OpenRouter Key")
+            .expect("the OpenRouter credential row is a settings item");
+        let mut app = App::for_tests();
+
+        app.config.api_keys.openrouter_api_key = Some("sk-not-a-real-secret-value".to_string());
+        let shown = setting_display(&app, row);
+        assert!(
+            !shown.contains("sk-not-a-real-secret"),
+            "the row printed the key: {shown}"
+        );
+        assert!(
+            shown.contains('•'),
+            "a stored key should read as dots: {shown}"
+        );
+
+        app.config.api_keys.openrouter_api_key =
+            Some("command:secret-tool lookup service xencode account me".to_string());
+        let shown = setting_display(&app, row);
+        assert!(
+            shown.contains("command:secret-tool lookup service xencode account me"),
+            "a reference names the program that holds the key: {shown}"
+        );
+
+        app.config.api_keys.openrouter_api_key = None;
+        with_openrouter_env(Some("env-openrouter-key"), || {
+            let shown = setting_display(&app, row);
+            assert!(
+                shown.contains("API_KEY_OPENROUTER"),
+                "the environment tier should be named: {shown}"
+            );
+            assert!(
+                !shown.contains("env-openrouter-key"),
+                "the row printed the key: {shown}"
+            );
+        });
     }
 
     #[test]

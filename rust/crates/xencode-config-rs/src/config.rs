@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::secrets::{SecretProblem, SecretProvider};
+
 /// The shape of `config.json` that this binary writes.
 ///
 /// Every rung of the ladder in [`migrate`] raises a file's version by one, so a
@@ -176,31 +178,51 @@ pub struct ApiKeys {
     pub remote_api_key: Option<String>,
     /// Bearer token for NVIDIA NIM (`nvidia:` models,
     /// `https://integrate.api.nvidia.com/v1`). Resolved by
-    /// [`ApiKeys::nvidia_api_key_resolved`], which also honours the
-    /// `NVIDIA_NIM_API_KEY` environment variable so the key can live outside
-    /// this file.
+    /// [`ApiKeys::secret`], which also honours `NVIDIA_NIM_API_KEY` and
+    /// `API_KEY_NVIDIA` so the key can live outside this file.
     #[serde(default)]
     pub nvidia_api_key: Option<String>,
 }
 
 impl ApiKeys {
-    /// The NVIDIA NIM key in force: the configured value wins, otherwise the
-    /// `NVIDIA_NIM_API_KEY` environment variable, otherwise nothing. Blank on
-    /// either side counts as unset, so an empty export cannot shadow a real
-    /// configured key with nothing.
-    pub fn nvidia_api_key_resolved(&self) -> Option<String> {
-        let configured = self
-            .nvidia_api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|key| !key.is_empty());
-        if configured.is_some() {
-            return configured.map(str::to_string);
+    /// The credential in force for one provider: the stored value if the file
+    /// holds one (running it if the value is a `command:` reference), otherwise
+    /// the provider's environment variable.
+    ///
+    /// A reference that fails is a [`SecretProblem`] naming the command — an empty
+    /// key and a broken keyring are different situations, and treating them alike
+    /// would mean a provider answering "no key configured" when the real cause is
+    /// that `secret-tool` is not on `PATH`.
+    pub fn secret(&self, provider: SecretProvider) -> Result<Option<String>, SecretProblem> {
+        crate::secrets::resolve(provider.stored(self), provider.env_vars())
+    }
+
+    /// Whether the provider has a credential, without reading it: no command
+    /// reference is run, so this is safe to ask while a panel is drawing.
+    pub fn has_secret(&self, provider: SecretProvider) -> bool {
+        crate::secrets::is_present(provider.stored(self), provider.env_vars())
+    }
+
+    /// Where the credential comes from, for `config show` and `doctor`. Never the
+    /// value itself.
+    pub fn secret_source(&self, provider: SecretProvider) -> Option<String> {
+        crate::secrets::describe(provider.stored(self), provider.env_vars())
+    }
+
+    /// Store a credential for a provider. Blank unsets it. A value beginning with
+    /// [`SECRET_COMMAND_PREFIX`](crate::secrets::SECRET_COMMAND_PREFIX) is kept as
+    /// written and treated as the command to read the secret from, so nothing but
+    /// the reference lands on disk.
+    pub fn set_secret(&mut self, provider: SecretProvider, value: &str) {
+        let stored = (!value.trim().is_empty()).then(|| value.trim().to_string());
+        match provider {
+            SecretProvider::OpenAi => self.openai_api_key = stored,
+            SecretProvider::OpenRouter => self.openrouter_api_key = stored,
+            SecretProvider::Gemini => self.google_gemini_api_key = stored,
+            SecretProvider::Qwen => self.qwen_api_key = stored,
+            SecretProvider::Remote => self.remote_api_key = stored,
+            SecretProvider::Nvidia => self.nvidia_api_key = stored,
         }
-        std::env::var("NVIDIA_NIM_API_KEY")
-            .ok()
-            .map(|key| key.trim().to_string())
-            .filter(|key| !key.is_empty())
     }
 }
 
@@ -1033,15 +1055,39 @@ impl XencodeConfig {
         Ok(())
     }
 
-    /// Serialize the config to a pretty-printed JSON string.
+    /// The configuration as `xencode config show` prints it.
+    ///
+    /// Credentials are replaced by where they come from. Serialising the struct as
+    /// it stands put every API key in plain view on the terminal, and that output
+    /// is what people paste into a bug report, pipe into a file, or screenshot —
+    /// including a key that had deliberately been kept out of `config.json` in an
+    /// environment variable. A command reference is shown as stored, because the
+    /// reference is not the secret and it is the thing to go and edit.
     pub fn to_json(&self) -> Result<String, ConfigError> {
-        serde_json::to_string_pretty(self).map_err(ConfigError::Json)
+        let mut value = serde_json::to_value(self).map_err(ConfigError::Json)?;
+        if let Some(keys) = value
+            .get_mut("api_keys")
+            .and_then(|found| found.as_object_mut())
+        {
+            for provider in SecretProvider::ALL {
+                let field = provider.json_field();
+                let shown = self.api_keys.secret_source(provider);
+                *keys
+                    .entry(field.to_string())
+                    .or_insert(serde_json::Value::Null) = match shown {
+                    Some(label) => serde_json::Value::String(label),
+                    None => serde_json::Value::Null,
+                };
+            }
+        }
+        serde_json::to_string_pretty(&value).map_err(ConfigError::Json)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::SECRET_COMMAND_PREFIX;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::{Mutex, MutexGuard};
@@ -1072,11 +1118,16 @@ mod tests {
     fn nvidia_key_prefers_config_over_environment_and_blank_is_unset() {
         let _guard = lock_nim_env();
         let previous = std::env::var_os("NVIDIA_NIM_API_KEY");
+        let previous_alias = std::env::var_os("API_KEY_NVIDIA");
+        std::env::remove_var("API_KEY_NVIDIA");
         std::env::set_var("NVIDIA_NIM_API_KEY", "env-key");
         // Environment alone resolves.
         assert_eq!(
-            ApiKeys::default().nvidia_api_key_resolved(),
-            Some("env-key".to_string())
+            ApiKeys::default()
+                .secret(SecretProvider::Nvidia)
+                .unwrap()
+                .as_deref(),
+            Some("env-key")
         );
         // A configured key wins over the environment.
         let configured = ApiKeys {
@@ -1084,8 +1135,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            configured.nvidia_api_key_resolved(),
-            Some("config-key".to_string())
+            configured
+                .secret(SecretProvider::Nvidia)
+                .unwrap()
+                .as_deref(),
+            Some("config-key")
         );
         // Blank on either side counts as unset, never as a shadow.
         let blank_config = ApiKeys {
@@ -1093,15 +1147,124 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            blank_config.nvidia_api_key_resolved(),
-            Some("env-key".to_string())
+            blank_config
+                .secret(SecretProvider::Nvidia)
+                .unwrap()
+                .as_deref(),
+            Some("env-key")
         );
         std::env::remove_var("NVIDIA_NIM_API_KEY");
-        assert_eq!(ApiKeys::default().nvidia_api_key_resolved(), None);
+        assert_eq!(
+            ApiKeys::default().secret(SecretProvider::Nvidia).unwrap(),
+            None
+        );
+        // The alias fills the same provider, so the naming rule works for NVIDIA
+        // as well as its first-shipped variable name.
+        std::env::set_var("API_KEY_NVIDIA", "alias-key");
+        assert_eq!(
+            ApiKeys::default()
+                .secret(SecretProvider::Nvidia)
+                .unwrap()
+                .as_deref(),
+            Some("alias-key")
+        );
         match previous {
             Some(value) => std::env::set_var("NVIDIA_NIM_API_KEY", value),
             None => std::env::remove_var("NVIDIA_NIM_API_KEY"),
         }
+        match previous_alias {
+            Some(value) => std::env::set_var("API_KEY_NVIDIA", value),
+            None => std::env::remove_var("API_KEY_NVIDIA"),
+        }
+    }
+
+    #[test]
+    fn config_show_names_where_each_credential_lives_and_never_the_value() {
+        let _guard = lock_nim_env();
+        let previous = std::env::var_os("API_KEY_OPENAI");
+        std::env::remove_var("API_KEY_OPENAI");
+        let config = XencodeConfig {
+            api_keys: ApiKeys {
+                openai_api_key: Some("sk-live-value-not-for-printing".to_string()),
+                google_gemini_api_key: Some(
+                    "command:secret-tool lookup service xencode".to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let shown = config.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&shown).unwrap();
+        assert_eq!(
+            parsed["api_keys"]["openai_api_key"],
+            serde_json::Value::String("set in config.json (value not shown)".to_string()),
+            "a stored key is named, not printed: {shown}"
+        );
+        assert_eq!(
+            parsed["api_keys"]["google_gemini_api_key"],
+            serde_json::Value::String(
+                "command reference — command:secret-tool lookup service xencode".to_string()
+            ),
+            "the reference is the thing to go edit, so it is shown: {shown}"
+        );
+        assert_eq!(
+            parsed["api_keys"]["qwen_api_key"],
+            serde_json::Value::Null,
+            "an absent key stays absent"
+        );
+        assert!(
+            !shown.contains("sk-live-value-not-for-printing"),
+            "the value appears nowhere in what is printed: {shown}"
+        );
+        // Everything that is not a credential is printed as it stands.
+        assert_eq!(parsed["default_model"], config.default_model);
+        assert_eq!(parsed["config_version"], CURRENT_CONFIG_VERSION);
+
+        // An environment-only credential is named by variable.
+        std::env::set_var("API_KEY_OPENAI", "env-live-value-not-for-printing");
+        let shown = XencodeConfig::default().to_json().unwrap();
+        assert!(
+            shown.contains("set in the environment as API_KEY_OPENAI"),
+            "the tier is stated: {shown}"
+        );
+        assert!(
+            !shown.contains("env-live-value-not-for-printing"),
+            "and the value is not: {shown}"
+        );
+        match previous {
+            Some(value) => std::env::set_var("API_KEY_OPENAI", value),
+            None => std::env::remove_var("API_KEY_OPENAI"),
+        }
+    }
+
+    #[test]
+    fn what_a_panel_can_ask_while_it_draws_costs_no_command() {
+        let dir =
+            std::env::temp_dir().join(format!("xencode-config-presence-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("was-run");
+        let keys = ApiKeys {
+            openrouter_api_key: Some(format!(
+                "{SECRET_COMMAND_PREFIX}/bin/sh -c 'touch {}; echo key'",
+                marker.display()
+            )),
+            ..Default::default()
+        };
+        assert!(keys.has_secret(SecretProvider::OpenRouter));
+        assert!(
+            !marker.exists(),
+            "presence must not run the helper a panel is only asking about"
+        );
+        assert_eq!(
+            keys.secret_source(SecretProvider::OpenRouter)
+                .unwrap()
+                .split(" — ")
+                .next()
+                .unwrap(),
+            "command reference"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

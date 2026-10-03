@@ -1678,6 +1678,75 @@ $ XCODE_CONFIG_DIR=/tmp/db8 xencode config set --dry-run default_model qwen3:4b
 would set default_model = qwen3:4b — nothing written (--dry-run)
 ```
 
+A provider credential is set the same way and is never printed back:
+
+```bash
+xencode config set openai_api_key <key>
+xencode config set qwen_api_key ""          # unset it here
+xencode config set --dry-run openai_api_key <key>
+would set openai_api_key (value not shown) — nothing written (--dry-run)
+xencode config set openai_api_key ""
+cleared openai_api_key — the environment variable named for the provider, if any, now supplies it
+```
+
+The value may also name a program instead of holding a key:
+
+```
+$ xencode config set openrouter_api_key "command:secret-tool lookup service xencode account me"
+set openrouter_api_key = a command reference — the secret is read from that command and stays out of config.json
+note: the command answered with a key.
+```
+
+A credential is then read from three places, in this order:
+
+1. the value in `config.json` — writing it there was a deliberate act, so it wins;
+2. a `command:` reference. The stored text is `command:<program> <args>`, that
+   program prints the key on its first line, and `config.json` holds no secret, so
+   a directory that gets backed up or synced still carries nothing. The program is
+   run **directly, not through a shell**: it has to be on `PATH`, and `*` or
+   `$HOME` written into the reference will not be expanded. It gets no terminal
+   and ten seconds to answer, so a helper waiting on a passphrase nobody can see
+   is stopped and named rather than hanging the request, and what it writes on
+   standard error is dropped instead of shown. `--dry-run` stores nothing and does
+   not run the command; `config set` runs it once immediately, so a reference that
+   cannot be read is found at the moment it is written down rather than in the
+   middle of a turn.
+3. the environment variable named for the provider: `API_KEY_OPENAI`,
+   `API_KEY_OPENROUTER`, `API_KEY_GEMINI`, `API_KEY_QWEN`, `API_KEY_REMOTE` (or
+   `XENCODE_API_KEY`, which fills only the `remote:` endpoint you run yourself —
+   there is deliberately no variable that applies to every provider, because one
+   name cannot say which account the key belongs to), and `API_KEY_NVIDIA` (or
+   `NVIDIA_NIM_API_KEY`, the name this project shipped first). A blank counts as
+   unset on both sides, so an empty `export` cannot hide a configured key.
+
+`config show` names which of the three a credential came from, and never the
+value:
+
+```
+$ xencode config show
+  "api_keys": {
+    "google_gemini_api_key": null,
+    "nvidia_api_key": null,
+    "openai_api_key": "set in config.json (value not shown)",
+    "openrouter_api_key": "command reference — command:secret-tool lookup service xencode account me",
+    "qwen_api_key": "set in the environment as API_KEY_QWEN",
+    "qwen_client_id": null,
+    "remote_api_key": null
+  },
+```
+
+The Settings panel's key rows read the same way: a stored key shows as dots, a
+reference shows in full because it names a program rather than a secret, and a
+row with nothing stored says which environment variable is answering for it.
+Typing `command:…` into one of those rows stores a reference.
+
+A Linux desktop keyring (`org.freedesktop.secrets`) is reachable through tier 2 —
+`command:secret-tool lookup …`. Worth being exact about what that buys: it keeps
+the secret out of a file that is backed up, synced or shared, and it does nothing
+against a process running as you, because the keyring answers anything in your own
+session and is not available over SSH or headless at all. It is a different place
+to keep the same secret, not a stronger lock on it.
+
 Every save that replaces the file first copies what was there to a timestamped
 `config.json.bak.<UTC time>` beside it, owner-only like the config itself, and
 keeps the newest five. A save that would write exactly the bytes already on disk
@@ -1719,7 +1788,8 @@ is what used to happen.
 |-----|------|-------|
 | `default_model` | string | e.g. `qwen3:4b` |
 | `ollama_url`, `llama_cpp_url` | string | provider endpoints |
-| `remote_url`, `remote_key` | string | Remote / Colab endpoint (any OpenAI-compatible server, e.g. `http://127.0.0.1:18000/v1` + its bearer token); empty `remote_key` clears it |
+| `remote_url`, `remote_key` | string | Remote / Colab endpoint (any OpenAI-compatible server, e.g. `http://127.0.0.1:18000/v1` + its bearer token); empty `remote_key` clears it. Its bearer token also comes from `XENCODE_API_KEY` / `API_KEY_REMOTE` when nothing is stored here |
+| `openai_api_key`, `openrouter_api_key`, `google_gemini_api_key`, `qwen_api_key`, `nvidia_api_key` | string | Provider credentials, `remote_key` included. Each takes a key, or `command:<program> <args>` to keep the key out of the file, and each has an environment variable of the same name if the file says nothing — see the three tiers above. `config show` reports where one lives and never its value |
 | `nvidia_api_key` | string | NVIDIA NIM token for `nvidia:<vendor/model>` (e.g. `nvidia:deepseek-ai/deepseek-v4.1-flash`); empty clears it. Also read from `NVIDIA_NIM_API_KEY` when unset here — the config value wins. **Generate it from the model's own page** (`build.nvidia.com/<vendor/model>` → Get API Key), not from the account page: an account-wide key lists models but every call returns `404 … Not found for account`. Expect 250–300s on a cold start, raise `response_timeout` (default 30s) accordingly, and give `max_tokens` room for the model's reasoning tokens |
 | `colab_enabled` | bool | Gates the whole Colab bridge; `false` → `xencode colab *` refuses |
 | `colab_session` | string | Session name for `xencode colab up`; empty = create one |

@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `DB-3`: a provider credential can stay out of `config.json`, and nothing prints a key
+
+`xencode config set` took no credential names at all, so the only way to give a
+provider a key was to edit the JSON by hand — and `config show` then printed the
+keys it found. Both are fixed, and a key can now be kept off the disk entirely.
+
+A credential is read from three places, in this order: the value in
+`config.json`, a `command:` reference naming a program that prints the key, then
+the environment variable named for the provider.
+
+```
+$ xencode config set openai_api_key <key>
+set openai_api_key = (stored, not shown)
+
+$ xencode config set openrouter_api_key "command:secret-tool lookup service xencode account me"
+set openrouter_api_key = a command reference — the secret is read from that command and stays out of config.json
+note: the command answered with a key.
+
+$ xencode config set qwen_api_key "command:/home/me/typo.sh"
+set qwen_api_key = a command reference — the secret is read from that command and stays out of config.json
+note: the key command `/home/me/typo.sh` could not be started: No such file or directory (os error 2). It is run directly, not through a shell, so the program has to be on PATH and `*` or `$HOME` in the reference will not be expanded
+
+$ xencode config set openai_api_key ""
+cleared openai_api_key — the environment variable named for the provider, if any, now supplies it
+```
+
+The line that runs the command is printed by the `config set` that stored it, so a
+reference that cannot be read is found when it is written down rather than in the
+middle of a turn. `config show` says where each credential lives and never its
+value:
+
+```
+  "api_keys": {
+    "google_gemini_api_key": null,
+    "nvidia_api_key": null,
+    "openai_api_key": "set in config.json (value not shown)",
+    "openrouter_api_key": "command reference — command:secret-tool lookup service xencode account me",
+    "qwen_api_key": "set in the environment as API_KEY_QWEN",
+    "qwen_client_id": null,
+    "remote_api_key": null
+  },
+```
+
+The helper runs with no shell involved — the program comes from `PATH`, and `*`
+or `$HOME` in the reference are not expanded — with nothing to read from, ten
+seconds to answer, and its error output dropped rather than shown, so a tool that
+leaks the key to standard error cannot put it on the terminal. A reference that
+takes too long is stopped and named; a keyring helper waiting on a passphrase
+nobody can see is exactly that case, because there is no terminal.
+
+`--dry-run` stores nothing and does not run the command:
+
+```
+$ xencode config set --dry-run qwen_api_key "command:/home/me/helper.sh"
+would set qwen_api_key = a command reference — nothing written, and the command was not run (--dry-run)
+```
+
+In the TUI, a key row shows a stored key as dots, shows a `command:` reference in
+full (it names a program, not a secret), and says which environment variable is
+answering for a row with nothing stored. Typing `command:…` into a row stores the
+reference. Asking whether a provider has a credential at all never runs the
+helper, so the panels pay nothing per redraw; reading a key does, and a read that
+fails is said once in the chat pane —
+
+```
+configuration: the qwen key is unusable — the key command `/home/me/typo.sh` could not be started: No such file or directory (os error 2). It is run directly, not through a shell, so the program has to be on PATH and `*` or `$HOME` in the reference will not be expanded
+```
+
+— rather than looking like a provider nobody configured, which is what would have
+sent the person off to paste the key in again.
+
+The desktop keyring is reachable through a reference (`secret-tool`) rather than a
+new dependency, and that is the honest shape: it keeps the secret out of a file
+that gets backed up, synced or shared, and it does nothing against a process
+running as your own user, because the keyring answers anything in your session and
+is unavailable over SSH. There is still no encrypted vault.
+
+`.xencode.example.json` now spells the three places out next to the `api_keys`
+block it shows, and gained the `nvidia_api_key` entry it was missing.
+
 ### Added — `DB-8`: a config save keeps what it replaced, and two commands can show their change first
 
 Overwriting `config.json` used to be the last thing standing between a person and

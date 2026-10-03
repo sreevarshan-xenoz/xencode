@@ -10,7 +10,7 @@ use xencode_analysis_rs::issues::CodeIssue;
 use xencode_analysis_rs::security::VulnerabilityScanner;
 use xencode_analysis_rs::web::{fetch_url, FetchedPage};
 use xencode_cache_rs::ResponseCache;
-use xencode_config_rs::XencodeConfig;
+use xencode_config_rs::{SecretProvider, XencodeConfig};
 use xencode_context_rs::doctor as doc;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
@@ -884,12 +884,17 @@ enum ConfigAction {
     Show,
     /// Set a configuration value
     Set {
-        /// Configuration key (e.g., default_model, ollama_url)
+        /// Configuration key (e.g., default_model, ollama_url). A key naming a
+        /// provider credential — `openai_api_key`, `openrouter_api_key`,
+        /// `google_gemini_api_key`, `qwen_api_key`, `remote_key`,
+        /// `nvidia_api_key` — is stored and never printed back.
         key: String,
         /// Value to set. A leading hyphen is allowed because the value people
         /// set most often is `llama_cpp_args`, which is a server command line,
         /// and the line `xencode hw probe` hands them to paste starts with a
-        /// flag.
+        /// flag. For a credential key the value may instead be
+        /// `command:<program> <args>`: only that reference is kept, and the
+        /// program supplies the secret when it is needed.
         #[arg(allow_hyphen_values = true)]
         value: String,
         /// Validate and report the change without writing config.json
@@ -1540,7 +1545,9 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
             dry_run,
         } => {
             let mut config = XencodeConfig::load().map_err(|e| e.to_string())?;
-            let mut secret = false;
+            // Which provider a credential key belongs to, when this is a credential.
+            let credential = SecretProvider::from_config_key(&key);
+            let secret = credential.is_some();
             match key.as_str() {
                 "default_model" => config.default_model = value.clone(),
                 "ollama_url" => config.ollama_url = value.clone(),
@@ -1557,26 +1564,16 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     }
                     config.remote_base_url = trimmed.to_string();
                 }
-                // The value is a token: report that it was stored, never echo it back.
-                "remote_key" => {
-                    config.api_keys.remote_api_key = if value.trim().is_empty() {
-                        None
-                    } else {
-                        Some(value.clone())
-                    };
-                    secret = true;
-                }
-                // NVIDIA NIM token (`nvidia:<vendor/model>`). Same secrecy as
-                // every other key: stored, never echoed. It can also live in
-                // NVIDIA_NIM_API_KEY instead of this file — the config value
-                // wins when both are set.
-                "nvidia_api_key" => {
-                    config.api_keys.nvidia_api_key = if value.trim().is_empty() {
-                        None
-                    } else {
-                        Some(value.clone())
-                    };
-                    secret = true;
+                // A credential, for any provider that takes one. Stored and never
+                // echoed back. The value may also be `command:<program> <args>`,
+                // which stores the reference and reads the secret from that
+                // command when it is needed, so `config.json` holds no key at all;
+                // each provider can equally be left unset here and supplied by the
+                // environment variable named for it.
+                _ if credential.is_some() => {
+                    config
+                        .api_keys
+                        .set_secret(credential.expect("the guard just matched this key"), &value);
                 }
                 "llama_cpp_model_path" => config.llama_cpp_model_path = value.clone(),
                 "llama_cpp_model_url" => config.llama_cpp_model_url = value.clone(),
@@ -1794,7 +1791,15 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // Everything above ran — the key was recognised and the value
                 // validated against the real config — and nothing was written.
                 if secret {
-                    println!("would set {key} (value not shown) — nothing written (--dry-run)");
+                    if xencode_config_rs::is_secret_reference(&value) {
+                        // A preview does not execute the person's helper: a
+                        // reference could name a command that changes something.
+                        println!("would set {key} = a command reference — nothing written, and the command was not run (--dry-run)");
+                    } else if value.trim().is_empty() {
+                        println!("would clear {key} — nothing written (--dry-run)");
+                    } else {
+                        println!("would set {key} (value not shown) — nothing written (--dry-run)");
+                    }
                 } else {
                     println!("would set {key} = {value} — nothing written (--dry-run)");
                 }
@@ -1802,7 +1807,30 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
             }
             config.save().map_err(|e| e.to_string())?;
             if secret {
-                println!("set {key} = (stored, not shown)");
+                if xencode_config_rs::is_secret_reference(&value) {
+                    // The reference is what was stored, and it is not printed: a
+                    // person who wrote the key into the command line by mistake
+                    // would otherwise see it come back.
+                    println!("set {key} = a command reference — the secret is read from that command and stays out of config.json");
+                    // Run it once now, so a reference that cannot be read is
+                    // found at the moment it is written down instead of in the
+                    // middle of a turn.
+                    if let Some(provider) = credential {
+                        match config.api_keys.secret(provider) {
+                            Ok(Some(_)) => println!("note: the command answered with a key."),
+                            Ok(None) => println!(
+                                "note: the command names nothing, so it answered with no key."
+                            ),
+                            Err(problem) => println!("note: {problem}"),
+                        }
+                    }
+                } else if value.trim().is_empty() {
+                    // Blank is the way a credential is unset, so say that rather
+                    // than claiming something was stored.
+                    println!("cleared {key} — the environment variable named for the provider, if any, now supplies it");
+                } else {
+                    println!("set {key} = (stored, not shown)");
+                }
             } else {
                 println!("set {key} = {value}");
             }
@@ -3609,7 +3637,7 @@ async fn run_query_once(
     // Reported before anything else so a stream that never finishes still says
     // which model it was waiting on.
     let routing = xencode_providers_rs::RoutingFacts {
-        openrouter_key: config.api_keys.openrouter_api_key.is_some(),
+        openrouter_key: config.api_keys.has_secret(SecretProvider::OpenRouter),
         remote_host: (!config.remote_base_url.is_empty())
             .then(|| xencode_providers_rs::url_host(&config.remote_base_url))
             .flatten(),
@@ -3870,17 +3898,17 @@ async fn run_query_once(
 
     let provider = ProviderManager::new(
         client,
-        config.api_keys.openrouter_api_key.clone(),
-        config.api_keys.qwen_api_key.clone(),
-        config.api_keys.google_gemini_api_key.clone(),
+        api_key(&config, SecretProvider::OpenRouter),
+        api_key(&config, SecretProvider::Qwen),
+        api_key(&config, SecretProvider::Gemini),
         None,
     )
     .with_llama_cpp(llama_client)
     .with_remote(
         &config.remote_base_url,
-        config.api_keys.remote_api_key.clone(),
+        api_key(&config, SecretProvider::Remote),
     )
-    .with_nvidia(config.api_keys.nvidia_api_key_resolved())
+    .with_nvidia(api_key(&config, SecretProvider::Nvidia))
     .with_request_timeout(config.response_timeout)
     .with_ollama_request(ollama_request)
     .with_egress_policy(EgressPolicy::new(config.allow_cloud_models));
@@ -4874,26 +4902,19 @@ fn endpoints(config: &xencode_config_rs::XencodeConfig) -> Vec<Endpoint> {
     // A cloud provider is only worth dialling when a key is configured —
     // reaching an endpoint nobody set up proves nothing about this machine.
     // Env-resolved: a key living in NVIDIA_NIM_API_KEY counts as configured
-    // here too, since the route would use it.
-    let nvidia_key = config.api_keys.nvidia_api_key_resolved();
-    for (name, key, host) in [
-        ("openai", &config.api_keys.openai_api_key, "api.openai.com"),
-        (
-            "openrouter",
-            &config.api_keys.openrouter_api_key,
-            "openrouter.ai",
-        ),
-        (
-            "gemini",
-            &config.api_keys.google_gemini_api_key,
-            "generativelanguage.googleapis.com",
-        ),
-        ("qwen", &config.api_keys.qwen_api_key, "chat.qwen.ai"),
-        ("nvidia", &nvidia_key, "integrate.api.nvidia.com"),
+    // here too, since the route would use it. Presence is asked the cheap way: a
+    // cloud endpoint is worth dialling when a credential exists, whether it is
+    // stored, stored as a command reference, or exported.
+    for (provider, host) in [
+        (SecretProvider::OpenAi, "api.openai.com"),
+        (SecretProvider::OpenRouter, "openrouter.ai"),
+        (SecretProvider::Gemini, "generativelanguage.googleapis.com"),
+        (SecretProvider::Qwen, "chat.qwen.ai"),
+        (SecretProvider::Nvidia, "integrate.api.nvidia.com"),
     ] {
-        if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {
+        if config.api_keys.has_secret(provider) {
             list.push(Endpoint {
-                name,
+                name: provider.slug(),
                 url: format!("https://{host}"),
                 start_command: None,
             });
@@ -4966,7 +4987,7 @@ async fn model_check(config: &xencode_config_rs::XencodeConfig) -> doc::SelfChec
     // The same prefix chain the router walks, so the report asks the server that
     // a real turn would contact rather than the one a name looks like.
     let routing = xencode_providers_rs::RoutingFacts {
-        openrouter_key: config.api_keys.openrouter_api_key.is_some(),
+        openrouter_key: config.api_keys.has_secret(SecretProvider::OpenRouter),
         remote_host: (!config.remote_base_url.is_empty())
             .then(|| xencode_providers_rs::url_host(&config.remote_base_url))
             .flatten(),
@@ -5179,6 +5200,26 @@ fn load_config() -> (xencode_config_rs::XencodeConfig, doc::ConfigRead) {
         Err(problem) => doc::ConfigRead::Unparseable(problem.to_string()),
     };
     (outcome.unwrap_or_default(), read)
+}
+
+/// The credential a provider is to use, read through the tiers: the value stored
+/// in `config.json` (running it, when what is stored is a `command:` reference),
+/// otherwise the variable named for that provider.
+///
+/// A reference that fails is said out loud. A keyring helper that is not on
+/// `PATH` looks exactly like a provider nobody configured from the outside, and
+/// the person would then go and paste the key in again.
+fn api_key(config: &XencodeConfig, provider: SecretProvider) -> Option<String> {
+    match config.api_keys.secret(provider) {
+        Ok(value) => value,
+        Err(problem) => {
+            eprintln!(
+                "xencode: the {} key is unusable — {problem}",
+                provider.slug()
+            );
+            None
+        }
+    }
 }
 
 /// `xencode doctor --selfcheck`: the slice a person runs when xencode itself
