@@ -1557,6 +1557,42 @@ fn parse_u16(value: &str, key: &str) -> Result<u16, String> {
     Ok(port)
 }
 
+/// Parse a `config set` daily budget cap: a positive number no larger than
+/// `max`, or an empty value meaning "no cap". Zero is refused rather than
+/// stored — a cap of nothing is crossed before the first turn ends, which is a
+/// way to disable the product that reads as a budget. The upper bound is where
+/// the unit stops being an amount anyone spends in a day, so a mistyped number
+/// is caught at the keyboard instead of deciding tomorrow's context window.
+fn parse_daily_cap(value: &str, key: &str, max: u64, unit: &str) -> Result<Option<u64>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let amount: u64 = trimmed
+        .parse()
+        .map_err(|_| format!("invalid number for {key}: {value}"))?;
+    if amount == 0 {
+        return Err(format!(
+            "{key} cannot be 0 — a cap of nothing is crossed by the first turn, which is not a budget"
+        ));
+    }
+    if amount > max {
+        return Err(format!("{key} must be between 1 and {max} {unit}"));
+    }
+    Ok(Some(amount))
+}
+
+/// Settings whose empty value means "nothing set at all". Printing
+/// `set x = ` after one of those describes a value that is no longer there, so
+/// the removal gets its own wording.
+const UNSET_WHEN_EMPTY: [&str; 5] = [
+    "power_cents_per_kwh",
+    "budget_tokens_per_day",
+    "budget_energy_wh_per_day",
+    "budget_usd_micros_per_day",
+    "budget_minutes_per_day",
+];
+
 /// Print where each kind of xencode's own files is kept, and say in as many
 /// words when they are still in the single directory this layout replaced.
 fn run_paths(format: OutputFormat) -> Result<(), String> {
@@ -1950,6 +1986,31 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         config.power_cents_per_kwh = Some(cents);
                     }
                 }
+                // The four daily caps. They are one mechanism seen from four
+                // angles, so they are validated by one function; what each unit
+                // means is in the config field's own documentation, and
+                // `xencode help` points at it. Crossing one buys the next turn
+                // down a smaller context — nothing is ever refused over it.
+                "budget_tokens_per_day" => {
+                    config.budget_tokens_per_day =
+                        parse_daily_cap(&value, "budget_tokens_per_day", 1_000_000_000, "tokens")?;
+                }
+                "budget_energy_wh_per_day" => {
+                    config.budget_energy_wh_per_day =
+                        parse_daily_cap(&value, "budget_energy_wh_per_day", 24_000, "watt-hours")?;
+                }
+                "budget_usd_micros_per_day" => {
+                    config.budget_usd_micros_per_day = parse_daily_cap(
+                        &value,
+                        "budget_usd_micros_per_day",
+                        10_000_000_000,
+                        "micro-dollars ($1.00 = 1000000)",
+                    )?;
+                }
+                "budget_minutes_per_day" => {
+                    config.budget_minutes_per_day =
+                        parse_daily_cap(&value, "budget_minutes_per_day", 1_440, "minutes")?;
+                }
                 "mcp_timeout" => {
                     let seconds: u64 = value
                         .parse()
@@ -2032,6 +2093,8 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 } else {
                     println!("set {key} = (stored, not shown)");
                 }
+            } else if value.trim().is_empty() && UNSET_WHEN_EMPTY.contains(&key.as_str()) {
+                println!("cleared {key} — nothing is set for it, and the behaviour is what it was before it was ever named");
             } else {
                 println!("set {key} = {value}");
             }
@@ -2046,6 +2109,22 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 {
                     println!("note: {problem}");
                 }
+            }
+            // An energy cap is measured from the machine's own counter. On a
+            // machine that publishes none there is no reading that could ever
+            // reach it, and the person who set it should hear that now rather
+            // than three days from now, from a budget that never moved.
+            if key == "budget_energy_wh_per_day"
+                && config.budget_energy_wh_per_day.is_some()
+                && xencode_context_rs::power::package_energy_uj(
+                    xencode_context_rs::power::POWERCAP_ROOT,
+                )
+                .is_none()
+            {
+                println!(
+                    "note: this machine publishes no CPU energy counter, so that cap cannot be \
+                     reached here; the reading it waits for does not exist."
+                );
             }
             Ok(())
         }

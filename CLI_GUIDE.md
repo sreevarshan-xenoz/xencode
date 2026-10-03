@@ -1880,6 +1880,10 @@ is what used to happen.
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
 | `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
 | `power_cents_per_kwh` | number | What a kilowatt-hour costs where this machine runs, in cents — `12.5` for 12½¢. Used to price the electricity a **local** generation drew, from the kernel's own power counter: the `⚡` line a finished turn prints and the `energy_uj` field on its metrics row. Unset, the line still shows the watt-hours and says `no $/kWh set`, because the machine drew the power either way and only the price is unknown. `config set power_cents_per_kwh ""` clears it again; a negative tariff, or one above 1000 cents, is refused where it is written — see [What a local turn cost in power](#what-a-local-turn-cost-in-power) |
+| `budget_tokens_per_day` | number | What one calendar day may spend, in prompt plus completion tokens. One of four daily caps — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed). Anywhere from 1 to a billion tokens; an empty value clears it again |
+| `budget_energy_wh_per_day` | number | What one calendar day may draw at the wall, in watt-hours, from the kernel's own package counter. On a machine that publishes no counter nothing can ever be weighed against it, and `config set` says so as it is written. From 1 to 24000 watt-hours; empty clears — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed) |
+| `budget_usd_micros_per_day` | number | What one calendar day's tokens may cost at the rates in `.xencode/pricing.json`, in millionths of a dollar ($5.00 = `5000000`). Provider spend only, and a model the table does not know counts as nothing against it, so an unpriced day cannot pass this cap. From 1 micro-dollar up to $10,000 a day; empty clears — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed) |
+| `budget_minutes_per_day` | number | What one calendar day's turns may take in the aggregate, in minutes — the seconds the turns themselves ran, not the time the interface sat open. From 1 to 1440 minutes, which is a whole day; empty clears. Crossing any of the four buys the **next** turn down one rung of `hardware_profile` and never refuses anything — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed) |
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |
 | `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
 | `layout` | string | TUI body arrangement: `classic`, `chat-first`, `zen`, or a name declared in `layout_templates` (unknown → classic at render, with the reason printed by `config set` and toasted in the TUI) |
@@ -2016,6 +2020,73 @@ existed have none of the four fields and still read, which is why the log stays
 append-only. `/cost` prices the same turns by tokens from `.xencode/pricing.json`
 — that is the provider's bill, and this is yours; the two are never added
 together.
+
+### What a day's caps do when they are passed
+
+Four settings put a limit on one calendar day's usage, in the four units xencode
+can actually measure it in:
+
+| Setting | Unit |
+| --- | --- |
+| `budget_tokens_per_day` | prompt plus completion tokens |
+| `budget_energy_wh_per_day` | watt-hours off the kernel's package counter |
+| `budget_usd_micros_per_day` | what the day's tokens cost at `pricing.json`, in millionths of a dollar |
+| `budget_minutes_per_day` | the seconds the day's turns ran, added up |
+
+**A passed cap buys the next turn down; it never refuses one.** The day's records
+are read at the boundary before a turn is built — never in the middle of one,
+because a refusal that lands between an edit and the check that was supposed to
+catch it is how these tools lose people's work. If a cap has been reached, the
+hardware profile steps one rung down (`HIGH → BALANCED → LOW`) and the turn runs
+with that smaller room: a shorter context window, fewer retrieved files, less of
+each one. At `LOW` there is nothing further to give up, xencode says so once, and
+the day keeps being spent. Every turn still answers.
+
+```bash
+$ xencode config set budget_tokens_per_day 100
+set budget_tokens_per_day = 100
+
+$ xencode config set budget_minutes_per_day 0
+error: budget_minutes_per_day cannot be 0 — a cap of nothing is crossed by the first turn, which is not a budget
+
+$ xencode config set budget_minutes_per_day 2000
+error: budget_minutes_per_day must be between 1 and 1440 minutes
+
+$ xencode config set budget_minutes_per_day ""
+cleared budget_minutes_per_day — nothing is set for it, and the behaviour is what it was before it was ever named
+```
+
+A cap of 0 is refused where it is written: a limit nothing can respect is a way to
+switch the product off that reads as a budget, and each bound above is where the
+unit stops being an amount anyone spends in a day.
+
+What a cap did is printed in the transcript when it does it, and `/cost` shows
+the numbers behind it — today's figures beside every cap that is set:
+
+```
+📉 Today has spent 3562 tokens against the 100 tokens you set on its token cap,
+so this turn takes the smaller context profile: HIGH → BALANCED. Nothing is
+refused. /ctx shows what it means in tokens, and /cost shows the day's figures.
+
+Today (2026-10-03), against the caps set in the config:
+  • token cap 100 tokens · today 7238 tokens · passed
+```
+
+Two caps can only ever be weighed against what the machine and the price table
+actually report, and xencode says so instead of guessing:
+
+- **Energy** is read from `/sys/class/powercap`, so on a box that publishes no
+  package counter the line reads `nothing this machine reported to weigh against
+  it today`. `config set` warns you of that as you write the cap. A silent
+  counter is not a day that used no power, and the cap never passes on a guess.
+- **Dollars** come from `.xencode/pricing.json`, which knows cloud rates. Models
+  it does not know count as nothing, so a day of unpriced local models cannot
+  pass this cap either — the line names how many models have no price.
+
+The day is the *local* date the records fall on, and only the last 400 days are
+kept in the rollup. The session-level warning is a separate thing:
+`cost_budget_usd_micros` warns about one conversation and is not one of these
+four.
 
 ### `xencode replay <run-id> [--run-tools]`
 Run a recorded agent turn again from the bytes it was made of. Turn on

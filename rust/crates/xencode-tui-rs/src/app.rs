@@ -763,9 +763,12 @@ pub struct App<'a> {
 
     /// The hardware profile this session budgets project context against, and
     /// the reason it was picked: `hardware_profile` in the config if it names
-    /// one, otherwise the memory this machine reports. Decided once, at startup,
-    /// and shown by `/ctx` — a session that changed profile mid-conversation
-    /// would change how much of its own history fits.
+    /// one, otherwise the memory this machine reports.
+    ///
+    /// A crossed daily cap can move it one rung down at a turn boundary (CX-7),
+    /// which is the exception the reason text names — the profile is otherwise
+    /// fixed, because a session that changed profile mid-conversation would
+    /// change how much of its own history fits.
     pub hardware: xencode_context_rs::ProfileDecision,
 
     /// What this session has spent, from the records on disk: the status-row
@@ -775,6 +778,10 @@ pub struct App<'a> {
     /// Whether the budget warning has already been shown this session, so a
     /// crossed budget warns once rather than on every turn after.
     budget_warned: bool,
+    /// Whether the "at the smallest profile already" line has been shown. It is
+    /// worth saying once when a cap keeps being crossed and there is nothing
+    /// further to give up; repeating it every turn would be noise.
+    daily_budget_bottom_said: bool,
 }
 
 /// The spend line the status bar shows, kept as text plus the figure it came
@@ -2634,6 +2641,7 @@ impl<'a> App<'a> {
             hardware,
             spend: None,
             budget_warned: false,
+            daily_budget_bottom_said: false,
         };
         app.style_chat_input();
 
@@ -3148,6 +3156,10 @@ impl<'a> App<'a> {
         }
 
         self.is_generating = true;
+        // The turn boundary: what today has spent is weighed before this turn's
+        // context is sized, so a passed cap buys the turn down and the check
+        // never lands between a tool call and the verification after it (CX-7).
+        self.check_daily_budget();
 
         // Normal LLM generation — project context is injected on every turn:
         // a byte-stable system head (KV-cacheable) + budgeted history turns +
@@ -4012,6 +4024,10 @@ impl<'a> App<'a> {
             self.system_line("usage: /bytebot <task>   (or Ctrl+B to open the panel)");
             return None;
         }
+        // The same boundary a chat turn has: what the day has spent is decided
+        // before the run's context is built, so a cap that has been passed buys
+        // this run down instead of arriving in the middle of it.
+        self.check_daily_budget();
         if self.bytebot_running {
             self.push_toast(
                 crate::toast::ToastKind::Warning,
@@ -5275,6 +5291,26 @@ impl<'a> App<'a> {
                 for line in cost_report_lines(&rollup, &table, session.as_deref(), budget) {
                     self.system_line(&line);
                 }
+                // Today's figures beside the caps they are weighed against, so a
+                // turn that got bought down can be checked against the numbers
+                // that bought it down rather than taken on faith (CX-7).
+                if let Some(budgets) = self.daily_budgets() {
+                    let day = rollup.today();
+                    let day_name = xencode_context_rs::MetricsRollup::today_key();
+                    self.system_line(&format!(
+                        "Today{}, against the caps set in the config:",
+                        if day_name.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({day_name})")
+                        }
+                    ));
+                    for line in budgets
+                        .today_lines(&day, &xencode_context_rs::cost_of(&day.by_model, &table))
+                    {
+                        self.system_line(&line);
+                    }
+                }
                 self.settle_spend(&rollup, &table, session.as_deref(), budget);
             }
             Err(message) => self.system_line(&message),
@@ -5320,6 +5356,82 @@ impl<'a> App<'a> {
                 xencode_context_rs::format_usd(budget.unwrap_or(0))
             ));
         }
+    }
+
+    /// The four daily caps as one struct, or `None` when no cap is set at all —
+    /// the cheap answer that lets a turn skip reading the disk entirely.
+    fn daily_budgets(&self) -> Option<xencode_context_rs::DailyBudgets> {
+        let budgets = xencode_context_rs::DailyBudgets {
+            tokens: self.config.budget_tokens_per_day,
+            energy_wh: self.config.budget_energy_wh_per_day,
+            usd_micros: self.config.budget_usd_micros_per_day,
+            minutes: self.config.budget_minutes_per_day,
+        };
+        budgets.any_set().then_some(budgets)
+    }
+
+    /// Ask the day's records whether a cap has been passed, at the boundary
+    /// before a turn is built. Never inside a turn: a cap that fires midway
+    /// would land between an edit and the check meant to catch it, which is how
+    /// a budget ends up owning someone's half-finished work.
+    fn check_daily_budget(&mut self) {
+        let root = xencode_context_rs::default_root();
+        self.apply_daily_budget_at(&root.join(xencode_context_rs::XENCODE_DIR));
+    }
+
+    /// The body, with the project named so a test can point it at a scratch
+    /// directory rather than whatever the test runner is standing in.
+    ///
+    /// What a passed cap does is buy the turn down one rung of the hardware
+    /// profile, which shrinks the window it fills, the number of files retrieved
+    /// into it, and how much of each of them goes. Nothing is refused over a cap.
+    /// Once the lowest rung is reached there is nothing further to give up: that
+    /// is said once, and the day keeps being spent as it stands.
+    fn apply_daily_budget_at(&mut self, xencode: &std::path::Path) {
+        let Some(budgets) = self.daily_budgets() else {
+            return;
+        };
+        let Ok((rollup, table, _)) = self.spend_inputs(xencode) else {
+            return;
+        };
+        let day = rollup.today();
+        // The dollar cap reads the priced models' total, which is a floor: a day
+        // of models the price table does not know cannot cross it. `/cost` names
+        // those models; this does not invent rates for them.
+        let Some(breach) = budgets.breach(
+            &day,
+            xencode_context_rs::cost_of(&day.by_model, &table).known_micros,
+        ) else {
+            return;
+        };
+        let spent = format!("{} against the {} you set", breach.used, breach.cap);
+        let Some(smaller) = self.hardware.profile.step_down() else {
+            if !self.daily_budget_bottom_said {
+                self.daily_budget_bottom_said = true;
+                self.system_line(&format!(
+                    "📉 Today has spent {spent} on its {dimension} cap, and this session is \
+                     already at the smallest context profile. Nothing further can be given up, \
+                     and nothing is stopped — /cost shows the day's figures.",
+                    dimension = breach.dimension.label(),
+                ));
+            }
+            return;
+        };
+        let previous = self.hardware.profile.name();
+        self.hardware = xencode_context_rs::ProfileDecision {
+            profile: smaller,
+            reason: format!(
+                "bought down from {previous} by today's {dimension} cap",
+                dimension = breach.dimension.label(),
+            ),
+        };
+        self.system_line(&format!(
+            "📉 Today has spent {spent} on its {dimension} cap, so this turn takes the smaller \
+             context profile: {previous} → {next}. Nothing is refused. /ctx shows what it means \
+             in tokens, and /cost shows the day's figures.",
+            dimension = breach.dimension.label(),
+            next = smaller.name(),
+        ));
     }
 
     /// `/doctor [env|deps]`: probe machine resources, environment facts, GPUs,
@@ -14456,5 +14568,155 @@ mod tests {
         assert!(app.release_drag());
         assert_eq!(app.layout_log.len(), rows, "nothing was written");
         assert_eq!(app.arrangement_line(), line, "nothing moved");
+    }
+
+    /// A day whose records pass a cap buys the next turn down one rung, and says
+    /// which cap and both rungs. This is the whole of what CX-7 promised: a
+    /// budget that acts without ever refusing a turn.
+    #[test]
+    fn a_passed_daily_cap_buys_the_next_turn_down_one_rung() {
+        let dir = cost_project("cap-crossed");
+        let xencode = dir.join(".xencode");
+        // 1200 tokens of turn against a cap of 1000.
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.config.budget_tokens_per_day = Some(1_000);
+        app.hardware = xencode_context_rs::ProfileDecision::resolve("high");
+        app.apply_daily_budget_at(&xencode);
+
+        assert_eq!(
+            app.hardware.profile,
+            xencode_context_rs::HardwareProfile::Balanced,
+            "the rung below the one the test set"
+        );
+        let report = system_lines(&app).join("\n");
+        assert!(
+            report.contains("1200 tokens against the 1000 tokens"),
+            "{report}"
+        );
+        assert!(report.contains("token cap"), "{report}");
+        assert!(report.contains("HIGH → BALANCED"), "{report}");
+        assert!(report.contains("Nothing is refused"), "{report}");
+        // `/ctx` reads the reason, so the downgrade has to be visible there too.
+        assert_eq!(
+            app.hardware.describe(),
+            "BALANCED profile bought down from HIGH by today's token cap"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cap_with_room_left_changes_nothing_and_says_nothing() {
+        let dir = cost_project("cap-inside");
+        let xencode = dir.join(".xencode");
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.config.budget_tokens_per_day = Some(10_000);
+        app.apply_daily_budget_at(&xencode);
+
+        assert_eq!(
+            app.hardware.profile,
+            xencode_context_rs::HardwareProfile::Balanced,
+            "a day inside its cap must not lose any room"
+        );
+        assert!(system_lines(&app).is_empty(), "nothing happened to report");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// With no cap set at all the check must not read the project's records,
+    /// which is what keeps a turn that nobody budgeted free.
+    #[test]
+    fn an_unbudgeted_session_never_opens_the_day() {
+        let dir = cost_project("no-cap");
+        let xencode = dir.join(".xencode");
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.apply_daily_budget_at(&xencode);
+
+        assert!(app.daily_budgets().is_none(), "no cap is set");
+        assert!(
+            !xencode.join("cache/metrics-rollup.json").is_file(),
+            "the rollup sidecar was written by a check that had nothing to check"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A day that ran past its minutes cap is caught the same way, which also
+    /// proves the turn's own seconds reach the day's totals — the field is
+    /// written on a cloud row too, where the energy counter stays away.
+    #[test]
+    fn a_day_that_ran_past_its_minutes_cap_is_caught_too() {
+        let dir = cost_project("cap-minutes");
+        let xencode = dir.join(".xencode");
+        let mut row = cost_turn("session_a", 1000, 400, 200);
+        row.elapsed_ms = Some(95_000);
+        record_turns(&xencode, &[row]);
+
+        let mut app = App::for_tests();
+        app.config.budget_minutes_per_day = Some(1);
+        app.apply_daily_budget_at(&xencode);
+
+        let report = system_lines(&app).join("\n");
+        assert!(report.contains("1.6 min against the 1 min"), "{report}");
+        assert!(report.contains("wall-clock cap"), "{report}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `/cost` report carries the same figures the caps are weighed against,
+    /// which is what makes a bought-down turn checkable instead of taken on faith.
+    #[test]
+    fn the_cost_report_shows_today_against_the_caps() {
+        let dir = cost_project("cost-caps");
+        let xencode = dir.join(".xencode");
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.config.budget_tokens_per_day = Some(10_000);
+        app.config.budget_energy_wh_per_day = Some(50);
+        app.report_cost_at(&xencode);
+        let report = system_lines(&app).join("\n");
+        assert!(report.contains("Today"), "{report}");
+        assert!(
+            report.contains("token cap 10000 tokens · today 1200 tokens · room left"),
+            "{report}"
+        );
+        assert!(
+            report.contains(
+                "energy cap 50 Wh · nothing this machine reported to weigh against it today"
+            ),
+            "{report}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bottom rung is the last thing a cap can take. Past it the day keeps
+    /// being spent, the one line is said once, and no later turn is stopped.
+    #[test]
+    fn a_cap_passed_at_the_smallest_profile_is_said_once() {
+        let dir = cost_project("cap-bottom");
+        let xencode = dir.join(".xencode");
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.config.budget_tokens_per_day = Some(1_000);
+        app.hardware = xencode_context_rs::ProfileDecision::resolve("low");
+        app.apply_daily_budget_at(&xencode);
+
+        let lines = system_lines(&app);
+        assert_eq!(lines.len(), 1, "{lines:#?}");
+        assert!(lines[0].contains("already at the smallest"), "{}", lines[0]);
+        assert_eq!(
+            app.hardware.profile,
+            xencode_context_rs::HardwareProfile::Low,
+            "there is no rung below the one already in use"
+        );
+
+        // The next turn of the same over-cap day: no new line, no refusal.
+        app.apply_daily_budget_at(&xencode);
+        assert_eq!(system_lines(&app).len(), 1, "the same news twice is noise");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

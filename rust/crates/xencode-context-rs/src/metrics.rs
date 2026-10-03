@@ -102,9 +102,11 @@ pub struct RequestMetrics {
     /// was doing at the time.
     #[serde(default)]
     pub energy_uj: Option<u64>,
-    /// How long the window that [`Self::energy_uj`] was measured over stayed
-    /// open. Without it a wattage cannot be recovered from the energy, and the
-    /// seconds cannot be shown beside the watt-hours.
+    /// How long the turn ran, in milliseconds. This one is written on every row,
+    /// local or cloud, because the seconds belong to the turn rather than to
+    /// whichever machine hosted the model — and a daily time budget has to count
+    /// both. [`Self::energy_uj`] is measured over the same window on the rows that
+    /// carry one.
     #[serde(default)]
     pub elapsed_ms: Option<u64>,
     /// The temperature this turn was asked to sample at, as it was sent. `None`

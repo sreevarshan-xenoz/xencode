@@ -501,6 +501,46 @@ pub struct XencodeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_cents_per_kwh: Option<f64>,
 
+    /// What one calendar day may spend, in prompt plus completion tokens. The
+    /// four `budget_*_per_day` settings are one mechanism seen from four angles,
+    /// so see [`XencodeConfig::budget_minutes_per_day`] for what happens when one
+    /// is crossed and for why none of them stops a turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_tokens_per_day: Option<u64>,
+
+    /// What one calendar day may draw at the wall, in watt-hours, counted from the
+    /// machine's own energy counter. On a machine that publishes no counter this
+    /// cap can never be reached, because there is no reading to reach it with, and
+    /// xencode does not guess one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_energy_wh_per_day: Option<u64>,
+
+    /// What one calendar day's tokens may cost at the rates in `pricing.json`, in
+    /// micro-dollars ($1.00 = 1_000_000). Provider spend alone: the electricity a
+    /// local turn drew is what [`XencodeConfig::budget_energy_wh_per_day`] weighs,
+    /// and the two are different documents that are never added together. Models
+    /// the price table does not know count as nothing against this cap, so an
+    /// unpriced day cannot cross it — a floor is allowed to fire, not to report
+    /// the day as cheap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_usd_micros_per_day: Option<u64>,
+
+    /// What one calendar day's turns may take in the aggregate, in minutes —
+    /// the wall-clock of the turns themselves, not the time the interface sat
+    /// open with nothing asked of it.
+    ///
+    /// Crossing any of the four caps buys down the *next* turn instead of
+    /// refusing anything: the hardware profile steps one rung down, which shrinks
+    /// the context it fills, the files it retrieves and the size of each of them.
+    /// A refusal landing between an edit and the check that was supposed to catch
+    /// it is how these tools lose people's work, so the budget is never allowed
+    /// to fire in the middle of a turn — it is read at the boundary, from the
+    /// records the last turn wrote. Once the profile is at its lowest rung there
+    /// is nothing further to give up, which is said once, and the day goes on
+    /// being spent. Unset by default, which is not a cap at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_minutes_per_day: Option<u64>,
+
     /// Whether a prompt may be sent to an internet service at all.
     ///
     /// This is consent, not credentials: `api_keys` says who you are to a cloud
@@ -850,6 +890,10 @@ impl Default for XencodeConfig {
             max_memory_items: default_memory_items(),
             cost_budget_usd_micros: None,
             power_cents_per_kwh: None,
+            budget_tokens_per_day: None,
+            budget_energy_wh_per_day: None,
+            budget_usd_micros_per_day: None,
+            budget_minutes_per_day: None,
             allow_cloud_models: false,
             allow_online_docs: false,
             api_keys: ApiKeys::default(),

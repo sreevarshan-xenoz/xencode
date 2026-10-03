@@ -68,8 +68,9 @@ pub use anchor::{
     discover, is_current, prove, render, write_anchor, Discovery, Kind, Provenance, Recipe, Verdict,
 };
 pub use budget::{
-    est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, ContextCaps,
-    HardwareProfile, ProfileDecision, PromptOverhead, TOKENS_PER_RETRIEVED_FILE,
+    est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, BudgetBreach,
+    BudgetDimension, ContextCaps, DailyBudgets, HardwareProfile, ProfileDecision, PromptOverhead,
+    TOKENS_PER_RETRIEVED_FILE,
 };
 pub use cochange::{
     load_history, mine_commit_history, parse_commit_log, save_history, CommitHistory, FileCommits,
@@ -146,9 +147,9 @@ pub use repo_map::{
 };
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
 pub use rollup::{
-    read_rollup, refresh_rollup, rollup_path, trim_metrics, write_rollup, MetricsRollup,
-    Percentiles, ProfileSample, SessionTotals, TokenTotals, METRICS_KEEP_BYTES, RATE_SAMPLE_WINDOW,
-    ROLLUP_VERSION,
+    local_day_key, read_rollup, refresh_rollup, rollup_path, trim_metrics, write_rollup, DayTotals,
+    MetricsRollup, Percentiles, ProfileSample, SessionTotals, TokenTotals, DAYS_KEPT,
+    METRICS_KEEP_BYTES, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
 };
 pub use scanner::{
     detect_language, language_for_extension, language_has_semantic_tier, scan_tree,

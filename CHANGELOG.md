@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `CX-7`: a day's budget now changes what the next turn does
+
+Four settings exist so that a cap you set is a thing that happens, rather than a
+number xencode watches you pass. `budget_tokens_per_day`,
+`budget_energy_wh_per_day`, `budget_usd_micros_per_day` and
+`budget_minutes_per_day` each say a maximum for one dimension of today, and once
+today's running figure goes past it, the next turn gets a smaller context rather
+than a refusal.
+
+```
+📉 Today has spent 3562 tokens against the 100 tokens you set on its token cap, so this turn takes the smaller context profile: HIGH → BALANCED. Nothing is refused. /ctx shows what it means in tokens, and /cost shows the day's figures.
+```
+
+That line came from a real run against `llama-server` on this machine, and so did
+the one after it, when the same day's token count passed the same cap again:
+`BALANCED → LOW`. The two words on the right name the size of the window the turn
+is about to be built in — 16384 tokens at `HIGH`, 8192 at `BALANCED`, 4096 at
+`LOW` — and the falling numbers are visible in the metrics log, one row per turn.
+The measured cost of the trade was the point of it: the turn after the second
+step-down drew `≈ 0.01 Wh · 2.3 s` where the turn before the first had drawn
+`≈ 0.03 Wh · 13 s`.
+
+Nothing is stopped, because a cap that refuses mid-task is worse than no cap. A
+turn that has already begun finishes at the size it began with, and the change
+takes effect between turns. It never takes effect *between* a tool call and the
+checking of its result: a context that shrank after an edit landed but before it
+was read back would leave a changed working tree with nobody looking at it, so the
+step-down waits for a turn boundary.
+
+The cap can also be reported rather than acted on. `/cost` now ends with today's
+figures next to whatever is set:
+
+```
+Today (2026-10-03), against the caps set in the config:
+  • token cap 100 tokens · today 7238 tokens · passed
+```
+
+A dimension that today cannot be weighed gets said so instead of being drawn as
+zero use. On a machine with no energy counter a watt-hour cap has nothing to be
+compared against — `xencode config set` warns you of that at the moment you set it
+— and a dollar cap goes unmet against models with no entry in `pricing.json`,
+naming how many were left out, because a missing price is not the same as a free
+day. The cap that fires is whichever one was passed by the largest proportion, so
+a day that ran 35× over its token allowance is not announced as a day that went
+7% over its minute allowance.
+
+Each setting is an ordinary one, and a cap of zero is refused on the way in:
+
+```
+$ xencode config set budget_minutes_per_day 90
+set budget_minutes_per_day = 90
+
+$ xencode config set budget_minutes_per_day 0
+error: budget_minutes_per_day cannot be 0 — a cap of nothing is crossed by the first turn, which is not a budget
+
+$ xencode config set budget_minutes_per_day 1441
+error: budget_minutes_per_day must be between 1 and 1440 minutes
+
+$ xencode config set budget_minutes_per_day ""
+cleared budget_minutes_per_day — nothing is set for it, and the behaviour is what it was before it was ever named
+```
+
+One thing this item asked for is deliberately not built: the cap does not swap the
+model for a smaller one. This machine has one quantised model file on it, so a
+model change could only ever have been described rather than watched, and a
+cap that downgrades the context is a real, measurable behaviour on its own. The
+plan item stays partly open on that count.
+
 ### Added — `CX-3`: a local answer now says what it drew at the wall
 
 A model running on this machine produces no invoice, which is not the same thing
