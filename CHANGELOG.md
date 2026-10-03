@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `DB-2`: a configuration declares its version, and an older xencode won't clobber a newer one
+
+`~/.xencode/config.json` now carries `config_version`, and the binary carries
+the version it writes. A file that names an older version is read, brought up to
+the current shape, and stamped with the new number the next time it is saved — so
+a configuration written before this key existed keeps working and is upgraded
+once, not rejected. A file that names a *newer* version is refused, in words.
+This is the real output of pointing `XCODE_CONFIG_DIR` at a directory holding a
+`config.json` that declares version 9:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/db2-newer xencode config set default_model qwen3:4b
+error: /tmp/db2-newer/config.json declares config version 9, and this xencode only knows versions up to 1. It was not read, and nothing was written to it — an older binary cannot see the fields a newer one added and would drop them on save. Run the xencode that wrote this file, or point XCODE_CONFIG_DIR at a config this one can read.
+```
+
+Refusing to *read* was not enough on its own: a dozen call sites load the config
+with a fallback to defaults, and the TUI saved with the error dropped, so any of
+them would have written those defaults over the newer file. The save path refuses
+as well, which is what keeps the bytes on disk untouched — verified by comparing
+the file before and after a refused `config set`, and by the two new rows in
+`xencode doctor` (`config` says the settings are unread, `config:version` says by
+how much). A settings change that cannot be persisted now says so in the chat
+transcript, once, instead of failing quietly on every keystroke.
+
+One more hole surfaced while testing this: a JSON array in place of the settings
+object used to *parse*, because every field has a default and serde will fill a
+struct from a list. That is not a configuration, and reading it as one handed
+back every default, ready to be written to disk. It is refused by name now.
+
 ### Added — `DB-6`: `xencode doctor` with no flag writes the whole bug report
 
 `doctor` could already probe the machine (`--env`), the dependencies (`--deps`)

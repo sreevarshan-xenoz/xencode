@@ -1654,6 +1654,24 @@ A value that begins with a dash is taken as the value rather than as an option t
 `config set`, because the line `xencode hw probe` hands back to paste starts with
 `--n-gpu-layers` and quoting it was refused until this was fixed.
 
+The file carries its own format version as `config_version`, which `xencode`
+writes and reads; it is not a `config set` key. A file naming an *older* version
+is read, converted, and stamped with the current number on the next save, so a
+`config.json` written before the key existed still works. A file naming a
+*newer* version than this binary is refused — reading and writing both — because
+an older binary cannot see fields it was not built for and would drop them:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/db2-newer xencode config set default_model qwen3:4b
+error: /tmp/db2-newer/config.json declares config version 9, and this xencode only knows versions up to 1. It was not read, and nothing was written to it — an older binary cannot see the fields a newer one added and would drop them on save. Run the xencode that wrote this file, or point XCODE_CONFIG_DIR at a config this one can read.
+```
+
+The same refusal applies to `config show`, and `xencode doctor` reports it as two
+rows: `config` (the settings are unread, so that run is on defaults) and
+`config:version` (the two numbers). A JSON value that is not an object — a list,
+a bare string — is refused the same way rather than read as "all defaults", which
+is what used to happen.
+
 `config set` keys (values are validated; `config show` prints the JSON):
 `mcp_servers`, `agent_hooks` and `model_profiles` are nested structures, so they are edited directly in the JSON instead, or managed in the TUI where a panel exists for them.
 
@@ -2221,7 +2239,8 @@ broken recipe, which is the one outcome this command exists to prevent.
 
 The bug report. One command, one list of rows, everything a person would have to
 type by hand to answer "what is wrong with my machine": does the configuration
-parse, can anyone else read the secrets in it, is there room on the volume the
+parse, is it a version this binary can read, can anyone else read the secrets in
+it, is there room on the volume the
 state lives on, how much disk the response cache has taken, the project's own
 index/git/metrics/cache rows, every endpoint the config would dial, whether the
 server behind the default model actually knows that model by name, each declared
@@ -2237,9 +2256,10 @@ than to this machine, carries no action.
 ```
 $ xencode doctor
   PASS   config                 /home/sree/.xencode/config.json
+  PASS   config:version         no version key — written before versions existed, so it is migrated on read and stamped 1 on the next save
   PASS   permissions:config     600 — owner only
   PASS   permissions:colab-key  600 — owner only
-  PASS   disk:state             /home/sree/.xencode has 114 GiB free
+  PASS   disk:state             /home/sree/.xencode has 113 GiB free
   PASS   size:cache             /home/sree/.xencode/cache holds 1 file(s), 364 B
   ABSENT index                  no index manifest; run /init for project-aware answers
                                 fix: run /init in the TUI to build the project index

@@ -379,6 +379,9 @@ pub struct App<'a> {
     pub spinner_tick: usize,
     pub theme: ThemeColors,
     pub config: XencodeConfig,
+    /// The last save refusal, so a write that keeps failing says it once instead
+    /// of once per keystroke. Cleared by the next save that works.
+    pub(crate) last_config_save_note: Option<String>,
     /// Product builds persist config edits; `for_tests()` turns that off so a
     /// keystroke in a test never rewrites the developer's `config.json`.
     pub(crate) persist_config: bool,
@@ -2423,6 +2426,7 @@ impl<'a> App<'a> {
             spinner_tick: 0,
             theme,
             persist_config: true,
+            last_config_save_note: None,
             config,
             show_terminal: false,
             last_body_focus: FocusArea::ChatInput,
@@ -2779,8 +2783,22 @@ impl<'a> App<'a> {
     /// Persist the working config to disk. One choke point for every
     /// settings write (H1-04).
     pub fn save_config(&mut self) {
-        if self.persist_config {
-            let _ = self.config.save();
+        if !self.persist_config {
+            return;
+        }
+        match self.config.save() {
+            Ok(()) => self.last_config_save_note = None,
+            Err(problem) => {
+                // The file is untouched, which is the point: an older xencode
+                // cannot see the fields a newer one wrote. The person has to be
+                // told, because every setting they just changed is now only in
+                // memory.
+                let note = format!("config.json unchanged: {problem}");
+                if self.last_config_save_note.as_deref() != Some(note.as_str()) {
+                    self.last_config_save_note = Some(note.clone());
+                    self.system_line(&note);
+                }
+            }
         }
     }
 

@@ -2714,6 +2714,59 @@ mod tests {
         std::env::set_var("XCODE_CONFIG_DIR", "");
     }
 
+    /// A config from a newer xencode is not overwritten, and the person has to
+    /// find out: every setting they just changed now lives only in memory. The
+    /// refusal says it once, not once per keystroke.
+    #[test]
+    fn a_refused_config_save_says_so_once_and_leaves_the_file_alone() {
+        let _guard = CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("xencode-newer-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, b"{\"config_version\": 99, \"default_model\": \"x\"}").unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+
+        let mut app = App::for_tests();
+        app.persist_config = true;
+
+        let refusals = |app: &App| {
+            app.messages
+                .iter()
+                .filter(|m| m.content.contains("config.json unchanged"))
+                .count()
+        };
+
+        app.save_config();
+        app.save_config();
+        app.save_config();
+
+        assert_eq!(refusals(&app), 1, "one refusal, not one per keystroke");
+        let line = app
+            .messages
+            .iter()
+            .find(|m| m.content.contains("config.json unchanged"))
+            .expect("the refusal reaches the transcript");
+        assert_eq!(line.role, "system");
+        assert!(line.content.contains("99"), "{}", line.content);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "the newer file is untouched"
+        );
+
+        // Once the file is one this binary can write, saving works and the
+        // guard resets, so a later refusal would be reported again.
+        std::fs::remove_file(&path).unwrap();
+        app.save_config();
+        assert!(app.last_config_save_note.is_none());
+        assert!(path.is_file(), "the config is written at last");
+        assert_eq!(refusals(&app), 1, "a success adds nothing");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", "");
+    }
+
     #[test]
     fn commit_message_is_fully_typable_including_j_k_and_globals() {
         let mut app = app_with(FocusArea::GitCommit);

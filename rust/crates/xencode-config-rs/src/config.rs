@@ -3,6 +3,46 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// The shape of `config.json` that this binary writes.
+///
+/// Every rung of the ladder in [`migrate`] raises a file's version by one, so a
+/// file at this number is exactly what the current code expects, and a file
+/// above it was written by a newer xencode. A file carrying no such key —
+/// every config written before the key existed — is
+/// [`LEGACY_CONFIG_VERSION`], and adopting it is the first rung.
+pub const CURRENT_CONFIG_VERSION: u32 = 1;
+
+/// What a file with no `config_version` key is: written before the key existed.
+pub const LEGACY_CONFIG_VERSION: u32 = 0;
+
+/// The version a parsed file declares, read from the raw JSON rather than from
+/// the struct — the whole question is what the *file* claims, before any of it
+/// is dropped for being unknown to this binary.
+fn declared_version(value: &serde_json::Value) -> u32 {
+    value
+        .get("config_version")
+        .and_then(serde_json::Value::as_u64)
+        .map(|found| found as u32)
+        .unwrap_or(LEGACY_CONFIG_VERSION)
+}
+
+/// Bring a file written by version `from` up to [`CURRENT_CONFIG_VERSION`], one
+/// rung at a time.
+///
+/// Each step is total: it takes the file as its predecessor wrote it and leaves
+/// one the next step can read, touching only what that step is about. There is
+/// no failure path by design — a file this binary cannot read at all is
+/// rejected by [`XencodeConfig::load`] before the ladder runs, never partway
+/// through it, so nothing half-migrated can be written back.
+fn migrate(value: &mut serde_json::Value, from: u32) {
+    // 0 -> 1: adopt versioning. A file written before the key existed gains it
+    // and nothing else changes; this rung is what every existing config takes
+    // on its first read by a versioned binary.
+    if from < 1 {
+        value["config_version"] = serde_json::Value::Number(CURRENT_CONFIG_VERSION.into());
+    }
+}
+
 /// API key configuration for cloud model providers.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ApiKeys {
@@ -94,6 +134,16 @@ pub struct ColabConfig {
 /// Top-level Xencode configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct XencodeConfig {
+    /// Which shape this file is written in. See [`CURRENT_CONFIG_VERSION`].
+    ///
+    /// A file with no key here was written before the key existed, and
+    /// [`migrate`] stamps it — which is why the deserialising default below is
+    /// [`LEGACY_CONFIG_VERSION`] while a config built in memory starts at
+    /// [`CURRENT_CONFIG_VERSION`]. The two are meant to differ: one describes a
+    /// file on disk, the other a config this binary made.
+    #[serde(default = "legacy_config_version")]
+    pub config_version: u32,
+
     /// The currently selected default model.
     #[serde(default = "default_model")]
     pub default_model: String,
@@ -530,6 +580,11 @@ fn default_model() -> String {
     "qwen2.5:7b".to_string()
 }
 
+/// What a file that never carried `config_version` is told it is.
+fn legacy_config_version() -> u32 {
+    LEGACY_CONFIG_VERSION
+}
+
 fn default_theme() -> String {
     "ocean".to_string()
 }
@@ -609,6 +664,7 @@ fn default_colab_weights() -> String {
 impl Default for XencodeConfig {
     fn default() -> Self {
         Self {
+            config_version: CURRENT_CONFIG_VERSION,
             default_model: default_model(),
             active_theme: default_theme(),
             layout: default_layout(),
@@ -682,6 +738,29 @@ pub enum ConfigError {
     Io(std::io::Error),
     Json(serde_json::Error),
     NoHomeDir,
+    /// The file is valid JSON but not an object of settings. Deserialising it
+    /// anyway would hand back a fully defaulted config — serde reads a struct
+    /// from a JSON array positionally, and with every field carrying a default
+    /// an empty array is indistinguishable from "the user set nothing" — so the
+    /// difference between a corrupt file and an empty one would be lost, and the
+    /// next save would write defaults over it.
+    NotAConfig {
+        /// Which file, and what it held instead.
+        path: PathBuf,
+        found: &'static str,
+    },
+    /// The file on disk declares a config shape newer than this binary writes.
+    /// Reading it would guess at fields that do not exist yet, and writing it
+    /// would delete whatever the newer xencode stored, so neither happens.
+    NewerFile {
+        /// Which file, named in the message because the person has to edit it.
+        path: PathBuf,
+        /// What that file claims its version is.
+        found: u32,
+        /// The highest version this binary understands
+        /// ([`CURRENT_CONFIG_VERSION`]).
+        known: u32,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -690,6 +769,23 @@ impl fmt::Display for ConfigError {
             ConfigError::Io(source) => write!(f, "config I/O error: {source}"),
             ConfigError::Json(source) => write!(f, "config parse error: {source}"),
             ConfigError::NoHomeDir => write!(f, "could not determine home directory"),
+            ConfigError::NotAConfig { path, found } => write!(
+                f,
+                "{} holds a JSON {found}, where an object of settings was expected. That is not a \
+                 configuration and it was not read — a file like this has no settings in it, and \
+                 reading it as one would quietly hand back every default. Restore the file from a \
+                 backup, or write a new one with `xencode config set <key> <value>`.",
+                path.display()
+            ),
+            ConfigError::NewerFile { path, found, known } => write!(
+                f,
+                "{} declares config version {found}, and this xencode only knows versions up to \
+                 {known}. It was not read, and nothing was written to it — an older binary \
+                 cannot see the fields a newer one added and would drop them on save. Run the \
+                 xencode that wrote this file, or point XCODE_CONFIG_DIR at a config this one \
+                 can read.",
+                path.display()
+            ),
         }
     }
 }
@@ -724,13 +820,64 @@ impl XencodeConfig {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(&path).map_err(ConfigError::Io)?;
-        serde_json::from_str(&content).map_err(ConfigError::Json)
+        Self::parse(&path, &content)
     }
 
     /// Load configuration from a specific file path.
     pub fn load_from(path: impl AsRef<std::path::Path>) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
         let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
-        serde_json::from_str(&content).map_err(ConfigError::Json)
+        Self::parse(path, &content)
+    }
+
+    /// Turn file bytes into a config, after checking the version the file
+    /// declares and running the ladder up to this binary's.
+    ///
+    /// The version is checked on the raw JSON because the fields that decide it
+    /// are exactly the ones the struct below cannot see. A file whose top level
+    /// is not an object is left for `from_value` to describe, rather than being
+    /// indexed as if it were one.
+    fn parse(path: &std::path::Path, content: &str) -> Result<Self, ConfigError> {
+        let mut value: serde_json::Value =
+            serde_json::from_str(content).map_err(ConfigError::Json)?;
+        if !value.is_object() {
+            // Named before the match below, because `value` is moved into it.
+            let found = match value {
+                serde_json::Value::Null => "null",
+                serde_json::Value::Bool(_) => "true or false",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::String(_) => "string",
+                serde_json::Value::Array(_) => "array",
+                serde_json::Value::Object(_) => "object",
+            };
+            return Err(ConfigError::NotAConfig {
+                path: path.to_path_buf(),
+                found,
+            });
+        }
+        let found = declared_version(&value);
+        if found > CURRENT_CONFIG_VERSION {
+            return Err(ConfigError::NewerFile {
+                path: path.to_path_buf(),
+                found,
+                known: CURRENT_CONFIG_VERSION,
+            });
+        }
+        migrate(&mut value, found);
+        serde_json::from_value(value).map_err(ConfigError::Json)
+    }
+
+    /// What the file at `path` says its config version is, without loading it.
+    ///
+    /// `None` means there is no readable object to ask — no file, an unreadable
+    /// one, or one that is not a JSON object — which a caller reports as the
+    /// shape it found rather than as a version. A readable file with no
+    /// `config_version` key is [`LEGACY_CONFIG_VERSION`]: written before the key
+    /// existed.
+    pub fn version_of(path: impl AsRef<std::path::Path>) -> Option<u32> {
+        let content = std::fs::read_to_string(path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+        value.is_object().then(|| declared_version(&value))
     }
 
     /// Save configuration to `~/.xencode/config.json`.
@@ -744,9 +891,25 @@ impl XencodeConfig {
     }
 
     /// Save configuration to a specific file path.
+    ///
+    /// The file already there is asked its version first, and a newer one is
+    /// refused. Checking at the write rather than only at the read is what makes
+    /// the refusal hold: plenty of call sites fall back to defaults when a load
+    /// fails, and without this they would save those defaults over a config this
+    /// binary could not read.
     pub fn save_to(&self, path: impl AsRef<std::path::Path>) -> Result<(), ConfigError> {
+        let path = path.as_ref();
+        if let Some(found) = Self::version_of(path) {
+            if found > CURRENT_CONFIG_VERSION {
+                return Err(ConfigError::NewerFile {
+                    path: path.to_path_buf(),
+                    found,
+                    known: CURRENT_CONFIG_VERSION,
+                });
+            }
+        }
         let json = serde_json::to_string_pretty(self).map_err(ConfigError::Json)?;
-        xencode_core_rs::write_atomic(path.as_ref(), json.as_bytes()).map_err(ConfigError::Io)?;
+        xencode_core_rs::write_atomic(path, json.as_bytes()).map_err(ConfigError::Io)?;
         Ok(())
     }
 
@@ -1500,6 +1663,170 @@ mod tests {
         XencodeConfig::default().save_to(&path).unwrap();
 
         assert_eq!(mode_of(&path), 0o600);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_config_written_before_the_version_existed_still_loads_and_is_stamped() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        // A file exactly as an older xencode wrote it: no version key at all.
+        let path = dir.join("legacy.json");
+        fs::write(&path, r#"{"default_model":"ollama:qwen2.5:7b"}"#).unwrap();
+
+        let loaded = XencodeConfig::load_from(&path).expect("a legacy config must still load");
+        assert_eq!(loaded.default_model, "ollama:qwen2.5:7b");
+        // The ladder took it to this binary's shape on the way in.
+        assert_eq!(loaded.config_version, CURRENT_CONFIG_VERSION);
+        // And the file itself still says what it is until something writes it.
+        assert_eq!(
+            XencodeConfig::version_of(&path),
+            Some(LEGACY_CONFIG_VERSION),
+            "reading a config must not mutate it"
+        );
+
+        // The first save is where the adoption lands.
+        loaded.save_to(dir.join("saved.json")).unwrap();
+        assert_eq!(
+            XencodeConfig::version_of(dir.join("saved.json")),
+            Some(CURRENT_CONFIG_VERSION)
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_from_a_newer_xencode_is_refused_with_both_numbers_named() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("newer.json");
+        let bytes = br#"{"config_version":99,"default_model":"ollama:qwen3:8b","a_field_from_the_future":{"nested":[1,2,3]}}"#;
+        fs::write(&path, bytes).unwrap();
+
+        let error = XencodeConfig::load_from(&path)
+            .expect_err("a config newer than this binary must not be read as if it were older");
+        let ConfigError::NewerFile { found, known, .. } = &error else {
+            panic!("expected a newer-file refusal, got {error:?}");
+        };
+        assert_eq!(*found, 99);
+        assert_eq!(*known, CURRENT_CONFIG_VERSION);
+        // The message has to be enough on its own: which file, what it claims,
+        // what this binary knows, and what to do.
+        let text = error.to_string();
+        assert!(text.contains("newer.json"), "{text}");
+        assert!(text.contains("99"), "{text}");
+        assert!(text.contains(&CURRENT_CONFIG_VERSION.to_string()), "{text}");
+        assert!(text.contains("XCODE_CONFIG_DIR"), "{text}");
+
+        // Nothing was read, and nothing at all was written.
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn saving_does_not_overwrite_a_config_this_binary_cannot_read() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let bytes = br#"{"config_version":7,"default_model":"ollama:qwen3:8b"}"#;
+        fs::write(&path, bytes).unwrap();
+
+        // The point of checking at the write: a call site that fell back to
+        // defaults after the failed load would otherwise save right over the
+        // newer file.
+        let error = XencodeConfig::default()
+            .save_to(&path)
+            .expect_err("a newer config on disk must not be replaced by defaults");
+        assert!(matches!(error, ConfigError::NewerFile { found: 7, .. }));
+        assert_eq!(fs::read(&path).unwrap(), bytes, "the file is untouched");
+
+        // A legacy file is not protected, and is not harmed either: it is the
+        // shape this binary is able to write.
+        let legacy = dir.join("legacy.json");
+        fs::write(&legacy, r#"{"default_model":"qwen2.5:7b"}"#).unwrap();
+        XencodeConfig::default().save_to(&legacy).unwrap();
+        assert_eq!(
+            XencodeConfig::version_of(&legacy),
+            Some(CURRENT_CONFIG_VERSION)
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn every_rung_of_the_ladder_is_walked_and_the_ladder_is_total() {
+        // A minimal file at each version this binary has ever written must reach
+        // the current shape, and a file already current must not be changed.
+        for from in LEGACY_CONFIG_VERSION..=CURRENT_CONFIG_VERSION {
+            let mut value: serde_json::Value = serde_json::json!({"default_model": "qwen2.5:7b"});
+            if from > LEGACY_CONFIG_VERSION {
+                value["config_version"] = serde_json::Value::Number(from.into());
+            }
+            migrate(&mut value, from);
+            assert_eq!(
+                declared_version(&value),
+                CURRENT_CONFIG_VERSION,
+                "version {from} did not reach the current shape"
+            );
+            let parsed: XencodeConfig =
+                serde_json::from_value(value).expect("every rung produces a readable config");
+            assert_eq!(parsed.default_model, "qwen2.5:7b");
+            if from == CURRENT_CONFIG_VERSION {
+                // A file already at this shape is left exactly as it is: the
+                // ladder has no step to take, so it changes nothing.
+                assert_eq!(parsed.config_version, from);
+            }
+        }
+        assert_eq!(
+            CURRENT_CONFIG_VERSION, 1,
+            "the ladder above has one rung; a new version needs its own step"
+        );
+    }
+
+    #[test]
+    fn a_config_that_is_not_an_object_is_refused_rather_than_defaulted() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("not-an-object.json");
+        fs::write(&path, "[]").unwrap();
+
+        // Serde would read an array as a struct given positionally, so an empty
+        // one becomes "every field at its default". That is how a corrupt file
+        // turns into a config that looks like the user asked for nothing, and
+        // then into defaults written over their real file.
+        let error = XencodeConfig::load_from(&path)
+            .expect_err("an array is not a config")
+            .to_string();
+        assert!(error.contains("holds a JSON array"), "{error}");
+        assert!(error.contains("not-an-object.json"), "{error}");
+        assert_eq!(XencodeConfig::version_of(&path), None);
+        assert_eq!(
+            XencodeConfig::version_of(dir.join("no-such-file.json")),
+            None,
+            "a file that is not there has no version"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_version_a_config_is_built_with_is_the_version_it_is_saved_as() {
+        // The field's deserialising default is deliberately lower than this: an
+        // absent key means a legacy file. What must never drift is that the
+        // config this binary creates and the file it writes agree.
+        assert_eq!(
+            XencodeConfig::default().config_version,
+            CURRENT_CONFIG_VERSION
+        );
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        XencodeConfig::default().save_to(&path).unwrap();
+        assert_eq!(
+            XencodeConfig::version_of(&path),
+            Some(XencodeConfig::default().config_version)
+        );
+        assert_eq!(
+            XencodeConfig::load_from(&path).unwrap(),
+            XencodeConfig::default()
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 }
