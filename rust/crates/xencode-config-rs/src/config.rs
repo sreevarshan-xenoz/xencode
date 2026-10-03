@@ -565,6 +565,22 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub allow_online_docs: bool,
 
+    /// Whether a model missing from `pricing.json` may be priced from a fetched
+    /// catalogue — OpenRouter's public model listing — instead of being reported
+    /// as having no price.
+    ///
+    /// A third network switch, next to [`XencodeConfig::allow_online_docs`], and
+    /// off like it. Nothing dials the listing on its own: the fetch happens when
+    /// `xencode prices fetch` is run, and what that writes is a plain file under
+    /// `.xencode/cache/` with the moment it was read in it. Turning this on only
+    /// says that file may be consulted. It is worth separating even from the docs
+    /// switch because a fetched price is a number that goes wrong quietly — the
+    /// catalogue changes and nothing here is told — which is why every report that
+    /// uses one also says how old it is, and why a rate you write by hand always
+    /// outranks a rate that was looked up.
+    #[serde(default)]
+    pub price_lookup: bool,
+
     /// API keys for cloud providers.
     #[serde(default)]
     pub api_keys: ApiKeys,
@@ -896,6 +912,7 @@ impl Default for XencodeConfig {
             budget_minutes_per_day: None,
             allow_cloud_models: false,
             allow_online_docs: false,
+            price_lookup: false,
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),

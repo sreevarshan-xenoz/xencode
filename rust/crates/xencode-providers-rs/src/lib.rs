@@ -15,6 +15,7 @@ pub mod compatible;
 pub mod egress;
 mod frames;
 pub mod gemini;
+pub mod listing;
 pub mod playback;
 pub mod qwen;
 pub mod retry;

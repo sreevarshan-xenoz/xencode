@@ -5265,7 +5265,11 @@ impl<'a> App<'a> {
     > {
         let rollup = xencode_context_rs::refresh_rollup(xencode)
             .map_err(|e| format!("the metrics rollup could not be written: {e}"))?;
-        let table = xencode_context_rs::PriceTable::load(xencode);
+        // The fetched price list is consulted only when the config says it may
+        // be; otherwise the table is the hand-written document and nothing else
+        // (CX-4). Nothing here fetches — a turn never dials out.
+        let table =
+            xencode_context_rs::PriceTable::load_with_lookup(xencode, self.config.price_lookup);
         Ok((rollup, table, self.memory.current_session().cloned()))
     }
 
@@ -5288,7 +5292,8 @@ impl<'a> App<'a> {
         match self.spend_inputs(xencode) {
             Ok((rollup, table, session)) => {
                 let budget = self.config.cost_budget_usd_micros;
-                for line in cost_report_lines(&rollup, &table, session.as_deref(), budget) {
+                let now_ms = xencode_context_rs::conversation::now_millis();
+                for line in cost_report_lines(&rollup, &table, session.as_deref(), budget, now_ms) {
                     self.system_line(&line);
                 }
                 // Today's figures beside the caps they are weighed against, so a
@@ -5296,6 +5301,7 @@ impl<'a> App<'a> {
                 // that bought it down rather than taken on faith (CX-7).
                 if let Some(budgets) = self.daily_budgets() {
                     let day = rollup.today();
+                    let day_report = xencode_context_rs::cost_of(&day.by_model, &table);
                     let day_name = xencode_context_rs::MetricsRollup::today_key();
                     self.system_line(&format!(
                         "Today{}, against the caps set in the config:",
@@ -5305,9 +5311,20 @@ impl<'a> App<'a> {
                             format!(" ({day_name})")
                         }
                     ));
-                    for line in budgets
-                        .today_lines(&day, &xencode_context_rs::cost_of(&day.by_model, &table))
-                    {
+                    for line in budgets.today_lines(&day, &day_report) {
+                        self.system_line(&line);
+                    }
+                    // The dollar cap above is weighed with whatever rates were
+                    // found; when some of them came off the fetched catalogue,
+                    // the day's figure inherits that much uncertainty (CX-4).
+                    if let Some(line) = xencode_context_rs::listing_provenance(
+                        table.lookup.as_ref(),
+                        &day_report.priced_from_listing,
+                        now_ms,
+                    ) {
+                        self.system_line(&line);
+                    }
+                    if let Some(line) = table.listing_expired_note(now_ms) {
                         self.system_line(&line);
                     }
                 }
@@ -8045,12 +8062,14 @@ fn cost_words(report: &xencode_context_rs::CostReport) -> String {
 /// What the recorded turns add up to, as lines for the chat pane (L-9, over
 /// CX-1's rollup). Pure: the rollup and the table come off disk, the arithmetic
 /// here does not, so the wording and the numbers can be checked together without
-/// a filesystem.
+/// a filesystem. `now_ms` is the clock, passed in because a line about how old a
+/// fetched price is has to be assertable.
 fn cost_report_lines(
     rollup: &xencode_context_rs::MetricsRollup,
     table: &xencode_context_rs::PriceTable,
     session: Option<&str>,
     budget_micros: Option<u64>,
+    now_ms: u64,
 ) -> Vec<String> {
     use xencode_context_rs as ctx;
     let mut out = Vec::new();
@@ -8204,6 +8223,17 @@ fn cost_report_lines(
     }
     if models.len() > COST_MODEL_ROWS {
         out.push(format!("  … and {} more", models.len() - COST_MODEL_ROWS));
+    }
+    // Which of the rates above came off somebody else's catalogue, and how old
+    // that copy is. A figure built from a fetched price is not wrong for it, but
+    // it is not the same kind of figure, and the report has to say so (CX-4).
+    if let Some(line) =
+        ctx::listing_provenance(table.lookup.as_ref(), &report.priced_from_listing, now_ms)
+    {
+        out.push(line);
+    }
+    if let Some(line) = table.listing_expired_note(now_ms) {
+        out.push(line);
     }
     out.push(format!("Everything recorded: {}", cost_words(&report)));
 

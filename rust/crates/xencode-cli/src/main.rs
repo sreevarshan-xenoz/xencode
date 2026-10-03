@@ -625,6 +625,12 @@ enum Commands {
         action: PerfAction,
     },
 
+    /// Where the prices a cost report uses come from, and reading them again
+    Prices {
+        #[command(subcommand)]
+        action: Option<PriceAction>,
+    },
+
     /// Run the tests, and never call a test that only passed on retry a pass
     Test {
         /// Only these packages (repeatable)
@@ -1229,6 +1235,28 @@ enum PerfAction {
 }
 
 #[derive(Subcommand)]
+enum PriceAction {
+    /// Show every price a cost report would use, which document each came from,
+    /// and which of the models this project has actually run are unpriced
+    Show {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+    /// Read the public catalogue again and replace the cached listing with it.
+    ///
+    /// This is the only thing in xencode that dials out for a price, and it is
+    /// asked for. Nothing is sent with the request: the listing is published for
+    /// anybody to read, which is the same reason no key is needed to fetch it.
+    Fetch {
+        /// Read from somewhere other than OpenRouter's listing — a gateway that
+        /// publishes the same document, or an address for testing
+        #[arg(long)]
+        url: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum WorktreeAction {
     /// List git worktrees of the current repository
     List,
@@ -1432,6 +1460,7 @@ async fn main() {
             format,
         } => run_cov(base, test, show_missing_lines, format),
         Commands::Perf { action } => run_perf(action),
+        Commands::Prices { action } => run_prices(action).await,
         Commands::Test {
             packages,
             retries,
@@ -1957,6 +1986,12 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // prompt: `read_docs` stays on cargo's local copies until this is
                 // on, and crates.io/docs.rs are never dialed behind it.
                 "allow_online_docs" => config.allow_online_docs = parse_bool(&value)?,
+                // Consent to price a model this project has no hand-written rate
+                // for off a catalogue somebody else published. It does not authorise
+                // a trip — `xencode prices fetch` is the only thing that dials out,
+                // and it is asked for. This only decides whether the copy already on
+                // disk is read, which is why the documented path stays offline.
+                "price_lookup" => config.price_lookup = parse_bool(&value)?,
                 // Keep every model call of every run, in the clear, under
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.
@@ -6667,12 +6702,218 @@ fn plural_count(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
+/// `xencode prices`: the two documents a cost report reads its rates out of, what
+/// each of them says, and which of the models this project has actually run have
+/// no rate in either.
+///
+/// Nothing here is computed — no spend, no totals. The point of the command is
+/// provenance: a number on a cost report is only as good as the paper it came
+/// from, and one of those two papers is somebody else's catalogue read on a day
+/// that has already passed.
+async fn run_prices(action: Option<PriceAction>) -> Result<(), String> {
+    let xencode_dir = project_xencode_dir();
+    let config = XencodeConfig::load().unwrap_or_default();
+    let action = action.unwrap_or(PriceAction::Show {
+        format: OutputFormat::Text,
+    });
+
+    match action {
+        PriceAction::Fetch { url } => {
+            let url = url
+                .as_deref()
+                .unwrap_or(xencode_providers_rs::listing::OPENROUTER_MODELS_URL);
+            let body = xencode_providers_rs::listing::fetch_listing(url)
+                .await
+                .map_err(|e| e.to_string())?;
+            let now = xencode_context_rs::conversation::now_millis();
+            let lookup = xencode_context_rs::PriceLookup::parse_openrouter(&body, now)?;
+            let path = lookup.write(&xencode_dir).map_err(|e| e.to_string())?;
+            println!(
+                "{} prices read off {url} and written to {}",
+                lookup.priced_models(),
+                path.display()
+            );
+            if lookup.unreadable > 0 {
+                println!(
+                    "  {} entries the listing gave in a shape no price could be read out of, counted and left out",
+                    lookup.unreadable
+                );
+            }
+            if !config.price_lookup {
+                println!(
+                    "note: price_lookup is off, so nothing is read from that file yet — `xencode config set price_lookup true`"
+                );
+            }
+            println!(
+                "note: a report reads that file for {} days, then stops pricing from it until it is fetched again.",
+                xencode_context_rs::PRICE_TTL_DAYS
+            );
+        }
+        PriceAction::Show { format } => {
+            let table =
+                xencode_context_rs::PriceTable::load_with_lookup(&xencode_dir, config.price_lookup);
+            // Folded here rather than read from the rollup file: refreshing that
+            // sidecar means writing to somebody's disk to answer a question about
+            // it, and a project driven only through this command has never written
+            // one. The records are the same ones the rollup is built from.
+            let mut rollup = xencode_context_rs::MetricsRollup::empty();
+            for row in xencode_context_rs::read_metrics(&xencode_dir) {
+                rollup.fold(&row);
+            }
+            let run: Vec<String> = rollup.by_model.keys().cloned().collect();
+            let unpriced: Vec<&String> = run
+                .iter()
+                .filter(|model| table.price_for_model(model.as_str()).is_none())
+                .collect();
+            let from_listing: Vec<&String> = run
+                .iter()
+                .filter(|model| {
+                    matches!(
+                        table.price_for_model(model.as_str()),
+                        Some(xencode_context_rs::PriceSource::Listing { .. })
+                    )
+                })
+                .collect();
+
+            // Read off the disk rather than through the table, so the answer does
+            // not depend on whether this build is allowed to price anything from
+            // it — the question here is what the file says.
+            let listing = xencode_context_rs::PriceLookup::load(&xencode_dir);
+            let now = xencode_context_rs::conversation::now_millis();
+
+            if matches!(format, OutputFormat::Json) {
+                let line = serde_json::json!({
+                    "pricing_json": {
+                        "path": table.path.display().to_string(),
+                        "present": table.file_present,
+                        "models": &table.models,
+                        "rejected": &table.rejected,
+                    },
+                    "listing": listing.as_ref().map(|lookup| serde_json::json!({
+                        "source": &lookup.source,
+                        "fetched_at_unix_ms": lookup.fetched_at_unix_ms,
+                        "fetched_on": xencode_context_rs::local_day_key(lookup.fetched_at_unix_ms),
+                        "age_days": lookup.age_days(now),
+                        "expired": lookup.stale(now),
+                        "priced_models": lookup.priced_models(),
+                        "unreadable": lookup.unreadable,
+                    })),
+                    "price_lookup": config.price_lookup,
+                    "listing_is_read": table.lookup.is_some() && !table.listing_expired,
+                    "models_run": &run,
+                    "priced_from_listing": &from_listing,
+                    "unpriced": &unpriced,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&line).unwrap_or_default()
+                );
+                return Ok(());
+            }
+
+            println!("pricing.json — {}", table.path.display());
+            if !table.file_present {
+                println!("  nothing there yet, so no model is priced by hand");
+            } else {
+                println!(
+                    "  {}, priced by hand",
+                    plural_count(table.models.len(), "model", "models")
+                );
+                for (name, price) in &table.models {
+                    println!("  • {name}  {}", describe_rates(price));
+                }
+            }
+            for problem in &table.rejected {
+                println!("  could not be read: {problem}");
+            }
+
+            println!(
+                "fetched listing — {}",
+                xencode_context_rs::lookup_path(&xencode_dir).display()
+            );
+            match &listing {
+                Some(lookup) => {
+                    println!(
+                        "  {} prices off {}, read on {}, {} days ago",
+                        lookup.priced_models(),
+                        lookup.source,
+                        xencode_context_rs::local_day_key(lookup.fetched_at_unix_ms),
+                        lookup.age_days(now),
+                    );
+                    if lookup.unreadable > 0 {
+                        println!("  {} entries carried no readable price", lookup.unreadable);
+                    }
+                    if !config.price_lookup {
+                        println!(
+                            "  not consulted: price_lookup is off. `xencode config set price_lookup true` lets a model missing from pricing.json be priced from here; a rate written by hand always outranks one read off a listing."
+                        );
+                    } else if let Some(note) = table.listing_expired_note(now) {
+                        println!("{note}");
+                    }
+                }
+                None => println!(
+                    "  nothing fetched. `xencode prices fetch` reads the public catalogue once and keeps it here."
+                ),
+            }
+
+            if run.is_empty() {
+                println!("models this project has run: none recorded yet");
+            } else {
+                println!(
+                    "models this project has run: {}; priced from the listing: {}; with no price in either document: {}",
+                    run.len(),
+                    from_listing.len(),
+                    unpriced.len()
+                );
+                // Which name each looked-up price was matched under, because a
+                // rate that arrived by matching a different string has to be
+                // checkable against the catalogue it came from.
+                for model in &from_listing {
+                    if let Some(xencode_context_rs::PriceSource::Listing { id, price }) =
+                        table.price_for_model(model)
+                    {
+                        println!(
+                            "  • {model} — the listing's {id}: {}",
+                            describe_rates(price)
+                        );
+                    }
+                }
+                for model in &unpriced {
+                    println!(
+                        "  • {model} — no price. A cost is reported as unknown, never as nothing."
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A hand-written rate the way it is written into the file, so `prices show` can
+/// be read against the editor rather than against a mental conversion.
+fn describe_rates(price: &xencode_context_rs::ModelPrice) -> String {
+    // `format_usd` already writes the dollar sign, so none is added here.
+    let mut line = format!(
+        "{} in / {} out per million tokens",
+        xencode_context_rs::format_usd((price.input_usd_per_mtok * 1_000_000.0).round() as u64),
+        xencode_context_rs::format_usd((price.output_usd_per_mtok * 1_000_000.0).round() as u64),
+    );
+    line.push_str(&match price.cached_input_usd_per_mtok {
+        Some(cached) => format!(
+            ", cache reads {}",
+            xencode_context_rs::format_usd((cached * 1_000_000.0).round() as u64)
+        ),
+        None => ", no cache rate — reads billed as input, which is an upper bound".to_string(),
+    });
+    line
+}
+
 /// QO-6 — put the release notes together from the two places this project
 /// already writes about what shipped: the commits since the last release, and
 /// the changelog's own unreleased block.
 ///
 /// The two disagree in both directions and both disagreements are the product:
-/// work that landed with no entry behind it never reaches a reader, and an entry
+/// work that shipped with no entry behind it never reaches a reader, and an entry
 /// whose commit sits below the release line would be announced twice. The output
 /// is a draft — to standard output, or to a path that must not already exist
 /// unless `--force` says otherwise, because a person is meant to edit it after.
@@ -7945,7 +8186,7 @@ mod tests {
     use super::{
         attach_images_to_final_user_message, compute_advise, doc, format_image_text,
         human_duration, join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind,
-        Cli, Commands, GenerateShell, OutputFormat, PerfAction, SessionAction,
+        Cli, Commands, GenerateShell, OutputFormat, PerfAction, PriceAction, SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -8622,6 +8863,44 @@ mod tests {
         assert_eq!(plural_count(1, "entry", "entries"), "1 entry");
         assert_eq!(plural_count(0, "entry", "entries"), "0 entries");
         assert_eq!(plural_count(131, "entry", "entries"), "131 entries");
+    }
+
+    /// `xencode prices` with nothing after it is the listing of what a cost report
+    /// would read — the fetch is the part that dials out, so it is never implied.
+    #[test]
+    fn prices_alone_shows_the_documents_and_fetches_nothing() {
+        let cli = Cli::try_parse_from(["xencode", "prices"]).unwrap();
+        match cli.command {
+            Some(Commands::Prices { action }) => {
+                assert!(action.is_none(), "no action means the showing one");
+            }
+            _ => panic!("expected prices"),
+        }
+    }
+
+    #[test]
+    fn prices_show_takes_a_format_and_fetch_takes_a_url() {
+        let cli = Cli::try_parse_from(["xencode", "prices", "show", "--format", "json"]).unwrap();
+        match cli.command {
+            Some(Commands::Prices {
+                action: Some(PriceAction::Show { format }),
+            }) => assert!(matches!(format, OutputFormat::Json)),
+            _ => panic!("expected prices show"),
+        }
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "prices",
+            "fetch",
+            "--url",
+            "http://127.0.0.1:9/models",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Prices {
+                action: Some(PriceAction::Fetch { url }),
+            }) => assert_eq!(url.as_deref(), Some("http://127.0.0.1:9/models")),
+            _ => panic!("expected prices fetch"),
+        }
     }
 
     fn path(p: &str) -> std::path::PathBuf {

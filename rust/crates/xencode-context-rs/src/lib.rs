@@ -138,7 +138,8 @@ pub use metrics::{
     CompactAction, MetricSource, MetricsIdentity, RequestMetrics,
 };
 pub use pricing::{
-    cost_of, format_usd, pricing_path, CostReport, ModelCost, ModelPrice, PriceTable,
+    cost_of, format_usd, listing_provenance, lookup_path, pricing_path, CostReport, ModelCost,
+    ModelPrice, PriceLookup, PriceSource, PriceTable, OPENROUTER_SOURCE, PRICE_TTL_DAYS,
 };
 pub use refresh::{refresh_rust_file, RefreshOutcome};
 pub use repo_map::{
