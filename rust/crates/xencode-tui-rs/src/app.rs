@@ -3428,6 +3428,14 @@ impl<'a> App<'a> {
             // The session's secret bit, shared across runs (SE-4): a read
             // in one turn still poisons shell calls in the next.
             taint: self.secret_taint.clone(),
+            // The sandbox is built around the same root the tools run in, so a
+            // command's writable world and the namespace's bind of it agree
+            // (SE-7). Off unless `run_command_sandbox`; on without `bwrap` it
+            // refuses rather than falling through.
+            sandbox: crate::sandbox::Sandbox::resolve(
+                self.config.run_command_sandbox,
+                &xencode_context_rs::default_root(),
+            ),
         }
     }
 
@@ -10582,6 +10590,7 @@ mod tests {
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sandbox: crate::sandbox::Sandbox::disabled(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -11360,6 +11369,7 @@ mod tests {
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sandbox: crate::sandbox::Sandbox::disabled(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),

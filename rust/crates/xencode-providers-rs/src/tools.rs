@@ -409,6 +409,13 @@ pub fn background_tools() -> Vec<ToolDefinition> {
                         "type": "string",
                         "description": "Directory to run the command in (e.g. a git \
                                         worktree path); defaults to the session directory"
+                    },
+                    "net": {
+                        "type": "boolean",
+                        "description": "Allow the task network access. Only relevant when \
+                                        run_command_sandbox is on, which drops the network \
+                                        namespace otherwise; set true for a command that must \
+                                        reach the network (fetch, push, an install)."
                     }
                 },
                 "required": ["command"]
@@ -852,6 +859,13 @@ pub fn command_tools() -> Vec<ToolDefinition> {
                     "type": "string",
                     "description": "Shell command line, run through sh -c in the \
                                     workspace root"
+                },
+                "net": {
+                    "type": "boolean",
+                    "description": "Allow the command network access. Only relevant when \
+                                    run_command_sandbox is on, which drops the network \
+                                    namespace otherwise; set true for a command that must \
+                                    reach the network (fetch, push, an install)."
                 }
             },
             "required": ["command"]
@@ -935,7 +949,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn run_command_takes_one_string_argument() {
+    fn run_command_takes_a_required_command_and_optional_net_grant() {
         let tools = command_tools();
         assert_eq!(
             tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
@@ -945,9 +959,17 @@ mod tests {
         let props = value["function"]["parameters"]["properties"]
             .as_object()
             .unwrap();
-        assert_eq!(props.len(), 1);
+        assert_eq!(props.len(), 2);
         assert_eq!(props["command"]["type"], "string");
+        assert_eq!(props["net"]["type"], "boolean");
         assert_eq!(value["function"]["parameters"]["required"][0], "command");
+        assert_eq!(
+            value["function"]["parameters"]["required"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

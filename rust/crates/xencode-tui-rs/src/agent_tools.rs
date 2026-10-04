@@ -2690,12 +2690,27 @@ fn cap_tail(text: &str, cap: usize) -> (bool, &str) {
 /// output instead of its rendered text, and the answer is rebuilt from that —
 /// error code, position, the fix the compiler offers, and the error-index entry
 /// for the code. See [`xencode_core_rs::rustc_json`].
-async fn run_foreground(root: &Path, command: &str, timeout_secs: u64) -> String {
+async fn run_foreground(
+    root: &Path,
+    command: &str,
+    timeout_secs: u64,
+    sandbox: &crate::sandbox::Sandbox,
+    net: bool,
+) -> String {
     let json_form = xencode_core_rs::cargo_json_command(command);
     let asked_for = json_form.as_deref().unwrap_or(command);
-    let child = match tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(asked_for)
+    // With the sandbox on this becomes `bwrap … sh -c`; off it is the plain
+    // shell; asked-for but impossible it is an error, never a quiet pass.
+    let (program, args) = match sandbox.wrap(asked_for, net) {
+        Ok(Some(wrapped)) => wrapped,
+        Ok(None) => (
+            "sh".to_string(),
+            vec!["-c".to_string(), asked_for.to_string()],
+        ),
+        Err(reason) => return err(reason),
+    };
+    let child = match tokio::process::Command::new(&program)
+        .args(&args)
         .current_dir(root)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -2806,9 +2821,8 @@ async fn run_hook(
     name: &str,
     call: &ToolCall,
     phase: HookPhase,
-    session_id: Option<&str>,
     command: &str,
-    timeout_secs: u64,
+    ctx: &ApprovalCtx,
 ) -> (bool, String) {
     let tool = call.name.as_str();
     let payload = serde_json::json!({
@@ -2819,13 +2833,23 @@ async fn run_hook(
         "tool_name": tool,
         "tool_input": call.arguments_object(),
         "cwd": root.to_string_lossy(),
-        "session_id": session_id.unwrap_or(""),
+        "session_id": ctx.session_id.as_deref().unwrap_or(""),
     });
     let payload = serde_json::to_vec(&payload).unwrap_or_else(|_| Vec::new());
 
-    let mut child = match tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    // SE-7: a hook is a shell command the config named, so it is exactly the
+    // exfiltration path the sandbox exists to bound. It gets no per-call net
+    // grant — a hook runs with the network off when the sandbox is on.
+    let (program, hook_args) = match ctx.sandbox.wrap(command, false) {
+        Ok(Some(wrapped)) => wrapped,
+        Ok(None) => (
+            "sh".to_string(),
+            vec!["-c".to_string(), command.to_string()],
+        ),
+        Err(reason) => return (false, format!("hook[{name}] {}: {reason}", phase.word())),
+    };
+    let mut child = match tokio::process::Command::new(&program)
+        .args(&hook_args)
         .current_dir(root)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -2855,7 +2879,7 @@ async fn run_hook(
         let _ = stdin.write_all(&payload).await;
         let _ = stdin.shutdown().await;
     }
-    let secs = timeout_secs.max(1);
+    let secs = ctx.command_timeout.max(1);
     let output = match tokio::time::timeout(
         std::time::Duration::from_secs(secs),
         child.wait_with_output(),
@@ -2926,7 +2950,18 @@ pub async fn execute_tool_call_timed(
     call: &ToolCall,
     command_timeout: u64,
 ) -> String {
-    execute_tool_call_plan(rt, root, call, command_timeout, None, None, false, None).await
+    execute_tool_call_plan(
+        rt,
+        root,
+        call,
+        command_timeout,
+        None,
+        None,
+        false,
+        None,
+        &crate::sandbox::Sandbox::disabled(),
+    )
+    .await
 }
 
 /// The dispatcher. `plan` is the chat's visible todo list: only the loop has
@@ -2941,6 +2976,7 @@ async fn execute_tool_call_plan(
     mcp: Option<&crate::mcp::McpHub>,
     online_docs: bool,
     skills: Option<&xencode_plugin_rs::SkillRuntime>,
+    sandbox: &crate::sandbox::Sandbox,
 ) -> String {
     let args = call.arguments_object();
     // Server tools are addressed by their visible `mcp__<server>__<tool>` name;
@@ -2967,7 +3003,10 @@ async fn execute_tool_call_plan(
         },
         "run_command" => match arg_str(&args, "command") {
             Some(command) if !command.trim().is_empty() => {
-                run_foreground(root, command, command_timeout).await
+                // SE-7: the per-call `net` grant lifts the network isolation
+                // the sandbox imposes; it is ignored when the sandbox is off.
+                let net = args.get("net").and_then(|v| v.as_bool()).unwrap_or(false);
+                run_foreground(root, command, command_timeout, sandbox, net).await
             }
             _ => "error: run_command needs a non-empty string \"command\"".to_string(),
         },
@@ -2996,8 +3035,30 @@ async fn execute_tool_call_plan(
                     ));
                 }
             }
+            let net = args.get("net").and_then(|v| v.as_bool()).unwrap_or(false);
+            // SE-7: a background task is isolated the same way a foreground one
+            // is — the recorded command stays readable, the program actually
+            // spawned is the sandboxed one. An enabled-but-impossible sandbox
+            // refuses rather than falling back quietly.
+            let spec = match sandbox.wrap(command, net) {
+                Ok(Some((program, wrap_args))) => xencode_core_rs::tasks::SpawnSpec {
+                    program,
+                    args: wrap_args,
+                },
+                Ok(None) => xencode_core_rs::tasks::SpawnSpec::shell(command),
+                Err(reason) => return err(reason),
+            };
             let mut m = rt.lock().await;
-            match m.start_with_cwd(name, command, cwd.as_deref()).await {
+            match m
+                .start_spawning(
+                    name,
+                    command,
+                    cwd.as_deref(),
+                    xencode_core_rs::tasks::DEFAULT_TASK_TIMEOUT,
+                    &spec,
+                )
+                .await
+            {
                 Ok(id) => {
                     let pid = m
                         .snapshot(id)
@@ -3153,6 +3214,11 @@ pub struct ApprovalCtx {
     pub turn: usize,
     /// Wall-clock budget for `run_command` (`agent_command_timeout`).
     pub command_timeout: u64,
+    /// The SE-7 `bwrap` sandbox decision for this run: `run_command`,
+    /// `background_start` and shell hooks are wrapped when it says so. Built
+    /// once per run by `App::approval_ctx` from the config plus whether this
+    /// machine has `bwrap`; a run outside the chat loop passes a disabled one.
+    pub sandbox: crate::sandbox::Sandbox,
     /// The chat pane's todo list, written by `update_plan`.
     pub plan: PlanHandle,
     /// The session's started MCP servers (I3-01): the turn offers their tools
@@ -3320,16 +3386,7 @@ async fn run_and_checkpoint(
 ) -> String {
     let mut before_note = String::new();
     if let Some((name, command)) = hook_for(&ctx.hooks, HookPhase::Before, &call.name) {
-        let (ok, text) = run_hook(
-            root,
-            name,
-            call,
-            HookPhase::Before,
-            ctx.session_id.as_deref(),
-            command,
-            ctx.command_timeout,
-        )
-        .await;
+        let (ok, text) = run_hook(root, name, call, HookPhase::Before, command, ctx).await;
         if !ok {
             return err(format!("pre-hook vetoed this call:\n{text}"));
         }
@@ -3345,6 +3402,7 @@ async fn run_and_checkpoint(
         mcp,
         ctx.online_docs,
         Some(&ctx.skills),
+        &ctx.sandbox,
     )
     .await;
     if let Some(note) = note {
@@ -3357,16 +3415,7 @@ async fn run_and_checkpoint(
         result.insert_str(0, &format!("{before_note}\n"));
     }
     if let Some((name, command)) = hook_for(&ctx.hooks, HookPhase::After, &call.name) {
-        let (_, text) = run_hook(
-            root,
-            name,
-            call,
-            HookPhase::After,
-            ctx.session_id.as_deref(),
-            command,
-            ctx.command_timeout,
-        )
-        .await;
+        let (_, text) = run_hook(root, name, call, HookPhase::After, command, ctx).await;
         result.push('\n');
         result.push_str(&text);
     }
@@ -6485,6 +6534,7 @@ patched = ["{fixed}"]
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sandbox: crate::sandbox::Sandbox::disabled(),
             },
             prompts: rx,
         }
@@ -6970,6 +7020,7 @@ patched = ["{fixed}"]
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sandbox: crate::sandbox::Sandbox::disabled(),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(
@@ -8374,15 +8425,36 @@ patched = ["{fixed}"]
     #[tokio::test]
     async fn check_verdict_reads_the_exit_code_of_real_runs() {
         let root = temp_root("verdict");
-        let passed = run_foreground(&root, "true", 10).await;
+        let passed = run_foreground(
+            &root,
+            "true",
+            10,
+            &crate::sandbox::Sandbox::disabled(),
+            false,
+        )
+        .await;
         assert_eq!(check_verdict(&passed), CheckVerdict::Passed, "{passed}");
 
-        let failed = run_foreground(&root, "exit 3", 10).await;
+        let failed = run_foreground(
+            &root,
+            "exit 3",
+            10,
+            &crate::sandbox::Sandbox::disabled(),
+            false,
+        )
+        .await;
         assert_eq!(check_verdict(&failed), CheckVerdict::Failed, "{failed}");
 
         // A missing toolchain exits 127 through sh: a real code, so it fails
         // the check rather than silently passing it.
-        let absent = run_foreground(&root, "no-such-check-tool-xyz", 10).await;
+        let absent = run_foreground(
+            &root,
+            "no-such-check-tool-xyz",
+            10,
+            &crate::sandbox::Sandbox::disabled(),
+            false,
+        )
+        .await;
         assert_eq!(check_verdict(&absent), CheckVerdict::Failed, "{absent}");
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -8395,9 +8467,90 @@ patched = ["{fixed}"]
         assert_eq!(check_verdict(DENIED_RESULT), CheckVerdict::Unverifiable);
         assert_eq!(check_verdict(FORBIDDEN_RESULT), CheckVerdict::Unverifiable);
         // A killed slow command reports a timeout, not a code.
-        let timed_out = run_foreground(&root, "sleep 5", 1).await;
+        let timed_out = run_foreground(
+            &root,
+            "sleep 5",
+            1,
+            &crate::sandbox::Sandbox::disabled(),
+            false,
+        )
+        .await;
         assert_eq!(check_verdict(&timed_out), CheckVerdict::Unverifiable);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// SE-7 done-when, run through the real wired path: an *approved*
+    /// `run_command` (AllAllow) under an enabled sandbox must not be able to
+    /// read a file that lives in the home, while the same command outside the
+    /// sandbox can — and the workspace bind still works, so a failure is proof
+    /// of the namespace hiding the home, not of the command never running.
+    ///
+    /// It plants its own throwaway file under `$HOME` and removes it, so it
+    /// depends on nothing the machine happens to have. With no `bwrap`
+    /// installed, the same test proves the other half of the contract: an
+    /// enabled sandbox *refuses* rather than silently running unsandboxed.
+    #[tokio::test]
+    async fn an_enabled_sandbox_hides_the_home_from_a_real_run_command() {
+        use crate::sandbox::Sandbox;
+        let home = match std::env::var_os("HOME") {
+            Some(h) => PathBuf::from(h),
+            None => return,
+        };
+        let probe_dir = home.join(format!(".xencode-se7-proof-{}", std::process::id()));
+        if std::fs::create_dir_all(&probe_dir).is_err() {
+            return; // cannot plant in the home here — nothing to prove
+        }
+        std::fs::write(probe_dir.join("note.txt"), "home-value-should-stay-hidden").unwrap();
+
+        let root = temp_root("se7-sandbox");
+        std::fs::write(root.join("visible.txt"), "workspace-value-should-show").unwrap();
+        let rt = new_task_runtime();
+        let pid = std::process::id();
+        let command = format!(
+            "cat \"$HOME/.xencode-se7-proof-{pid}/note.txt\" 2>&1; echo ---; cat ./visible.txt 2>&1"
+        );
+
+        // Baseline, no sandbox: the home file is reachable — the exact exposure
+        // the sandbox exists to close.
+        let open_ctx = harness(ApprovalMode::AllAllow);
+        let before =
+            execute_tool_call_approved(&rt, &root, &cmd_call(&command), &open_ctx.ctx, None).await;
+        assert!(
+            before.contains("home-value-should-stay-hidden"),
+            "unsandboxed run must read the home file: {before}"
+        );
+
+        let sandbox = Sandbox::resolve(true, &root);
+        if !sandbox.available() {
+            // No bwrap here: enabling must refuse, never fall through.
+            let mut denied = harness(ApprovalMode::AllAllow);
+            denied.ctx.sandbox = sandbox;
+            let refused =
+                execute_tool_call_approved(&rt, &root, &cmd_call("true"), &denied.ctx, None).await;
+            assert!(
+                refused.contains("bwrap"),
+                "enabled-without-bwrap must refuse: {refused}"
+            );
+            std::fs::remove_dir_all(&probe_dir).ok();
+            std::fs::remove_dir_all(&root).ok();
+            return;
+        }
+
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.sandbox = sandbox;
+        let after = execute_tool_call_approved(&rt, &root, &cmd_call(&command), &h.ctx, None).await;
+
+        assert!(
+            !after.contains("home-value-should-stay-hidden"),
+            "sandboxed run leaked the home file: {after}"
+        );
+        assert!(
+            after.contains("workspace-value-should-show"),
+            "the workspace bind must stay usable inside the sandbox: {after}"
+        );
+
+        std::fs::remove_dir_all(&probe_dir).ok();
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// SE-5: writing content that carries a credential keeps the bytes on disk

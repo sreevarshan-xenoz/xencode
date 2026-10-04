@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2202 tests passing, zero warnings (re-verified 2026-10-04, after SE-6)
+- [x] Workspace gates green — 16 crates, 2207 tests passing, zero warnings (re-verified 2026-10-04, after SE-7)
 
 ## Model Catalog Honesty
 
@@ -2245,7 +2245,24 @@ Ranked by what the tree actually shows, not by how alarming it sounds.
   writable, network off by default, per-command `--net` approval. L. Trap: silent
   fallback when the kernel lacks Landlock; the test matrix is painful. The
   `landlock` crate is alive (0.4.x). Done-when: `cat ~/.ssh/id_rsa` fails *inside*
-  an approved command, on this machine.
+  an approved command, on this machine. **Done 2026-10-04** (with **QTR-3**, its
+  `bwrap` slice): implemented on bubblewrap rather than Landlock — one
+  mechanism, no kernel-version matrix. `run_command_sandbox` (default off; a
+  build that fetches needs the net, so enabling is a decision) wraps each
+  `run_command`, `background_start` and shell hook in a `bwrap` mount namespace
+  (`crates/xencode-tui-rs/src/sandbox.rs`): home tmpfs'd *before* the workspace
+  and `~/.cargo` are rebound (the ordering is what hides `~/.ssh` yet keeps a
+  build working), `--unshare-all` drops the net, a per-call `net: true` on
+  `run_command`/`background_start` re-grants it via `--share-net`, and hooks run
+  net-off with no grant. No silent fallback: enabled with no `bwrap` refuses the
+  command with the reason. Background tasks reuse the sandbox by spawning a
+  `SpawnSpec` (program + args) through `TaskManager::start_spawning`, so the
+  recorded command stays readable while the executed one is wrapped. Proven live
+  on this machine (bubblewrap 0.12.0): an approved `run_command` under the
+  sandbox reads `No such file or directory` for a planted file under `$HOME`
+  while the workspace file beside it reads fine, and `/dev/tcp` connect is
+  "Network is unreachable". Unit tests cover the namespace shape, the `--net`
+  grant, the disabled pass-through, and the enabled-without-`bwrap` refusal.
 
 Context for the ordering: a Jan-2026 SoK catalogued 42 injection techniques and
 found adaptive attacks still exceeding 85% success against *filter-based*
@@ -5890,7 +5907,9 @@ and PR-1: refuse at the source class, never grade with a classifier.
   elsewhere, network namespace off by default, visible opt-out. `bwrap` is
   installed here and Landlock is kernel-enabled. *Do not market it as containing
   the compiler:* `build.rs` scripts run free inside, and anything in the
-  bind-mounted workspace is reachable.
+  bind-mounted workspace is reachable. **Done 2026-10-04, as part of SE-7** —
+  same wrapper, one commit; the honesty note about the compiler is in the README
+  bullet and the config doc, not just here.
 - **QTR-4 — Git-backed checkpoints.** *Effort: M.* A per-turn commit on an
   `xencode/ckpt` branch + a `git status` diff before `/rewind` so interleaved
   human edits are detected — the thing in-memory ≤4 MiB checkpoints can never
@@ -9091,7 +9110,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers |
 | **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
 | **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement); done — enforced at load and at install, see the note in Q-9 |
-| **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7 |
+| **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7; done 2026-10-04 as part of SE-7 — see the note |
 | **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo) |
 | **QTR-5** | Accountability as trailers + a run ledger | capability | accountability trailers + run ledger (rides GH-5's format) |
 | **SE-2** | untrusted-content marking | core | untrusted-content marking; done 2026-10-04 — see the note |
@@ -9099,7 +9118,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-4** | lethal-trifecta gate in `classify` | core | lethal-trifecta gate in classify |
 | **SE-5** | secret *content* scanning | capability | secret content scanning; done 2026-10-04 — see the note |
 | **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5); done 2026-10-04 — see the note |
-| **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper) |
+| **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper); done 2026-10-04 — see the note |
 | **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement |
 
 #### W7 progress
@@ -9281,6 +9300,35 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   *Not done from the item:* the `cargo-deny` decode is unexercised on this
   machine (binary absent); installing it and syncing its advisory DB is a network
   action left to the user.
+
+- [x] `SE-7` (+ `QTR-3`) — 2026-10-04. A `bubblewrap` mount namespace around the
+  agent's shell. Implemented on `bwrap` rather than Landlock — one mechanism, no
+  kernel-version test matrix, and `bwrap` is installed here (0.12.0). The new
+  `run_command_sandbox` config switch (default **off**; on it needs `bwrap` and
+  breaks a net-fetching build, so it is a decision, and the `config set` handler
+  now accepts the key) makes every `run_command`, `background_start` and shell
+  hook run through `sandbox::Sandbox::wrap`
+  (`crates/xencode-tui-rs/src/sandbox.rs`). The mechanism is bind ordering: the
+  home is `--tmpfs`'d *before* the workspace and `~/.cargo` are rebound, so
+  `~/.ssh` is absent inside while a build still works — proven by `ls -A $HOME`
+  returning `count=0` in the namespace. `--unshare-all` drops the network; a
+  per-call `net: true` on `run_command`/`background_start` (both tool schemas now
+  carry the flag) puts it back with `--share-net`; hooks get no grant and run
+  net-off. No silent fallback: `wrap` returns an `Err` — and the caller refuses —
+  when the switch is on but `bwrap` is missing, which unit test
+  `enabled_without_bwrap_is_a_refusal_not_a_fallback` pins. Background tasks are
+  isolated by spawning a `SpawnSpec { program, args }` through the new
+  `TaskManager::start_spawning`, so `poll` still shows the human command while
+  `bwrap` runs the real one. `App::approval_ctx` builds the sandbox against the
+  same `default_root()` the tools run in. Done-when **proven live** on this
+  machine through the wired path (an *approved* AllAllow `run_command`, test
+  `an_enabled_sandbox_hides_the_home_from_a_real_run_command`): a planted file
+  under `$HOME` reads `No such file or directory` inside the sandbox and its
+  bytes outside it, the workspace file reads fine in both, and `/dev/tcp`
+  connect is "Network is unreachable". The honesty note (it bounds the home and
+  net, not the compiler — `build.rs` and anything the workspace reaches run
+  free) is in the README bullet and the config doc, not only here. *Not claimed:*
+  Landlock is not used; this is the bubblewrap path QTR-3 named.
 
 #### W8 — Outward research capability — 6 items
 

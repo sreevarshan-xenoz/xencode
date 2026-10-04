@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `SE-7` (+ `QTR-3`): an optional `bubblewrap` sandbox around the agent's shell
+
+With the new `run_command_sandbox` switch on (off by default), every
+`run_command`, `background_start` and shell hook runs inside a `bubblewrap`
+(`bwrap`) mount namespace: the workspace and `~/.cargo` stay writable so a build
+still works, the rest of the home — `~/.ssh` and the keys under it — is replaced
+by an empty directory so it is *absent* rather than merely denied, and the
+network namespace is dropped. A single command that must reach the network asks
+for it with `net: true` (a new argument on `run_command` and `background_start`);
+shell hooks get no such grant and always run with the net off. There is no silent
+fallback: with the switch on and `bwrap` not installed, the command is refused
+with the reason rather than quietly run unsandboxed. Background tasks are
+isolated the same way while their recorded command stays the readable one. This
+bounds what an approved command can read outside the project and reach over the
+network — the exfiltration path the approval gate cannot see — and is honest that
+it is not a full jail: `build.rs` scripts and anything the workspace can reach run
+free inside. Verified on this machine (bubblewrap 0.12.0): an approved sandboxed
+command reading a planted file under `$HOME` gets *No such file or directory*
+while the workspace file beside it reads fine, and a network connect reports
+"Network is unreachable".
+
 ### Added — `SE-6`: `xencode deps` — one supply-chain report over the checkers you have
 
 `xencode deps` shells out to whichever dependency checkers are installed
