@@ -84,7 +84,12 @@ while the subagent works. Four more reach the same engines the CLI runs:
 `/doctor [env|deps]` probes machine resources, GPUs, memory and environment
 facts, `/verify [skip...]` runs the machine-checkable checklist (fmt, lint,
 test), `/hotspots [limit]` ranks files by churn, size and bus factor, and
-`/agents` inventories the coding-agent CLIs installed on `PATH`.
+`/agents` inventories the coding-agent CLIs installed on `PATH`, and
+`/trust` decides whether this workspace's `AGENTS.md` enters the model's
+context as instructions or stays marked `[data]` — by content hash, persisted
+in `.xencode/cache/agents_trust.json`, so an edit to the file asks again.
+`/trust status` reports which one it is right now; `/trust forget` withdraws
+trust for the current bytes.
 
 #### What the build tells the model: `/ctx prompts`
 

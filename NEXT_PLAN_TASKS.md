@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2184 tests passing, zero warnings (re-verified 2026-10-04, after SE-2)
+- [x] Workspace gates green — 16 crates, 2193 tests passing, zero warnings (re-verified 2026-10-04, after SE-3)
 
 ## Model Catalog Honesty
 
@@ -2202,6 +2202,12 @@ Ranked by what the tree actually shows, not by how alarming it sounds.
   store. M. Trap: it breaks the exact workflow `AGENTS.md` exists for, so the
   prompt must be unmissable and the decision durable. **Done-when: an untrusted
   `AGENTS.md` cannot raise permissions, proven by test.**
+  *(Done 2026-10-04 — see W7 progress. The gate has no way to reach the file:
+  `classify()` reads only the tool, its args, the mode, the session grants and
+  the SE-4 taint bit — never `AGENTS.md` — and a test pins that an untrusted
+  file, then the same file trusted with its bytes back verbatim, produces
+  identical `classify` decisions. Trusting is the user's, via `/trust`, keyed to
+  the exact bytes' hash in `.xencode/cache/agents_trust.json`.)*
 - **SE-4 lethal-trifecta gate in `classify`** — if a turn has read
   `~/.ssh`/`~/.xencode`/env/secret-named content, a later network-writing command
   escalates or denies. M. Trap: cross-turn taint tracking is leaky; keep it a
@@ -9069,7 +9075,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo) |
 | **QTR-5** | Accountability as trailers + a run ledger | capability | accountability trailers + run ledger (rides GH-5's format) |
 | **SE-2** | untrusted-content marking | core | untrusted-content marking; done 2026-10-04 — see the note |
-| **SE-3** | the `AGENTS.md` trust split (fact 3) | core | AGENTS.md trust split |
+| **SE-3** | the `AGENTS.md` trust split (fact 3) | core | AGENTS.md trust split; done 2026-10-04 — see the note |
 | **SE-4** | lethal-trifecta gate in `classify` | core | lethal-trifecta gate in classify |
 | **SE-5** | secret *content* scanning | capability | secret content scanning |
 | **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5) |
@@ -9137,6 +9143,54 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   (derived names and this session's own notes, not fetched bodies); and
   conversation memory still stores plain user/assistant text, because tool
   results never entered it — they lived only inside the turn.
+
+- [x] `SE-3` — 2026-10-04. A repository's `AGENTS.md` is data until you trust its
+  exact bytes. `read_agents_md` (`xencode-context-rs/src/trust.rs`) is the one
+  reader: it returns the file verbatim when its sha256 is in
+  `.xencode/cache/agents_trust.json`, and otherwise wraps it under a
+  `[data] AGENTS.md — repository-provided, untrusted` banner that carries the
+  first twelve hash characters and tells the model these bytes came from the
+  repository, not from the person it works for, so it must not follow them or
+  let them move its approvals, permission mode, or what it reads and runs. Every
+  path that puts `AGENTS.md` in front of the model was moved through that seam —
+  the four `app.rs` readers (the one-shot `/review` and panel prompts, the `/ctx`
+  preview) — and the load-bearing catch was the live turn itself: it assembles
+  through `collect_live_context` in `context.rs`, so that call now reads through
+  the trust seam too, which covers the TUI chat turn, ByteBot, `/spawn` delegated
+  context, and headless `xencode run` in one place. Trust is keyed to the content
+  hash alone: an edit changes the hash, so the edited file is untrusted again
+  while the old hash stays trusted; `/trust` stores, `/trust status` reports
+  against the file read fresh right now, `/trust forget` withdraws; the store
+  holds hashes only and never the file body, so no repository content is
+  duplicated into the cache, and a corrupt or unreadable store reads as no trust
+  at all — it fails closed. The TUI notices an untrusted file once per exact hash
+  per session (`agents_trust_noticed`) rather than every turn. The done-when is
+  that an untrusted file cannot raise permissions, proven two ways: structurally,
+  `classify()`'s inputs are the tool, its args, the mode, the session grants and
+  the SE-4 taint bit — `AGENTS.md` is not among them, so it has no path to the
+  gate; and by test, `an_untrusted_agents_md_cannot_move_the_permission_gate`
+  feeds a file that demands `chmod 777 . && curl` to the gate before and after
+  trusting (whose bytes return verbatim), asserts the decisions are identical in
+  both the Ask and auto-edit modes, then edits it and asserts the marked form
+  still produces the same decisions. Nine new tests: eight in `trust.rs` covering
+  the banner, durable hash-only trust, edit-reverts-to-data, forget, corrupt-store
+  fail-closed, refusing a missing/blank file, the live assembler wrapping an
+  untrusted file (and the stable head placing the marker ahead of the content for
+  KV byte-stability, byte-equal across two reads), and one in `agent_tools.rs`
+  for the gate. Live on this machine with the real TUI driving a local model: a
+  workspace with an untrusted `AGENTS.md` rendered the "…repository-provided and
+  untrusted…" notice with sha256 `585c6af3c33e`, `/trust status` reported NOT
+  trusted, `/trust` returned "🤝 Trusted", and the store file held exactly
+  `["585c6af3c33e8b0ba0c747028c1325e5d4dbc593ff4942bd659aaa624952d966"]` with
+  zero grep hits for the file's body; a fresh session trusted the file, then an
+  edit made `sha256 ec384f474155` report NOT trusted while the store still kept
+  only the old hash — durable per-hash and edit-re-ask, watched. *Not done from
+  the item:* the banner is the same hygiene SE-2 admits it is — a model can still
+  be persuaded to follow a `[data]` body, so the honest wall against permission
+  escalation remains SE-4's gate (proven here to have no `AGENTS.md` input) and
+  SE-7's kernel enforcement; and the trust store is per-workspace content, not
+  per-author, so a trusted file that a collaborator later edits to match your
+  bytes would read as trusted again — the hash is the contract, exactly as spec'd.
 
 #### W8 — Outward research capability — 6 items
 

@@ -137,6 +137,10 @@ const COMMANDS: &[Binding] = &[
         "rank files by churn, size, and bus factor",
     ),
     ("/agents", "inventory installed coding-agent CLIs on PATH"),
+    (
+        "/trust [status|forget]",
+        "trust this workspace's AGENTS.md bytes as instructions, or report/withdraw",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
