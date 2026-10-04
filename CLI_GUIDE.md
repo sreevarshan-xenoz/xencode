@@ -108,6 +108,22 @@ are never flagged, and any repo-relative path you list in
 too; an unreadable allowlist means nothing is skipped, so the scan errs toward
 reporting rather than silence.
 
+The same pattern list now also guards the way *in* to the model, not only what a
+tool returns. Before a turn's context is sent, any credential-shaped value in the
+dynamic tiers — task state, git facts, the repo map, retrieved file bodies, the
+prior conversation, the current prompt — is replaced by a placeholder
+(`«xencode-secret-1»`, and so on) that carries no secret, and the real value is
+kept locally and put back at the one point it is needed: when a tool call whose
+arguments name the placeholder is about to run. So the model can be told to run a
+command referencing a secret and it still works, while the plaintext never
+crossed the provider boundary. The stable head (system prompt plus trusted
+`AGENTS.md`) is never rewritten, because those bytes are what a local server
+key/value-caches and a per-turn cache-drift check compares. One value seen in two
+tiers becomes one placeholder, and the number of secrets held back is reported
+without naming any of them. This reduces what leaves the machine; it is pattern
+matching, not a proof, so a secret in a shape the list does not know passes
+through — the approval gate and the shell sandbox remain the actual wall.
+
 #### What the build tells the model: `/ctx prompts`
 
 The instructions this program sends with every request are plain markdown files

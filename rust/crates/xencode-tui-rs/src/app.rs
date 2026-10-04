@@ -3397,6 +3397,10 @@ impl<'a> App<'a> {
 
         let mut run = self.agent_run(LoopSink::Chat, context_messages, &prompt);
         run.retrieved_files = assembly.retrieved_files;
+        // Hand the executor the secrets this turn's dynamic tiers held back
+        // (PR-3), so a tool call naming a placeholder gets its real value at the
+        // point of running rather than on the way to the model.
+        run.approval.redaction = std::sync::Arc::new(assembly.vault);
 
         tokio::spawn(agent_rounds(run, tx));
     }
@@ -3436,6 +3440,9 @@ impl<'a> App<'a> {
                 self.config.run_command_sandbox,
                 &xencode_context_rs::default_root(),
             ),
+            // The chat path replaces this with the vault its assembled turn took
+            // out (PR-3); every other caller runs without a redaction to undo.
+            redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
         }
     }
 
@@ -4192,6 +4199,7 @@ impl<'a> App<'a> {
             &task,
         );
         run.retrieved_files = assembly.retrieved_files;
+        run.approval.redaction = std::sync::Arc::new(assembly.vault);
         Some(run)
     }
 
@@ -4324,6 +4332,7 @@ impl<'a> App<'a> {
             task,
         );
         run.retrieved_files = assembly.retrieved_files;
+        run.approval.redaction = std::sync::Arc::new(assembly.vault);
         run.tool_root = worktree_path;
         run.approval.checkpoints = std::sync::Arc::new(crate::agent_tools::CheckpointStore::new());
         Some((id, branch_name, run))
@@ -10606,6 +10615,7 @@ mod tests {
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sandbox: crate::sandbox::Sandbox::disabled(),
+            redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -11455,6 +11465,7 @@ mod tests {
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sandbox: crate::sandbox::Sandbox::disabled(),
+            redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),

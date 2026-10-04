@@ -3284,6 +3284,12 @@ pub struct ApprovalCtx {
     /// not per-variable taint, because cross-turn fine tracking is leaky and
     /// a leaky gate is theater. Once set it stays set for the session.
     pub taint: Arc<AtomicBool>,
+    /// The secret values the context engine held back from this turn's dynamic
+    /// tiers (PR-3), keyed by the placeholder the model was shown. A tool call
+    /// that names a placeholder gets the real value back from here before it is
+    /// classified and run, so the plaintext never crossed to the provider but
+    /// the command still works. Empty/default when nothing was redacted.
+    pub redaction: Arc<xencode_context_rs::Vault>,
 }
 
 impl ApprovalCtx {
@@ -3473,6 +3479,23 @@ pub async fn execute_tool_call_approved(
     ctx: &ApprovalCtx,
     mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
+    // A secret the context engine held back from this turn's dynamic tiers
+    // reached the model only as a placeholder (PR-3). Here, at the point of
+    // execution — after the provider saw the token, before the tool runs — the
+    // placeholder becomes the real value again, so the shape check, the policy
+    // classification and the run all work on what the call actually means. With
+    // nothing redacted this is a no-op and `call` stays the borrowed original.
+    let restored;
+    let call = if ctx.redaction.is_empty() {
+        call
+    } else {
+        restored = ToolCall {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            arguments: ctx.redaction.restore_value(call.arguments.clone()),
+        };
+        &restored
+    };
     // Before any policy is consulted or any prompt is opened: a call whose
     // arguments cannot be read as what the tool asked for is not a call the agent
     // meant to make, and running it with an empty set of arguments would be a
@@ -6709,6 +6732,7 @@ patched = ["{fixed}"]
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
+                redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
             },
             prompts: rx,
         }
@@ -7195,6 +7219,7 @@ patched = ["{fixed}"]
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
+                redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(
@@ -7322,6 +7347,46 @@ patched = ["{fixed}"]
 
         let empty = timed(&root, cmd_call("true"), 10).await;
         assert_eq!(empty, "$ true\nexit 0");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// PR-3: the model only ever saw a placeholder for a secret the context
+    /// engine held back, so when it writes a command naming that token, the real
+    /// value is put back at the point of execution — after the provider round
+    /// trip, before the shell runs.
+    #[tokio::test]
+    async fn a_placeholder_in_a_command_is_restored_at_execution() {
+        use xencode_context_rs::Redactor;
+        let root = temp_root("redact-restore");
+        let mut h = harness(ApprovalMode::AllAllow);
+        // What the provider was shown: the assignment stays readable, the value
+        // becomes a token. The vault keeps the value for this run only.
+        let mut redactor = Redactor::new();
+        let shown = redactor.redact("AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI\"");
+        h.ctx.redaction = std::sync::Arc::new(redactor.into_vault());
+        assert!(
+            shown.contains("«xencode-secret-1»") && !shown.contains("wJalrXUtnFEMI"),
+            "the offered text is the placeholder form: {shown}"
+        );
+
+        // The model echoes the token it was given, not the secret.
+        let out = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &cmd_call(&format!("printf %s {shown}")),
+            &h.ctx,
+            None,
+        )
+        .await;
+
+        assert!(
+            out.contains("wJalrXUtnFEMI"),
+            "the command ran with the real value restored:\n{out}"
+        );
+        assert!(
+            !out.contains("«xencode-secret"),
+            "no placeholder ever reached the shell:\n{out}"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
