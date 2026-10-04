@@ -136,6 +136,21 @@ The ordered backlog and its dependency waves remain in
 [`NEXT_PLAN.md`](../NEXT_PLAN.md). Research appendices are evidence and candidate
 records, not a list of shipped behavior.
 
+**Free compute, re-read from source on 2026-10-04.** Milestone L's 2026-09-23
+backend survey put Kaggle in the "no SSH, therefore unreachable" bucket. Reading
+the projects that actually run a model server on free GPUs changed that: Kaggle
+runs notebook code as root, a prebuilt Linux CUDA build of `llama-server` exists
+so the community's 26-minute compile is optional, `--api-key` is one flag rather
+than a project, and the weights-and-binary cache that makes a session start in a
+minute is a private Kaggle dataset rather than Google Drive (which Kaggle cannot
+mount). The open problem is transport, not capacity, and every public example
+found solves it by exposing an unauthenticated endpoint to the internet — which
+this project's own rules forbid. Separately, AMD's **$100 Developer Cloud credit**
+gives a root-SSH MI300X VM, which the existing bring-your-own-SSH path already
+handles. Both are recorded as **L-13 → L-15** with their numbers dated and their
+unverified points marked; none of it is shipped behavior, and each is gated on a
+probe that has not run.
+
 ## 📊 Success Metrics & Current Status
 
 ### 🎯 Target Metrics

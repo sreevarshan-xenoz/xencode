@@ -309,6 +309,14 @@
   metrics that already exist. Research behind the shape (including the paid GPU
   clouds deliberately **not** integrated) is in
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone L.
+- 🔜 **Milestone L refreshed** (2026-10-04): a source-reading pass over the free
+  GPU field added a third track — **L-13 → L-15**, free compute that is not a
+  machine you can SSH into. Kaggle's two free T4s become reachable in principle
+  (it runs notebook code as root; `llama-server` has `--api-key`; weights and
+  binary cache as a private Kaggle dataset, not Google Drive, which it cannot
+  mount) but have no SSH, so they wait on a private transport rather than a
+  public URL; AMD's $100 Developer Cloud credit lands a root-SSH MI300X and needs
+  no new backend at all. All three are probe-gated and none is shipped behavior.
 
 ## Backlog (A–K all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 

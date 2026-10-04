@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation — where free compute and free inference actually come from, re-read from source
+
+The plan's 2026-09-23 survey filed Kaggle under "no SSH, therefore unreachable"
+and left the paid GPU clouds as the only alternative. Reading the projects that
+already run a model server on free GPUs, plus the vendors' own pages, corrected
+that: Kaggle runs notebook code as root, `llama-server` publishes a prebuilt
+Linux CUDA build so the community's 26-minute compile is optional and its
+`--api-key` flag turns the unauthenticated-endpoint problem every example ships
+with into one argument, and the cache that makes a second session start in about a
+minute is a private Kaggle dataset rather than Google Drive — which Kaggle cannot
+mount at all. What is actually missing is a **private** way for the box to dial
+out, since a public URL is against this project's own rules. Separately, AMD's
+$100 Developer Cloud credit lands a root-SSH MI300X VM, which the existing
+bring-your-own-SSH path already handles with no new code. The free hosted
+inference routes were re-measured against each provider's own page and put in a
+dated table, including the reason each disqualified one is disqualified — GitHub
+Models retired on 2026-07-30, and three tiers that read your prompts to improve
+their models. None of this is shipped behavior: it is recorded as **L-13 → L-17**
+in `NEXT_PLAN_TASKS.md`, each gated on a probe that has not run, and the manual's
+"rented GPU" wording now says what it costs.
+
 ### Added — `/rewind` now knows when *not* to rewind
 
 The session's in-memory snapshots can put a file back, but they cannot tell
