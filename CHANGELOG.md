@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `SE-5`: the security scan now reads credential *content*, not just file names
+
+The pattern scanner only fired on an assignment whose key looked secret —
+`api_key = "…"` — so a bare `sk-proj-…` token or a pasted private key dropped
+into ordinary source went unreported. `scan_secrets` reads the same credential
+shapes the trace scrubber and the secrets-taint gate already use (one pattern
+list, no new dependency) and reports each hit by line and kind. The TUI's
+Security auditor streams these as `secret-content` findings folded into its
+totals, skipping any line the name-gated pass already flagged so a secret is
+reported once. A file whose content was just written by `write_file`/`edit_file`
+and carries a credential keeps its bytes on disk — that is the action you asked
+for — but the summary fed back to the model, recorded in the trace and written
+into the session recording has the value redacted and a `[secret]` line on top.
+A credential-shaped string in a fixture is documentation, not a leak, so
+`examples/`, `testdata/`, `fixtures/`, `samples/` and `*.example`/`*.sample`/
+`*.template` files are skipped, and `.xencode/cache/secrets-allowlist` names any
+path you want left alone (one per line, `#` for comments; an unreadable allowlist
+means nothing is skipped). Verified by driving the real scan over a planted tree:
+the bare token and private key in `src/leak.rs` are caught, the byte-identical
+file under `examples/` produces nothing.
+
 ### Added — `SE-3`: a repository's `AGENTS.md` is data until you trust its exact bytes
 
 A fresh clone can hand the agent a file whose whole purpose is to be obeyed —

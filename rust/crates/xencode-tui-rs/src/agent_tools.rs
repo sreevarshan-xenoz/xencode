@@ -1116,6 +1116,30 @@ fn tool_search_files(root: &Path, args: &serde_json::Map<String, serde_json::Val
     out
 }
 
+/// SE-5: a write or edit whose content carries a credential-shaped value gets
+/// the summary the model reads back scrubbed, plus a line saying so. The bytes
+/// on disk are what the user asked for and stay as written — this only guards
+/// the *transcript copy* (the tool result, which rides into the model history,
+/// the trace tail and the session recording). A fixture path or an allowlisted
+/// tree is left alone, so a documented example key does not raise an alarm.
+/// The patterns are the product's one credential list, shared with the trace
+/// scrubber and the SE-4 taint gate.
+fn secret_guard(rel: &str, content: &str, summary: String) -> String {
+    if xencode_context_rs::path_skips_secret_scan(rel) {
+        return summary;
+    }
+    if !xencode_context_rs::contains_secret(content) {
+        return summary;
+    }
+    let scrubbed = xencode_context_rs::redact_secrets(&summary);
+    format!(
+        "[secret] the content written to {rel} carries a credential-shaped value. The \
+         file on disk keeps the bytes as you wrote them; this summary has them redacted. \
+         Revoke it and keep it out of the file — run /security-scan, or use a secrets \
+         manager.\n{scrubbed}"
+    )
+}
+
 fn tool_write_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
     let Some(raw) = arg_str(args, "path") else {
         return err("write_file needs a string \"path\"");
@@ -1153,10 +1177,14 @@ fn tool_write_file(root: &Path, args: &serde_json::Map<String, serde_json::Value
     } else {
         diff.trim_end().to_string()
     };
-    format!(
-        "{} {display} ({} line(s))\n{body}",
-        if existed { "updated" } else { "created" },
-        content.lines().count()
+    secret_guard(
+        &display,
+        content,
+        format!(
+            "{} {display} ({} line(s))\n{body}",
+            if existed { "updated" } else { "created" },
+            content.lines().count()
+        ),
     )
 }
 
@@ -1624,9 +1652,13 @@ fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
     }
     let n = if replace_all { count } else { 1 };
     let diff = unified_diff(&text, &updated);
-    format!("edited {display}: replaced {n} occurrence(s)\n{diff}")
-        .trim_end()
-        .to_string()
+    secret_guard(
+        &display,
+        &updated,
+        format!("edited {display}: replaced {n} occurrence(s)\n{diff}")
+            .trim_end()
+            .to_string(),
+    )
 }
 
 /// The edit an `edit_symbol` call would perform, or the reason it would refuse.
@@ -8365,6 +8397,69 @@ patched = ["{fixed}"]
         // A killed slow command reports a timeout, not a code.
         let timed_out = run_foreground(&root, "sleep 5", 1).await;
         assert_eq!(check_verdict(&timed_out), CheckVerdict::Unverifiable);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// SE-5: writing content that carries a credential keeps the bytes on disk
+    /// (that is the action the user asked for) but scrubs the credential from
+    /// the summary the model reads back — the transcript copy — and says so.
+    /// The same bytes under `examples/` are left untouched.
+    #[test]
+    fn a_secret_written_to_source_is_redacted_in_the_copy_but_kept_on_disk() {
+        let root =
+            std::env::temp_dir().join(format!("xencode-secret-guard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("examples")).unwrap();
+        // A bare token with no secret-shaped name: only the broad list sees it.
+        let token = "sk-proj-abcdefghij1234567890abcdefghij";
+        let content = format!("pub const KEY: &str = \"{token}\";\n");
+        let args = |path: &str| {
+            serde_json::json!({ "path": path, "content": content })
+                .as_object()
+                .unwrap()
+                .clone()
+        };
+
+        let out = tool_write_file(&root, &args("src/leak.rs"));
+        assert!(out.starts_with("[secret]"), "{out}");
+        assert!(
+            !out.contains(token),
+            "the transcript copy must be scrubbed: {out}"
+        );
+        let on_disk = std::fs::read_to_string(root.join("src/leak.rs")).unwrap();
+        assert!(
+            on_disk.contains(token),
+            "the file keeps the bytes as written: {on_disk}"
+        );
+
+        // An examples/ tree is documentation, not a leak: no guard, no redaction.
+        let out = tool_write_file(&root, &args("examples/leak.rs"));
+        assert!(!out.starts_with("[secret]"), "{out}");
+        assert!(out.contains(token), "examples/ is left alone: {out}");
+
+        // edit_file guards the same way: drop the token into a clean file.
+        std::fs::write(root.join("src/clean.rs"), "fn main() {}\n").unwrap();
+        let edit = serde_json::json!({
+            "path": "src/clean.rs",
+            "old": "fn main() {}",
+            "new": format!("const KEY: &str = \"{token}\";"),
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let out = tool_edit_file(&root, &edit);
+        assert!(out.starts_with("[secret]"), "{out}");
+        assert!(
+            !out.contains(token),
+            "the edit copy must be scrubbed: {out}"
+        );
+        let on_disk = std::fs::read_to_string(root.join("src/clean.rs")).unwrap();
+        assert!(
+            on_disk.contains(token),
+            "the edit wrote the real bytes: {on_disk}"
+        );
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -184,8 +184,9 @@ pub use verify::{
 };
 
 pub use trace::{
-    append_trace, arguments_preview, prompt_digest, read_recent_traces, redact_secrets,
-    tail_preview, trace_path, ToolTrace, TurnTrace, TRACE_ARGUMENTS_CAP, TRACE_TAIL_CAP,
+    allowlisted_by, append_trace, arguments_preview, contains_secret, load_secret_allowlist,
+    path_skips_secret_scan, prompt_digest, read_recent_traces, redact_secrets, scan_secrets,
+    tail_preview, trace_path, SecretHit, ToolTrace, TurnTrace, TRACE_ARGUMENTS_CAP, TRACE_TAIL_CAP,
 };
 pub use trust::{
     agents_content_is_trusted, agents_sha256, read_agents_md, trust_agents, untrust_agents,

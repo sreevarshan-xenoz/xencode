@@ -1185,6 +1185,9 @@ async fn run_security_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
 
     let mut scanned = 0usize;
     let mut unreadable = 0usize;
+    // SE-5: the user's own secret-scan allowlist, loaded once. A line is a
+    // repo-relative path whose content is left alone; unreadable means empty.
+    let allow = xencode_context_rs::load_secret_allowlist(&root.join(".xencode"));
     for entry in &outcome.files {
         if entry.is_binary || entry.is_secret {
             continue;
@@ -1198,6 +1201,13 @@ async fn run_security_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
                 continue;
             }
         };
+        // Lines the name-gated scanner already flagged as a credential, so the
+        // content scan below reports a leaked secret once, not twice.
+        let already_secret: std::collections::BTreeSet<u32> = findings
+            .iter()
+            .filter(|f| f.finding_type == "hardcoded-secret" || f.finding_type == "hardcoded-token")
+            .map(|f| f.line_number)
+            .collect();
         for finding in findings {
             let severity = format!("{:?}", finding.severity);
             reported += 1;
@@ -1221,6 +1231,35 @@ async fn run_security_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
                 cwe,
                 finding.recommendation
             ));
+        }
+        // SE-5: credential *content* scanning. The name-gated pass above only
+        // fires on an assignment whose key looks secret, so a bare `sk-…` token
+        // or a pasted private key in ordinary code slips through. Scan the same
+        // bytes against the product's one credential pattern list, and locate
+        // each hit by line. A fixture tree or an allowlisted path is skipped —
+        // a credential-looking string in `examples/` is documentation, not a
+        // leak, and flagging it is exactly the false positive the item warns of.
+        if !(xencode_context_rs::path_skips_secret_scan(&entry.path)
+            || xencode_context_rs::allowlisted_by(&entry.path, &allow))
+        {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for hit in xencode_context_rs::scan_secrets(&text) {
+                    let line = hit.line as u32;
+                    if already_secret.contains(&line) {
+                        continue;
+                    }
+                    reported += 1;
+                    bump("High");
+                    if shown >= FINDINGS_CAP {
+                        continue;
+                    }
+                    shown += 1;
+                    let _ = tx.send(format!(
+                        "[SECURITY]finding:High|secret-content|{}:{}|{} detected — revoke it and keep it out of the file",
+                        entry.path, hit.line, hit.kind
+                    ));
+                }
+            }
         }
         let _ = tx.send(format!(
             "[SECURITY]progress:{:.2}",
@@ -13452,6 +13491,71 @@ mod tests {
         assert!(done.ends_with("|1,0,1,0"), "{done}");
         assert!(!messages.iter().any(|m| m.contains("config.py")));
         assert!(!messages.iter().any(|m| m.contains("tests passed")));
+    }
+
+    /// SE-5 done-when: a credential-shaped value planted in ordinary source is
+    /// caught, and the same value in `examples/` is ignored. These shapes are
+    /// chosen so the name-gated pass above misses them — a bare `sk-proj-…`
+    /// token (the hyphen breaks the token regex) and a pasted private key (no
+    /// credential scan exists for it) — which is exactly what the content
+    /// scanner adds.
+    #[tokio::test]
+    async fn secret_content_scan_catches_a_planted_key_and_ignores_examples() {
+        let leak = "pub const KEY: &str = \"sk-proj-abcdefghij1234567890abcdefghij\";\n\
+                    let PEM: &str = \"-----BEGIN OPENSSH PRIVATE KEY-----\n\
+                    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAA\n\
+                    -----END OPENSSH PRIVATE KEY-----\";\n";
+        let mk = |sub: &str| {
+            let dir = std::env::temp_dir()
+                .join(format!("xcode-secret-scan-{}-{sub}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("src")).unwrap();
+            std::fs::create_dir_all(dir.join("examples")).unwrap();
+            std::fs::write(dir.join("src/leak.rs"), leak).unwrap();
+            std::fs::write(dir.join("examples/leak.rs"), leak).unwrap();
+            dir
+        };
+
+        // The planted credential in source is caught, by line, as content.
+        let dir = mk("catch");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_security_scan(dir.clone(), tx).await;
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        let caught: Vec<&String> = messages
+            .iter()
+            .filter(|m| m.starts_with("[SECURITY]finding:High|secret-content|src/leak.rs"))
+            .collect();
+        assert!(
+            caught.iter().any(|m| m.contains("API key")),
+            "the bare sk-proj token must be caught: {messages:?}"
+        );
+        assert!(
+            caught.iter().any(|m| m.contains("private key")),
+            "the pasted private key must be caught: {messages:?}"
+        );
+
+        // The identical bytes under `examples/` are documentation, not a leak.
+        let dir = mk("ignore");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_security_scan(dir.clone(), tx).await;
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            !messages.iter().any(|m| m.contains("examples/leak.rs")),
+            "examples/ must be skipped: {messages:?}"
+        );
+        // It is the *same* file content: the difference is the path, so the skip
+        // is the allowlist, not the detector.
+        assert!(messages
+            .iter()
+            .any(|m| m.starts_with("[SECURITY]finding:High|secret-content|src/leak.rs")));
     }
 
     /// J-04: every row this panel shows comes out of the walk. The five files

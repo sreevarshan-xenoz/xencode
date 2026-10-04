@@ -91,6 +91,23 @@ in `.xencode/cache/agents_trust.json`, so an edit to the file asks again.
 `/trust status` reports which one it is right now; `/trust forget` withdraws
 trust for the current bytes.
 
+#### Secrets in content, not just in file names
+
+The Security auditor panel scans credential *content*, not only files whose name
+looks secret. Beyond the name-gated assignment check it locates a bare
+`sk-…`/`AKIA…` token, a bearer token, or a pasted private key in ordinary source,
+by line, using the one credential pattern list the trace scrubber and the
+secrets-taint gate already share. The same list guards the transcript copy: when
+`write_file` or `edit_file` writes a credential-shaped value, the file keeps the
+bytes you asked for but the summary returned to the model — which is what the
+per-turn trace and the session recording keep — is redacted and flagged `[secret]`.
+A credential-looking string in a fixture is documentation, so `examples/`,
+`testdata/`, `fixtures/`, `samples/` and `*.example`/`*.sample`/`*.template` files
+are never flagged, and any repo-relative path you list in
+`.xencode/cache/secrets-allowlist` (one per line, `#` starts a comment) is skipped
+too; an unreadable allowlist means nothing is skipped, so the scan errs toward
+reporting rather than silence.
+
 #### What the build tells the model: `/ctx prompts`
 
 The instructions this program sends with every request are plain markdown files

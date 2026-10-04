@@ -266,6 +266,115 @@ pub fn contains_secret(text: &str) -> bool {
     })
 }
 
+/// One credential-shaped value found in file content, located so a person can
+/// go look at the line. `kind` names which of the credential shapes matched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretHit {
+    /// 1-based line number within the scanned text.
+    pub line: usize,
+    pub kind: &'static str,
+}
+
+/// The opening marker of a private-key block, matched per line. The full PEM
+/// regex spans lines, so a line-scanner needs a marker of its own to say where
+/// a key begins.
+static PEM_BEGIN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| pattern(r"(?i)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"));
+
+/// Where in `text` credentials sit, by the same shapes [`contains_secret`]
+/// detects and [`redact_secrets`] scrubs — one pattern list, three uses, so the
+/// content scanner cannot disagree with the taint gate or the transcript
+/// scrubber about what a secret looks like. A single line can carry more than
+/// one shape; each is reported once. This is deliberately the *broad* list: it
+/// catches a bare `sk-…` token or a pasted private key that a name-gated scan
+/// misses, and it flags a harmless `key_count=500` too — the allowlist and the
+/// fixture skip are what keep that from becoming noise.
+pub fn scan_secrets(text: &str) -> Vec<SecretHit> {
+    let mut hits = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let line_no = idx + 1;
+        let mut kinds: Vec<&'static str> = Vec::new();
+        if PEM_BEGIN_RE.is_match(line) {
+            kinds.push("private key");
+        }
+        if PREFIXED_TOKEN_RE.is_match(line) {
+            kinds.push("API key");
+        }
+        if BEARER_RE.is_match(line) {
+            kinds.push("bearer token");
+        }
+        if KEYED_VALUE_RE.captures_iter(line).any(|caps| {
+            caps.get(1).is_some_and(|name| {
+                let name = name.as_str().to_lowercase();
+                SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
+            })
+        }) {
+            kinds.push("secret assignment");
+        }
+        for kind in kinds {
+            hits.push(SecretHit {
+                line: line_no,
+                kind,
+            });
+        }
+    }
+    hits
+}
+
+/// Built-in path shapes whose content is not secret-scanned, because a
+/// credential-looking string there is documentation or a test fixture rather
+/// than a live leak: an `examples/`, `testdata/`, `fixtures/` or `samples/`
+/// directory, or a `*.example` / `*.sample` / `*.template` file. This mirrors
+/// the walker's own `.example` exemption so the two never disagree.
+pub fn path_skips_secret_scan(rel: &str) -> bool {
+    let rel = rel.replace('\\', "/").to_ascii_lowercase();
+    if rel.split('/').filter(|seg| !seg.is_empty()).any(|seg| {
+        matches!(
+            seg,
+            "examples" | "example" | "testdata" | "fixtures" | "fixture" | "samples" | "sample"
+        )
+    }) {
+        return true;
+    }
+    let file = rel.rsplit('/').next().unwrap_or("");
+    file.ends_with(".example")
+        || file.ends_with(".sample")
+        || file.ends_with(".template")
+        || file.ends_with(".tpl")
+        || file.ends_with(".dist")
+}
+
+/// Load the user's secret-scan allowlist from `.xencode/cache/secrets-allowlist`.
+/// Each non-blank line that is not a `#` comment is a repo-relative path prefix
+/// or file name whose content is left alone. An unreadable file is no entries —
+/// the scan then reports everything, which is the safe direction.
+pub fn load_secret_allowlist(xencode_dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(xencode_dir.join("cache").join("secrets-allowlist"))
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(|line| line.replace('\\', "/").to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether `rel` is excused from the content scan by the user's allowlist:
+/// the entry matches as a whole path, a leading directory, or a named file in
+/// any directory. Case- and separator-insensitive, like the built-in skip.
+pub fn allowlisted_by(rel: &str, entries: &[String]) -> bool {
+    let rel = rel.replace('\\', "/").to_ascii_lowercase();
+    entries.iter().any(|entry| {
+        let entry = entry.trim_matches('/');
+        !entry.is_empty()
+            && (rel == entry
+                || rel.starts_with(&format!("{entry}/"))
+                || rel.ends_with(&format!("/{entry}"))
+                || rel.contains(&format!("/{entry}/")))
+    })
+}
+
 /// The last `cap` bytes of `text` on a character boundary, as one line, with
 /// credentials removed. Redaction runs first so a secret cannot survive by
 /// being cut in half.
@@ -420,6 +529,62 @@ mod tests {
         // harmless `key_count` taints, because leaving a real key costs
         // an exfiltration and taint only buys a prompt.
         assert!(contains_secret("key_count=500"));
+    }
+
+    /// The content scanner locates a secret by line, so a scan can point at it.
+    #[test]
+    fn scan_secrets_locates_a_bare_token_a_bearer_and_a_pem_marker() {
+        let text = "use reqwest;\n\
+                    fn auth() {\n\
+                    \x20   let c = \"sk-proj-abcdefghij1234567890\";\n\
+                    \x20   let h = format!(\"Authorization: Bearer eyJhbGciOi.abc\");\n\
+                    \x20   let pem = \"-----BEGIN OPENSSH PRIVATE KEY-----\";\n\
+                    }\n";
+        let hits = scan_secrets(text);
+        let found = |line: usize, kind: &str| hits.iter().any(|h| h.line == line && h.kind == kind);
+        // Line 3: a bare `sk-…` token — no secret-shaped *name*, so a
+        // name-gated scanner misses it, but the broad prefix list catches it.
+        assert!(found(3, "API key"), "{hits:?}");
+        // Line 4: a bearer token.
+        assert!(found(4, "bearer token"), "{hits:?}");
+        // Line 5: the opening line of a private key.
+        assert!(found(5, "private key"), "{hits:?}");
+    }
+
+    /// The scanner agrees with the taint predicate: what one flags, the other
+    /// sees, because both read the same patterns.
+    #[test]
+    fn scan_secrets_agrees_with_contains_secret() {
+        for text in [
+            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI",
+            "token: \"ghp_abcdefghijklmnopqrst\"",
+        ] {
+            assert!(contains_secret(text));
+            assert!(!scan_secrets(text).is_empty(), "{text} must locate");
+        }
+        for plain in ["fn main() {}", "let count = 5; // secrets are fun"] {
+            assert!(!contains_secret(plain));
+            assert!(scan_secrets(plain).is_empty(), "{plain} must not fire");
+        }
+    }
+
+    #[test]
+    fn the_secret_allowlist_skips_example_trees_and_honours_a_prefix() {
+        // Built-in: fixture/sample trees and `.example` files are documentation,
+        // not live leaks.
+        assert!(path_skips_secret_scan("examples/config.rs"));
+        assert!(path_skips_secret_scan("tests/fixtures/keys.json"));
+        assert!(path_skips_secret_scan(".env.example"));
+        assert!(!path_skips_secret_scan("src/keys.rs"));
+        // A user allowlist line matches a whole path, a leading directory, or a
+        // named file anywhere.
+        let entries: Vec<String> = vec!["integration/legacy.rs".to_string(), "vendor".to_string()];
+        assert!(allowlisted_by("integration/legacy.rs", &entries));
+        assert!(allowlisted_by("src/deep/vendor/key.rs", &entries));
+        assert!(!allowlisted_by("src/keys.rs", &entries));
+        // An unreadable allowlist file yields no entries, never a crash.
+        let missing = temp_dir();
+        assert!(load_secret_allowlist(&missing).is_empty());
     }
 
     #[test]
