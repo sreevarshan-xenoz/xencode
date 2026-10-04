@@ -9106,7 +9106,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **M-1** | give hooks their payload | capability | hook payload (before hooks can run anything: SE-4/QTR-3) |
 | **M-2** | enforce what a manifest declares | core | fold into QTR-1 — done, see QTR-1's note |
 | **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants; done 2026-10-04 — see the note |
-| **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN |
+| **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN; done 2026-10-04 — see the note |
 | **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers |
 | **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
 | **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement); done — enforced at load and at install, see the note in Q-9 |
@@ -9358,6 +9358,30 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   time. Tool-stripping (hiding write tools from the offered list in PLAN, as
   opposed to denying them at the gate) is **MD-2**, not this item; this is the
   gate half.
+
+- [x] `MD-2` — 2026-10-04. The belt to MD-1's braces: in `plan` mode the write
+  tools are not merely denied at the gate, they are never **offered** to the
+  model. `offered_tools` (`crates/xencode-tui-rs/src/app.rs`) now takes the run's
+  `ApprovalMode`, and under `Plan` retains only the tools whose `tool_class` is
+  `ReadOnly` — `write_file`/`edit_file`/`edit_symbol` (Edit), `run_command`/
+  `background_start` (Shell) and every MCP server tool (External) drop out of the
+  provider `tools` field, while `read_file`/`list_dir`/`search_files`/
+  `repo_advise`/`what_breaks`/`read_docs`/`load_skill`/`update_plan`/
+  `background_poll` stay. So a plan cannot spend a round asking for a call MD-1
+  would refuse. The item's trap — "changing the tool list mid-turn costs a KV
+  miss on tool-calling templates — batch it at turn boundaries" — is met by
+  construction: the mode is fixed when the run is built and the list is computed
+  once at the top of `agent_rounds` (before the round loop, alongside the existing
+  final-round-empty withdrawal), so the surface never shifts inside a turn;
+  switching to or out of `plan` takes effect only at the next turn boundary. The
+  same `offered_tools` also feeds `approval.schemas`, so MI-1's argument
+  validation sees exactly the descriptions the model was offered — a call for a
+  stripped tool is answered, not guessed. Done-when pinned by
+  `plan_mode_offers_only_read_only_tools`: the plan list keeps every read tool,
+  omits every write/shell tool, and is a strict subset of the `ask` list. This is
+  the offer half; MD-1 is the enforcement half; the two never disagree because
+  both key off the same `tool_class`. *Not this item:* per-mode system prompts
+  (**MD-3**, rejected) and the other execution-mode labels.
 
 #### W8 — Outward research capability — 6 items
 

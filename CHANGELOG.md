@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `MD-1`: `plan` and `autonomous` are real approval modes, not labels
+### Added — `MD-1` + `MD-2`: `plan` and `autonomous` are real approval modes, not labels
 
 The agent's tool-approval mode (`agent_approval`) now takes two new values that
 the permission gate actually enforces, alongside the existing `ask`,
@@ -18,8 +18,11 @@ the permission gate actually enforces, alongside the existing `ask`,
   than asks, an "always allow edits for this session" you clicked while
   implementing cannot leak into a later plan and turn its denial back into an
   approval — a session grant only replaces a prompt, never a denial. This is the
-  fix for the well-known failure that "plan mode isn't really read-only".
-- **`autonomous`** runs the whole local task with nobody watching: reads, edits
+  fix for the well-known failure that "plan mode isn't really read-only". The
+  write and shell tools are also no longer *offered* to the model in `plan` at
+  all — only the read-only tools are — so a plan cannot even ask for a call the
+  gate would refuse.
+- **`autonomous`** runs the whole local task unattended: reads, edits
   and shell execute freely, but anything reaching an external MCP server or the
   network is *denied* rather than asked, since an unattended run has no one to
   answer a prompt. That is exactly what separates it from `all-allow`, where
@@ -28,8 +31,9 @@ the permission gate actually enforces, alongside the existing `ask`,
 Both names parse from config and cycle in the TUI's `Agent Approval` row; an
 unknown value still falls back to the strictest mode, `ask`. Verified live:
 `xencode config set agent_approval plan` (and `… autonomous`) store the word and
-the gate reads it at decision time. Hiding the write tools from the offered list
-in `plan` (as opposed to denying them at the gate) is a separate item.
+the gate reads it at decision time. The tool list is fixed for the whole turn, so
+switching modes takes effect at the next turn and never shifts the offered tools
+mid-run.
 
 ### Added — `SE-7` (+ `QTR-3`): an optional `bubblewrap` sandbox around the agent's shell
 
