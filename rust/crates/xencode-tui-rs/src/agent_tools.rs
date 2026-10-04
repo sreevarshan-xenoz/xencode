@@ -25,7 +25,7 @@ use xencode_providers_rs::ToolCall;
 // (and later the approval overlay) asks `classify`; nothing else decides.
 
 /// Named values for the `agent_approval` config key (Settings row + CLI).
-pub const APPROVAL_MODE_NAMES: &[&str] = &["ask", "edit-allow", "all-allow"];
+pub const APPROVAL_MODE_NAMES: &[&str] = &["ask", "edit-allow", "all-allow", "plan", "autonomous"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalMode {
@@ -35,6 +35,13 @@ pub enum ApprovalMode {
     EditAllow,
     /// Everything except hard-denied paths is auto-approved.
     AllAllow,
+    /// Read-only, enforced by the gate: an edit or shell call is denied, not
+    /// merely prompted, so a plan turn cannot write even on a stale grant.
+    Plan,
+    /// The whole task runs without a human: reads, edits and shell are free,
+    /// but anything reaching a stranger's MCP server or off the machine is
+    /// denied rather than asked, because there is nobody to answer the prompt.
+    Autonomous,
 }
 
 impl ApprovalMode {
@@ -43,6 +50,8 @@ impl ApprovalMode {
         match name {
             "edit-allow" => Self::EditAllow,
             "all-allow" => Self::AllAllow,
+            "plan" => Self::Plan,
+            "autonomous" => Self::Autonomous,
             _ => Self::Ask,
         }
     }
@@ -289,6 +298,27 @@ fn capability_gate(capability: Capability, mode: ApprovalMode) -> Permission {
         ApprovalMode::AllAllow => match capability {
             Capability::ExternalMcp | Capability::NetworkRequest => Permission::Ask,
             _ => Permission::Allow,
+        },
+        // PLAN is read-only, and the word enforced is Deny rather than Ask. A
+        // session grant can only shortcut a prompt (`decision == Ask`), never a
+        // denial, so "allow edits for this session" clicked while implementing
+        // cannot leak into a later plan and let it write. This is the exact
+        // failure the industry call "Plan Mode Isn't Read-Only" describes; here
+        // the mode cannot be talked out of being read-only.
+        ApprovalMode::Plan => match capability {
+            Capability::FilesystemRead => Permission::Allow,
+            _ => Permission::Deny,
+        },
+        // AUTONOMOUS does the local work without prompting — reads, edits and
+        // shell — but still refuses to reach a stranger's MCP server or leave
+        // the machine, denied rather than asked so it can run unattended without
+        // hanging on a prompt nobody is there to answer. AllAllow lets those
+        // prompt; AUTONOMOUS closes them.
+        ApprovalMode::Autonomous => match capability {
+            Capability::FilesystemRead | Capability::FilesystemWrite | Capability::ShellExecute => {
+                Permission::Allow
+            }
+            Capability::NetworkRequest | Capability::ExternalMcp => Permission::Deny,
         },
     }
 }
@@ -4908,6 +4938,150 @@ mod tests {
             ),
             Permission::Ask,
             "a shell grant must not unlock edits"
+        );
+    }
+
+    /// MD-1: PLAN is a real gate, not a display label. Reads run, everything
+    /// that writes — an edit, a shell command, a stranger's server — is denied,
+    /// and denied in the one way a session grant cannot talk past. This is the
+    /// exact failure "Plan Mode Isn't Read-Only" describes, and the trap that
+    /// an "allow edits for this session" clicked while implementing would leak
+    /// into a later plan. The grant shortcut in `classify` only replaces a
+    /// prompt, so it can never turn a PLAN denial into an approval.
+    #[test]
+    fn plan_mode_is_read_only_and_a_stale_grant_cannot_leak_a_write_through_it() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({}));
+        assert_eq!(
+            classify(root, "read_file", &none, ApprovalMode::Plan, &[], false),
+            Permission::Allow,
+            "a plan may still read"
+        );
+        assert_eq!(
+            classify(root, "write_file", &none, ApprovalMode::Plan, &[], false),
+            Permission::Deny,
+            "a plan denies an edit outright"
+        );
+        assert_eq!(
+            classify(root, "run_command", &none, ApprovalMode::Plan, &[], false),
+            Permission::Deny,
+            "a plan denies shell outright"
+        );
+        assert_eq!(
+            classify(root, "mcp__srv__do", &none, ApprovalMode::Plan, &[], false),
+            Permission::Deny,
+            "a plan never reaches a stranger's server"
+        );
+        // The trap, proved: the same edit that EditAllow and AllAllow would run
+        // (and that a live session grant covers in Ask) stays denied in PLAN.
+        assert_eq!(
+            classify(
+                root,
+                "write_file",
+                &none,
+                ApprovalMode::Plan,
+                &[ToolClass::Edit],
+                false
+            ),
+            Permission::Deny,
+            "an Edit grant given while implementing must not leak into a plan"
+        );
+        assert_eq!(
+            classify(
+                root,
+                "run_command",
+                &none,
+                ApprovalMode::Plan,
+                &[ToolClass::Shell],
+                false
+            ),
+            Permission::Deny,
+            "a Shell grant must not leak into a plan either"
+        );
+    }
+
+    /// MD-1: AUTONOMOUS runs the whole local task without a human — reads,
+    /// edits and shell are free — but anything that reaches a stranger's MCP
+    /// server or off the machine is denied rather than asked, because there is
+    /// nobody at the other end to answer a prompt. This is what distinguishes it
+    /// from AllAllow, which still lets those two prompt.
+    #[test]
+    fn autonomous_mode_runs_local_work_free_but_denies_anything_off_the_machine() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({}));
+        assert_eq!(
+            classify(
+                root,
+                "read_file",
+                &none,
+                ApprovalMode::Autonomous,
+                &[],
+                false
+            ),
+            Permission::Allow,
+            "autonomous reads run free"
+        );
+        assert_eq!(
+            classify(
+                root,
+                "write_file",
+                &none,
+                ApprovalMode::Autonomous,
+                &[],
+                false
+            ),
+            Permission::Allow,
+            "autonomous edits run free"
+        );
+        assert_eq!(
+            classify(
+                root,
+                "run_command",
+                &none,
+                ApprovalMode::Autonomous,
+                &[],
+                false
+            ),
+            Permission::Allow,
+            "autonomous shell runs free"
+        );
+        assert_eq!(
+            classify(
+                root,
+                "mcp__srv__do",
+                &none,
+                ApprovalMode::Autonomous,
+                &[],
+                false
+            ),
+            Permission::Deny,
+            "autonomous denies a stranger's server rather than hanging on a prompt"
+        );
+        // The same call is only *asked* under AllAllow; autonomous closes it.
+        assert_eq!(
+            classify(
+                root,
+                "mcp__srv__do",
+                &none,
+                ApprovalMode::AllAllow,
+                &[],
+                false
+            ),
+            Permission::Ask,
+            "all-allow still prompts for the external call that autonomous denies"
+        );
+    }
+
+    /// MD-1: the two new modes parse from their config words, and an unknown
+    /// word still falls back to the strictest mode.
+    #[test]
+    fn plan_and_autonomous_parse_from_their_config_names() {
+        assert_eq!(ApprovalMode::parse("plan"), ApprovalMode::Plan);
+        assert_eq!(ApprovalMode::parse("autonomous"), ApprovalMode::Autonomous);
+        assert_eq!(
+            ApprovalMode::parse("PLAN"),
+            ApprovalMode::Ask,
+            "case-sensitive"
         );
     }
 

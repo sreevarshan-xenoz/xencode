@@ -2969,10 +2969,17 @@ mod tests {
         press(&mut app, KeyCode::Right);
         assert!(app.config.rounded_borders);
 
-        // Agent Approval cycles the three modes and wraps (I1-01).
+        // Agent Approval cycles the five modes and wraps (I1-01, MD-1).
         app.settings_cursor = settings_row_index("Agent Approval");
         assert_eq!(app.config.agent_approval, "ask");
-        for expected in ["edit-allow", "all-allow", "ask", "edit-allow"] {
+        for expected in [
+            "edit-allow",
+            "all-allow",
+            "plan",
+            "autonomous",
+            "ask",
+            "edit-allow",
+        ] {
             press(&mut app, KeyCode::Right);
             assert_eq!(app.config.agent_approval, expected, "cycle must wrap");
         }
