@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2193 tests passing, zero warnings (re-verified 2026-10-04, after SE-3)
+- [x] Workspace gates green — 16 crates, 2198 tests passing, zero warnings (re-verified 2026-10-04, after SE-5)
 
 ## Model Catalog Honesty
 
@@ -2217,6 +2217,11 @@ Ranked by what the tree actually shows, not by how alarming it sounds.
   positives on fixtures need an allowlist file; a pure-Rust library option is
   early-stage (**UNVERIFIED** quality). Done-when: a planted key is caught and
   `examples/` is ignored.
+  *(Done 2026-10-04 — see W7 progress. The content scan reuses the one credential
+  pattern list already in `trace.rs` (the same list SE-4's taint gate and the
+  transcript scrubber read), so scanner, gate and scrubber cannot disagree about
+  what a secret looks like. The pure-Rust library option was rejected exactly as
+  the trap warns — this is our own matcher, no new dependency.)*
 - **SE-6 `xencode deps` supply-chain report** — shell to `cargo deny` (+
   `cargo-shear`), parse JSON, stream findings like the security scan; lockfile
   diffing on a PR. S-M. Trap: report only — auto-fixing dependencies is how the
@@ -9077,7 +9082,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-2** | untrusted-content marking | core | untrusted-content marking; done 2026-10-04 — see the note |
 | **SE-3** | the `AGENTS.md` trust split (fact 3) | core | AGENTS.md trust split; done 2026-10-04 — see the note |
 | **SE-4** | lethal-trifecta gate in `classify` | core | lethal-trifecta gate in classify |
-| **SE-5** | secret *content* scanning | capability | secret content scanning |
+| **SE-5** | secret *content* scanning | capability | secret content scanning; done 2026-10-04 — see the note |
 | **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5) |
 | **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper) |
 | **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement |
@@ -9191,6 +9196,51 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   SE-7's kernel enforcement; and the trust store is per-workspace content, not
   per-author, so a trusted file that a collaborator later edits to match your
   bytes would read as trusted again — the hash is the contract, exactly as spec'd.
+
+- [x] `SE-5` — 2026-10-04. Credential *content* is scanned, not just file names.
+  The name-gated OWASP pass in `run_security_scan` (and `xencode analyze`) only
+  fires on an assignment whose *key* looks secret — `api_key = "…"` — so a bare
+  `sk-proj-…` token or a pasted private key sitting in ordinary source slipped
+  through. `scan_secrets` (`xencode-context-rs/src/trace.rs`) now reports each
+  credential-shaped value in file content by 1-based line and kind ("private
+  key", "API key", "bearer token", "secret assignment"), reading the **same**
+  four regexes the transcript scrubber and the SE-4 taint gate already share —
+  one credential pattern list, three uses, so scanner, gate and scrubber cannot
+  disagree. No new dependency: the pure-Rust library option the trap warned
+  about is deliberately not taken. `run_security_scan` runs it per file after
+  the name-gated findings, skips any line the OWASP pass already reported for
+  that file (so a leaked secret is reported once, not twice), and emits
+  `High|secret-content|<path>:<line>` lines that fold into the panel's existing
+  totals. Fixtures are the false-positive trap: `path_skips_secret_scan` exempts
+  an `examples`/`example`/`testdata`/`fixtures`/`samples` directory segment and a
+  `*.example`/`*.sample`/`*.template`/`*.tpl`/`*.dist` file (mirroring the
+  walker's own `.example` exemption), and `load_secret_allowlist` reads
+  `.xencode/cache/secrets-allowlist` — one repo-relative path per line, `#`
+  comments, an unreadable file meaning no entries so the scan reports everything
+  (fails toward flagging, not silence). The second half of the integration is
+  the transcript copy: `secret_guard` wraps `tool_write_file` and
+  `tool_edit_file` so that when the content just written to a real path carries a
+  credential, the file on disk keeps the bytes the user asked for but the summary
+  fed back to the model — which rides into the history, the trace tail and the
+  session recording — has the credential redacted and opens with a `[secret]`
+  line saying so; an allowlisted path (like `examples/`) is left untouched. Five
+  new tests: three in `trace.rs` (locating a bare token, a bearer and a PEM
+  marker by line; scanner agreeing with `contains_secret`; the built-in skip plus
+  a user prefix), the async `secret_content_scan_catches_a_planted_key_and_ignores_examples`
+  driving the real `run_security_scan` over a temp tree — a bare `sk-proj-…` and
+  a private key planted in `src/leak.rs` are both reported as content, and the
+  byte-identical file under `examples/` produces nothing — and
+  `a_secret_written_to_source_is_redacted_in_the_copy_but_kept_on_disk` proving
+  the write and edit tools scrub the copy while the on-disk bytes survive. The
+  existing `security_scan_streams_real_findings` totals still read `|1,0,1,0`
+  because the line the OWASP pass flags is deduped, not added. *Not done from
+  the item:* this is pattern matching, not validation — it catches credential
+  *shapes*, so it over-flags a harmless `key_count=500` (the allowlist and the
+  fixture skip are what make that survivable) and cannot prove a string is
+  harmless; `xencode analyze` itself still runs only the name-gated pass and does
+  not yet call `scan_secrets`; and secret-named files (`.env`, `*.key`) remain
+  listed-but-never-read by the walker, so their *contents* are not content-scanned
+  either.
 
 #### W8 — Outward research capability — 6 items
 
