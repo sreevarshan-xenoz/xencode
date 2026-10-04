@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — secret-shaped test fixtures no longer look like real vendor keys
+
+The repository is public, and secret scanners fire on credential *shapes* rather
+than intent, so the made-up values used to prove that redaction works — AWS,
+GitHub, Google, Slack, OpenAI and JWT examples copied from vendor documentation
+or given an exact vendor key length — were being reported as leaked secrets.
+Every such fixture in the test suite is now an obviously fake value that still
+trips Xencode's own detectors but sits outside any vendor's published signature,
+and `AGENTS.md` records a standing rule to keep it that way. No behavior
+changed: the redaction and secret-scan tests still pass, at the same counts.
+
 ### Added — `PR-3`: secrets are held back from what the model is shown, and put back only when a command runs
 
 When a credential-shaped value would otherwise leave the machine in the

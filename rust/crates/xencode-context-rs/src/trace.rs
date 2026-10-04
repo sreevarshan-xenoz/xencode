@@ -558,14 +558,14 @@ mod tests {
     fn secret_detection_matches_secret_scrubbing() {
         let secrets = [
             "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
-            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig",
-            "OPENAI_API_KEY=\"sk-live-abcdef1234567890\"",
-            "AKIAIOSFODNN7EXAMPLE",
+            "Authorization: Bearer FAKEJwtNotARealToken123",
+            "OPENAI_API_KEY=\"sk-FAKE-NOT-A-REAL-TEST-KEY\"",
+            "AKIAFAKEFAKEFAKEFA",
         ];
         for secret in secrets {
             assert!(contains_secret(secret), "{secret} must taint");
             assert!(
-                !redact_secrets(secret).contains("sk-live-abcdef1234567890"),
+                !redact_secrets(secret).contains("sk-FAKE-NOT-A-REAL-TEST-KEY"),
                 "and must scrub"
             );
         }
@@ -583,8 +583,8 @@ mod tests {
     fn scan_secrets_locates_a_bare_token_a_bearer_and_a_pem_marker() {
         let text = "use reqwest;\n\
                     fn auth() {\n\
-                    \x20   let c = \"sk-proj-abcdefghij1234567890\";\n\
-                    \x20   let h = format!(\"Authorization: Bearer eyJhbGciOi.abc\");\n\
+                    \x20   let c = \"sk-proj-FAKE-NOT-A-REAL-TEST-KEY\";\n\
+                    \x20   let h = format!(\"Authorization: Bearer FAKEJwtNotAReal.abc\");\n\
                     \x20   let pem = \"-----BEGIN OPENSSH PRIVATE KEY-----\";\n\
                     }\n";
         let hits = scan_secrets(text);
@@ -603,8 +603,8 @@ mod tests {
     #[test]
     fn scan_secrets_agrees_with_contains_secret() {
         for text in [
-            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI",
-            "token: \"ghp_abcdefghijklmnopqrst\"",
+            "AWS_SECRET_ACCESS_KEY=FAKE_NOT_A_REAL_SECRET",
+            "token: \"ghp_FAKE_NOT_A_REAL_TEST_KEY\"",
         ] {
             assert!(contains_secret(text));
             assert!(!scan_secrets(text).is_empty(), "{text} must locate");
@@ -759,35 +759,35 @@ mod tests {
     #[test]
     fn credentials_are_removed_whatever_shape_they_arrive_in() {
         let cases = [
-            ("OPENAI_API_KEY=sk-abc123def456ghi789", "sk-abc123"),
+            ("OPENAI_API_KEY=sk-FAKE-NOT-A-REAL-TEST-KEY", "sk-FAKE-NOT-A-REAL"),
             (
-                "export AWS_SECRET_ACCESS_KEY='wJalrXUtnFEMI/K7MDENG'",
-                "wJalrXUtnFEMI",
+                "export AWS_SECRET_ACCESS_KEY='FAKE_NOT_A_REAL_SECRET_KEY'",
+                "FAKE_NOT_A_REAL",
             ),
             (
-                "curl -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\"",
-                "eyJhbGciOiJIUzI1NiI",
+                "curl -H \"Authorization: Bearer FAKEJwtNotARealToken123\"",
+                "FAKEJwtNotAReal",
             ),
             (
-                "token: ghp_0123456789abcdef0123456789abcdef0123",
-                "ghp_0123456789abcdef",
+                "token: ghp_FAKE_NOT_A_REAL_TEST_KEY",
+                "ghp_FAKE_NOT_A_REAL",
             ),
             (
-                "{\"AWS_SECRET_ACCESS_KEY\": \"wJalrXUtnFEMI/K7MDENG\"}",
-                "wJalrXUtnFEMI",
+                "{\"AWS_SECRET_ACCESS_KEY\": \"FAKE_NOT_A_REAL_SECRET_KEY\"}",
+                "FAKE_NOT_A_REAL",
             ),
-            ("slack=xoxb-1234567890-abcdefghij", "xoxb-1234567890"),
+            ("slack=xoxb-FAKE-NOT-A-REAL-TEST", "xoxb-FAKE-NOT-A-REAL"),
             (
-                "key=AIzaSyA1234567890abcdefghijklmnopqrstuv",
-                "AIzaSyA1234567890",
-            ),
-            (
-                "aws_key_id AKIAIOSFODNN7EXAMPLE here",
-                "AKIAIOSFODNN7EXAMPLE",
+                "key=AIzaSyFAKE_NOT_A_REAL_GOOGLE_TEST",
+                "AIzaSyFAKE_NOT_A_REAL",
             ),
             (
-                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
-                "MIIEpAIBAAKCAQEA",
+                "aws_key_id AKIAFAKEFAKEFAKEFA here",
+                "AKIAFAKE",
+            ),
+            (
+                "-----BEGIN RSA PRIVATE KEY-----\nFAKEKEYBODYnotAReal123\n-----END RSA PRIVATE KEY-----",
+                "FAKEKEYBODYnotAReal",
             ),
         ];
         for (input, secret) in cases {

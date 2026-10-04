@@ -31,3 +31,11 @@
 - **Counts stay current**: crate/test counts in `README.md` and `NEXT_PLAN_TASKS.md` must match `cargo test --workspace` at the time of the docs commit.
 - **Sweep every few features**: after every 2–3 feature commits (or weekly, whichever comes first), re-check the entry-point docs for drift and correct everything in one docs commit.
 
+## 🔐 Secret Fixture Rule: No Scanner-Flaggable Credentials In The Repo
+
+- **The repo is public open source, and secret scanners (GitGuardian "Internal secret detection") fire on credential *shapes*, not on intent.** A test fixture that matches a real vendor's key pattern is flagged as an incident even when it is a made-up value. That noise hides genuine leaks, so credential-shaped strings in this repo are held to a stricter bar than "it isn't a real key".
+- **Never** put a real/original credential anywhere in git — not in code, tests, docs, `CHANGELOG.md`, or a commit message. Real keys live only in `~/.config/xencode/config.json` / environment variables, outside the repo.
+- **A placeholder must be unmistakably fake AND outside a vendor's published signature.** The credential values that appear in vendor *documentation* (the AWS access-key and secret-key examples, Google's fixed-length `AIzaSy…` form) and exact-length synthetic keys (`ghp_` + 36 base62, `sk-proj-` + long base62, `xoxb-<digits>-…`) are **forbidden** — they are precisely what scanners match. Prefer an obviously-fake token body that still trips **our own** detectors (`xencode-context-rs/src/trace.rs`: `secret_spans` / `redact_secrets`) but sits off the real signature: a wrong length (e.g. `AKIA` + a body that is not the vendor's fixed 16 characters), or hyphenated word bodies like `sk-FAKE-NOT-A-REAL-TEST-KEY`, `AIzaNOTREALKEYNOTREALKEY…`, `ghp_FAKE_NOT_A_REAL_TEST_KEY`, `xoxb-FAKE-NOT-A-REAL-TEST`. Do not write the vendor example values into this file either — quoting them here is itself a scanner hit.
+- **Keep each detector's own test meaningful.** Do not over-fake a fixture so far that our regex stops matching — the whole point of these tests is proving a credential shape gets redacted. After changing any fixture, re-run the relevant crate's tests, not just the workspace build.
+
+

@@ -182,17 +182,17 @@ mod tests {
     fn a_secret_in_a_note_is_scrubbed_before_it_reaches_disk() {
         let xencode = temp_xencode("scrub");
         let mut e = entry(Some("s1"));
-        e.note = "failed with OPENAI_API_KEY=\"sk-live-abcdef1234567890\" set".to_string();
+        e.note = "failed with OPENAI_API_KEY=\"sk-FAKE-NOT-A-REAL-TEST-KEY\" set".to_string();
         append_ledger(&xencode, &e).unwrap();
         let raw = std::fs::read_to_string(ledger_path(&xencode)).unwrap();
         assert!(
-            !raw.contains("sk-live-abcdef1234567890"),
+            !raw.contains("sk-FAKE-NOT-A-REAL-TEST-KEY"),
             "the secret reached disk"
         );
         assert!(raw.contains("[redacted]"), "the scrub must be visible");
         // ...while the same note unredacted would have leaked, so the test is
         // not vacuous: the scrub did the work, not the fixture.
-        assert!(e.note.contains("sk-live-abcdef1234567890"));
+        assert!(e.note.contains("sk-FAKE-NOT-A-REAL-TEST-KEY"));
     }
 
     #[test]
