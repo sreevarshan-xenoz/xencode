@@ -375,16 +375,17 @@ mod tests {
     fn a_secret_in_a_note_is_scrubbed_before_it_reaches_disk() {
         let xencode = temp_xencode("scrub");
         let mut row = record("1700000000-eeee5555");
-        row.note = "stopped after OPENAI_API_KEY=\"sk-live-abcdef1234567890\" leaked".to_string();
+        row.note =
+            "stopped after OPENAI_API_KEY=\"sk-FAKE-NOT-A-REAL-TEST-KEY\" leaked".to_string();
         append_run(&xencode, &row).unwrap();
         let raw = std::fs::read_to_string(runs_path(&xencode)).unwrap();
         assert!(
-            !raw.contains("sk-live-abcdef1234567890"),
+            !raw.contains("sk-FAKE-NOT-A-REAL-TEST-KEY"),
             "the secret reached disk"
         );
         assert!(raw.contains("[redacted]"), "the scrub must be visible");
         // The scrub did the work, not the fixture.
-        assert!(row.note.contains("sk-live-abcdef1234567890"));
+        assert!(row.note.contains("sk-FAKE-NOT-A-REAL-TEST-KEY"));
     }
 
     #[test]

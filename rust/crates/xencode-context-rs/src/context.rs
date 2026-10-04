@@ -1034,7 +1034,7 @@ mod tests {
         });
         let secret = assemble_chat({
             let mut input = sample_chat_input(Vec::new(), &[]);
-            input.prompt = "run it with AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI\"";
+            input.prompt = "run it with AWS_SECRET_ACCESS_KEY=\"FAKE_NOT_A_REAL_SECRET_KEY\"";
             input
         });
 
@@ -1043,13 +1043,15 @@ mod tests {
             "the stable head changed once a secret appeared in a lower tier"
         );
         assert!(
-            !secret.turns[0].content.contains("wJalrXUtnFEMI"),
+            !secret.turns[0]
+                .content
+                .contains("FAKE_NOT_A_REAL_SECRET_KEY"),
             "the stable head must never carry the secret either way"
         );
 
         let last = secret.turns.last().unwrap().content.clone();
         assert!(
-            !last.contains("wJalrXUtnFEMI"),
+            !last.contains("FAKE_NOT_A_REAL_SECRET_KEY"),
             "the raw secret must not be in the offered turn:\n{last}"
         );
         assert!(
@@ -1059,7 +1061,10 @@ mod tests {
         assert_eq!(secret.vault.len(), 1, "exactly one secret held back");
         // The value never named in the placeholder form is recoverable for the
         // run that must actually use it.
-        assert!(secret.vault.restore(&last).contains("wJalrXUtnFEMI"));
+        assert!(secret
+            .vault
+            .restore(&last)
+            .contains("FAKE_NOT_A_REAL_SECRET_KEY"));
     }
 
     #[test]

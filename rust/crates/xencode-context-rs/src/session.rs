@@ -666,10 +666,10 @@ mod tests {
         );
     }
 
-    const SEEDED_SECRET: &str = "sk-live-abcdef1234567890";
-    const SEEDED_GITHUB: &str = "ghp_deadbeefcafe1234567890";
+    const SEEDED_SECRET: &str = "sk-FAKE-NOT-A-REAL-TEST-KEY";
+    const SEEDED_GITHUB: &str = "ghp_FAKE_NOT_A_REAL_TEST_KEY";
     const SEEDED_PEM: &str =
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA7b\n-----END RSA PRIVATE KEY-----";
+        "-----BEGIN RSA PRIVATE KEY-----\nFAKEKEYBODYnotAReal\n-----END RSA PRIVATE KEY-----";
 
     fn leaky_call() -> RecordedCall {
         let mut c = call(0, "do the thing");
@@ -682,7 +682,7 @@ mod tests {
         })
         .to_string();
         c.response_body = format!(
-            "the token is {SEEDED_GITHUB} and the key block is\n{SEEDED_PEM}\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig\n"
+            "the token is {SEEDED_GITHUB} and the key block is\n{SEEDED_PEM}\nAuthorization: Bearer FAKEJwtNotARealToken.payload.sig\n"
         );
         c
     }
@@ -695,8 +695,8 @@ mod tests {
         for secret in [
             SEEDED_SECRET,
             SEEDED_GITHUB,
-            "MIIEowIBAAKCAQEA7b",
-            "eyJhbGciOiJIUzI1NiJ9",
+            "FAKEKEYBODYnotAReal",
+            "FAKEJwtNotARealToken",
         ] {
             assert!(
                 !redacted.contains(secret),

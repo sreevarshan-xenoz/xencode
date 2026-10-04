@@ -166,14 +166,14 @@ mod tests {
     #[test]
     fn a_named_secret_becomes_a_placeholder_and_restores() {
         let mut redactor = Redactor::new();
-        let line = "curl -H \"Authorization: Bearer sk-abc123DEF456ghi789\"";
+        let line = "curl -H \"Authorization: Bearer sk-FAKE-NOT-A-REAL-TEST-KEY\"";
         let redacted = redactor.redact(line);
         assert!(
             redacted.contains("«xencode-secret-"),
             "the credential must be gone: {redacted}"
         );
         assert!(
-            !redacted.contains("sk-abc123"),
+            !redacted.contains("sk-FAKE-NOT-A-REAL"),
             "the raw token must not survive: {redacted}"
         );
         assert!(
@@ -219,9 +219,9 @@ mod tests {
         let mut redactor = Redactor::new();
         // The whole assignment line is what leaves the machine; only the value
         // slice is replaced, and the real secret is held for the run.
-        let shown = redactor.redact("AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI\"");
+        let shown = redactor.redact("AWS_SECRET_ACCESS_KEY=\"FAKE_NOT_A_REAL_SECRET_KEY\"");
         assert!(
-            !shown.contains("wJalrXUtnFEMI"),
+            !shown.contains("FAKE_NOT_A_REAL_SECRET_KEY"),
             "the secret must not be in the offered text: {shown}"
         );
         let vault = redactor.into_vault();
@@ -235,7 +235,7 @@ mod tests {
         let restored = vault.restore_value(args);
         assert_eq!(
             restored["command"].as_str().unwrap(),
-            "aws s3 ls --key AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI\""
+            "aws s3 ls --key AWS_SECRET_ACCESS_KEY=\"FAKE_NOT_A_REAL_SECRET_KEY\""
         );
         assert_eq!(restored["background"], false, "non-strings pass through");
         assert_eq!(restored["timeout"], 30);

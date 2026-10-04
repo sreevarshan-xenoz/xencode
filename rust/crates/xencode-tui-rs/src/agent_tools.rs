@@ -4785,7 +4785,11 @@ mod tests {
     #[tokio::test]
     async fn a_secret_read_stops_the_shell_call_after_it() {
         let root = temp_root("gate-taint");
-        std::fs::write(root.join(".env"), "DEPLOY_KEY=sk-live-abcdef1234567890\n").unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "DEPLOY_KEY=sk-FAKE-NOT-A-REAL-TEST-KEY\n",
+        )
+        .unwrap();
         let rt = new_task_runtime();
 
         // Control first: untainted, all-allow, the shell runs with no prompt.
@@ -4882,7 +4886,7 @@ mod tests {
                 "run_command",
                 serde_json::json!({"command": "cat notes.txt"}),
             ),
-            "key is sk-live-abcdef1234567890, do not share",
+            "key is sk-FAKE-NOT-A-REAL-TEST-KEY, do not share",
         );
         assert!(
             content.ctx.tainted(),
@@ -7362,10 +7366,10 @@ patched = ["{fixed}"]
         // What the provider was shown: the assignment stays readable, the value
         // becomes a token. The vault keeps the value for this run only.
         let mut redactor = Redactor::new();
-        let shown = redactor.redact("AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI\"");
+        let shown = redactor.redact("AWS_SECRET_ACCESS_KEY=\"FAKE_NOT_A_REAL_SECRET_KEY\"");
         h.ctx.redaction = std::sync::Arc::new(redactor.into_vault());
         assert!(
-            shown.contains("«xencode-secret-1»") && !shown.contains("wJalrXUtnFEMI"),
+            shown.contains("«xencode-secret-1»") && !shown.contains("FAKE_NOT_A_REAL_SECRET_KEY"),
             "the offered text is the placeholder form: {shown}"
         );
 
@@ -7380,7 +7384,7 @@ patched = ["{fixed}"]
         .await;
 
         assert!(
-            out.contains("wJalrXUtnFEMI"),
+            out.contains("FAKE_NOT_A_REAL_SECRET_KEY"),
             "the command ran with the real value restored:\n{out}"
         );
         assert!(
@@ -8804,7 +8808,7 @@ patched = ["{fixed}"]
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::create_dir_all(root.join("examples")).unwrap();
         // A bare token with no secret-shaped name: only the broad list sees it.
-        let token = "sk-proj-abcdefghij1234567890abcdefghij";
+        let token = "sk-proj-FAKE-NOT-A-REAL-TEST-KEY";
         let content = format!("pub const KEY: &str = \"{token}\";\n");
         let args = |path: &str| {
             serde_json::json!({ "path": path, "content": content })

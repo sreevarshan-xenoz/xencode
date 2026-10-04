@@ -1647,15 +1647,15 @@ mod tests {
     #[test]
     fn a_redaction_pass_removes_the_shapes_agents_actually_echo() {
         let text = "\
-key sk-abcdefghijklmnopqrstuvwxyz012345\n\
-ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n\
-AIzaSyA1234567890abcdefghijklmnopqrstuv\n\
-Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
+key sk-FAKE-NOT-A-REAL-TEST-KEY\n\
+ghp_FAKEFAKEFAKEFAKE12345\n\
+AIzaNOTREALKEYNOTREALKEYNOTREALKEY\n\
+Authorization: Bearer FAKEJwtNotARealToken.payload.sig\n";
         let out = redact(text);
-        assert!(!out.contains("sk-abcdefghij"), "{out}");
-        assert!(!out.contains("ghp_ABCDEF"), "{out}");
-        assert!(!out.contains("AIzaSyA1"), "{out}");
-        assert!(!out.contains("eyJhbGciOiJIUzI1NiJ9"), "{out}");
+        assert!(!out.contains("sk-FAKE-NOT-A-REAL"), "{out}");
+        assert!(!out.contains("ghp_FAKEFAKE"), "{out}");
+        assert!(!out.contains("AIzaNOTREALKEY"), "{out}");
+        assert!(!out.contains("FAKEJwtNotARealToken"), "{out}");
         assert_eq!(out.matches("[redacted").count(), 4, "{out}");
     }
 

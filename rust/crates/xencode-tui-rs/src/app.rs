@@ -13019,7 +13019,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("notes.txt"),
-            "first line\nOPENAI_API_KEY=sk-abcdefghijklmnop\nthird line\n",
+            "first line\nOPENAI_API_KEY=sk-FAKE_NOT_REALKEY\nthird line\n",
         )
         .unwrap();
 
@@ -13032,7 +13032,7 @@ mod tests {
                     {"function": {"name": "read_file", "arguments": {"path": "notes.txt"}}},
                     {"function": {"name": "write_file", "arguments": {
                         "path": "copy.txt",
-                        "content": "OPENAI_API_KEY=sk-abcdefghijklmnop\n".repeat(60),
+                        "content": "OPENAI_API_KEY=sk-FAKE_NOT_REALKEY\n".repeat(60),
                     }}},
                     {"function": {"name": "repo_advise", "arguments": {}}}
                 ]}, "done": true}),
@@ -13077,7 +13077,7 @@ mod tests {
             Some("{\"path\":\"notes.txt\"}")
         );
         let tail = row.tools[0].tail.clone().expect("output was kept");
-        assert!(!tail.contains("sk-abcdefghijklmnop"), "{tail}");
+        assert!(!tail.contains("sk-FAKE_NOT_REALKEY"), "{tail}");
         assert!(tail.contains("[redacted]"), "{tail}");
         // A file the call tried to write is kept as its size, never as text.
         let write = &row.tools[1];
@@ -13093,7 +13093,7 @@ mod tests {
         let arguments = write.arguments.clone().expect("arguments were kept");
         assert!(arguments.contains("copy.txt"), "{arguments}");
         assert!(arguments.contains("[2100 bytes]"), "{arguments}");
-        assert!(!arguments.contains("sk-abcdefghijklmnop"), "{arguments}");
+        assert!(!arguments.contains("sk-FAKE_NOT_REALKEY"), "{arguments}");
         assert!(!arguments.contains("OPENAI_API_KEY"), "{arguments}");
         // A call that took nothing records nothing rather than `{}`.
         assert_eq!(row.tools[2].name, "repo_advise");
@@ -13607,7 +13607,7 @@ mod tests {
     /// scanner adds.
     #[tokio::test]
     async fn secret_content_scan_catches_a_planted_key_and_ignores_examples() {
-        let leak = "pub const KEY: &str = \"sk-proj-abcdefghij1234567890abcdefghij\";\n\
+        let leak = "pub const KEY: &str = \"sk-proj-FAKE-NOT-A-REAL-TEST-KEY\";\n\
                     let PEM: &str = \"-----BEGIN OPENSSH PRIVATE KEY-----\n\
                     b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAA\n\
                     -----END OPENSSH PRIVATE KEY-----\";\n";

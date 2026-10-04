@@ -12,8 +12,8 @@ use xencode_agents_rs::protocol::{AgentEvent, Origin};
 use xencode_agents_rs::roster::Provenance;
 use xencode_agents_rs::RunCapture;
 
-const TOKEN: &str = "sk-abcdefghijklmnopqrstuvwxyz012345";
-const JWT: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5E8h9tQ1GZ3k4p";
+const TOKEN: &str = "sk-FAKE-NOT-A-REAL-TEST-KEY";
+const JWT: &str = "eyJFAKE_JWT_HEADERxx.eyJFAKE_JWT_PAYLOADyy.FAKE_JWT_SIGNATUREzz";
 
 fn run(agent: &str, stdout: &str, session_id: Option<&str>) -> RunCapture {
     RunCapture {
