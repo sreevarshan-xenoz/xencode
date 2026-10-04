@@ -327,6 +327,45 @@ does not carry is transferred onto it — 380 of the 822 RustSec advisories with
 CVSS vector gain a one-word GHSA rating that way, which is why both corpora are
 downloaded rather than one.
 
+#### The supply-chain report: `xencode deps`
+
+```bash
+xencode deps [--path DIR] [--format text|json]
+```
+
+`xencode deps` is one command over the dependency checkers that exist on the
+machine. It shells out to `cargo-shear` (unused dependencies) and `cargo-deny`
+(advisories, bans, licenses), parses their JSON, and prints every finding in one
+stream, alongside two facts that need no external tool at all: any crate pinned
+at more than one version in `Cargo.lock`, and the delta of the current lock
+against the one committed at `HEAD` — the diff a reviewer wants before merging a
+dependency change.
+
+**It is report only, on purpose.** Auto-fixing a dependency — removing an import,
+bumping a version, dropping a crate — is exactly how the supply chain becomes the
+attack, so this command edits no manifest. Each checker it could not run is
+named as unavailable rather than counted as clean:
+
+```text
+dependency checkers
+  cargo-shear (unused dependencies): 1 error(s), 0 warning(s)
+  cargo-deny (advisories, bans, licenses): cargo-deny not installed — advisories and licenses are not checked here; use `xencode advisory check` for the offline RustSec/OSV corpus
+
+findings
+  [High] unused-dependency crates/xencode-cli/Cargo.toml — unused dependency `dirs` (remove this dependency)
+  [Medium] duplicate-major getrandom pinned at 3 versions: 0.2.17, 0.3.4, 0.4.3
+  ...
+```
+
+That is real output from this workspace: `cargo-shear` flagged `dirs` in the CLI
+manifest and the duplicate-major scan read it straight from `Cargo.lock`.
+`cargo-deny` is not installed here, so its column says so instead of pretending
+the advisory and license checks ran — the advisory side is covered offline by
+`xencode advisory check` (see above), which reads the synced corpus rather than
+shelling out. Install `cargo-deny` and the same command fills that column for
+real. `--format json` emits the checkers' status and a `findings` array for a
+script to read.
+
 #### What a failing build answers with
 
 A `cargo build` or `cargo check` the model asks for is run with

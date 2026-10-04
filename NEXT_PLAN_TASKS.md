@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2198 tests passing, zero warnings (re-verified 2026-10-04, after SE-5)
+- [x] Workspace gates green — 16 crates, 2202 tests passing, zero warnings (re-verified 2026-10-04, after SE-6)
 
 ## Model Catalog Honesty
 
@@ -2226,6 +2226,21 @@ Ranked by what the tree actually shows, not by how alarming it sounds.
   `cargo-shear`), parse JSON, stream findings like the security scan; lockfile
   diffing on a PR. S-M. Trap: report only — auto-fixing dependencies is how the
   supply chain becomes the attack. Done-when: it runs on this workspace.
+  **Done 2026-10-04.** `xencode deps [--path] [--format text|json]` shells to the
+  hyphenated binaries directly so a missing checker is an OS "not found", not a
+  cargo message, and reports it as unavailable rather than clean. `cargo-shear`
+  runs here and its `--format json` is parsed by `deps::parse_shear_json`
+  (`xencode-analysis-rs/src/deps.rs`), tested against real output captured off
+  this workspace; `cargo-deny` is not installed, so its column names that and
+  points at the offline `xencode advisories check` — its `deps::parse_deny_json`
+  is unit-tested against cargo-deny's advisory shape but its end-to-end path is
+  **not verified on this host** (binary absent), recorded rather than faked. The
+  report also carries two tool-free facts read straight from `Cargo.lock`: any
+  crate pinned at more than one version, and the delta against the lock at
+  `HEAD`. It edits nothing. Live on this workspace: `cargo-shear` flagged the
+  real unused `dirs` in `crates/xencode-cli/Cargo.toml`, the duplicate scan named
+  `getrandom` at 3 versions, and the absent `cargo-deny` said so instead of
+  passing.
 - **SE-7 Landlock/bubblewrap wrapper for `run_command`** — workspace + `~/.cargo`
   writable, network off by default, per-command `--net` approval. L. Trap: silent
   fallback when the kernel lacks Landlock; the test matrix is painful. The
@@ -9083,7 +9098,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-3** | the `AGENTS.md` trust split (fact 3) | core | AGENTS.md trust split; done 2026-10-04 — see the note |
 | **SE-4** | lethal-trifecta gate in `classify` | core | lethal-trifecta gate in classify |
 | **SE-5** | secret *content* scanning | capability | secret content scanning; done 2026-10-04 — see the note |
-| **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5) |
+| **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5); done 2026-10-04 — see the note |
 | **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper) |
 | **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement |
 
@@ -9241,6 +9256,31 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   not yet call `scan_secrets`; and secret-named files (`.env`, `*.key`) remain
   listed-but-never-read by the walker, so their *contents* are not content-scanned
   either.
+- [x] `SE-6` — 2026-10-04. `xencode deps` — one supply-chain report over the
+  checkers that exist here. It shells out to the **hyphenated binaries directly**
+  (`cargo-shear`, `cargo-deny`) so a tool that is not installed is an OS
+  `NotFound` and gets reported as unavailable rather than counted clean — the
+  honesty rule `deps.rs` is built around, carried to the external checkers.
+  `parse_shear_json` reads cargo-shear's real `--format json` document
+  (`{summary:{errors,warnings},findings:[…]}`) and is unit-tested against output
+  captured off this workspace; `parse_deny_json` reads cargo-deny's advisory
+  shape and is unit-tested, but its **end-to-end run is not verified on this
+  host** because the binary is absent — recorded honestly rather than faked, and
+  its column points at the offline `xencode advisories check` (RS-5) that already
+  covers advisories without a network. The report adds two tool-free facts read
+  straight from `Cargo.lock`: crates pinned at more than one major (`deps::
+  duplicate_versions`, U-5) and the delta against the lock at `HEAD`
+  (`deps::lock_delta` + `head_lock_text`). It edits nothing — auto-fixing a
+  dependency is the attack the trap names. Report-only, `--format json` for
+  scripts. Live proof on this workspace: `cargo-shear` flagged the real unused
+  `dirs` in `crates/xencode-cli/Cargo.toml`, the duplicate scan named `getrandom`
+  at three versions, and the absent `cargo-deny` said so instead of passing. The
+  committed shell completions and man page (`docs/completions/*`, `docs/man/*`)
+  were regenerated through `xencode generate`, which the `the_committed_
+  completions_are_generated_never_hand_written` drift guard then required.
+  *Not done from the item:* the `cargo-deny` decode is unexercised on this
+  machine (binary absent); installing it and syncing its advisory DB is a network
+  action left to the user.
 
 #### W8 — Outward research capability — 6 items
 

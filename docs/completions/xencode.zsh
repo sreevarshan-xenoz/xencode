@@ -391,6 +391,14 @@ esac
     ;;
 esac
 ;;
+(deps)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Project to check (default\: the current directory)]:PATH:_files' \
+'--format=[]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (query)
 _arguments "${_arguments_options[@]}" : \
 '-m+[Model to use (overrides config default)]:MODEL:_default' \
@@ -1860,6 +1868,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(deps)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (query)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2382,6 +2394,7 @@ _xencode_commands() {
 'cache:Response cache management' \
 'audit:The session server'\''s audit log' \
 'advisories:Known security advisories for the crates this project depends on' \
+'deps:Supply-chain report\: shell to the installed dependency checkers (cargo-shear, cargo-deny) and stream their findings. Report only — it never edits a manifest or auto-fixes a dependency' \
 'query:Send a query to a model' \
 'memory:Manage conversation memory' \
 'tasks:Manage background tasks (file-backed, survives this process)' \
@@ -2726,6 +2739,11 @@ _xencode__subcmd__cov_commands() {
     local commands; commands=()
     _describe -t commands 'xencode cov commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__deps_commands] )) ||
+_xencode__subcmd__deps_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode deps commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__doctor_commands] )) ||
 _xencode__subcmd__doctor_commands() {
     local commands; commands=()
@@ -2798,6 +2816,7 @@ _xencode__subcmd__help_commands() {
 'cache:Response cache management' \
 'audit:The session server'\''s audit log' \
 'advisories:Known security advisories for the crates this project depends on' \
+'deps:Supply-chain report\: shell to the installed dependency checkers (cargo-shear, cargo-deny) and stream their findings. Report only — it never edits a manifest or auto-fixes a dependency' \
 'query:Send a query to a model' \
 'memory:Manage conversation memory' \
 'tasks:Manage background tasks (file-backed, survives this process)' \
@@ -2986,6 +3005,11 @@ _xencode__subcmd__help__subcmd__config__subcmd__show_commands() {
 _xencode__subcmd__help__subcmd__cov_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help cov commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__deps_commands] )) ||
+_xencode__subcmd__help__subcmd__deps_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help deps commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__doctor_commands] )) ||
 _xencode__subcmd__help__subcmd__doctor_commands() {
