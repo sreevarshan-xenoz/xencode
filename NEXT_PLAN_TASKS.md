@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2230 tests passing, zero warnings (re-verified 2026-10-04, after QTR-4)
+- [x] Workspace gates green — 16 crates, 2261 tests passing, zero warnings (re-verified 2026-10-04, after U-6)
 
 ## Model Catalog Honesty
 
@@ -1925,7 +1925,7 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       ellipsis — and the body reaches the model solely through `load_skill`, a
       read-only tool that takes a name and no path, so it opens no read outside
       the skill directories. With no skills installed the menu is absent and the
-      tool list is the 17 built-ins it was before, both asserted.
+      tool list is the 18 built-ins it was before, both asserted.
       Verified live against a local llama.cpp model on the same prompt in a fresh
       session each time (Qwen3-4B-Instruct, the smallest model here that calls
       tools — the 0.6B and 1.7B models on this machine ignored the tool list
@@ -9353,7 +9353,7 @@ WF-4 first, always — deciding what “run the tests” means is the decision V
 | **WF-4** | build/test autodiscovery | core | build/test autodiscovery — decides what "run the tests" means |
 | **U-1** | Cargo feature matrix: static `cfg` coverage first, compile matrix second | capability | from U — the `cfg`-coverage half is a CI-1 query and runs before any build; the matrix reuses RS-6's rustc JSON |
 | **U-4** | Flaky test isolation by differential base-tree run, riding VF-5 | capability | from U — the stress loop and quarantine hook are VF-5's; only the base-tree classification is new |
-| **U-6** | Red-to-green reproduction gate: no production edit before a witnessed RED | core | from U — phase 1 is MD-2's tool-stripping narrowed to the reproduction file; the gate itself is W7 |
+| **U-6** | Red-to-green reproduction gate: no production edit before a witnessed RED | core | from U — phase 1 is MD-2's tool-stripping narrowed to the reproduction file; the gate itself is W7; done 2026-10-04 — see the W7 note |
 
 #### W6 — Evidence and task state — 10 items
 
@@ -9396,7 +9396,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-5** | secret *content* scanning | capability | secret content scanning; done 2026-10-04 — see the note |
 | **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5); done 2026-10-04 — see the note |
 | **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper); done 2026-10-04 — see the note |
-| **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement |
+| **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement; done 2026-10-04 as `/gate` + `reproduce_bug` — see the note |
 
 #### W7 progress
 
@@ -9746,6 +9746,65 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   path outside the root refused, unborn `HEAD` explained, no-repo reported, agent
   deletion recorded as a deletion) plus one in `app.rs` driving the real write →
   checkpoint → hand-edit → refuse → `--force` → quiet-restore sequence.
+- [x] `U-6` — 2026-10-04. The reproduction gate is a **capability gate, not a
+  prompt**. `reprogate.rs` holds a session's phase (`awaiting a failing
+  reproduction` → `red witnessed, awaiting the green` → `red then green
+  recorded`), the one reproduction file, the command the measurement is made
+  with, and the neighbourhood the bug was reported in. Enforcement sits at the
+  two places a call already has to pass: `offered_tools` drops `edit_symbol`,
+  `ast_edit` and `codemod` from the turn while the gate waits (MD-2's
+  tool-stripping, same mechanism as PLAN), and `execute_tool_call_approved`
+  refuses **every** edit-class call before `classify` runs — so the refusal
+  arrives without a prompt, and a session grant cannot buy it off, because the
+  grant is only consulted after the gate has already said no. `rename` proves
+  the check is keyed on the class rather than on names the feature happens to
+  know: an edit call carrying no readable `path` is refused, not waved through
+  because the gate could not tell what it would touch. `reproduce_bug` runs the
+  command for real and accepts only a failure it can quote — `panic_sites`
+  reads rustc's `panicked at <file>:<line>:<col>:`, `failed_tests` reads a
+  runner's `... FAILED` / `FAIL [..]` summary line — so a non-zero exit with no
+  assertion on record (a compile error, a missing binary) is refused rather than
+  counted as a red. *The trap this item exists for is a manufactured pass,* so
+  four rules hold it: a reproduction that **passes unmodified** reproduces
+  nothing and unlocks nothing; the reproduction file is **frozen** once its
+  failure is on record (editing it now is how a pass is made out of the
+  assertion that just failed); the green must come from the **same command** (a
+  different command is a different measurement and is refused as one); and one
+  fix gets **one** reproduction file. A failure located outside the reported
+  neighbourhood is returned as `suspect reproduction` with the location quoted
+  and the phase left where it was — an ordinary `assert_eq!` in the test itself
+  is *not* suspect, which is why the judgement exempts the reproduction's own
+  file; that distinction came from running real Rust assertions, not from
+  reading the plan. Only `/gate bugfix` locks a session: a gate the agent
+  opened itself by calling `reproduce_bug` records the measurement and forbids
+  nothing, because release is the user's command and a lock with no way out is
+  not a favour. `/gate` reads phase, neighbourhood, command, refusals and both
+  recorded exits; `/gate off` closes and names the half-measurement it is
+  throwing away (a gate with nothing recorded just says it closed). *Done-when,
+  watched rather than argued:* 29 new tests, every judgement made against a
+  throwaway Rust crate in `/tmp` that `cargo test --offline` actually compiled
+  and ran — never this repository — including the end-to-end pair: seeded
+  `doubled(2) == 4` against a `value + 1` body came back exit `101` with
+  `tests/repro.rs:5:5` and the test's own name recorded, `src/lib.rs` was then
+  writable, the reproduction was not, and the same command on the fixed tree
+  returned `red to green.` with `suite … passed`. Three refusals in a row were
+  counted (`refusals() == 3`) before the failure was witnessed; a panic in
+  `src/lib.rs:2:5` against a bug reported in `src/billing.rs` was flagged
+  suspect and changed no state. Verified in the **real TUI** as well: a
+  sandboxed headless run against a scratch project printed `Reproduction gate
+  open. … reported neighbourhood: src`, then `/gate` printed
+  `reproduction gate: awaiting a failing reproduction` / `reported in: src` /
+  `red: not witnessed · green: not yet` / `suite: not run by the gate`, then
+  `/gate off` closed it and a further `/gate` read `off`.
+  *Limits, stated:* the gate does not run the surrounding suite unless a `suite`
+  command is given, and then it says so instead of implying it checked; parsing
+  is shaped for rustc/pytest/go/rspec-style output, so an unusual runner may
+  report `no failing assertion` on a real failure — that refusal is honest about
+  what it could not find, and re-engaging the gate is the user's call. It records
+  evidence rather than joining it to the ledger: the EVd-3 write-through of this
+  evidence into `verify::FailureClass`/`ledger::RunClass` is still open. U-1's
+  row in W5 is untouched by this — the protocol note there is the same item's
+  other placement, now shipped.
 
 #### W8 — Outward research capability — 6 items
 

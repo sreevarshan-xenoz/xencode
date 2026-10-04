@@ -99,6 +99,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/spawn",
     "/plan",
     "/rewind",
+    "/gate",
     "/mcp",
     "/plugin",
     "/skills",
@@ -469,6 +470,11 @@ pub struct App<'a> {
     /// persisted. Shared with the spawned tool loops like the grants, so a
     /// secret read in one turn still poisons shell calls in the next.
     pub secret_taint: Arc<std::sync::atomic::AtomicBool>,
+    /// The red-to-green reproduction gate (U-6). Session-only, shared with the
+    /// spawned tool loops like the taint bit: its state is about the bug being
+    /// fixed, so it has to survive the turn that noticed it. `/gate` opens and
+    /// closes it; nothing else may.
+    pub repro_gate: Arc<crate::reprogate::ReproGate>,
     /// Byte-for-byte snapshots of what the agent changed, grouped per chat
     /// turn (I2-01). `/rewind` puts them back; quitting drops them.
     pub checkpoints: Arc<crate::agent_tools::CheckpointStore>,
@@ -2530,6 +2536,7 @@ impl<'a> App<'a> {
             layout_scroll: 0,
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             secret_taint: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            repro_gate: Arc::new(crate::reprogate::ReproGate::new()),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
             mcp: Arc::new(crate::mcp::McpHub::new()),
@@ -3140,6 +3147,12 @@ impl<'a> App<'a> {
             return;
         }
 
+        // The red-to-green reproduction gate (/gate)
+        if prompt == "/gate" || prompt.starts_with("/gate ") {
+            self.handle_gate_command(&prompt);
+            return;
+        }
+
         // The agent's todo list (/plan, /plan clear)
         if prompt == "/plan" || prompt.starts_with("/plan ") {
             self.handle_plan_command(&prompt);
@@ -3451,6 +3464,10 @@ impl<'a> App<'a> {
             // The chat path replaces this with the vault its assembled turn took
             // out (PR-3); every other caller runs without a redaction to undo.
             redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            // The session's gate, shared across runs like the taint bit (U-6): a
+            // fix whose failure was witnessed in one turn keeps its unlocked
+            // edits in the next, and one that has not stays locked either way.
+            repro: self.repro_gate.clone(),
         }
     }
 
@@ -5257,6 +5274,147 @@ impl<'a> App<'a> {
     /// anything this asks whether the file on disk still matches what the agent
     /// left there. If a person edited it in between, rewinding would silently
     /// throw that edit away, and it refuses unless `--force` says otherwise.
+    /// `/gate` — read, open or close the red-to-green reproduction gate (U-6).
+    ///
+    /// `/gate bugfix [path …]` starts supervising a fix: until a reproduction
+    /// test has been run and *seen failing* against code that has not been
+    /// changed, the agent may write nothing but that test. The paths name the
+    /// reported bug's neighbourhood, and a failure recorded outside them is
+    /// flagged rather than accepted. `/gate off` stops. Only the user opens or
+    /// closes it — a gate the model could dismiss refuses nothing, and a fix
+    /// that was never witnessed failing is a coincidence with a diff attached.
+    fn handle_gate_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/gate").unwrap_or("").trim();
+        let (verb, rest) = match arg.split_once(' ') {
+            Some((verb, rest)) => (verb, rest),
+            None => (arg, ""),
+        };
+        match verb {
+            "" => {
+                let evidence = self.repro_gate.evidence();
+                let scope = self.repro_gate.scope();
+                let command = self.repro_gate.command();
+                self.system_line(&self.repro_gate.status_line());
+                if !scope.is_empty() {
+                    self.system_line(&format!("   reported in: {}", scope.join(", ")));
+                }
+                if let Some(command) = command.filter(|c| !c.is_empty()) {
+                    self.system_line(&format!("   command: {command}"));
+                }
+                if self.repro_gate.phase() != crate::reprogate::Phase::Off {
+                    // The two points of the measurement, said plainly whether or
+                    // not the first one has happened yet: "waiting for a failing
+                    // test" and "no failure yet" are the same state, and a user
+                    // reading the status needs to see the second one spelled out.
+                    self.system_line(&format!(
+                        "   red: {} · green: {}",
+                        evidence
+                            .as_ref()
+                            .and_then(|e| e.red.as_ref())
+                            .map(|red| red.short())
+                            .unwrap_or_else(|| "not witnessed".to_string()),
+                        match evidence.as_ref().and_then(|e| e.green_exit) {
+                            Some(0) => "recorded".to_string(),
+                            Some(code) => format!("not yet (last run exit {code})"),
+                            None => "not yet".to_string(),
+                        }
+                    ));
+                    self.system_line(&format!(
+                        "   suite: {}",
+                        match evidence.as_ref().and_then(|e| e.suite_exit) {
+                            Some(0) => format!(
+                                "passed (`{}`)",
+                                evidence
+                                    .as_ref()
+                                    .and_then(|e| e.suite_command.clone())
+                                    .unwrap_or_default()
+                            ),
+                            Some(code) => format!(
+                                "exit {code} (`{}`)",
+                                evidence
+                                    .as_ref()
+                                    .and_then(|e| e.suite_command.clone())
+                                    .unwrap_or_default()
+                            ),
+                            None => "not run by the gate".to_string(),
+                        }
+                    ));
+                }
+            }
+            "bugfix" | "fix" => {
+                // Opening the gate while a run is in flight would lock edits out
+                // from under a loop already making them.
+                if self.is_generating || self.bytebot_running {
+                    self.push_toast(
+                        crate::toast::ToastKind::Warning,
+                        "can't change the gate while the agent is working — Esc to stop it first"
+                            .to_string(),
+                    );
+                    return;
+                }
+                let scope: Vec<String> = rest
+                    .split_whitespace()
+                    .map(|word| word.trim_matches('/').to_string())
+                    .filter(|word| !word.is_empty())
+                    .collect();
+                self.repro_gate.engage(&scope, true);
+                let where_line = if scope.is_empty() {
+                    "no neighbourhood named — a failure anywhere will be accepted, so the \
+                     reproduction's location goes unchecked"
+                        .to_string()
+                } else {
+                    format!("reported neighbourhood: {}", scope.join(", "))
+                };
+                self.system_line(&format!(
+                    "Reproduction gate open. The agent may now read anything, run commands, \
+                     and write one test file; every other write is refused until \
+                     `reproduce_bug` has been seen failing on the unchanged code. {where_line}"
+                ));
+            }
+            "off" => {
+                if self.is_generating || self.bytebot_running {
+                    self.push_toast(
+                        crate::toast::ToastKind::Warning,
+                        "can't change the gate while the agent is working — Esc to stop it first"
+                            .to_string(),
+                    );
+                    return;
+                }
+                let evidence = self.repro_gate.evidence();
+                let phase = self.repro_gate.phase();
+                self.repro_gate.release();
+                self.system_line(&if evidence.is_none() {
+                    "Reproduction gate closed.".to_string()
+                } else {
+                    // The measurement was in progress or complete; say what is
+                    // being thrown away, since an unfinished one is the sign of a
+                    // fix that has not been evidenced.
+                    format!(
+                        "Reproduction gate closed — its evidence was dropped with it. {}",
+                        match phase {
+                            crate::reprogate::Phase::AwaitingRed => {
+                                "no failure was ever witnessed.".to_string()
+                            }
+                            crate::reprogate::Phase::RedWitnessed => {
+                                "the fix was never shown to make it pass.".to_string()
+                            }
+                            _ => "The red-to-green pair was complete.".to_string(),
+                        }
+                    )
+                });
+            }
+            other => {
+                self.system_line(&format!(
+                    "usage: /gate — the state of the reproduction gate\n\
+                     /gate bugfix [path …] — require a failing reproduction before any \
+                     production edit\n\
+                     /gate off — stop supervising this fix\n\
+                     `{other}` is not a gate command."
+                ));
+            }
+        }
+    }
+
     /// Where there is no repository or no checkpoint branch to compare against,
     /// it says so and rewinds anyway — the in-memory undo was never git's to
     /// provide.
@@ -8949,16 +9107,25 @@ fn record_round(
 /// same list for every round of the turn: the mode is fixed when the run is
 /// built, so the tool surface cannot shift mid-turn and cost KV reuse. Switching
 /// to or out of `plan` takes effect at the next turn boundary.
+///
+/// An open reproduction gate narrows the same list the same way (U-6): while it
+/// waits for its failing test, the tools that can only ever edit production
+/// source — `edit_symbol`, `ast_edit`, `codemod`, `rename` — are not offered, so
+/// the model cannot spend a round on a call the gate will refuse. `write_file`
+/// and `edit_file` stay, because writing the reproduction is the one write this
+/// phase allows, and the gate checks where they point.
 fn offered_tools(
     mcp: &crate::mcp::McpHub,
     skills: &xencode_plugin_rs::SkillRuntime,
     mode: crate::agent_tools::ApprovalMode,
+    repro: &crate::reprogate::ReproGate,
 ) -> Vec<xencode_providers_rs::ToolDefinition> {
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
     tools.extend(xencode_providers_rs::command_tools());
     tools.extend(xencode_providers_rs::plan_tools());
+    tools.extend(xencode_providers_rs::repro_tools());
     // Whatever `/mcp` started, read at the moment the turn begins. A plan
     // strips these too — they are `External`, which a plan cannot reach.
     tools.extend(mcp.definitions());
@@ -8969,6 +9136,14 @@ fn offered_tools(
         tools.retain(|def| {
             crate::agent_tools::tool_class(&def.name) == crate::agent_tools::ToolClass::ReadOnly
         });
+    }
+    // U-6: the tools that can only point at production source go while the gate
+    // waits for its failure. `edit_symbol`, `ast_edit`, `codemod` and `rename`
+    // are named rather than filtered by class because `write_file` and
+    // `edit_file` are the same class and are exactly what this phase is for.
+    if repro.is_enforcing() && repro.phase() == crate::reprogate::Phase::AwaitingRed {
+        const PRODUCTION_ONLY: &[&str] = &["edit_symbol", "ast_edit", "codemod", "rename"];
+        tools.retain(|def| !PRODUCTION_ONLY.contains(&def.name.as_str()));
     }
     tools
 }
@@ -9098,7 +9273,12 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             let _ = tx.send(format!("[OLLAMA]{note}"));
         }
     }
-    let tools = offered_tools(&approval.mcp, &approval.skills, approval.mode);
+    let tools = offered_tools(
+        &approval.mcp,
+        &approval.skills,
+        approval.mode,
+        &approval.repro,
+    );
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
     // with whatever the reader would have guessed (MI-1).
@@ -10820,6 +11000,7 @@ mod tests {
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sandbox: crate::sandbox::Sandbox::disabled(),
             redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -10940,6 +11121,7 @@ mod tests {
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
                 redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+                repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
             }
         };
         let call = xencode_providers_rs::ToolCall {
@@ -11372,14 +11554,16 @@ mod tests {
                 std::path::PathBuf::new(),
             ),
             crate::agent_tools::ApprovalMode::Ask,
+            &crate::reprogate::ReproGate::new(),
         );
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
             built_in.len(),
-            17,
+            18,
             "the built-in surface, uncounted before this: {built_in:?}"
         );
         assert!(!built_in.contains(&"load_skill"), "{built_in:?}");
+        assert!(built_in.contains(&"reproduce_bug"), "{built_in:?}");
 
         let dir = temp_dir("offered-skills");
         install_skill(
@@ -11391,6 +11575,7 @@ mod tests {
             &crate::mcp::McpHub::new(),
             &xencode_plugin_rs::SkillRuntime::load(&dir, std::path::Path::new("")),
             crate::agent_tools::ApprovalMode::Ask,
+            &crate::reprogate::ReproGate::new(),
         );
         let names: Vec<&str> = with.iter().map(|tool| tool.name.as_str()).collect();
         assert!(names.contains(&"load_skill"), "{names:?}");
@@ -11417,6 +11602,7 @@ mod tests {
             &crate::mcp::McpHub::new(),
             &no_skills(),
             crate::agent_tools::ApprovalMode::Plan,
+            &crate::reprogate::ReproGate::new(),
         );
         let plan: Vec<&str> = plan_tools.iter().map(|tool| tool.name.as_str()).collect();
         // Everything a plan may do stays offered.
@@ -11453,6 +11639,7 @@ mod tests {
             &crate::mcp::McpHub::new(),
             &no_skills(),
             crate::agent_tools::ApprovalMode::Ask,
+            &crate::reprogate::ReproGate::new(),
         );
         let ask: Vec<&str> = ask_tools.iter().map(|tool| tool.name.as_str()).collect();
         assert!(
@@ -11841,6 +12028,7 @@ mod tests {
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sandbox: crate::sandbox::Sandbox::disabled(),
             redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),
@@ -15758,5 +15946,152 @@ mod tests {
             !report.contains("FAKE_NOT_A_REAL_SECRET_KEY"),
             "the preview must never echo the credential itself: {report}"
         );
+    }
+
+    /// `/gate bugfix …` is the user's half of U-6: it opens the gate and says
+    /// what the agent may and may not do until a failure has been seen.
+    #[test]
+    fn the_gate_command_opens_it_with_the_reported_neighbourhood() {
+        let mut app = App::for_tests();
+        assert!(app.repro_gate.is_off());
+        app.handle_gate_command("/gate bugfix src/billing.rs src/invoice.rs");
+        let report = system_lines(&app).join("\n");
+        assert!(app.repro_gate.is_enforcing());
+        assert_eq!(app.repro_gate.phase(), crate::reprogate::Phase::AwaitingRed);
+        assert!(report.contains("Reproduction gate open"), "{report}");
+        assert!(
+            report.contains("src/billing.rs, src/invoice.rs"),
+            "{report}"
+        );
+        // The gate's own read agrees with what was printed.
+        assert_eq!(
+            app.repro_gate.scope(),
+            vec!["src/billing.rs".to_string(), "src/invoice.rs".to_string()]
+        );
+    }
+
+    /// A gate opened without naming where the bug was reported cannot check the
+    /// failure's location, so it says so instead of pretending otherwise.
+    #[test]
+    fn a_gate_opened_without_a_neighbourhood_says_what_it_cannot_check() {
+        let mut app = App::for_tests();
+        app.handle_gate_command("/gate bugfix");
+        let report = system_lines(&app).join("\n");
+        assert!(app.repro_gate.is_enforcing());
+        assert!(report.contains("no neighbourhood named"), "{report}");
+    }
+
+    /// Bare `/gate` reports the state it has, including the refusals it caused —
+    /// the number the user needs to know whether the agent fought the gate.
+    #[test]
+    fn the_gate_reports_its_state_and_what_it_refused() {
+        let mut app = App::for_tests();
+        app.handle_gate_command("/gate bugfix src");
+        app.repro_gate.check_write("src/lib.rs");
+        app.handle_gate_command("/gate");
+        let report = system_lines(&app).join("\n");
+        assert!(
+            report.contains("awaiting a failing reproduction"),
+            "{report}"
+        );
+        assert!(report.contains("reported in: src"), "{report}");
+        assert!(report.contains("1 writes refused"), "{report}");
+        assert!(report.contains("not witnessed"), "{report}");
+    }
+
+    /// Closing a gate mid-measurement discards the evidence, and says which
+    /// half of the red-to-green pair was never finished.
+    #[test]
+    fn closing_a_gate_mid_measurement_says_what_is_thrown_away() {
+        let mut app = App::for_tests();
+        app.handle_gate_command("/gate bugfix src");
+        app.repro_gate.declare_repro("tests/repro.rs");
+        app.repro_gate.record_red(
+            crate::reprogate::Failure {
+                location: "tests/repro.rs".to_string(),
+                line: Some(4),
+                message: "assertion failed".to_string(),
+                test: None,
+            },
+            Some(101),
+        );
+        app.handle_gate_command("/gate off");
+        let report = system_lines(&app).join("\n");
+        assert!(app.repro_gate.is_off());
+        assert!(report.contains("evidence was dropped"), "{report}");
+        assert!(report.contains("never shown to make it pass"), "{report}");
+        // A gate with nothing recorded closes without a eulogy.
+        let mut quiet = App::for_tests();
+        quiet.handle_gate_command("/gate off");
+        assert_eq!(system_lines(&quiet).join("\n"), "Reproduction gate closed.");
+    }
+
+    /// The other half of the same enforcement: while the gate waits, the tools
+    /// that can only point at production source are not offered at all, and the
+    /// one tool that ends the wait is.
+    #[test]
+    fn a_locked_gate_takes_the_production_edit_tools_off_the_table() {
+        let no_skills = || {
+            xencode_plugin_rs::SkillRuntime::empty(
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            )
+        };
+        let gate = crate::reprogate::ReproGate::new();
+        let offered = |gate: &crate::reprogate::ReproGate| -> Vec<String> {
+            offered_tools(
+                &crate::mcp::McpHub::new(),
+                &no_skills(),
+                crate::agent_tools::ApprovalMode::Ask,
+                gate,
+            )
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect()
+        };
+        // With no gate, everything is on the table, production edits included.
+        let open_table = offered(&gate);
+        assert!(open_table.contains(&"reproduce_bug".to_string()));
+        assert!(open_table.contains(&"edit_symbol".to_string()));
+        assert!(open_table.contains(&"codemod".to_string()));
+        // Waiting for the failure: those go, the reproduction and the ordinary
+        // write tools stay, because writing the test is the point of this phase.
+        gate.engage(&["src"], true);
+        let locked = offered(&gate);
+        for gone in ["edit_symbol", "ast_edit", "codemod"] {
+            assert!(!locked.contains(&gone.to_string()), "{gone} was offered");
+        }
+        for kept in ["reproduce_bug", "write_file", "edit_file", "read_file"] {
+            assert!(locked.contains(&kept.to_string()), "{kept} was withheld");
+        }
+        // After the failure is witnessed, the table is whole again.
+        gate.declare_repro("tests/repro.rs");
+        gate.record_red(
+            crate::reprogate::Failure {
+                location: "tests/repro.rs".to_string(),
+                line: Some(4),
+                message: "assertion failed".to_string(),
+                test: None,
+            },
+            Some(101),
+        );
+        assert!(offered(&gate).contains(&"edit_symbol".to_string()));
+    }
+
+    /// A gate the agent opened itself by calling `reproduce_bug` records the
+    /// measurement and forbids nothing — the user is the one who locks a session.
+    #[test]
+    fn a_gate_the_agent_opened_offers_every_tool_and_refuses_nothing() {
+        let gate = crate::reprogate::ReproGate::new();
+        gate.engage::<&str>(&[], false);
+        assert_eq!(
+            gate.check_write("src/lib.rs"),
+            crate::reprogate::WriteVerdict::Allowed
+        );
+        let mut app = App::for_tests();
+        app.repro_gate = std::sync::Arc::new(gate);
+        app.handle_gate_command("/gate");
+        let report = system_lines(&app).join("\n");
+        assert!(report.contains("recording only"), "{report}");
     }
 }

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `/gate`: a bug fix has to reproduce the bug first
+
+An agent that "fixed" a bug often never showed the bug happening. It wrote a
+test, watched it pass, edited the code, and reported success — sometimes
+against a bug that was never there, sometimes by quietly weakening the test
+until it agreed. `/gate bugfix [paths…]` makes the order of work something the
+agent cannot skip. While the gate is open and waiting:
+
+- **every write to a production file is refused**, at the point of execution and
+  before the approval prompt opens, so "allow for the session" does not buy it
+  off. The tools that can only edit production source (`edit_symbol`, `ast_edit`,
+  `codemod`) are not offered to the model at all during that phase.
+- the one file it may write is the reproduction, and it must be a real test —
+  under a `tests/` directory or named as one — that exists in the workspace.
+- running it happens through the new `reproduce_bug` tool, which runs your
+  command for real and only accepts a failure it can quote: the assertion's
+  file, line and message, plus the test's name when the runner printed one.
+  A run that passes reproduces nothing and unlocks nothing. A non-zero exit with
+  no failing assertion in it — a compile error, a missing binary — is refused,
+  because nothing was asserted. A failure whose location is outside the paths
+  you named is flagged as suspect and changes nothing.
+- once the failure is on record, **the reproduction file is frozen**. Editing it
+  now is how a pass is manufactured out of the assertion that just failed. The
+  fix goes into the production code, and the same command re-run against it is
+  what has to pass: a different command is a different measurement, and is
+  refused as one.
+
+Bare `/gate` reports the phase, the neighbourhood, the command, and the red and
+green exits it has; `/gate off` closes it and names the measurement it is
+throwing away. Only you open or close a gate — an agent that could dismiss the
+lock would refuse nothing, so an agent that calls `reproduce_bug` without being
+asked gets its failure recorded and forbids nothing.
+
 ### Documentation — where free compute and free inference actually come from, re-read from source
 
 The plan's 2026-09-23 survey filed Kaggle under "no SSH, therefore unreachable"

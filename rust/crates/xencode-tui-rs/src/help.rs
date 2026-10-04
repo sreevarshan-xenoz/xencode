@@ -101,6 +101,10 @@ const COMMANDS: &[Binding] = &[
         "undo the agent's file changes (session-only), refusing files edited by hand",
     ),
     (
+        "/gate [bugfix [paths] | off]",
+        "refuse production edits until a reproduction test has been seen failing",
+    ),
+    (
         "/mcp [status|stop|read <server> <uri>|prompt <server> <name>]",
         "connect MCP servers, read their tools, documents and prompts",
     ),
