@@ -89,7 +89,15 @@ test), `/hotspots [limit]` ranks files by churn, size and bus factor, and
 context as instructions or stays marked `[data]` — by content hash, persisted
 in `.xencode/cache/agents_trust.json`, so an edit to the file asks again.
 `/trust status` reports which one it is right now; `/trust forget` withdraws
-trust for the current bytes.
+trust for the current bytes. `/egress [text]` shows, without sending anything,
+where the next turn would actually go: the provider a model id resolves to,
+whether that route stays on this machine or leaves it, whether the egress policy
+allows it (or would refuse the turn before sending), how many messages and bytes
+a real turn would carry, and how many secrets the redactor would hold back — by
+their placeholder tokens, never their values. It rebuilds the same prompt a real
+turn arms, so the preview is what would genuinely leave the machine rather than
+an estimate; the stable head (system prompt and a trusted `AGENTS.md`) is never
+redacted. With no text it previews where the last user turn would have gone.
 
 #### Secrets in content, not just in file names
 

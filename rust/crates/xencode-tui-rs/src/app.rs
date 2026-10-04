@@ -19,7 +19,7 @@ use xencode_models_rs::{
     LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
 };
 use xencode_providers_rs::{
-    classify, url_host, ChatMessage, ContentPart, Egress, EgressPolicy, ImageUrlPart,
+    classify, provider_for, url_host, ChatMessage, ContentPart, Egress, EgressPolicy, ImageUrlPart,
     MessageContent, OllamaRequest, ProviderManager, RoutingFacts,
 };
 
@@ -109,6 +109,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/hotspots",
     "/agents",
     "/trust",
+    "/egress",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -3228,6 +3229,13 @@ impl<'a> App<'a> {
             return;
         }
 
+        // /egress [text]: PR-4. Show, without sending anything, where the next
+        // turn's prompt would actually go and what redaction would hold back.
+        if prompt == "/egress" || prompt.starts_with("/egress ") {
+            self.handle_egress_command(&prompt);
+            return;
+        }
+
         self.is_generating = true;
         // The turn boundary: what today has spent is weighed before this turn's
         // context is sized, so a passed cap buys the turn down and the check
@@ -5855,6 +5863,115 @@ impl<'a> App<'a> {
                  not {other:?}"
             )),
         }
+    }
+
+    /// PR-4: show, without sending anything, where the next turn's prompt would
+    /// actually go and what the redactor would hold back. This rebuilds the same
+    /// assembly a real turn arms (deterministic, no network) so the answer is
+    /// what would genuinely leave the machine, not an estimate. It is a checkable
+    /// debug preview, deliberately not a per-turn gate.
+    fn handle_egress_command(&mut self, prompt: &str) {
+        let query = prompt.strip_prefix("/egress").unwrap_or("").trim();
+        let mut history: Vec<(String, String)> = self
+            .memory
+            .get_context(26)
+            .into_iter()
+            .map(|m| (m.role, m.content))
+            .collect();
+        // The rest of the command is the prompt to preview; with none given,
+        // show where the last real user turn would have gone.
+        let preview_prompt = if query.is_empty() {
+            history
+                .iter()
+                .rev()
+                .find(|(role, _)| role == "user")
+                .map(|(_, content)| content.clone())
+                .unwrap_or_default()
+        } else {
+            query.to_string()
+        };
+        if history
+            .last()
+            .is_some_and(|(role, content)| role == "user" && *content == preview_prompt)
+        {
+            history.pop();
+        }
+
+        let root = xencode_context_rs::default_root();
+        let model = self.config.default_model.clone();
+        let context_window =
+            xencode_providers_rs::effective_context_window(&model, self.window_for(&model));
+        let caps = xencode_context_rs::ContextCaps::for_turn(
+            self.hardware.profile,
+            self.prompt_overhead
+                .free_tokens(xencode_context_rs::fill_target(
+                    self.hardware.profile,
+                    context_window,
+                )),
+        );
+        let live = xencode_context_rs::collect_live_context(&root, &preview_prompt, caps);
+        let system = self.agent_system_prompt();
+        let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
+            profile: self.hardware.profile,
+            context_window,
+            system: &system,
+            agents_md: live.agents_md.as_deref(),
+            anchor_md: live.anchor_md.as_deref(),
+            state_md: live.state_md.as_deref(),
+            git_summary: &live.git_summary,
+            repo_map: &live.repo_map,
+            retrieved: live.blocks,
+            attached_block: "",
+            history: &history,
+            prompt: &preview_prompt,
+        });
+
+        let facts = self.routing_facts();
+        let egress = classify(&model, facts);
+        let provider = provider_for(&model, facts);
+        let allowed = self.egress_policy().check(egress).is_ok();
+        let bytes: usize = assembly.turns.iter().map(|t| t.content.len()).sum();
+        let held_back = assembly.vault.len();
+
+        let mut lines = vec![
+            format!("🌐 Egress preview — model {model:?}"),
+            format!("   destination: {provider}  ·  {}", egress.label()),
+            match (egress, allowed) {
+                (Egress::Local, _) => {
+                    "   leaves the machine: no — this is a server on this box".to_string()
+                }
+                (Egress::Cloud, true) => {
+                    "   leaves the machine: yes — an off-machine route, and the policy allows it"
+                        .to_string()
+                }
+                (Egress::Cloud, false) => {
+                    "   BLOCKED — off-machine route but allow_cloud_models is off, so this turn \
+                     would be refused before anything is sent"
+                        .to_string()
+                }
+            },
+            format!(
+                "   a real turn would send: {} message(s), {bytes} byte(s)",
+                assembly.turns.len()
+            ),
+        ];
+        if held_back == 0 {
+            lines.push(
+                "   redaction: nothing credential-shaped in the dynamic tiers to hold back"
+                    .to_string(),
+            );
+        } else {
+            lines.push(format!(
+                "   redaction: {held_back} secret(s) would be held back as [{}] — the values \
+                 stay local and are restored only when a tool actually runs",
+                assembly.vault.placeholders().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        lines.push(
+            "   note: the stable head (system prompt + trusted AGENTS.md) is never redacted."
+                .to_string(),
+        );
+        self.system_line(&lines.join("\n"));
     }
 
     /// I3-01 / M-6: the Model Context Protocol. `/mcp` connects every server
@@ -15238,5 +15355,52 @@ mod tests {
         app.apply_daily_budget_at(&xencode);
         assert_eq!(system_lines(&app).len(), 1, "the same news twice is noise");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-4: `/egress` renders a checkable preview of where the next turn's
+    /// prompt would go, without sending anything. A test app has no cloud key and
+    /// an empty default model, so it routes to the local Ollama fallback.
+    #[test]
+    fn egress_preview_names_the_destination_and_says_it_stays_local() {
+        let mut app = App::for_tests();
+        app.handle_egress_command("/egress explain the build error");
+        let report = system_lines(&app).join("\n");
+        assert!(report.contains("Egress preview"), "{report}");
+        assert!(report.contains("destination: ollama"), "{report}");
+        assert!(
+            report.contains("leaves the machine: no"),
+            "an unset local model must read as staying on this machine: {report}"
+        );
+        assert!(report.contains("a real turn would send"), "{report}");
+        assert!(
+            report.contains("never redacted"),
+            "the preview says the stable head is untouched: {report}"
+        );
+    }
+
+    /// The preview's whole point: it shows the redaction a real turn would apply,
+    /// counting the secrets held back without ever printing them.
+    #[test]
+    fn egress_preview_counts_a_secret_without_revealing_it() {
+        let mut app = App::for_tests();
+        app.memory.add_message(
+            "user",
+            "run it with AWS_SECRET_ACCESS_KEY=\"FAKE_NOT_A_REAL_SECRET_KEY\"",
+            None,
+        );
+        app.handle_egress_command("/egress");
+        let report = system_lines(&app).join("\n");
+        assert!(
+            report.contains("would be held back"),
+            "the secret in the prompt must be reported as redacted: {report}"
+        );
+        assert!(
+            report.contains("«xencode-secret-1»"),
+            "it names the placeholder, not the value: {report}"
+        );
+        assert!(
+            !report.contains("FAKE_NOT_A_REAL_SECRET_KEY"),
+            "the preview must never echo the credential itself: {report}"
+        );
     }
 }

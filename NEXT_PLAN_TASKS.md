@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2219 tests passing, zero warnings (re-verified 2026-10-04, after PR-3)
+- [x] Workspace gates green — 16 crates, 2221 tests passing, zero warnings (re-verified 2026-10-04, after PR-4)
 
 ## Model Catalog Honesty
 
@@ -6563,7 +6563,7 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
    `http://127.0.0.1:18000/v1` counts as local even though the VM on the other
    end is Google's. Making that say *cloud* means the classifier learning about
    the bridge; the README says the boundary out loud instead. Redaction and the
-   per-request preview remain PR-3 and PR-4.
+   per-request preview (PR-3, PR-4) have since landed.
    Workspace: **872 → 880 tests** (one in `config.rs` for the default and the
    round-trip, two in `tests/egress_policy.rs` — the refusal naming the setting,
    and `EgressPolicy::new` opening a route the default refuses, against an
@@ -9108,7 +9108,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants; done 2026-10-04 — see the note |
 | **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN; done 2026-10-04 — see the note |
 | **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers; done 2026-10-04 — see the note |
-| **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
+| **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview; done 2026-10-04 as the `/egress` command — see the note |
 | **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement); done — enforced at load and at install, see the note in Q-9 |
 | **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7; done 2026-10-04 as part of SE-7 — see the note |
 | **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo) |
@@ -9421,6 +9421,21 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   that makes the policy checkable is **PR-4**, not this. Tool *results* coming back
   into the context mid-turn are likewise not scrubbed here — SE-4 taints and gates
   those calls.
+- [x] `PR-4` — 2026-10-04. `/egress [text]` is the debug preview this item asked
+  for — explicitly *not* a per-turn gate, because approval fatigue is the trap and
+  no vendor ships one for a reason. Typing it rebuilds the exact prompt a real turn
+  would arm (`collect_live_context` + `assemble_chat`, deterministic and offline)
+  and prints where that turn goes: the provider a model id resolves to, whether it
+  is a server on this machine or an off-machine route, and whether the egress policy
+  (`allow_cloud_models`) allows it or would refuse the turn before a byte is sent.
+  It then reports how many messages and bytes a real turn would carry and how many
+  secrets the redactor would hold back — by placeholder token only, never value.
+  With no text it previews where the last user turn would have gone. This is the
+  item that makes PR-2's policy and PR-3's redaction checkable by eye rather than
+  trusted on faith. Verified end to end by two tests in `app.rs`: one that an unset
+  local model reads as "leaves the machine: no", one that a secret-shaped value in
+  the prompt is counted as "would be held back" as `«xencode-secret-1»` while the
+  report provably does not contain the value itself.
 
 #### W8 — Outward research capability — 6 items
 

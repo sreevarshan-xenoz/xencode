@@ -220,6 +220,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /hotspots [limit]     - Rank files by churn, size and bus factor
 /agents               - Inventory the coding-agent CLIs installed on PATH
 /trust [status|forget] - Follow the workspace AGENTS.md as instructions, or report/withdraw (trust is per content hash)
+/egress [text]         - Show where the next turn would send your prompt and what redaction holds back, without sending it
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full
