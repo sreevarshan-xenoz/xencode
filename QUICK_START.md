@@ -208,7 +208,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /impact <file>        - Blast radius of one file (crates · files · churn, in a fan-out panel)
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
-/rewind [turns]       - Undo the agent's file changes for this session
+/rewind [turns] [--force] - Undo the agent's file changes for this session (refuses files you edited by hand, unless --force)
 /mcp [status|stop]    - Connect all MCP servers declared in config, or ask about/stop them (read a listed resource with `/mcp read <server> <uri>`, ask for a prompt with `/mcp prompt <server> <name>`)
 /spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status)
 /plugin [reload]      - Show which plugins took effect, the prompt text and pinned commit each one contributes, or re-scan the plugin dir

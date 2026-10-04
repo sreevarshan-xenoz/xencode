@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2221 tests passing, zero warnings (re-verified 2026-10-04, after PR-4)
+- [x] Workspace gates green — 16 crates, 2230 tests passing, zero warnings (re-verified 2026-10-04, after QTR-4)
 
 ## Model Catalog Honesty
 
@@ -5914,7 +5914,10 @@ and PR-1: refuse at the source class, never grade with a classifier.
   `xencode/ckpt` branch + a `git status` diff before `/rewind` so interleaved
   human edits are detected — the thing in-memory ≤4 MiB checkpoints can never
   do. Constrained by fact Q-1.4 (46 GiB `target/`): share the build cache
-  deliberately or say why not.
+  deliberately or say why not. **Done 2026-10-04** — the commit is built from a
+  scratch index over exactly the agent's paths, `/rewind` compares trees before it
+  restores and refuses a hand edit (`--force` to override), and the build cache is
+  left where it is because it never enters the checkpoint at all; see the W7 note.
 - **QTR-5 — Accountability as trailers + a run ledger.** *Effort: S.* GH-5's
   trailer plus a local `runs.jsonl` joining run-id → model → approvals →
   artifacts, extended from the EVd family rather than duplicated. in-toto/SLSA/
@@ -9111,7 +9114,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview; done 2026-10-04 as the `/egress` command — see the note |
 | **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement); done — enforced at load and at install, see the note in Q-9 |
 | **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7; done 2026-10-04 as part of SE-7 — see the note |
-| **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo) |
+| **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo); done 2026-10-04 as `xencode/ckpt` + the `/rewind` hand-edit guard — see the note |
 | **QTR-5** | Accountability as trailers + a run ledger | capability | accountability trailers + run ledger (rides GH-5's format) |
 | **SE-2** | untrusted-content marking | core | untrusted-content marking; done 2026-10-04 — see the note |
 | **SE-3** | the `AGENTS.md` trust split (fact 3) | core | AGENTS.md trust split; done 2026-10-04 — see the note |
@@ -9436,6 +9439,39 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   local model reads as "leaves the machine: no", one that a secret-shaped value in
   the prompt is counted as "would be held back" as `«xencode-secret-1»` while the
   report provably does not contain the value itself.
+- [x] `QTR-4` — 2026-10-04. Every turn that writes files is now also recorded as
+  a commit on `xencode/ckpt` — a branch of xencode's own, written through a scratch
+  `GIT_INDEX_FILE` (`read-tree` the tip, `update-index` the agent's exact paths,
+  `write-tree`, `commit-tree`, `update-ref`), so the user's `HEAD`, current branch,
+  working tree and index are never opened by it. `/rewind` consults it before
+  restoring anything: the checkpoint tip is re-read into a scratch index, the current
+  bytes of exactly the files that rewind is about to touch are staged beside it, and
+  the two trees are compared with `diff-tree`. A file edited by hand after the agent
+  wrote it shows up there and the rewind **refuses**, naming the files, and tells you
+  `/rewind <turns> --force` is the override; it consumes nothing, so the refusal can
+  be re-run. Comparing *trees* rather than running `git diff <commit> -- paths` is
+  the part that took a real run to find: `git diff` against a commit only consults
+  the working tree for paths the user's index already knows, so a file the agent
+  *created* — untracked, therefore — came back as deleted every time, and every
+  rewind over a new file would have been blocked by a hand edit that never happened.
+  *Fact Q-1.4, answered as the item asks:* nothing here shares or relocates the build
+  cache, and nothing needs to. There is no `git add -A` and no directory spec on the
+  commit path — only the individual files the agent snapshotted go in, and
+  `check-ignore` drops anything the repository ignores first — so the 46 GiB `target/`
+  is absent from checkpoint history by construction rather than by luck. Checkpoint
+  commits are stamped `xencode <xencode@localhost>` with `commit.gpgsign=false`:
+  they are scratch, not the user's work, and a checkpoint commit that stopped for a
+  passphrase would hang the turn (signing the user's own commits stays `gitsign`'s
+  job). *Degradation is stated, not hidden:* outside a git repository, in one with an
+  unborn `HEAD`, or before the first turn that wrote a file, there is no branch to
+  compare against, the rewind says hand edits were not checked, and the in-memory
+  undo works exactly as it did. Verified end to end against throwaway repositories
+  built and deleted inside the tests — never this one: nine in `ckptgit.rs` (commit
+  made and HEAD/index/branch untouched, turns chained, ignored path never recorded,
+  a no-op turn makes no commit, hand edit and vanished-created-file both found, a
+  path outside the root refused, unborn `HEAD` explained, no-repo reported, agent
+  deletion recorded as a deletion) plus one in `app.rs` driving the real write →
+  checkpoint → hand-edit → refuse → `--force` → quiet-restore sequence.
 
 #### W8 — Outward research capability — 6 items
 

@@ -5247,11 +5247,29 @@ impl<'a> App<'a> {
         self.focus = FocusArea::ImpactPanel;
     }
 
-    /// `/rewind [turns]` — put back the files the agent changed in its most
-    /// recent turns that touched anything (default: the last turn). The
-    /// snapshots are session-only bytes in memory, so this can never undo an
-    /// earlier xencode run, and git is left entirely alone.
+    /// `/rewind [turns] [--force]` — put back the files the agent changed in
+    /// its most recent turns that touched anything (default: the last turn).
+    /// The snapshots are session-only bytes in memory, so this can never undo
+    /// an earlier xencode run.
+    ///
+    /// What git adds (QTR-4) is the check that memory cannot make: each turn
+    /// the agent wrote is also committed on `xencode/ckpt`, so before restoring
+    /// anything this asks whether the file on disk still matches what the agent
+    /// left there. If a person edited it in between, rewinding would silently
+    /// throw that edit away, and it refuses unless `--force` says otherwise.
+    /// Where there is no repository or no checkpoint branch to compare against,
+    /// it says so and rewinds anyway — the in-memory undo was never git's to
+    /// provide.
     fn handle_rewind_command(&mut self, prompt: &str) {
+        self.handle_rewind_at(prompt, &xencode_context_rs::default_root());
+    }
+
+    /// The rewind itself, with the repository to check against passed in. The
+    /// root is a parameter rather than a `default_root()` call inside the body,
+    /// because the guard reads a real repository and a test has to be able to
+    /// point it at a throwaway one — without moving the process's working
+    /// directory out from under the tests running beside it.
+    fn handle_rewind_at(&mut self, prompt: &str, root: &std::path::Path) {
         // ByteBot writes through the same gate, so rewinding under it would
         // fight a run that is still going.
         if self.is_generating || self.bytebot_running {
@@ -5262,13 +5280,26 @@ impl<'a> App<'a> {
             return;
         }
         let arg = prompt.strip_prefix("/rewind").unwrap_or("").trim();
+        // `--force` is a flag, not the turn count, so it is taken out of the
+        // argument before the number is read and may appear on either side.
+        let (arg, forced) = match arg.find("--force") {
+            Some(at) => (
+                format!("{} {}", &arg[..at], &arg[at + "--force".len()..])
+                    .trim()
+                    .to_string(),
+                true,
+            ),
+            None => (arg.to_string(), false),
+        };
         let back = if arg.is_empty() {
             1
         } else {
             match arg.parse::<usize>() {
                 Ok(n) if n >= 1 => n,
                 _ => {
-                    self.system_line("usage: /rewind [turns] — a whole number of turns, default 1");
+                    self.system_line(
+                        "usage: /rewind [turns] [--force] — a whole number of turns, default 1",
+                    );
                     return;
                 }
             }
@@ -5280,7 +5311,54 @@ impl<'a> App<'a> {
             );
             return;
         }
-        let report = self.checkpoints.rewind(back.min(available));
+        let steps = back.min(available);
+        // Checked against the checkpoint tip before anything is restored, so
+        // the refusal is about the files this rewind is about to touch.
+        let mut guard_note = String::new();
+        if forced {
+            guard_note = " — forced, so a hand edit may have been overwritten".to_string();
+        } else {
+            let touched = self.checkpoints.pending_paths(steps);
+            match crate::ckptgit::human_edits(root, &touched) {
+                Ok(edited) if !edited.is_empty() => {
+                    let shown = if edited.len() > 4 {
+                        format!(
+                            "{}, …",
+                            edited
+                                .iter()
+                                .take(4)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    } else {
+                        edited.join(", ")
+                    };
+                    self.system_line(&format!(
+                        "⚠ Not rewound: {} file(s) changed by hand since the agent wrote them, \
+                         and restoring would overwrite your edits — {}.\n\
+                         Re-run `/rewind {} --force` to restore them anyway.",
+                        edited.len(),
+                        shown,
+                        steps
+                    ));
+                    self.push_toast(
+                        crate::toast::ToastKind::Warning,
+                        format!("{} file(s) edited since the checkpoint", edited.len()),
+                    );
+                    return;
+                }
+                Ok(_) => {}
+                // No repository, or no checkpoint branch yet: the guard simply
+                // is not available here. Say the designed reason when that is
+                // the case, and git's own words when it is something else.
+                Err(why) => {
+                    let why = crate::ckptgit::unavailable_reason(root).unwrap_or(why);
+                    guard_note = format!(" — hand edits were not checked ({why})");
+                }
+            }
+        }
+        let report = self.checkpoints.rewind(steps);
         self.refresh_editor_after_rewind(&report);
         let restored = report.files.len() - report.removed;
         let mut parts: Vec<String> = Vec::new();
@@ -5294,7 +5372,7 @@ impl<'a> App<'a> {
             parts.push(format!("{} failed", report.failed.len()));
         }
         self.system_line(&format!(
-            "↺ Rewound {} agent turn(s) — {} ({})",
+            "↺ Rewound {} agent turn(s) — {} ({}){}",
             report.turns,
             parts.join(", "),
             if report.files.len() > 4 {
@@ -5310,7 +5388,8 @@ impl<'a> App<'a> {
                 )
             } else {
                 report.files.join(", ")
-            }
+            },
+            guard_note
         ));
         self.push_toast(
             crate::toast::ToastKind::Info,
@@ -9474,6 +9553,14 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         note: String::new(),
     };
     let _ = xencode_context_rs::append_run(&trace_dir, &run_record);
+    // QTR-4: record this turn's writes on the checkpoint branch, so `/rewind`
+    // can tell a hand edit made after the agent from the agent's own change.
+    // Quiet either way — a repository we cannot write to costs the guard, not
+    // the turn, and `/rewind` reports the missing branch when it matters.
+    let changed = approval.checkpoints.group_paths(approval.turn);
+    if !changed.is_empty() {
+        let _ = crate::ckptgit::write_turn(&tool_root, approval.turn, &changed);
+    }
     let _ = tx.send(match sink {
         LoopSink::Chat => "[DONE]".to_string(),
         LoopSink::ByteBot => "[BYTEBOT_DONE]".to_string(),
@@ -10750,7 +10837,7 @@ mod tests {
         assert!(wrote.starts_with("edited keep.txt"), "{wrote}");
         assert!(dir.join("keep.txt").exists());
 
-        app.handle_rewind_command("/rewind");
+        app.handle_rewind_at("/rewind", &dir);
         assert_eq!(
             std::fs::read_to_string(dir.join("keep.txt")).unwrap(),
             "mine\n"
@@ -10760,6 +10847,12 @@ mod tests {
         assert!(
             line.content.contains("Rewound 1 agent turn") && line.content.contains("keep.txt"),
             "{:?}",
+            line.content
+        );
+        assert!(
+            line.content.contains("hand edits were not checked")
+                && line.content.contains("not a git repository"),
+            "outside a repository the rewind must say it did not check: {:?}",
             line.content
         );
 
@@ -10781,6 +10874,171 @@ mod tests {
             .content
             .contains("usage: /rewind"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// QTR-4, end to end: the agent's write is recorded on a checkpoint branch
+    /// of a real repository, so `/rewind` can tell a hand edit made after the
+    /// agent from the agent's own change — and refuse. Run against a throwaway
+    /// repository created here and deleted at the end; the xencode working tree
+    /// is the one repository this feature must never commit into.
+    #[tokio::test]
+    async fn rewind_refuses_a_file_a_person_edited_after_the_agent_wrote_it() {
+        let dir = std::env::temp_dir().join(format!("xencode-rewind-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .expect("git is on PATH");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let stdout = |args: &[&str]| {
+            String::from_utf8_lossy(
+                &std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&dir)
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .trim()
+            .to_string()
+        };
+        git(&["init", "-q", "."]);
+        git(&["config", "user.name", "tester"]);
+        git(&["config", "user.email", "tester@example.invalid"]);
+        std::fs::write(dir.join("one.txt"), b"yours\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "base"]);
+
+        let mut app = App::for_tests();
+        let mut receivers = Vec::new();
+        let mut ctx_for = |app: &App<'_>| {
+            let (prompts, rx) = mpsc::unbounded_channel();
+            receivers.push(rx);
+            crate::agent_tools::ApprovalCtx {
+                mode: crate::agent_tools::ApprovalMode::AllAllow,
+                grants: app.agent_grants.clone(),
+                prompts,
+                checkpoints: app.checkpoints.clone(),
+                turn: app.checkpoints.begin_turn(),
+                command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
+                plan: app.agent_plan.clone(),
+                mcp: app.mcp.clone(),
+                skills: app.skills.clone(),
+                hooks: app.config.agent_hooks.clone(),
+                schemas: std::collections::HashMap::new(),
+                online_docs: false,
+                session_id: None,
+                approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sandbox: crate::sandbox::Sandbox::disabled(),
+                redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            }
+        };
+        let call = xencode_providers_rs::ToolCall {
+            id: "c1".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({"path": "one.txt", "content": "the agent's version\n"}),
+        };
+
+        // Turn 1: the agent writes, and the turn is checkpointed the way
+        // `agent_rounds` does when a round ends.
+        let ctx = ctx_for(&app);
+        crate::agent_tools::execute_tool_call_approved(
+            &app.task_runtime,
+            &dir,
+            &call,
+            &ctx,
+            Some(&app.mcp),
+        )
+        .await;
+        let turn = ctx.turn;
+        drop(ctx);
+        let written = app.checkpoints.group_paths(turn);
+        assert!(
+            crate::ckptgit::write_turn(&dir, turn, &written)
+                .unwrap()
+                .is_some(),
+            "a turn that wrote a tracked file makes a checkpoint commit"
+        );
+
+        // A person edits the same file after the agent did.
+        std::fs::write(dir.join("one.txt"), b"a hand edit that matters\n").unwrap();
+
+        let before = app.messages.len();
+        app.handle_rewind_at("/rewind", &dir);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("one.txt")).unwrap(),
+            "a hand edit that matters\n",
+            "the refusal writes not one byte"
+        );
+        assert_eq!(
+            app.checkpoints.turns(),
+            1,
+            "a refused rewind consumes nothing, so it can be forced after"
+        );
+        let line = &app.messages[before..]
+            .iter()
+            .find(|message| message.role == "system")
+            .expect("a refusal is said out loud")
+            .content;
+        assert!(
+            line.contains("Not rewound") && line.contains("one.txt") && line.contains("--force"),
+            "{line:?}"
+        );
+        assert!(
+            app.toasts
+                .iter()
+                .any(|toast| toast.message.contains("edited since the checkpoint")),
+            "and it is visible without scrolling"
+        );
+        // The user's own history is still exactly theirs: the checkpoint lives
+        // on its own ref, and the base commit is the only thing on HEAD.
+        assert_eq!(stdout(&["rev-list", "--count", "HEAD"]), "1");
+        assert_eq!(stdout(&["rev-list", "--count", "xencode/ckpt"]), "2");
+
+        // Forced, it does what it says.
+        app.handle_rewind_at("/rewind --force", &dir);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("one.txt")).unwrap(),
+            "yours\n",
+            "--force restores what the agent changed"
+        );
+        assert!(app.messages.last().unwrap().content.contains("forced"));
+
+        // A file nobody touched since the checkpoint is restored without a word
+        // about hand edits — the guard is a refusal, not a tax on every rewind.
+        let ctx = ctx_for(&app);
+        crate::agent_tools::execute_tool_call_approved(
+            &app.task_runtime,
+            &dir,
+            &call,
+            &ctx,
+            Some(&app.mcp),
+        )
+        .await;
+        drop(ctx);
+        app.handle_rewind_at("/rewind", &dir);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("one.txt")).unwrap(),
+            "yours\n",
+            "the file goes back to what it was before the agent wrote it"
+        );
+        let line = &app.messages.last().unwrap().content;
+        assert!(line.contains("Rewound 1 agent turn"), "{line:?}");
+        assert!(
+            !line.contains("not checked") && !line.contains("forced"),
+            "an unguarded rewind must not claim either: {line:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -13120,6 +13378,104 @@ mod tests {
         );
         assert!(!dir.join("bad.txt").exists(), "a cut-off call wrote");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The wiring, not just the plumbing: a real turn of the agent loop — the
+    /// loop's own provider socket, the loop's own executor, the loop's own
+    /// approval gate — must leave a checkpoint commit behind in the repository
+    /// it wrote into, holding what the agent wrote. Proved against a throwaway
+    /// repository built here and deleted at the end, because this feature must
+    /// never commit into the one it is being developed in.
+    #[tokio::test]
+    async fn a_turn_of_the_real_loop_leaves_a_checkpoint_commit_behind() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-ckpt-loop-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            String::from_utf8_lossy(
+                &std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&dir)
+                    .output()
+                    .expect("git is on PATH")
+                    .stdout,
+            )
+            .trim()
+            .to_string()
+        };
+        std::process::Command::new("git")
+            .args(["init", "-q", "."])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        git(&["config", "user.name", "tester"]);
+        git(&["config", "user.email", "tester@example.invalid"]);
+        std::fs::write(dir.join("one.txt"), b"yours\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "base"]);
+        let head_before = git(&["rev-parse", "HEAD"]);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments":
+                        {"path": "one.txt", "content": "the agent's version\n"}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "done"}, "done": true}),
+            ],
+        ));
+
+        let mut app = App::for_tests();
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "write the file".into(),
+            }],
+            "write the file",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        run.trace_dir = dir.join("traces");
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        while rx.try_recv().is_ok() {}
+        let _ = server.await;
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("one.txt")).unwrap(),
+            "the agent's version\n",
+            "the turn has to have actually written the file"
+        );
+        assert!(
+            !git(&["rev-parse", "--verify", "-q", "refs/heads/xencode/ckpt"]).is_empty(),
+            "and the loop has to have checkpointed it"
+        );
+        assert_eq!(
+            git(&["show", "refs/heads/xencode/ckpt:one.txt"]),
+            "the agent's version",
+            "the checkpoint holds what the agent wrote, not what was there before"
+        );
+        assert_eq!(
+            git(&["rev-parse", "HEAD"]),
+            head_before,
+            "the user's HEAD did not move"
+        );
+        assert_eq!(
+            git(&["diff", "--cached", "--name-only"]),
+            "",
+            "the user's index was not staged into"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The writer end to end: the real agent loop over a real socket, real tool

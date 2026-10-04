@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `/rewind` now knows when *not* to rewind
+
+The session's in-memory snapshots can put a file back, but they cannot tell
+whether you edited that file by hand after the agent wrote it — and a rewind that
+does not ask simply overwrites your work. Every turn that writes files is now also
+recorded as a commit on a branch of xencode's own, `xencode/ckpt`, built from a
+scratch index containing exactly the files the agent touched: your `HEAD`, your
+current branch, your working tree and your own index are never opened by it, and
+nothing ignored by `.gitignore` (a `target/` directory above all) is ever staged
+into it. Before restoring anything, `/rewind` re-reads that checkpoint and compares
+it against the files as they stand now; if a file changed since the agent left it,
+the rewind **refuses**, names the files, and points at `/rewind <turns> --force`
+as the override. Checkpoint commits are authored as `xencode <xencode@localhost>`
+and never signed, so scratch history is never mistaken for yours. Outside a git
+repository, in one with no commits yet, or before the first turn that wrote a file,
+there is nothing to compare against — the rewind says hand edits were not checked
+instead of implying it looked, and puts the files back as before.
+
 ### Added — `/egress`: see exactly what would leave the machine before it does
 
 `/egress [text]` rebuilds the prompt a real turn would arm (deterministically,

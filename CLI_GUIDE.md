@@ -56,7 +56,9 @@ the next frame). Slash commands: `/init`, `/ctx`, `/advise`,
 `/impact <file>` (open the blast-radius panel over `xencode impact`'s three
 layers),
 `/bytebot`, `/plan` (pin or clear the agent's todo list),
-`/rewind` (undo the agent's file changes for this session),
+`/rewind` (undo the agent's file changes for this session; it refuses to
+overwrite a file you edited by hand after the agent wrote it, and
+`/rewind [turns] --force` overrides that),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
 `/mcp stop`, `/mcp read <server> <uri>`, `/mcp prompt <server> <name>`), `/plugin` (report which plugins loaded and what they changed;
 `/plugin reload` re-scans the plugin directory), `/skills` (report which
