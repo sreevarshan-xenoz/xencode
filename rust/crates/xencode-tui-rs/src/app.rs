@@ -8736,19 +8736,34 @@ fn record_round(
 /// existed. That is the whole reason the two extensions are gated on being
 /// non-empty: an offer of a tool with nothing behind it is a round the model can
 /// waste.
+///
+/// In `Plan` mode only the read-only tools survive (MD-2): an edit, a shell
+/// command or a stranger's server is not merely denied at the gate (that is
+/// MD-1) — it is never offered, so the model cannot spend a round asking for a
+/// call the gate would refuse. This is the belt to MD-1's braces, and it is the
+/// same list for every round of the turn: the mode is fixed when the run is
+/// built, so the tool surface cannot shift mid-turn and cost KV reuse. Switching
+/// to or out of `plan` takes effect at the next turn boundary.
 fn offered_tools(
     mcp: &crate::mcp::McpHub,
     skills: &xencode_plugin_rs::SkillRuntime,
+    mode: crate::agent_tools::ApprovalMode,
 ) -> Vec<xencode_providers_rs::ToolDefinition> {
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
     tools.extend(xencode_providers_rs::command_tools());
     tools.extend(xencode_providers_rs::plan_tools());
-    // Whatever `/mcp` started, read at the moment the turn begins.
+    // Whatever `/mcp` started, read at the moment the turn begins. A plan
+    // strips these too — they are `External`, which a plan cannot reach.
     tools.extend(mcp.definitions());
     if !skills.is_empty() {
         tools.extend(xencode_providers_rs::skill_tools());
+    }
+    if mode == crate::agent_tools::ApprovalMode::Plan {
+        tools.retain(|def| {
+            crate::agent_tools::tool_class(&def.name) == crate::agent_tools::ToolClass::ReadOnly
+        });
     }
     tools
 }
@@ -8878,7 +8893,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             let _ = tx.send(format!("[OLLAMA]{note}"));
         }
     }
-    let tools = offered_tools(&approval.mcp, &approval.skills);
+    let tools = offered_tools(&approval.mcp, &approval.skills, approval.mode);
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
     // with whatever the reader would have guessed (MI-1).
@@ -10971,6 +10986,7 @@ mod tests {
                 std::path::PathBuf::new(),
                 std::path::PathBuf::new(),
             ),
+            crate::agent_tools::ApprovalMode::Ask,
         );
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
@@ -10989,12 +11005,81 @@ mod tests {
         let with = offered_tools(
             &crate::mcp::McpHub::new(),
             &xencode_plugin_rs::SkillRuntime::load(&dir, std::path::Path::new("")),
+            crate::agent_tools::ApprovalMode::Ask,
         );
         let names: Vec<&str> = with.iter().map(|tool| tool.name.as_str()).collect();
         assert!(names.contains(&"load_skill"), "{names:?}");
         assert_eq!(names.len(), built_in.len() + 1, "{names:?}");
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// MD-2: in `plan` mode the offered list is only the read-only tools — an
+    /// edit, a shell command, a background start or a stranger's server is never
+    /// handed to the model, so it cannot spend a round asking for a call MD-1's
+    /// gate would refuse anyway. Outside plan the same list carries them. This is
+    /// the belt to MD-1's braces: MD-1 denies the call at the gate, MD-2 hides the
+    /// tool from the offer.
+    #[test]
+    fn plan_mode_offers_only_read_only_tools() {
+        let no_skills = || {
+            xencode_plugin_rs::SkillRuntime::empty(
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            )
+        };
+        let plan_tools = offered_tools(
+            &crate::mcp::McpHub::new(),
+            &no_skills(),
+            crate::agent_tools::ApprovalMode::Plan,
+        );
+        let plan: Vec<&str> = plan_tools.iter().map(|tool| tool.name.as_str()).collect();
+        // Everything a plan may do stays offered.
+        for read in [
+            "read_file",
+            "list_dir",
+            "search_files",
+            "repo_advise",
+            "what_breaks",
+            "update_plan",
+            "background_poll",
+        ] {
+            assert!(
+                plan.contains(&read),
+                "a plan must still offer the read tool {read}: {plan:?}"
+            );
+        }
+        // Everything that reaches a file write, a process or a server is gone.
+        for write in [
+            "write_file",
+            "edit_file",
+            "edit_symbol",
+            "run_command",
+            "background_start",
+        ] {
+            assert!(
+                !plan.contains(&write),
+                "a plan must not offer {write}: {plan:?}"
+            );
+        }
+        // The very same call, unfiltered, still carries them: the strip is the
+        // mode, not the surface.
+        let ask_tools = offered_tools(
+            &crate::mcp::McpHub::new(),
+            &no_skills(),
+            crate::agent_tools::ApprovalMode::Ask,
+        );
+        let ask: Vec<&str> = ask_tools.iter().map(|tool| tool.name.as_str()).collect();
+        assert!(
+            ask.contains(&"write_file") && ask.contains(&"run_command"),
+            "{ask:?}"
+        );
+        assert!(
+            plan.len() < ask.len(),
+            "a plan's list is a strict subset of ask's: plan {} vs ask {}",
+            plan.len(),
+            ask.len()
+        );
     }
 
     /// `/skills` reports what loaded from which root, what was found and
