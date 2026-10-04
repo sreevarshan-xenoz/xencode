@@ -59,6 +59,15 @@ layers),
 `/rewind` (undo the agent's file changes for this session; it refuses to
 overwrite a file you edited by hand after the agent wrote it, and
 `/rewind [turns] --force` overrides that),
+`/gate` (read the reproduction gate's state — phase, the neighbourhood it was
+given, the command, and the recorded red and green),
+`/gate bugfix [paths…]` (supervise one bug fix: until the agent has run a
+reproduction test and had its failure actually observed on code nobody has
+changed, writes to production files are refused at execution rather than
+asked about, the tools that can only edit production source are taken off the
+turn's tool list, and the reproduction is frozen once its failure is on
+record), `/gate off` (stop supervising, saying what measurement — if any —
+is being thrown away),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
 `/mcp stop`, `/mcp read <server> <uri>`, `/mcp prompt <server> <name>`), `/plugin` (report which plugins loaded and what they changed;
 `/plugin reload` re-scans the plugin directory), `/skills` (report which

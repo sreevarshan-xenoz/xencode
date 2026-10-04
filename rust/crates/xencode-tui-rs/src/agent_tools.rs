@@ -150,6 +150,10 @@ pub fn tool_class(tool: &str) -> ToolClass {
         "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
             ToolClass::Edit
         }
+        // `reproduce_bug` runs a command, so it is a shell call by class: it
+        // costs whatever `run_command` costs in this mode, never less. Naming it
+        // explicitly keeps it out of the unknown-tool fallback while saying why.
+        "reproduce_bug" => ToolClass::Shell,
         _ => ToolClass::Shell,
     }
 }
@@ -585,7 +589,7 @@ const CRATE_AWARE_TOOLS: &[&str] = &["read_file", "list_dir", "search_files"];
 /// config dir). This is the executor-side mirror of `classify`'s path rule:
 /// until the approval prompt (I1-03) is wired, the file tools still refuse
 /// every out-of-workspace byte.
-fn workspace_path(root: &Path, raw: &str) -> Result<(PathBuf, String), String> {
+pub(crate) fn workspace_path(root: &Path, raw: &str) -> Result<(PathBuf, String), String> {
     if raw.trim().is_empty() {
         return Err(err("\"path\" must not be empty"));
     }
@@ -2971,9 +2975,9 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
 ///
 /// These two entry points are the ones outside the chat loop: they read crate
 /// documentation offline only, because the setting that permits a fetch arrives
-/// through [`ApprovalCtx`], and they know no skills, because the session's
-/// loaded skills arrive the same way. The loop is the only caller that has
-/// either.
+/// through [`ApprovalCtx`], they know no skills, because the session's loaded
+/// skills arrive the same way, and they carry no reproduction gate, because the
+/// session's gate does too. The loop is the only caller that has any of them.
 pub async fn execute_tool_call_timed(
     rt: &TaskRuntime,
     root: &Path,
@@ -2990,6 +2994,7 @@ pub async fn execute_tool_call_timed(
         false,
         None,
         &crate::sandbox::Sandbox::disabled(),
+        None,
     )
     .await
 }
@@ -3007,6 +3012,7 @@ async fn execute_tool_call_plan(
     online_docs: bool,
     skills: Option<&xencode_plugin_rs::SkillRuntime>,
     sandbox: &crate::sandbox::Sandbox,
+    repro: Option<&crate::reprogate::ReproGate>,
 ) -> String {
     let args = call.arguments_object();
     // Server tools are addressed by their visible `mcp__<server>__<tool>` name;
@@ -3039,6 +3045,15 @@ async fn execute_tool_call_plan(
                 run_foreground(root, command, command_timeout, sandbox, net).await
             }
             _ => "error: run_command needs a non-empty string \"command\"".to_string(),
+        },
+        // U-6: run the reproduction, judge it, and move the gate's phase. The
+        // gate is the session's, so the measurement survives the turn that made
+        // it; outside the chat loop there is no gate to write into.
+        "reproduce_bug" => match repro {
+            Some(gate) => {
+                crate::reprogate::reproduce_bug(gate, root, &args, command_timeout, sandbox).await
+            }
+            None => err("reproduce_bug is only available in the chat loop"),
         },
         "background_start" => {
             let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
@@ -3290,6 +3305,12 @@ pub struct ApprovalCtx {
     /// classified and run, so the plaintext never crossed to the provider but
     /// the command still works. Empty/default when nothing was redacted.
     pub redaction: Arc<xencode_context_rs::Vault>,
+    /// The red-to-green reproduction gate (U-6). Shared across the session's
+    /// runs like the taint bit, because its state is about the bug being fixed
+    /// rather than the turn that noticed it: a gate that reset each turn would
+    /// let turn two edit production on turn one's evidence. Off by default, and
+    /// only the user opens it.
+    pub repro: Arc<crate::reprogate::ReproGate>,
 }
 
 impl ApprovalCtx {
@@ -3439,6 +3460,7 @@ async fn run_and_checkpoint(
         ctx.online_docs,
         Some(&ctx.skills),
         &ctx.sandbox,
+        Some(&ctx.repro),
     )
     .await;
     if let Some(note) = note {
@@ -3514,6 +3536,20 @@ pub async fn execute_tool_call_approved(
             return err(format!("{} was not carried out: {reason}", call.name));
         }
     };
+    // U-6: the reproduction gate is enforced here, at the one point every call
+    // passes and before any prompt is opened, because what it refuses is not a
+    // permission the user can grant — it is a write the fix has not earned yet.
+    // While the gate waits for its failing reproduction, the only file the agent
+    // may write is the reproduction itself.
+    if tool_class(&call.name) == ToolClass::Edit {
+        let target = arg_str(&args, "path")
+            .and_then(|raw| workspace_path(root, raw).ok())
+            .map(|(_, display)| display)
+            .unwrap_or_default();
+        if let crate::reprogate::WriteVerdict::Refused(reason) = ctx.repro.check_write(&target) {
+            return err(reason);
+        }
+    }
     match classify(
         root,
         &call.name,
@@ -6770,6 +6806,7 @@ patched = ["{fixed}"]
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
                 redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+                repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
             },
             prompts: rx,
         }
@@ -7257,6 +7294,7 @@ patched = ["{fixed}"]
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
                 redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+                repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(
@@ -8889,6 +8927,152 @@ patched = ["{fixed}"]
             "the edit wrote the real bytes: {on_disk}"
         );
 
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A tree with a real bug in it, so the reproduction below is a real file in
+    /// a real workspace rather than an invented path.
+    fn repro_workspace(label: &str) -> PathBuf {
+        let root = temp_root(label);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn doubled(value: i32) -> i32 {\n    value + 1\n}\n",
+        )
+        .unwrap();
+        root
+    }
+
+    /// U-6 end to end: while the gate waits for its failing reproduction, the
+    /// production write is refused at the executor — not by a prompt the model
+    /// could answer, and not by a mode the user could have set. AllAllow is the
+    /// mode that says yes to everything, so it is the one that has to fail.
+    #[tokio::test]
+    async fn a_locked_gate_refuses_the_production_write_even_in_all_allow() {
+        let root = repro_workspace("reprogate-locked");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        h.ctx.repro.engage(&["src"], true);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call(
+                "src/lib.rs",
+                "pub fn doubled(value: i32) -> i32 {\n    value * 2\n}\n",
+            ),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(result.starts_with("error:"), "{result}");
+        assert!(result.contains("waiting for a failing test"), "{result}");
+        // Refused outright: no prompt was raised for anyone to answer.
+        assert!(h.prompts.try_recv().is_err(), "a prompt was raised");
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/lib.rs")).unwrap(),
+            "pub fn doubled(value: i32) -> i32 {\n    value + 1\n}\n",
+            "the refused write still reached the file"
+        );
+        assert_eq!(h.ctx.repro.refusals(), 1);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The same gate lets the reproduction itself through, because that is the
+    /// one file the fix is waiting on.
+    #[tokio::test]
+    async fn a_locked_gate_accepts_the_reproduction_file_it_is_waiting_for() {
+        let root = repro_workspace("reprogate-repro");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        h.ctx.repro.engage(&["src"], true);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call(
+                "tests/repro.rs",
+                "#[test]\nfn two_is_four() {\n    assert_eq!(thing::doubled(2), 4);\n}\n",
+            ),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(!result.starts_with("error:"), "{result}");
+        assert!(root.join("tests/repro.rs").is_file());
+        // And the gate now knows which file is this fix's evidence.
+        assert_eq!(h.ctx.repro.repro_path().as_deref(), Some("tests/repro.rs"));
+        assert!(h.prompts.try_recv().is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The refusal is keyed on the tool class, not on the tools this feature
+    /// happens to know about: an edit call whose arguments name no readable path
+    /// is refused while the gate is locked, rather than passing through because
+    /// the gate could not tell what it would touch.
+    #[tokio::test]
+    async fn an_edit_call_that_names_no_path_is_refused_while_the_gate_is_locked() {
+        let root = repro_workspace("reprogate-nameonly");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        h.ctx.repro.engage(&["src"], true);
+        // `rename` is an edit-class tool that carries no `path` argument at all.
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &call(
+                "rename",
+                serde_json::json!({"from": "doubled", "to": "times_two"}),
+            ),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(result.starts_with("error:"), "{result}");
+        assert!(h.prompts.try_recv().is_err(), "a prompt was raised");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Once the failure has been witnessed, the same call goes through — and the
+    /// gate turns around and closes on the evidence, so the test that proved the
+    /// bug cannot be edited into proving the fix.
+    #[tokio::test]
+    async fn the_production_write_runs_once_the_gate_has_seen_its_failure() {
+        let root = repro_workspace("reprogate-open");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        h.ctx.repro.engage(&["src"], true);
+        h.ctx.repro.declare_repro("tests/repro.rs");
+        h.ctx.repro.record_red(
+            crate::reprogate::Failure {
+                location: "tests/repro.rs".to_string(),
+                line: Some(3),
+                message: "assertion failed: left == right".to_string(),
+                test: Some("two_is_four".to_string()),
+            },
+            Some(101),
+        );
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call(
+                "src/lib.rs",
+                "pub fn doubled(value: i32) -> i32 {\n    value * 2\n}\n",
+            ),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(result.starts_with("updated src/lib.rs"), "{result}");
+        let evidence = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("tests/repro.rs", "// weakened\n"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(evidence.starts_with("error:"), "{evidence}");
+        assert!(evidence.contains("already on record"), "{evidence}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -873,6 +873,51 @@ pub fn command_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// The red-to-green reproduction gate (U-6). This is the one call that turns "I
+/// fixed it" into a measurement: the same command run before the change (where
+/// it must fail) and after it (where it must pass).
+pub fn repro_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "reproduce_bug".to_string(),
+        description: "Run a reproduction test for the bug you are fixing and report \
+                      whether it failed. Call it once before changing any production \
+                      code: the run must fail, and that failure is what the fix is held \
+                      against. Call it again with the same path and command after the fix \
+                      to confirm the same run now passes. While a gate the user opened is \
+                      waiting for that first failure, the only file you may write is the \
+                      reproduction test. `path` is the test file, `command` the exact \
+                      command that runs it, `scope` the paths the bug is reported in, and \
+                      `suite` an optional command that runs the surrounding tests."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative path of the reproduction test file"
+                },
+                "command": {
+                    "type": "string",
+                    "description": "The command that runs it, e.g. \
+                                    cargo test -p mycrate repro_name -- --nocapture"
+                },
+                "scope": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Paths the reported bug lives in; a failure outside \
+                                    them is flagged as suspect rather than accepted"
+                },
+                "suite": {
+                    "type": "string",
+                    "description": "Optional command that runs the surrounding suite, \
+                                    recorded against the fixed tree"
+                }
+            },
+            "required": ["path", "command"]
+        }),
+    }]
+}
+
 /// The agent's visible todo list (Milestone I, I2-03). One call replaces the
 /// whole plan, so the model never has to track indices, and the tool touches
 /// no files — it is presentation only. A model that ignores it loses the

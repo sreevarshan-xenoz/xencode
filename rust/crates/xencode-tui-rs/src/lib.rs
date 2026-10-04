@@ -20,6 +20,7 @@ pub mod mcp_serve;
 pub mod panic;
 pub mod permission_broker;
 pub mod replay;
+pub mod reprogate;
 pub mod review;
 pub mod sandbox;
 pub mod task_eval;
