@@ -1048,10 +1048,31 @@ async fn tool_web_fetch(args: &serde_json::Map<String, serde_json::Value>) -> St
         .and_then(|v| v.as_u64())
         .map(|v| (v as usize).clamp(1, xencode_analysis_rs::DEFAULT_TEXT_CAP_CHARS))
         .unwrap_or(xencode_analysis_rs::DEFAULT_TEXT_CAP_CHARS);
-    let page = match xencode_analysis_rs::web::fetch_url_guarded(url).await {
-        Ok(page) => page,
-        Err(e) => return err(e.to_string()),
-    };
+    let page =
+        match xencode_analysis_rs::web::fetch_url_guarded(url).await {
+            Ok(page) => page,
+            // RS-7: the one branch worth the extra request. A 404 is the answer a
+            // model most often gets when it guessed a documentation path, and a site
+            // that publishes `llms.txt` has written down its real ones. Probed only
+            // on a miss, never on a hit, because the file is absent across most of
+            // the Rust ecosystem and a second request to every page to find nothing
+            // is a tax, not a feature.
+            Err(xencode_analysis_rs::FetchError::Status(404)) => {
+                match llms_txt_fallback(url, cap).await {
+                    Some(answer) => return answer,
+                    // Nothing published, so say the page is missing and nothing
+                    // more: not that an index exists elsewhere, and not as a
+                    // refusal the caller could read as a permission problem.
+                    None => return err(
+                        "server returned status 404, and this site publishes no llms.txt index \
+                         either — ask for an address you have actually seen, not a path you \
+                         guessed"
+                            .to_string(),
+                    ),
+                }
+            }
+            Err(e) => return err(e.to_string()),
+        };
     let (text, dropped) = xencode_analysis_rs::cap_chars(&page.text, cap);
     let title = page.title.as_deref().unwrap_or("(no title)");
     let mut out = format!(
@@ -1065,6 +1086,36 @@ async fn tool_web_fetch(args: &serde_json::Map<String, serde_json::Value>) -> St
         ));
     }
     out
+}
+
+/// The site's own index for models, reached only after the page it was asked for
+/// turned out to be missing. `None` means there is no `llms.txt` here — the
+/// common case — which the caller reports as the 404 that it was.
+///
+/// The fallback goes to the same scheme, host and port the caller was approved
+/// for, and through the same guard, so it is a second path on an address already
+/// agreed to rather than a new trip.
+async fn llms_txt_fallback(url: &str, cap: usize) -> Option<String> {
+    let index = xencode_analysis_rs::web::llms_txt_url(url)?;
+    let page = xencode_analysis_rs::web::fetch_url_guarded(&index)
+        .await
+        .ok()?;
+    // An index is a table of contents, and a table of contents read as if it
+    // were the page that was asked for is how a model ends up quoting an
+    // index entry as documentation. The header says which of the two this is.
+    let (text, dropped) = xencode_analysis_rs::cap_chars(&page.text, cap);
+    let mut out = format!(
+        "[{url} — 404 not found. What follows is this site's own index for models, at {}, \
+         which is a list of its pages, not the page that was asked for]\n{text}",
+        page.url
+    );
+    if dropped > 0 {
+        out.push_str(&format!(
+            "\n[{dropped} more characters in this index; the whole list is at {}]",
+            page.url
+        ));
+    }
+    Some(out)
 }
 
 fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -1577,8 +1628,13 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                     // Not "a public address": loopback passes the guard on
                     // purpose, and a label that called `127.0.0.1` public would
                     // teach the reader to distrust the label. The honest pair is
-                    // whether the request would go out or be refused.
-                    Ok(()) => "  (would connect; the page is returned as text, capped)".to_string(),
+                    // whether the request would go out or be refused. The
+                    // second sentence names the one other trip this call can
+                    // make, which is the same host and a different path.
+                    Ok(()) => "  (would connect; the page is returned as text, capped; \
+                               if it turns out to be missing, this site's own /llms.txt \
+                               index is asked for on the same address)"
+                        .to_string(),
                     Err(e) => format!("  — this one would be refused: {e}"),
                 });
                 out
@@ -9329,6 +9385,10 @@ patched = ["{fixed}"]
             "{preview}"
         );
         assert!(preview.contains("would connect"), "{preview}");
+        assert!(
+            preview.contains("/llms.txt"),
+            "the prompt hides that a miss buys a second request: {preview}"
+        );
         assert!(!preview.contains("public"), "{preview}");
         // The check the fetch will make is shown before the answer, so the
         // person is not asked to approve a trip that cannot be taken.
@@ -9473,5 +9533,123 @@ patched = ["{fixed}"]
         assert!(result.contains("refusing to fetch"), "{result}");
         assert!(result.contains("169.254.169.254"), "{result}");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A server that answers `GET /llms.txt` with `index_body` when one is given,
+    /// and 404s every other path — the shape a documentation site takes when the
+    /// model guessed a path that is not there.
+    async fn serve_missing_page_with_optional_index(index_body: Option<&'static str>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let (read_half, mut write_half) = stream.into_split();
+                let mut lines = BufReader::new(read_half).lines();
+                // The request line is the only part worth reading: its path says
+                // which of the two answers this connection gets. The headers are
+                // drained so the exchange stays well-formed and the client is not
+                // left writing into a socket nobody is reading.
+                let mut path = String::from("/");
+                if let Ok(Some(request_line)) = lines.next_line().await {
+                    path = request_line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("/")
+                        .to_string();
+                    loop {
+                        match lines.next_line().await {
+                            Ok(Some(line)) if line.is_empty() => break,
+                            Ok(Some(_)) => continue,
+                            Ok(None) | Err(_) => break,
+                        }
+                    }
+                }
+                let body = match index_body {
+                    Some(index) if path == "/llms.txt" => index.to_string(),
+                    _ => String::new(),
+                };
+                let status = if body.is_empty() {
+                    "404 Not Found"
+                } else {
+                    "200 OK"
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = write_half.write_all(response.as_bytes()).await;
+                let _ = write_half.flush().await;
+            }
+        });
+        format!("http://{addr}/")
+    }
+
+    /// RS-7, the one branch worth a second request: the page the model guessed is
+    /// missing, and the site's own index of its pages is offered instead — named
+    /// as an index, so a listing entry cannot be quoted back as documentation.
+    #[tokio::test]
+    async fn a_missing_page_returns_the_index_that_names_the_pages_instead() {
+        let base = serve_missing_page_with_optional_index(Some(
+            "# Site\n\n- [Guide](/guide.html): how to start\n",
+        ))
+        .await;
+        let out = tool_web_fetch(&args_of(serde_json::json!({
+            "url": format!("{base}docs/getting-started-v2.html")
+        })))
+        .await;
+        assert!(out.contains("404 not found"), "{out}");
+        assert!(out.contains("index for models"), "{out}");
+        assert!(
+            out.contains("not the page that was asked for"),
+            "an index handed over as if it were the page: {out}"
+        );
+        assert!(out.contains("[Guide](/guide.html)"), "{out}");
+        assert!(out.contains("/llms.txt"), "{out}");
+    }
+
+    /// The other answer is the common one — most documentation sites publish no
+    /// such file — and it has to stay a plain miss. A wording that hinted an
+    /// index might exist somewhere else is how a model ends up asking the same
+    /// host again for a thing that is not there.
+    #[tokio::test]
+    async fn a_missing_page_on_a_site_with_no_index_is_reported_as_only_a_miss() {
+        let base = serve_missing_page_with_optional_index(None).await;
+        let out = tool_web_fetch(&args_of(serde_json::json!({
+            "url": format!("{base}nope.html")
+        })))
+        .await;
+        assert!(out.starts_with("error:"), "{out}");
+        assert!(out.contains("404"), "{out}");
+        assert!(out.contains("no llms.txt index"), "{out}");
+        assert!(!out.contains("What follows"), "{out}");
+    }
+
+    /// The fallback is another path on the address already refused or already
+    /// approved, never a new trip: it goes through the same guard, so a miss
+    /// cannot become a way into a private host.
+    #[tokio::test]
+    async fn the_index_fallback_cannot_step_off_the_address_being_fetched() {
+        let out = tool_web_fetch(&args_of(serde_json::json!({
+            "url": "http://169.254.169.254/latest/meta-data/nope"
+        })))
+        .await;
+        assert!(out.starts_with("error:"), "{out}");
+        assert!(out.contains("refusing to fetch"), "{out}");
+        assert!(!out.contains("llms.txt"), "{out}");
+    }
+
+    /// And a page that arrives is not probed at all: the second request exists
+    /// only behind a miss, which is what keeps this a fallback rather than a tax.
+    #[tokio::test]
+    async fn a_page_that_arrives_is_never_probed_for_an_index() {
+        let url = serve_page("<html><body><p>here it is</p></body></html>", "text/html").await;
+        let out = tool_web_fetch(&args_of(serde_json::json!({ "url": url }))).await;
+        assert!(out.contains("here it is"), "{out}");
+        assert!(out.contains("bytes fetched"), "{out}");
+        assert!(!out.contains("llms.txt"), "{out}");
     }
 }

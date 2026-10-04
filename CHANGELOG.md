@@ -44,6 +44,32 @@ The manual shows the prompt, the metadata refusal and a real fetched page.
 `xencode fetch <url>` is unchanged: you chose that address, so it needs no
 permission.
 
+### Added — `RS-7`: a page that turns out to be missing is answered with the site's own index
+
+A model asked to read documentation guesses a path, and a guessed path usually
+returns a missing page. That one answer now buys a second, cheap request: the
+same address's root `/llms.txt`, the plain-text index some documentation sites
+publish specifically for models, with the path, query and fragment dropped because
+the convention is one file per site.
+
+- **It is labelled as what it is.** The heading says the page was not found and
+  that what follows is the site's index of its pages, not the page asked for — a
+  list of links handed back as if it were the document is how a model goes on
+  describing a page it never read. The address it came from is named, and the same
+  character cap applies.
+- **A miss with no index stays a plain miss.** Measured here on 2026-10-04,
+  `docs.rs`, `tokio.rs`, `actix.rs`, `doc.rust-lang.org` and the cargo book publish
+  no such file (404 from all of them; `docs.rs` answers 400), so the wording
+  reports the absence and says to ask for an address that was actually seen. It
+  hints at no other location, because hunting for a file that was never published
+  is the failure mode this branch had to avoid.
+- **It is a fallback, not a tax.** A page that arrives is never probed, and the
+  index request goes through the same address guard as the page it follows, on the
+  same host — so a miss cannot become a second route into a private network or the
+  cloud metadata service.
+- **The approval prompt says so beforehand**, in the line shown before you answer,
+  rather than spending an extra request behind a yes that was given for one.
+
 ### Added — `/gate`: a bug fix has to reproduce the bug first
 
 An agent that "fixed" a bug often never showed the bug happening. It wrote a

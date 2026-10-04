@@ -205,6 +205,29 @@ async fn intake(response: reqwest::Response, requested: &str) -> Result<FetchedP
     })
 }
 
+/// The address of the index a site publishes *for models*, if it publishes one:
+/// `llms.txt` at the root of the same scheme and host, with the path, query and
+/// fragment of `url` dropped — the convention is one file per site, not one per
+/// page. `None` when there is no site to hang a root on: an unsupported scheme,
+/// a URL with no host, or an empty one.
+///
+/// Public because the caller has to say which address it actually looked at. A
+/// missing `llms.txt` is the normal answer, not an error — measured across the
+/// Rust documentation ecosystem — so the one thing this must not produce is a
+/// retry loop hunting for a file that was never published.
+pub fn llms_txt_url(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return None,
+    }
+    let host = parsed.host_str().filter(|h| !h.is_empty())?;
+    // Any credentials in the address belong to the person who wrote it, not to
+    // the file being looked for, so they are dropped along with the path.
+    let port = parsed.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Some(format!("{}://{host}{port}/llms.txt", parsed.scheme()))
+}
+
 /// The host of one URL has to resolve, and every address it resolves to has to
 /// be one a stranger may be pointed at. Failing to resolve is a refusal rather
 /// than a pass: an unresolvable name is also exactly what a host that only
@@ -605,6 +628,38 @@ mod tests {
             stream.write_all(response.as_bytes()).await.unwrap();
         });
         format!("http://{addr}/")
+    }
+
+    #[test]
+    fn the_index_a_site_publishes_for_models_sits_at_its_root() {
+        // One file per site, not one per page: whatever the page's own path,
+        // query or fragment was, the lookup is at the root of the same scheme,
+        // host and port.
+        assert_eq!(
+            llms_txt_url("https://docs.example.org/guide/setup.html?utm=1#anchor"),
+            Some("https://docs.example.org/llms.txt".to_string())
+        );
+        assert_eq!(
+            llms_txt_url("http://127.0.0.1:8000/x"),
+            Some("http://127.0.0.1:8000/llms.txt".to_string())
+        );
+        // An IPv6 literal keeps the brackets that make it a host and not a port.
+        assert_eq!(
+            llms_txt_url("https://[::1]:3000/a/b"),
+            Some("https://[::1]:3000/llms.txt".to_string())
+        );
+        // Credentials belong to whoever typed the address, not to the file.
+        assert_eq!(
+            llms_txt_url("https://someone:pw@example.org/a"),
+            Some("https://example.org/llms.txt".to_string())
+        );
+        // Nothing to hang a root on, in each of these: no scheme this could dial,
+        // no host, or no URL at all.
+        assert_eq!(llms_txt_url("ftp://example.org/a"), None);
+        assert_eq!(llms_txt_url("example.org/a"), None);
+        assert_eq!(llms_txt_url("file:///tmp/a"), None);
+        assert_eq!(llms_txt_url("https://"), None);
+        assert_eq!(llms_txt_url(""), None);
     }
 
     #[tokio::test]

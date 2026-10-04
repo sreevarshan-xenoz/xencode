@@ -930,7 +930,10 @@ pub fn web_tools() -> Vec<ToolDefinition> {
                       approving one address does not approve another. Addresses inside a \
                       private network, and any host that resolves only to one, are refused \
                       whatever the answer is. Returns the text of the page with the URL it \
-                      finally landed on, which is not always the one asked for. Use it for \
+                      finally landed on, which is not always the one asked for. A page the \
+                      server says is missing is answered with the site's own /llms.txt index \
+                      at its root, when it publishes one, clearly labelled as that index and \
+                      not the page. Use it for \
                       documentation, changelogs and an API response you can name; it reads \
                       text, not a site's scripts, and it cannot search — there is no search \
                       tool, so ask for a URL you already have."

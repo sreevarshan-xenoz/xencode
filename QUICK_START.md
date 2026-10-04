@@ -140,7 +140,10 @@ apply here, because a yes about one page is not a yes about the next host. The
 address is resolved and refused before connecting and again at each redirect, so
 a private network or the cloud's metadata service stays unreachable even after a
 `y`; `127.0.0.1` is allowed, so a local dev server is fetchable. Answers are text
-capped at 30 000 characters. The `web_fetch` section of
+capped at 30 000 characters. A page the server says is missing gets one more
+request on the same address — its root `/llms.txt`, the index some documentation
+sites publish for models — labelled as that index rather than the page, and most
+sites have none, which is reported as a plain miss. The `web_fetch` section of
 [CLI_GUIDE.md](CLI_GUIDE.md) shows the prompt, the refusal and a real answer.
 
 ### Ask what this machine can serve
