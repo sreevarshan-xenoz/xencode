@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2207 tests passing, zero warnings (re-verified 2026-10-04, after SE-7)
+- [x] Workspace gates green — 16 crates, 2219 tests passing, zero warnings (re-verified 2026-10-04, after PR-3)
 
 ## Model Catalog Honesty
 
@@ -9107,7 +9107,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **M-2** | enforce what a manifest declares | core | fold into QTR-1 — done, see QTR-1's note |
 | **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants; done 2026-10-04 — see the note |
 | **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN; done 2026-10-04 — see the note |
-| **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers |
+| **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers; done 2026-10-04 — see the note |
 | **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
 | **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement); done — enforced at load and at install, see the note in Q-9 |
 | **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7; done 2026-10-04 as part of SE-7 — see the note |
@@ -9382,6 +9382,45 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   the offer half; MD-1 is the enforcement half; the two never disagree because
   both key off the same `tool_class`. *Not this item:* per-mode system prompts
   (**MD-3**, rejected) and the other execution-mode labels.
+
+- [x] `PR-3` — 2026-10-04. A credential that reaches the model's context on its
+  way out of the machine is now replaced, in the **dynamic** tiers only, by a
+  placeholder whose real value is kept locally and put back at the single point it
+  is needed — when the tool actually runs. `secret_spans`
+  (`xencode-context-rs/src/trace.rs`) is the one detector: it reuses the four
+  credential shapes the turn trace already recognises (private-key blocks, bearer
+  tokens, prefixed API keys, secret-named assignments) so there is exactly one
+  source of truth for "what looks like a secret", and it returns the byte ranges,
+  never the values. `redact.rs` (`xencode-context-rs`) turns those into a
+  placeholder map: `Redactor::redact` replaces each distinct secret with
+  `«xencode-secret-N»`, numbered by first appearance so the same value in the
+  retrieval block and the prompt collapses to one token, and freezes into a
+  `Vault` that only restores. `assemble_chat` runs one `Redactor` over the history
+  turns and the assembled user turn and stores the resulting `Vault` on
+  `ChatAssembly.vault` — **the stable head (`turns[0]`) is deliberately left
+  untouched**, because redacting the bytes a local server key/value-caches would
+  both break that reuse and trip `/ctx`'s drift check; a test asserts `turns[0]`
+  comes back byte-for-byte identical with and without a secret lower in the turn.
+  The vault then rides the run: each of the three assembly→run paths (chat,
+  ByteBot, `/spawn`) hands it to `ApprovalCtx.redaction`, and
+  `execute_tool_call_approved` calls `Vault::restore_value` on the call's JSON
+  arguments — for every string leaf, so a `command` or `path` naming a placeholder
+  gets its real value back — after the provider round trip but before the shape
+  check, the policy classification and the run, so plaintext never crossed to the
+  model yet the command still works. Done-when pinned by three `context.rs` tests
+  (a secret in a dynamic tier becomes a placeholder and the stable head is
+  untouched; the held-back value restores; a secret-free turn redacts nothing and
+  is returned byte-for-byte) and one `agent_tools.rs` test that runs a real
+  `printf` whose argument names the placeholder and asserts the secret reappears
+  in the output with no token left behind. The count of held-back secrets is
+  reportable (`Vault::len`) without ever naming them. *Honest about its limits, as
+  the item's trap demands:* this is pattern-based recall, not a guarantee — a
+  secret that is not shaped like one of the four forms (a bare high-entropy string
+  with no name beside it) passes through, and the module doc says so; the real wall
+  stays SE-4's approval gate and SE-7's sandbox, and a per-request egress preview
+  that makes the policy checkable is **PR-4**, not this. Tool *results* coming back
+  into the context mid-turn are likewise not scrubbed here — SE-4 taints and gates
+  those calls.
 
 #### W8 — Outward research capability — 6 items
 

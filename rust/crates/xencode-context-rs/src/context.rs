@@ -14,6 +14,7 @@ use crate::budget::{
 };
 use crate::gitinfo::{current_git_info, dirty_paths};
 use crate::index::FileEntry;
+use crate::redact::{Redactor, Vault};
 use crate::retrieve::{retrieve, RetrievalIndex, RetrieveOptions, RetrievedFile};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -381,6 +382,12 @@ pub struct ChatAssembly {
     pub retrieved_files: Vec<String>,
     pub history_kept: usize,
     pub history_total: usize,
+    /// The secret values this assembly took out of the dynamic tiers, keyed by
+    /// the placeholder the model sees. Empty when nothing credential-shaped was
+    /// found. The stable head is never in here because it is never redacted. The
+    /// chat path hands this to the executor so a placeholder in a tool call's
+    /// arguments becomes the real value again at the point of running.
+    pub vault: Vault,
 }
 
 impl ChatAssembly {
@@ -540,14 +547,24 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
     }
 
     // ── Assemble turns ───────────────────────────────────────────────────
+    // The stable head (`turns[0]`, `stable.prefix`) is sent byte-for-byte every
+    // turn so a local server can reuse its key/value cache — redacting it would
+    // break that reuse and trip `/ctx`'s drift check, so it is left untouched.
+    // Everything after it is dynamic and has no cache to lose: those tiers are
+    // what gets redacted on the way out. One redactor spans the whole turn so a
+    // secret repeated across tiers collapses to one placeholder.
     let history_kept = kept.len();
+    let mut redactor = Redactor::new();
     let mut turns = Vec::with_capacity(history_kept + 2);
     turns.push(ChatTurn {
         role: "system".to_string(),
         content: stable.prefix,
     });
     for (role, content) in kept {
-        turns.push(ChatTurn { role, content });
+        turns.push(ChatTurn {
+            role,
+            content: redactor.redact(&content),
+        });
     }
     let mut user_turn = String::new();
     if state_included {
@@ -579,10 +596,13 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         user_turn.push_str("\n\n");
     }
     user_turn.push_str(input.prompt);
+    let user_turn = redactor.redact(&user_turn);
     turns.push(ChatTurn {
         role: "user".to_string(),
         content: user_turn,
     });
+
+    let vault = redactor.into_vault();
 
     let total_tokens = target.saturating_sub(remaining);
     // Compaction is actionable only when real history was lost: unlike the
@@ -603,6 +623,7 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         retrieved_chars_included,
         history_kept,
         history_total,
+        vault,
     }
 }
 
@@ -998,6 +1019,61 @@ mod tests {
             "{}",
             doc.text
         );
+    }
+
+    /// PR-3: a credential in a *dynamic* tier is held back from what leaves the
+    /// machine, while the stable head is left exactly as a key/value cache
+    /// expects it. The same turn, asked twice with and without the secret, must
+    /// produce a byte-identical `turns[0]` or llama.cpp's prefix reuse breaks.
+    #[test]
+    fn a_secret_in_a_dynamic_tier_is_held_back_and_the_stable_head_is_untouched() {
+        let clean = assemble_chat({
+            let mut input = sample_chat_input(Vec::new(), &[]);
+            input.prompt = "where is the login handler?";
+            input
+        });
+        let secret = assemble_chat({
+            let mut input = sample_chat_input(Vec::new(), &[]);
+            input.prompt = "run it with AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI\"";
+            input
+        });
+
+        assert_eq!(
+            clean.turns[0].content, secret.turns[0].content,
+            "the stable head changed once a secret appeared in a lower tier"
+        );
+        assert!(
+            !secret.turns[0].content.contains("wJalrXUtnFEMI"),
+            "the stable head must never carry the secret either way"
+        );
+
+        let last = secret.turns.last().unwrap().content.clone();
+        assert!(
+            !last.contains("wJalrXUtnFEMI"),
+            "the raw secret must not be in the offered turn:\n{last}"
+        );
+        assert!(
+            last.contains("«xencode-secret-1»"),
+            "the turn shows the placeholder instead:\n{last}"
+        );
+        assert_eq!(secret.vault.len(), 1, "exactly one secret held back");
+        // The value never named in the placeholder form is recoverable for the
+        // run that must actually use it.
+        assert!(secret.vault.restore(&last).contains("wJalrXUtnFEMI"));
+    }
+
+    #[test]
+    fn a_secret_free_turn_holds_back_nothing() {
+        let assembly = assemble_chat(sample_chat_input(sample_retrieved(), &[]));
+        assert!(assembly.vault.is_empty());
+        // A turn with nothing to redact must come back exactly as assembled —
+        // the placeholder machinery is invisible when there is no credential.
+        assert!(assembly
+            .turns
+            .last()
+            .unwrap()
+            .content
+            .contains("where is the login handler?"));
     }
 
     #[test]

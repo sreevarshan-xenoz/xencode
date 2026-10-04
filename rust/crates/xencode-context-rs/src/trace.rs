@@ -266,6 +266,53 @@ pub fn contains_secret(text: &str) -> bool {
     })
 }
 
+/// Every byte range in `text` that holds a credential, by the same four shapes
+/// [`redact_secrets`] removes — one pattern list, so the redactor and the
+/// scrubber and the taint gate can never disagree about what a secret is. The
+/// ranges are sorted and merged (a private-key block that also trips a
+/// prefixed-token match yields one span, not two), and each covers the *value*
+/// only: a bearer prefix and a `KEY =` name are left standing so the row still
+/// reads, exactly as [`redact_secrets`] keeps them.
+///
+/// This is the locate step the placeholder/restore map (PR-3) builds on: it
+/// needs not just "is there a secret" but "replace this exact slice and
+/// remember what it was".
+pub fn secret_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for m in PEM_KEY_RE.find_iter(text) {
+        spans.push((m.start(), m.end()));
+    }
+    for m in PREFIXED_TOKEN_RE.find_iter(text) {
+        spans.push((m.start(), m.end()));
+    }
+    // Bearer: the match leads with `bearer `, which stays; only its token goes.
+    for caps in BEARER_RE.captures_iter(text) {
+        if let (Some(whole), Some(prefix)) = (caps.get(0), caps.get(1)) {
+            spans.push((prefix.end(), whole.end()));
+        }
+    }
+    // A keyed value counts only when the *name* is secret-shaped, and then the
+    // value (group 2) is what is hidden, not the `name =`.
+    for caps in KEYED_VALUE_RE.captures_iter(text) {
+        if let (Some(name), Some(value)) = (caps.get(1), caps.get(2)) {
+            let lowered = name.as_str().to_lowercase();
+            if SECRET_NAME_PARTS.iter().any(|part| lowered.contains(part)) {
+                spans.push((value.start(), value.end()));
+            }
+        }
+    }
+    spans.sort_unstable();
+    // Merge overlaps and adjacency, keeping the widest reach of any covering run.
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+    for (start, end) in spans {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
 /// One credential-shaped value found in file content, located so a person can
 /// go look at the line. `kind` names which of the credential shapes matched.
 #[derive(Debug, Clone, PartialEq, Eq)]

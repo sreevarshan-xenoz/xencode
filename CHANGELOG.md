@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `PR-3`: secrets are held back from what the model is shown, and put back only when a command runs
+
+When a credential-shaped value would otherwise leave the machine in the
+context sent to a local model, it is now replaced with a placeholder
+(`«xencode-secret-1»`, `«xencode-secret-2»`, …) that carries no secret, and the
+real value is kept locally and restored at the one moment it is needed — when
+the tool actually executes. So a command line the model writes naming the
+placeholder runs with the genuine value, while the provider never saw the
+plaintext.
+
+- Only the **dynamic** tiers are redacted — the current task state, git facts,
+  the repo map, retrieved file bodies, the prior conversation and the current
+  prompt. The **stable head** (system prompt plus trusted `AGENTS.md`) is
+  deliberately never redacted, because those bytes are what a local server
+  key/value-caches; scrubbing them would break that reuse and trip the `/ctx`
+  cache-drift check. A test proves the head comes back byte-for-byte identical
+  with and without a secret elsewhere in the turn.
+- The same secret appearing in two tiers collapses to one placeholder (numbered
+  by first appearance, so the result is deterministic), and the number of
+  secrets held back is reportable without ever naming them.
+- Detection reuses the four credential shapes the turn trace already knows —
+  private-key blocks, bearer tokens, prefixed API keys and secret-named
+  assignments — so there is one definition of "looks like a secret".
+
+This is best-effort reduction of what leaves the machine, not a guarantee: a
+secret that is not shaped like one of those four forms passes through. The real
+wall remains the secret-taint approval gate and the shell sandbox. A per-request
+preview that would make the egress policy checkable by eye is still open.
+
 ### Added — `MD-1` + `MD-2`: `plan` and `autonomous` are real approval modes, not labels
 
 The agent's tool-approval mode (`agent_approval`) now takes two new values that
