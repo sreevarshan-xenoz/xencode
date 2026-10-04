@@ -146,6 +146,23 @@ sites publish for models — labelled as that index rather than the page, and mo
 sites have none, which is reported as a plain miss. The `web_fetch` section of
 [CLI_GUIDE.md](CLI_GUIDE.md) shows the prompt, the refusal and a real answer.
 
+### Give the agent a search engine to ask
+```bash
+xencode config set search_provider wikipedia   # or searxng, brave, tavily
+```
+`web_search` finds addresses; `web_fetch` reads one. Nothing is offered until you
+name an engine, and the default is `none`. Wikipedia is the one keyless engine
+that answers — about people, places and concepts, not the whole web. `searxng` is
+an instance you run (`xencode config set search_searxng_url http://127.0.0.1:8888`),
+and `brave` and `tavily` are a paid API behind `brave_api_key` / `tavily_api_key`,
+each sent only to its own host. There is no default public instance because the
+free options were checked and are not there: DuckDuckGo answers this machine with
+its bot CAPTCHA or `410 Gone`, public SearXNG instances won't serve JSON, MDN's
+JSON search endpoint is `404`. The question leaves the machine, so every call asks
+— `a` (allow for the session) does not apply — and what comes back is titles,
+links and the engine's snippets, none of them read. The `web_search` section of
+[CLI_GUIDE.md](CLI_GUIDE.md) shows the prompt and the real answer.
+
 ### Ask what this machine can serve
 ```bash
 xencode hw probe

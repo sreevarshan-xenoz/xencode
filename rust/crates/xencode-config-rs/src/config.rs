@@ -182,6 +182,15 @@ pub struct ApiKeys {
     /// `API_KEY_NVIDIA` so the key can live outside this file.
     #[serde(default)]
     pub nvidia_api_key: Option<String>,
+    /// Key for the Brave Search API (`https://api.search.brave.com`). It is not a
+    /// model provider: this credential is only ever sent to Brave's search host,
+    /// and only once `search_provider` says so.
+    #[serde(default)]
+    pub brave_api_key: Option<String>,
+    /// Key for Tavily (`https://api.tavily.com`), the other paid search backend.
+    /// Same rule as [`ApiKeys::brave_api_key`] — a search key, never a route.
+    #[serde(default)]
+    pub tavily_api_key: Option<String>,
 }
 
 impl ApiKeys {
@@ -222,6 +231,8 @@ impl ApiKeys {
             SecretProvider::Qwen => self.qwen_api_key = stored,
             SecretProvider::Remote => self.remote_api_key = stored,
             SecretProvider::Nvidia => self.nvidia_api_key = stored,
+            SecretProvider::Brave => self.brave_api_key = stored,
+            SecretProvider::Tavily => self.tavily_api_key = stored,
         }
     }
 }
@@ -597,6 +608,28 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub allow_web_fetch: bool,
 
+    /// Which search engine the agent's `web_search` tool is allowed to ask, by its
+    /// exact name — `none`, `wikipedia`, `searxng`, `brave` or `tavily`.
+    ///
+    /// `none` is the default, and it is not a disappointing default: it is the
+    /// honest one. The keyless options people assume are free were measured and
+    /// are gone — DuckDuckGo's keyless endpoints answer this machine a bot CAPTCHA
+    /// or **410 Gone**, and public SearXNG instances answer a `format=json` request
+    /// with an HTML page or **429**. So a search tool only exists when a person
+    /// names an engine, and the `none` answer says what the alternatives were
+    /// rather than silently failing every week.
+    #[serde(default = "default_search_provider")]
+    pub search_provider: String,
+
+    /// The address of the SearXNG instance to ask, used only when
+    /// [`XencodeConfig::search_provider`] is `searxng`. It has to be an instance
+    /// you run, because that is the only kind that serves JSON. The same address
+    /// rule as `web_fetch` applies to it: whatever this holds is resolved and
+    /// refused before a connection, so it cannot point at a private network or the
+    /// cloud's metadata service.
+    #[serde(default)]
+    pub search_searxng_url: String,
+
     /// API keys for cloud providers.
     #[serde(default)]
     pub api_keys: ApiKeys,
@@ -822,6 +855,15 @@ fn default_theme() -> String {
     "ocean".to_string()
 }
 
+/// The default for [`XencodeConfig::search_provider`]. Spelled out as a function
+/// rather than left to `#[serde(default)]` because the field is a `String`, and
+/// the value serde would reach for on an absent key is `""`. That reads the same
+/// way here — nothing is searched — but a file written back out should carry the
+/// name a person can see and change, not an empty string.
+fn default_search_provider() -> String {
+    "none".to_string()
+}
+
 fn default_layout() -> String {
     "classic".to_string()
 }
@@ -943,6 +985,8 @@ impl Default for XencodeConfig {
             run_command_sandbox: false,
             price_lookup: false,
             allow_web_fetch: false,
+            search_provider: default_search_provider(),
+            search_searxng_url: String::new(),
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),
@@ -1477,6 +1521,13 @@ mod tests {
             config.remote_base_url.is_empty(),
             "the example must not point at an invented endpoint"
         );
+        // RS-2: an example that named an engine would teach the wrong posture —
+        // the whole point of the setting is that nothing dials out until asked.
+        assert_eq!(
+            config.search_provider, "none",
+            "the example must show search switched off"
+        );
+        assert!(config.search_searxng_url.is_empty());
     }
 
     /// A `remote:` endpoint is opt-in, so an absent URL must stay absent rather

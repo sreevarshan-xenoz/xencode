@@ -935,8 +935,9 @@ pub fn web_tools() -> Vec<ToolDefinition> {
                       at its root, when it publishes one, clearly labelled as that index and \
                       not the page. Use it for \
                       documentation, changelogs and an API response you can name; it reads \
-                      text, not a site's scripts, and it cannot search — there is no search \
-                      tool, so ask for a URL you already have."
+                      text, not a site's scripts, and it does not search. Where a search tool \
+                      is offered, use it to find an address; where it is not, ask for a URL you \
+                      already have."
             .to_string(),
         parameters: serde_json::json!({
             "type": "object",
@@ -953,6 +954,47 @@ pub fn web_tools() -> Vec<ToolDefinition> {
                 }
             },
             "required": ["url"]
+        }),
+    }]
+}
+
+/// The agent's search call (RS-2). Offered only when the user has named a search
+/// provider in their config — `none` is the default, so most machines never see
+/// the name at all. The engine is whoever they picked (Wikipedia, an instance of
+/// their own, or a paid API with their key), which is why the description says
+/// "the configured provider" rather than promising a particular one.
+///
+/// It returns links and what the engine said about them. Reading one of those
+/// links is `web_fetch` and its own approval, so a list of addresses is not a way
+/// to browse the web without saying so.
+pub fn search_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "web_search".to_string(),
+        description: "Ask the search provider the user configured for a small number of \
+                      results: title, address, and the short snippet the engine printed. It \
+                      does not read any of those pages — follow one with web_fetch, which is \
+                      a separate request and a separate approval. The question leaves this \
+                      machine, so it is put to the user every time. Which engine answers \
+                      depends on what they chose: Wikipedia answers about people, places and \
+                      concepts and nothing else; an instance or a paid API answers general \
+                      web queries. Use it to find an address you do not have, not to \
+                      summarise a page you do. At most 10 results; a query longer than 400 \
+                      characters is refused."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The question to search for, in a few words"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Optional smaller number of results, 1 to 10. Defaults \
+                                    to 5; asking for more than 10 buys nothing."
+                }
+            },
+            "required": ["query"]
         }),
     }]
 }

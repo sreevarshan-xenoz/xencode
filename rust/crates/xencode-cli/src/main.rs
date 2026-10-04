@@ -1017,7 +1017,8 @@ enum ConfigAction {
         /// Configuration key (e.g., default_model, ollama_url). A key naming a
         /// provider credential — `openai_api_key`, `openrouter_api_key`,
         /// `google_gemini_api_key`, `qwen_api_key`, `remote_key`,
-        /// `nvidia_api_key` — is stored and never printed back.
+        /// `nvidia_api_key`, `brave_api_key`, `tavily_api_key` — is stored and
+        /// never printed back.
         key: String,
         /// Value to set. A leading hyphen is allowed because the value people
         /// set most often is `llama_cpp_args`, which is a server command line,
@@ -1803,12 +1804,13 @@ fn parse_daily_cap(value: &str, key: &str, max: u64, unit: &str) -> Result<Optio
 /// Settings whose empty value means "nothing set at all". Printing
 /// `set x = ` after one of those describes a value that is no longer there, so
 /// the removal gets its own wording.
-const UNSET_WHEN_EMPTY: [&str; 5] = [
+const UNSET_WHEN_EMPTY: [&str; 6] = [
     "power_cents_per_kwh",
     "budget_tokens_per_day",
     "budget_energy_wh_per_day",
     "budget_usd_micros_per_day",
     "budget_minutes_per_day",
+    "search_searxng_url",
 ];
 
 /// Print where each kind of xencode's own files is kept, and say in as many
@@ -2186,6 +2188,36 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // from the two above: this trip has no named host in front of it,
                 // so it stays unoffered until the user says it may be.
                 "allow_web_fetch" => config.allow_web_fetch = parse_bool(&value)?,
+                // Which engine `web_search` may ask, if any. Checked against the
+                // names the search code itself accepts, so a typo here is told at
+                // the keyboard instead of at the first search of the next session.
+                "search_provider" => {
+                    let name = value.trim().to_ascii_lowercase();
+                    if !xencode_analysis_rs::search::PROVIDER_NAMES.contains(&name.as_str()) {
+                        return Err(format!(
+                            "search_provider must be one of {}; `none` leaves the tool unoffered",
+                            xencode_analysis_rs::search::PROVIDER_NAMES.join(", ")
+                        ));
+                    }
+                    config.search_provider = name;
+                }
+                // The instance to ask when the provider above is `searxng`. Same
+                // shape rule as `remote_url`, because this address is the one a
+                // search request is dialed to and it is checked again, against
+                // private ranges, before every connection.
+                "search_searxng_url" => {
+                    let trimmed = value.trim().trim_end_matches('/').to_string();
+                    if !trimmed.is_empty()
+                        && !(trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+                    {
+                        return Err(
+                            "search_searxng_url must be an http:// or https:// URL, or empty to \
+                             unset"
+                                .to_string(),
+                        );
+                    }
+                    config.search_searxng_url = trimmed;
+                }
                 // Keep every model call of every run, in the clear, under
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.
