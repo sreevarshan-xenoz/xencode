@@ -2185,6 +2185,12 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.
                 "session_recording" => config.session_recording = parse_bool(&value)?,
+                // Fence each run_command, background_start and shell hook in a
+                // bubblewrap namespace (SE-7). Off by default because it changes
+                // what an approved command can reach, and on it needs bwrap — a
+                // command is then refused rather than run unsandboxed when bwrap
+                // is missing, so a machine without it must not turn this on blind.
+                "run_command_sandbox" => config.run_command_sandbox = parse_bool(&value)?,
                 // Let a saved profile take a turn on its own when the prompt reads
                 // as the kind of work it is marked for. Off until it is asked for,
                 // because a model the user did not choose answering a query is a

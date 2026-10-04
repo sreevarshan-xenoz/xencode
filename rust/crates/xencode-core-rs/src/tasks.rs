@@ -179,6 +179,26 @@ impl Default for TaskManager {
     }
 }
 
+/// What to actually execute for a background task: a program and its argument
+/// list. Normally `SpawnSpec::shell` (`sh -c command`); the agent passes a
+/// `bwrap …` spec when the SE-7 sandbox is on, so isolation reaches background
+/// tasks too while the recorded command stays the human-readable one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnSpec {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+impl SpawnSpec {
+    /// The plain `sh -c command` spawn.
+    pub fn shell(command: &str) -> SpawnSpec {
+        SpawnSpec {
+            program: "sh".to_string(),
+            args: vec!["-c".to_string(), command.to_string()],
+        }
+    }
+}
+
 impl TaskManager {
     pub fn new() -> Self {
         Self {
@@ -233,9 +253,26 @@ impl TaskManager {
         cwd: Option<&std::path::Path>,
         timeout: Duration,
     ) -> Result<u64, TaskError> {
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg(command)
+        self.start_spawning(name, command, cwd, timeout, &SpawnSpec::shell(command))
+            .await
+    }
+
+    /// Like [`start_with_cwd_and_timeout`](Self::start_with_cwd_and_timeout) but
+    /// spawning through a caller-resolved program and argument list instead of a
+    /// bare `sh -c`. `command` is still what the record and `poll` display;
+    /// `spawn` is what actually executes. The agent uses this to run a background
+    /// task inside the SE-7 `bwrap` sandbox while keeping the recorded command
+    /// readable.
+    pub async fn start_spawning(
+        &mut self,
+        name: &str,
+        command: &str,
+        cwd: Option<&std::path::Path>,
+        timeout: Duration,
+        spawn: &SpawnSpec,
+    ) -> Result<u64, TaskError> {
+        let mut cmd = Command::new(&spawn.program);
+        cmd.args(&spawn.args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);

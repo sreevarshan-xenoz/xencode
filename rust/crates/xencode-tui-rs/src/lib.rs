@@ -20,6 +20,7 @@ pub mod panic;
 pub mod permission_broker;
 pub mod replay;
 pub mod review;
+pub mod sandbox;
 pub mod task_eval;
 pub mod task_profiles;
 pub mod templates;

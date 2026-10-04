@@ -613,6 +613,18 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub session_recording: bool,
 
+    /// Run each `run_command`, `background_start` and shell hook inside a
+    /// `bubblewrap` sandbox: the workspace and `~/.cargo` stay writable, the
+    /// rest of the home (including `~/.ssh`) and the wider filesystem are not
+    /// mounted in, and the network namespace is dropped unless the call asks
+    /// for it. Off by default, because it changes what an approved command can
+    /// reach and a build that fetches a dependency will not run with the net
+    /// off — turning it on is a decision, not a surprise. There is deliberately
+    /// no silent fallback: when this is on and `bwrap` is not installed, the
+    /// command is refused with the reason rather than quietly run unsandboxed.
+    #[serde(default)]
+    pub run_command_sandbox: bool,
+
     /// Named generation settings the TUI's Custom Models panel applies to the
     /// next turn. The panel edits these values and writes them back with
     /// [`XencodeConfig::save`]; nothing is seeded, so an empty list means the
@@ -912,6 +924,7 @@ impl Default for XencodeConfig {
             budget_minutes_per_day: None,
             allow_cloud_models: false,
             allow_online_docs: false,
+            run_command_sandbox: false,
             price_lookup: false,
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
@@ -1349,6 +1362,9 @@ mod tests {
         assert_eq!(config.agent_max_rounds, 16);
         // Nothing is written down about a session until the user asks.
         assert!(!config.session_recording);
+        // No shell command is fenced until the user asks; on it needs bwrap and
+        // changes what an approved command can reach.
+        assert!(!config.run_command_sandbox);
         assert_eq!(config.agent_command_timeout, 30);
         assert!(config.agent_fallback_models.is_empty());
         assert_eq!(config.ollama_url, "http://localhost:11434");

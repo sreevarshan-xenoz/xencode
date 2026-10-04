@@ -115,6 +115,19 @@ approval comes back `denied` unless you pass `--run-tools`. Ollama, llama.cpp, a
 `remote:` endpoint and OpenRouter can be recorded; models served by Anthropic,
 Gemini or Qwen cannot, and the command says so rather than writing a paraphrase.
 
+### Fence the agent's shell off from your home
+```bash
+xencode config set run_command_sandbox true   # needs `bwrap` installed
+```
+Off by default. On, each `run_command`, `background_start` and shell hook runs in
+a `bubblewrap` namespace: the workspace and `~/.cargo` stay writable, the rest of
+the home (`~/.ssh` keys included) is replaced by an empty directory so it is gone
+rather than hidden, and the network is off unless that one command passes `net`.
+It is the guard against a command or a hook exfiltrating a file the approval gate
+could not see. With `bwrap` missing the command is refused, never run
+unsandboxed. A build that downloads a dependency will not run with the net off,
+which is why enabling it is a choice, not the default.
+
 ### Ask what this machine can serve
 ```bash
 xencode hw probe
