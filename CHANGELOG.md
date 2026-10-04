@@ -220,6 +220,18 @@ trips Xencode's own detectors but sits outside any vendor's published signature,
 and `AGENTS.md` records a standing rule to keep it that way. No behavior
 changed: the redaction and secret-scan tests still pass, at the same counts.
 
+### Fixed — MCP list calls no longer hang strict servers, and a browser recipe shows the whole loop
+
+The client sent `"params": null` on `tools/list`, `resources/list` and
+`prompts/list`; a strict server (Playwright MCP) answers the handshake and then
+drops such a call without a word, which surfaced as a 30-second timeout. All
+three now send `{}`. `CLI_GUIDE.md` carries the recipe this fix unblocks:
+declaring `@playwright/mcp` under `mcp_servers`, starting it with `/mcp`,
+letting the agent navigate and screenshot a dev server behind the `External`
+approval, and attaching the PNG with `Space` — with the two limits stated
+plainly (twenty-five tool definitions cost about nine thousand context tokens,
+and a text-only local model cannot read the screenshot it just took).
+
 ### Added — `PR-3`: secrets are held back from what the model is shown, and put back only when a command runs
 
 When a credential-shaped value would otherwise leave the machine in the

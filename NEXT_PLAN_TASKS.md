@@ -9963,6 +9963,23 @@ Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate chang
   `brave`/`tavily` are implemented to their published request and response shapes but
   have not been exercised against those APIs live, because there is no key for either
   on this box and a paid call is the person's decision to make, not the agent's.
+- [x] `CU-2` / `MM-11` — 2026-10-04. Browser verification as a documented
+  Playwright-MCP recipe (`CLI_GUIDE.md`), the same item under both IDs. The recipe
+  itself is docs-only; making it work exposed one real client bug: `tools/list`,
+  `resources/list` and `prompts/list` sent `"params": null`, which Playwright MCP
+  answers by saying nothing — a silent drop that reads as a 30-second timeout. All
+  three now send `{}` (existing `xencode-mcp-rs` tests green).
+  *Verified by running it:* `/mcp` against the real `@playwright/mcp` 0.0.83
+  reported `◈ ✓ playwright · 25 tool(s)`; the agent ran `browser_navigate` on a
+  loopback dev server (its log showed a real Chromium `GET /` plus `/favicon.ico`)
+  and `browser_take_screenshot`, which wrote a real 1280×720 PNG (18,330 bytes);
+  attaching it with `Space` (`📌`) sent it as a data URL — the loopback text-only
+  model refused it (`image input is not supported … you may need to provide the
+  mmproj`), which is the recipe's stated limit: the screenshot lands on disk and is
+  sent, but having the model *read* it needs a vision-capable model. The recipe also
+  states the context cost plainly: twenty-five tool definitions are about nine
+  thousand tokens, so a local `llama-server` needs `-c 32768` — a 9232-token turn
+  does not fit an 8192 slot and fails before the model reads a word.
 
 #### W9 — Project DNA and architecture intelligence — 21 items
 
