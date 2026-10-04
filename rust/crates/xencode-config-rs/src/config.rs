@@ -582,6 +582,21 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub price_lookup: bool,
 
+    /// Whether the agent is offered `web_fetch` at all: one read of a page or
+    /// an API response whose address the model picked.
+    ///
+    /// The fourth network switch, and the only one where the *model* chooses the
+    /// address. [`XencodeConfig::allow_online_docs`] dials two named hosts for a
+    /// file whose version a lock file already pinned; this one goes wherever a
+    /// tool call says, which is why it is off by default, why offering it is a
+    /// separate decision from every approval mode, and why each call still asks:
+    /// a permission to fetch one page is not a permission to fetch the web.
+    /// What it cannot reach even when on is written down in
+    /// `xencode_analysis_rs::web`: private networks, the cloud's metadata
+    /// address, and any host that resolves only to those.
+    #[serde(default)]
+    pub allow_web_fetch: bool,
+
     /// API keys for cloud providers.
     #[serde(default)]
     pub api_keys: ApiKeys,
@@ -927,6 +942,7 @@ impl Default for XencodeConfig {
             allow_online_docs: false,
             run_command_sandbox: false,
             price_lookup: false,
+            allow_web_fetch: false,
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),

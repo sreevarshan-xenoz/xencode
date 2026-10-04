@@ -128,6 +128,21 @@ could not see. With `bwrap` missing the command is refused, never run
 unsandboxed. A build that downloads a dependency will not run with the net off,
 which is why enabling it is a choice, not the default.
 
+### Let the agent read one page you have not chosen
+```bash
+xencode config set allow_web_fetch true
+```
+This is what offers the agent the `web_fetch` tool — the only one whose address
+comes from the model. Off by default, and turning it on only offers the tool:
+every call still stops at the approval prompt, which shows the address and
+whether the fetch would even be allowed, and `a` (allow for the session) does not
+apply here, because a yes about one page is not a yes about the next host. The
+address is resolved and refused before connecting and again at each redirect, so
+a private network or the cloud's metadata service stays unreachable even after a
+`y`; `127.0.0.1` is allowed, so a local dev server is fetchable. Answers are text
+capped at 30 000 characters. The `web_fetch` section of
+[CLI_GUIDE.md](CLI_GUIDE.md) shows the prompt, the refusal and a real answer.
+
 ### Ask what this machine can serve
 ```bash
 xencode hw probe

@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2261 tests passing, zero warnings (re-verified 2026-10-04, after U-6)
+- [x] Workspace gates green — 16 crates, 2279 tests passing, zero warnings (re-verified 2026-10-04, after RS-1)
 
 ## Model Catalog Honesty
 
@@ -1925,7 +1925,9 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       ellipsis — and the body reaches the model solely through `load_skill`, a
       read-only tool that takes a name and no path, so it opens no read outside
       the skill directories. With no skills installed the menu is absent and the
-      tool list is the 18 built-ins it was before, both asserted.
+      tool list is the built-ins it was before (18 then; `web_fetch` made that 19
+      and is off by default, so the list a machine sees without opening that
+      switch is still the same one), both asserted.
       Verified live against a local llama.cpp model on the same prompt in a fresh
       session each time (Qwen3-4B-Instruct, the smallest model here that calls
       tools — the 0.6B and 1.7B models on this machine ignored the tool list
@@ -9818,6 +9820,56 @@ Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate chang
 | **RS-1** | `web_fetch` as an agent tool | capability | web_fetch — MUST follow SE-2 + the approval-gate change, per the file's own note |
 | **RS-2** | A search provider abstraction with `provider = "none"` | capability | search provider abstraction, provider="none" as default — no keyless engine, tested and false |
 | **RS-7** | `llms.txt` probing as a branch inside RS-1 | capability | llms.txt probing inside RS-1 |
+
+#### W8 progress
+
+- [x] `RS-1` — 2026-10-04. `web_fetch` is a real tool, and it is the only one
+  whose address the model chooses. `ToolClass::Network` joins read/edit/shell and
+  maps to the `network.request` capability CAP-1 had already written the strict
+  row for, so the gate's decision existed before the tool did: `Ask` in
+  `ask`/`edit-allow`/`all-allow`, `Deny` in `plan` and `autonomous`, and — the
+  item's own trap, "not grantable as one blanket *always allow all hosts*" — the
+  session grant is refused for this single class while `no_session_grant_buys_off_a_fetch`
+  proves the shortcut still works one tool over, on `run_command`. The ledger is
+  honest about it too: an `a` answer is recorded as a one-time allow, because
+  recording the consent the gate will not honour would be a record of something
+  that never happened. `xencode mcp serve` refuses the tool even when it was
+  named in `--allow`, saying the half that is missing is a person to answer.
+  *Offering* it is a fourth switch, `allow_web_fetch` (default `false`), separate
+  from every approval mode, and the executor refuses again if a call arrives with
+  the switch off — so a resumed transcript cannot run what the settings page says
+  is closed. All three of the traps named for this item are fixed, each with a
+  test that watches the refusal: the content-type gate now admits
+  `application/json` and any `+json` suffix (it had been rejecting every API
+  response that described itself correctly); redirects are walked by xencode
+  under `Policy::none()` so `guard_destination` runs on **every hop**, because a
+  `Location:` header is as untrusted as the page that sent it — proven by a live
+  `302` into `169.254.169.254` refused before the second connection, and by a
+  chain that never landing stopping at five with its own error rather than
+  looking like a slow page; and the deny list covers RFC1918, CGNAT, link-local
+  and the metadata address, `0.0.0.0`, multicast, and the IPv6 equivalents, with
+  loopback **allowed deliberately** (a guard that refused it would be one nobody
+  could run, and it is what lets the fetch path be tested end to end against a
+  real socket). An unresolvable name is refused, not passed — from out here an
+  internal-only hostname and a dead one look identical, and the guard is not
+  allowed to guess. The 30 000-character cap moved into
+  `xencode_analysis_rs::web::DEFAULT_TEXT_CAP_CHARS` and the CLI's own
+  `FETCH_TEXT_CAP_CHARS` is now an alias of it, so the number the plan told us to
+  copy is one number; `max_chars` can lower it, not raise it.
+  *Verified by running it:* the tool against a page served on loopback by the
+  test's own HTTP listener returned `[http://127.0.0.1:43427/ — Guide — 78 bytes
+  fetched]` with the page's text under it, an approved fetch of
+  `http://169.254.169.254/latest/meta-data/` came back `error: refusing to fetch
+  …: 169.254.169.254 is the link-local range, which is where a cloud serves its
+  instance metadata and credentials` with no packet sent, and a fetch while the
+  switch is off answered `error: web_fetch is not enabled: …` even after `y`.
+  *Limits, stated:* the guard resolves the host to check it and reqwest resolves
+  it again to connect, so a name whose record changes between the two (DNS
+  rebinding) is a window this does not close — closing it needs the resolved
+  address pinned onto the connection, which is `SE-7`'s neighbour, not this
+  item's. The header names the address the answer landed on, so a redirected fetch
+  is at least honest about where the text came from. `RS-7`'s `llms.txt` probing
+  is a separate row and is not part of this commit.
 
 #### W9 — Project DNA and architecture intelligence — 21 items
 

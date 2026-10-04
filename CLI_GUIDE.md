@@ -306,6 +306,64 @@ in every approval mode, like the three read tools, and it is not a way to write:
 the only files it opens are documentation, and a fetched document is handed to the
 model as text, never saved.
 
+#### Reading one page the model asks for: `web_fetch`
+
+`allow_cloud_models` opens a server you chose and `allow_online_docs` dials two
+named hosts for a pinned crate. `web_fetch` is the one tool whose address comes
+from the model, which is why it is off until you say otherwise:
+`xencode config set allow_web_fetch true` adds it to what the agent is offered,
+and nothing else.
+
+Offering it is not the same as letting it out. Every call stops at the approval
+prompt, in every mode including all-allow, and the prompt shows the address
+together with the verdict the fetch itself will reach — the same check, not a
+second opinion:
+
+```text
+web_fetch http://127.0.0.1:9999/docs
+fetch: http://127.0.0.1:9999/docs  (would connect; the page is returned as text, capped)
+
+web_fetch http://169.254.169.254/latest/meta-data/
+fetch: http://169.254.169.254/latest/meta-data/  — this one would be refused: 169.254.169.254 is the link-local range, which is where a cloud serves its instance metadata and credentials
+```
+
+Answering `a` — allow for the session — is the one answer this tool does not
+take. A yes about one page is not a yes about the next host, so the grant is
+ignored for `network.request` and the second fetch prompts again. In plan and
+autonomous mode the call is refused outright rather than asked: plan must not
+reach out, and an unattended run has nobody to answer.
+
+Approval is also not a key into this machine. The address is resolved before the
+connection is opened, and every redirect is re-checked at each hop, so a page
+cannot point the request inward — RFC1918, carrier-grade NAT, link-local and the
+metadata address are unreachable even after a `y`, and a host that resolves only
+to internal DNS is refused rather than tried. `127.0.0.1` is allowed on purpose,
+so a dev server on this machine stays fetchable. This is the whole tool running
+against a server started by the test on loopback:
+
+```text
+[http://127.0.0.1:43427/ — Guide — 78 bytes fetched]
+Guide fetched body
+```
+
+The header names the address the answer actually came from, which is the landed
+one after redirects, not the one that was asked for. HTML is reduced to text;
+JSON and `text/plain` are returned as they arrived. The text is capped at 30 000
+characters, and when anything is cut the answer says how much and repeats the
+address so the next call can ask for the rest. A `max_chars` argument can lower
+that cap but not raise it — the cap exists to keep a whole page out of the
+context window, so a bigger number buys nothing.
+
+A call that arrives while the setting is off — from a resumed transcript, say —
+is refused in the executor too, and answering the prompt does not change that:
+
+```text
+error: web_fetch is not enabled: `xencode config set allow_web_fetch true` offers it, and every call still asks before the request leaves
+```
+
+`xencode fetch <url>` is the same reading with you choosing the address, and it
+does not go through this gate.
+
 #### Asking what is known to be wrong with a dependency: `lookup_advisory`
 
 The third thing a model gets wrong about a dependency is its history: asked
@@ -2002,6 +2060,7 @@ is what used to happen.
 | `session_recording` | bool | Write down every model call of an agent turn — the request, the response bytes as they arrived, and what each tool returned — to `.xencode/cache/sessions/<run-id>.jsonl`, so `xencode replay` can run that turn again. Off by default. Only the routes whose bytes this program reads itself are recordable: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter. Asking for a recording of an Anthropic, Gemini or Qwen model is refused with the reason, because those have their own readers and a "recording" of them would be a paraphrase. |
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
 | `allow_online_docs` | bool | Whether the agent's `read_docs` tool may fetch a crate's documentation when cargo has not unpacked it on this machine. Off by default, and independent of `allow_cloud_models` — turning one on does not turn on the other, because one is a prompt leaving and the other is a text file arriving. With it off, `read_docs` answers from cargo's own copy and says what else would be needed to get more. Open it with `xencode config set allow_online_docs true`. |
+| `allow_web_fetch` | bool | Whether the agent is offered the `web_fetch` tool, which reads one page or API response at an address **the model names**. Off by default, and independent of both switches above. Turning it on only offers the tool: every call stops at the approval prompt showing the exact address and whether that address could land, and "allow for the session" does not apply to this tool — a yes about one page is not a yes about the next host. Approval is not a route into this machine either: the address is resolved and refused before the connection, and again at every redirect, so RFC1918, carrier-grade NAT, link-local and cloud-metadata addresses are unreachable even after a `y`, while `127.0.0.1` is allowed so a local dev server stays fetchable. The text handed back is capped at 30 000 characters and says how much of the page was left out. Open it with `xencode config set allow_web_fetch true`. |
 | `run_command_sandbox` | bool | Run each `run_command`, `background_start` and shell hook inside a `bubblewrap` (`bwrap`) mount namespace. Off by default; open it with `xencode config set run_command_sandbox true`, and it needs `bwrap` installed. With it on: the workspace and `~/.cargo` are bind-mounted writable so a build still works, the rest of the home directory is replaced by an empty tmpfs so `~/.ssh` and the files under it are *absent* rather than merely unreadable, and the network namespace is dropped. A single call that must reach the network passes `net: true` (an argument on `run_command` and `background_start`); shell hooks get no such grant and always run with the net off under the sandbox. There is **no silent fallback**: if the setting is on and `bwrap` is not present, the command is refused with the reason instead of being run unsandboxed. It bounds what a command can read outside the project — it does not contain the compiler: `build.rs` scripts and anything reachable from the writable workspace run free inside, so this is a fence on the home and the network, not a full jail. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048, "for_task": "bugfix" }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here; `f` cycles `for_task` through `bugfix`, `general` and none. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |

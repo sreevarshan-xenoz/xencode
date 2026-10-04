@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `RS-1`: the agent can read one web page, and only after you switch it on and say yes to that address
+
+`xencode config set allow_web_fetch true` offers the agent the `web_fetch` tool,
+for the one thing no other tool could do: fetch a page or API
+response whose URL the model names. It is off by default because the model picks
+the address, and it stays gated on two independent rules.
+
+- **Every call asks, in every approval mode, and "allow for the session" does not
+  apply.** A new `network request` class sits beside read, edit and shell, and it
+  is the one class a standing grant cannot buy off: consenting to one page is not
+  consenting to the next host. `plan` refuses it outright (a read-only mode cannot
+  reach out), `autonomous` refuses it too — an unattended run has nobody to
+  answer — and `xencode mcp serve` refuses it however the tool was named at
+  launch.
+- **The prompt shows the verdict before you give it.** The same check the fetch
+  will run is applied while you are still deciding, so an address that cannot be
+  fetched is never offered for approval.
+- **Approval is not a route into this machine.** The address is resolved and
+  refused *before* the connection opens, and every redirect is re-checked at each
+  hop, so RFC1918, carrier-grade NAT, link-local and a cloud's instance-metadata
+  address are unreachable even after a `y`, and a page cannot point the request
+  inward. A host that resolves only through internal DNS is refused rather than
+  tried; `127.0.0.1` is allowed on purpose, so a local dev server stays fetchable.
+  The chain is capped at five redirects and says when it never landed.
+- **What comes back is text, capped at 30 000 characters** — the same number the
+  CLI's own `xencode fetch` uses, now shared rather than repeated. HTML is
+  reduced to text, JSON and `text/plain` arrive as they are, and the answer is
+  headed by the address it *actually* landed on after redirects, not the one that
+  was asked for. `max_chars` can lower the cap but not raise it.
+- **JSON is no longer refused for being JSON.** The content-type check that
+  rejected anything not HTML also rejected every API response that said so
+  honestly; `application/json` and `+json` now pass.
+
+The manual shows the prompt, the metadata refusal and a real fetched page.
+`xencode fetch <url>` is unchanged: you chose that address, so it needs no
+permission.
+
 ### Added — `/gate`: a bug fix has to reproduce the bug first
 
 An agent that "fixed" a bug often never showed the bug happening. It wrote a

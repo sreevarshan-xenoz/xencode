@@ -918,6 +918,42 @@ pub fn repro_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// The agent's one read of the public web (RS-1). Offered only when the user has
+/// opened `allow_web_fetch`, and every call still asks: the address comes from
+/// the model, and a permission to fetch one page is not a permission to fetch
+/// any page.
+pub fn web_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "web_fetch".to_string(),
+        description: "Read one page or API response as text. Pass the exact URL. The \
+                      request leaves this machine, so it is put to the user every time — \
+                      approving one address does not approve another. Addresses inside a \
+                      private network, and any host that resolves only to one, are refused \
+                      whatever the answer is. Returns the text of the page with the URL it \
+                      finally landed on, which is not always the one asked for. Use it for \
+                      documentation, changelogs and an API response you can name; it reads \
+                      text, not a site's scripts, and it cannot search — there is no search \
+                      tool, so ask for a URL you already have."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The http(s) address to read"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Optional smaller limit on the text returned, in \
+                                    characters. Lowering it is allowed; the tool has a \
+                                    ceiling a larger number cannot raise."
+                }
+            },
+            "required": ["url"]
+        }),
+    }]
+}
+
 /// The agent's visible todo list (Milestone I, I2-03). One call replaces the
 /// whole plan, so the model never has to track indices, and the tool touches
 /// no files — it is presentation only. A model that ignores it loses the
