@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `SE-3`: a repository's `AGENTS.md` is data until you trust its exact bytes
+
+A fresh clone can hand the agent a file whose whole purpose is to be obeyed —
+and nothing checked who wrote it. Now an `AGENTS.md` nobody has trusted enters
+the model's context marked `[data]`, with the file's sha256 and a sentence
+telling the model it came from the repository, not from the person it works
+for, and must not change any approval, permission mode, read or run. The TUI
+says so in the chat once per exact content, and `/trust` gives those bytes
+instruction status; the decision persists in
+`.xencode/cache/agents_trust.json` as hashes only, so the same file is asked
+about once and any edit is a new question — `/trust status` reads the state,
+`/trust forget` withdraws it. The permission gate never reads the file in any
+state: a test pins that `classify` answers identically for a shell call with
+the demanding file absent, untrusted, trusted and edited, in every mode.
+Verified live: a sandboxed TUI on a local model showed the ⚠️ notice with
+hash `585c6af3c33e`, `🤝 Trusted` flipped the head digest, and editing one
+line moved the file back to `NOT trusted (sha256 ec384f474155)` while the
+store kept only the old hash. A corrupt trust store fails closed — it reads
+as no trust, never as permission.
+
 ### Changed — `SE-2`: every tool result arrives at the model labelled with where it came from
 
 Content fetched from the machine — a file body, a command's output, an MCP

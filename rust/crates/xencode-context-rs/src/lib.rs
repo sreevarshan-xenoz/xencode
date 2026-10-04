@@ -56,6 +56,7 @@ pub mod stale;
 pub mod state;
 pub mod symbols;
 pub mod trace;
+pub mod trust;
 pub mod tsymbols;
 pub mod verify;
 pub mod watcher;
@@ -185,6 +186,10 @@ pub use verify::{
 pub use trace::{
     append_trace, arguments_preview, prompt_digest, read_recent_traces, redact_secrets,
     tail_preview, trace_path, ToolTrace, TurnTrace, TRACE_ARGUMENTS_CAP, TRACE_TAIL_CAP,
+};
+pub use trust::{
+    agents_content_is_trusted, agents_sha256, read_agents_md, trust_agents, untrust_agents,
+    UNTRUSTED_BANNER,
 };
 pub use watcher::{
     map_kind, should_ignore, Debounce, WatchEvent, WatchKind, WatcherSession, WorkspaceWatcher,

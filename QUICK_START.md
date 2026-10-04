@@ -206,6 +206,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /verify [skip...]     - Run the machine-checkable checklist — fmt, lint, test
 /hotspots [limit]     - Rank files by churn, size and bus factor
 /agents               - Inventory the coding-agent CLIs installed on PATH
+/trust [status|forget] - Follow the workspace AGENTS.md as instructions, or report/withdraw (trust is per content hash)
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full

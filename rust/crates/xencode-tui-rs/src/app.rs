@@ -108,6 +108,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/verify",
     "/hotspots",
     "/agents",
+    "/trust",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -352,6 +353,11 @@ pub struct App<'a> {
     pub available_models: Vec<String>,
     pub selected_model: usize,
     pub is_generating: bool,
+    /// SE-3: content hash of the `AGENTS.md` this session has already been
+    /// warned about. The notice shows once per exact bytes — a fresh clone
+    /// says it, an edit to the file says it again, and fifty more turns of
+    /// the same untrusted file stay quiet.
+    pub agents_trust_noticed: Option<String>,
     pub is_reviewing: bool,
     pub code_review_output: String,
     pub review_dash: crate::review::ReviewDashboard,
@@ -1860,7 +1866,7 @@ impl SingleShot {
 /// The frozen system head a chat turn sends (workspace instructions + anchor),
 /// so a panel's one-shot request starts from the same prefix and stays cheap.
 fn one_shot_messages(root: &std::path::Path, prompt: String) -> Vec<ChatMessage> {
-    let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+    let agents = xencode_context_rs::read_agents_md(root);
     let anchor =
         std::fs::read_to_string(root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md")).ok();
     vec![
@@ -2434,6 +2440,7 @@ impl<'a> App<'a> {
             available_models,
             selected_model,
             is_generating: false,
+            agents_trust_noticed: None,
             is_reviewing: false,
             code_review_output: String::new(),
             review_dash: crate::review::ReviewDashboard::new(),
@@ -3174,6 +3181,14 @@ impl<'a> App<'a> {
             return;
         }
 
+        // /trust: SE-3. An AGENTS.md you have not trusted arrives as data;
+        // this gives trust to its exact content hash, reports the state, or
+        // takes it back.
+        if prompt == "/trust" || prompt.starts_with("/trust ") {
+            self.handle_trust_command(&prompt);
+            return;
+        }
+
         self.is_generating = true;
         // The turn boundary: what today has spent is weighed before this turn's
         // context is sized, so a passed cap buys the turn down and the check
@@ -3270,6 +3285,29 @@ impl<'a> App<'a> {
                 role: "system".to_string(),
                 content: "Project index not found — run /init once for project-aware answers. Continuing with guidelines + history only.".to_string(),
             });
+        }
+        // SE-3: say out loud, once per exact bytes, that an untrusted
+        // AGENTS.md rode into this turn as data rather than instructions —
+        // the file's whole purpose is to be followed, so the refusal to
+        // follow it must not be silent.
+        if let Ok(raw) = std::fs::read_to_string(root.join("AGENTS.md")) {
+            if !raw.trim().is_empty() && !xencode_context_rs::agents_content_is_trusted(&root, &raw)
+            {
+                let sha = xencode_context_rs::agents_sha256(&raw);
+                if self.agents_trust_noticed.as_deref() != Some(sha.as_str()) {
+                    self.agents_trust_noticed = Some(sha.clone());
+                    self.messages.push(UiMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "⚠️ AGENTS.md (sha256 {}) is repository-provided and untrusted: \
+                             it entered this turn marked [data], not as instructions, and the \
+                             model is told not to follow it. Read it yourself, then /trust to \
+                             follow these exact bytes; /trust status shows the state.",
+                            &sha[..12]
+                        ),
+                    });
+                }
+            }
         }
         // What the server will report the cost of, split between retrieval and
         // the rest of the turn, for the next turn's caps (AC-4).
@@ -4909,7 +4947,7 @@ impl<'a> App<'a> {
                 let profile = self.hardware.profile;
                 let root = xencode_context_rs::default_root();
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-                let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+                let agents = xencode_context_rs::read_agents_md(&root);
                 let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
                 let state =
                     xencode_context_rs::ContextState::from_disk(&xencode).map(|s| s.to_markdown());
@@ -5692,6 +5730,77 @@ impl<'a> App<'a> {
         self.system_line(&msg);
     }
 
+    /// SE-3: the `AGENTS.md` trust split, from the command line. `/trust`
+    /// trusts the current bytes of the workspace file — by content hash, so a
+    /// later edit is a new question — and the decision persists in
+    /// `.xencode/cache/agents_trust.json` across sessions. `/trust status`
+    /// says how the file enters context right now; `/trust forget` withdraws
+    /// trust for these exact bytes.
+    fn handle_trust_command(&mut self, prompt: &str) {
+        let root = xencode_context_rs::default_root();
+        let body = prompt.strip_prefix("/trust").unwrap_or("").trim();
+        match body {
+            "" => match xencode_context_rs::trust_agents(&root) {
+                Ok(sha) => self.system_line(&format!(
+                    "🤝 Trusted AGENTS.md (sha256 {}). Its bytes now enter the model's \
+                     context as instructions. Any edit changes the hash and makes it \
+                     data again. Withdraw with /trust forget.",
+                    &sha[..12]
+                )),
+                Err(e) => self.system_line(&format!("Cannot trust: {e}")),
+            },
+            "status" => {
+                let content = std::fs::read_to_string(root.join("AGENTS.md"));
+                match content {
+                    Ok(content) if content.trim().is_empty() => {
+                        self.system_line("AGENTS.md is empty — nothing to trust.");
+                    }
+                    Ok(content) => {
+                        let sha = xencode_context_rs::agents_sha256(&content);
+                        if xencode_context_rs::agents_content_is_trusted(&root, &content) {
+                            self.system_line(&format!(
+                                "AGENTS.md (sha256 {}) is trusted: it enters context as \
+                                 instructions.",
+                                &sha[..12]
+                            ));
+                        } else {
+                            self.system_line(&format!(
+                                "AGENTS.md (sha256 {}) is NOT trusted: it enters context \
+                                 marked [data], and the model is told not to follow it. \
+                                 Read it, then decide with /trust.",
+                                &sha[..12]
+                            ));
+                        }
+                    }
+                    Err(_) => self.system_line("No AGENTS.md in this workspace."),
+                }
+            }
+            "forget" => {
+                let sha_file = std::fs::read_to_string(root.join("AGENTS.md"))
+                    .map(|c| xencode_context_rs::agents_sha256(&c));
+                match sha_file {
+                    Ok(sha) => match xencode_context_rs::untrust_agents(&root, &sha) {
+                        Ok(true) => self.system_line(&format!(
+                            "Trust withdrawn for AGENTS.md (sha256 {}). It is data again.",
+                            &sha[..12]
+                        )),
+                        Ok(false) => {
+                            self.system_line("This AGENTS.md was not trusted, so nothing changed.")
+                        }
+                        Err(e) => {
+                            self.system_line(&format!("Could not update the trust store: {e}"))
+                        }
+                    },
+                    Err(_) => self.system_line("No AGENTS.md in this workspace."),
+                }
+            }
+            other => self.system_line(&format!(
+                "Usage: /trust (trust this AGENTS.md), /trust status, /trust forget — \
+                 not {other:?}"
+            )),
+        }
+    }
+
     /// I3-01 / M-6: the Model Context Protocol. `/mcp` connects every server
     /// declared under `mcp_servers` in config.json, offers its tools to the model
     /// for the session, and lists by name the resources and prompts it holds;
@@ -6176,7 +6285,7 @@ impl<'a> App<'a> {
                 &results,
                 caps.content_cap_chars,
             );
-            let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+            let agents = xencode_context_rs::read_agents_md(&root);
             let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
             let state = std::fs::read_to_string(xencode.join("state.md")).ok();
             let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
@@ -7882,7 +7991,7 @@ impl<'a> App<'a> {
                 // Same frozen system head as chat turns so reviews follow the
                 // project guidelines and reuse the cached prefix.
                 let root = xencode_context_rs::default_root();
-                let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+                let agents = xencode_context_rs::read_agents_md(&root);
                 let anchor = std::fs::read_to_string(
                     root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md"),
                 )
