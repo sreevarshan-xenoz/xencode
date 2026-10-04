@@ -1225,6 +1225,24 @@ mod tests {
     }
 
     #[test]
+    fn the_tool_message_reaches_the_model_with_its_source_line_intact() {
+        // SE-2 marks content where it is produced; the wire render must not
+        // shave it off on the way to either backend style.
+        let extra = vec![AgentTurn::ToolResult {
+            id: "a1".to_string(),
+            content: "[data] read_file src/main.rs\nfn main() {}".to_string(),
+        }];
+        for style in [HistoryStyle::OpenAI, HistoryStyle::Ollama] {
+            let v = render_history(&[], &extra, style);
+            assert_eq!(v[0]["role"], "tool");
+            assert_eq!(
+                v[0]["content"],
+                "[data] read_file src/main.rs\nfn main() {}"
+            );
+        }
+    }
+
+    #[test]
     fn render_ollama_history_keeps_object_args_without_ids() {
         let extra = vec![AgentTurn::Assistant {
             text: "".to_string(),

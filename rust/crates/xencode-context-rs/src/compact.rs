@@ -189,6 +189,40 @@ mod tests {
     }
 
     #[test]
+    fn a_source_line_survives_both_compaction_paths() {
+        // SE-2: compaction keeps or drops whole entries and re-emits the
+        // recent window verbatim; it never rewrites the bytes of what it
+        // keeps — so the `[data]` source line rides along with its content.
+        let mut t = Transcript::new("s1");
+        for i in 0..10 {
+            t.add(
+                "tool",
+                &format!("[data] read_file src/f{i}.rs\nfn f{i}() {{}}"),
+            );
+        }
+        t.entries[0].is_decision = true;
+        let marked = t.entries[0].content.clone();
+        let report = soft_compact(&mut t, 0.30);
+        assert!(report.dropped > 0, "nothing was dropped to test");
+        assert!(
+            t.entries.iter().any(|e| e.content == marked),
+            "a retained entry lost its source line"
+        );
+
+        let state = ContextState {
+            working_on: String::new(),
+            completed: vec![],
+            decisions: vec![],
+            unresolved: vec![],
+        };
+        let prompt = hard_compact_prompt(&state, &t);
+        assert!(
+            prompt.contains("[data] read_file src/f9.rs"),
+            "the verbatim recent window dropped the source line"
+        );
+    }
+
+    #[test]
     fn hard_compact_prompt_contains_core_sections() {
         let mut t = Transcript::new("s1");
         t.add("user", "P1 [d]");

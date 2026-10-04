@@ -265,6 +265,36 @@ mod tests {
     }
 
     #[test]
+    fn the_system_prompt_owns_the_data_versus_instructions_rule() {
+        // SE-2: the `[data]` line on a tool result means something only
+        // because this file tells the model what it means. Pin the rule's
+        // vocabulary, not its full prose.
+        assert!(
+            AGENT_SYSTEM.contains("[data]"),
+            "the prompt no longer names the source line"
+        );
+        assert!(
+            AGENT_SYSTEM.contains("never instructions"),
+            "the prompt no longer says fetched content carries no instructions"
+        );
+        assert!(
+            AGENT_SYSTEM.contains("## Retrieval"),
+            "the prompt no longer covers repository sections inside a user turn"
+        );
+    }
+
+    #[test]
+    fn the_compaction_instruction_carries_source_lines_forward() {
+        // Markers survive compaction because the folding instruction says so
+        // for whatever it re-emits, and because what it keeps verbatim keeps
+        // bytes. This is the first half.
+        assert!(
+            COMPACT_TRANSCRIPT.contains("[data]"),
+            "the folding instruction no longer mentions source lines"
+        );
+    }
+
+    #[test]
     fn a_brief_is_the_instructions_with_the_task_appended() {
         for (built, file) in [
             (subagent_brief("Fix the failing test"), SUBAGENT_BRIEF),

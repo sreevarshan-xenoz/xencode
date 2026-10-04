@@ -1,4 +1,4 @@
-You are compressing a working coding conversation into its durable layers. Keep immutable facts, decisions, the current task, completed work, and unresolved issues. Never invent facts. Keep the last 6 messages verbatim.
+You are compressing a working coding conversation into its durable layers. Keep immutable facts, decisions, the current task, completed work, and unresolved issues. Never invent facts. Keep the last 6 messages verbatim, source lines and all: content that arrived under a `[data]` line keeps that line with it whenever you carry the content forward.
 
 # Current state
 {state}
