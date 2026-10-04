@@ -1204,6 +1204,30 @@ pub fn call_outcome(result: &str) -> CallOutcome {
     }
 }
 
+/// The source line every tool result carries into the model's context (SE-2).
+/// The system prompt declares tool results to be data fetched from the
+/// machine — this line is what makes that claim checkable per result instead
+/// of blanket. A server tool says `mcp`; a built-in tool says its own name
+/// plus the argument it pointed at, so a `git log` result names the command.
+pub fn mark_untrusted(call: &ToolCall, result: String) -> String {
+    let label = if crate::mcp::is_mcp_tool(&call.name) {
+        format!("mcp {}", call.name)
+    } else {
+        let args = call.arguments_object();
+        let target = ["command", "path", "pattern", "query", "crate", "url"]
+            .into_iter()
+            .find_map(|key| args.get(key).and_then(|v| v.as_str()))
+            .unwrap_or("");
+        let target = truncate_one_line(target, 60);
+        if target.is_empty() {
+            call.name.clone()
+        } else {
+            format!("{} {target}", call.name)
+        }
+    };
+    format!("[data] {label}\n{result}")
+}
+
 // ── Post-edit project checks (L-7) ────────────────────────────────────
 // The model saying it is done is not the gate; the project's own commands
 // exiting 0 is. These helpers decide which commands that is for a given
@@ -3877,6 +3901,59 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("task never exited");
+    }
+
+    #[test]
+    fn every_result_entering_the_model_context_names_its_source() {
+        // SE-2: the system prompt declares tool results to be data; the
+        // `[data]` line is what makes that claim per-result instead of
+        // blanket. Each producer kind gets its own wording.
+        let read = mark_untrusted(
+            &call("read_file", serde_json::json!({"path": "src/main.rs"})),
+            "fn main() {}".to_string(),
+        );
+        assert_eq!(read, "[data] read_file src/main.rs\nfn main() {}");
+
+        let command = mark_untrusted(
+            &call(
+                "run_command",
+                serde_json::json!({"command": "git log --oneline"}),
+            ),
+            "deadbeef work".to_string(),
+        );
+        assert_eq!(
+            command,
+            "[data] run_command git log --oneline\ndeadbeef work"
+        );
+
+        let server = mark_untrusted(
+            &call("mcp__fetch__get_document", serde_json::json!({})),
+            "fetched text".to_string(),
+        );
+        assert_eq!(server, "[data] mcp mcp__fetch__get_document\nfetched text");
+
+        // A tool call that pointed at nothing string-shaped still names its
+        // producer, and the body rides along byte for byte.
+        let plan = mark_untrusted(
+            &call("update_plan", serde_json::json!({"items": []})),
+            "plan set".to_string(),
+        );
+        assert_eq!(plan, "[data] update_plan\nplan set");
+    }
+
+    #[test]
+    fn a_source_line_stays_one_bounded_line_over_a_long_command() {
+        // The header is the first line whatever the arguments were, so a
+        // six-hundred-character command cannot push the marker off the top.
+        let long = format!("echo {}", "x".repeat(600));
+        let marked = mark_untrusted(
+            &call("run_command", serde_json::json!({"command": long})),
+            "ok".to_string(),
+        );
+        let first = marked.lines().next().unwrap();
+        assert!(first.starts_with("[data] run_command echo xxx"), "{first}");
+        assert!(first.chars().count() <= 90, "{first}");
+        assert!(marked.ends_with("\nok"));
     }
 
     #[tokio::test]

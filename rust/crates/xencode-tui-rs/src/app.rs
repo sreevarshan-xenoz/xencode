@@ -8928,7 +8928,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                             });
                             history.push(xencode_providers_rs::AgentTurn::ToolResult {
                                 id: call.id.clone(),
-                                content: result,
+                                content: crate::agent_tools::mark_untrusted(&call, result),
                             });
                             ending_turn = false;
                         } else if sink == LoopSink::Chat {
@@ -8969,7 +8969,10 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                                 });
                                 history.push(xencode_providers_rs::AgentTurn::ToolResult {
                                     id: call.id.clone(),
-                                    content: report.report,
+                                    content: crate::agent_tools::mark_untrusted(
+                                        &call,
+                                        report.report,
+                                    ),
                                 });
                                 if sink == LoopSink::Chat {
                                     let _ = tx.send(format!(
@@ -9024,6 +9027,12 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             )
             .await;
             let outcome = crate::agent_tools::call_outcome(&result);
+            // SE-2: from here every copy of this output — the transcript
+            // preview, the trace tail, the history the model reads, and the
+            // recording a replay is made from — carries the source line. The
+            // outcome was decided from the raw bytes just above, so marking
+            // cannot change it.
+            let result = crate::agent_tools::mark_untrusted(call, result);
             // A finished Edit-class call means the turn put bytes on disk, which
             // is what arms the L-7 check gate at the end of the turn. A failed
             // or refused edit changed nothing and must not arm it.

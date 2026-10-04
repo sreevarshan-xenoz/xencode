@@ -149,9 +149,12 @@ async fn the_replay_ran_the_tool_it_recorded_and_the_model_saw_its_real_output()
     assert_eq!(lines[0]["outcome"], "done");
     // The digest is of what the shell printed during THIS replay, taken from a
     // string written here rather than copied from the recording, so a replay
-    // that ran the command and got something else could not pass.
+    // that ran the command and got something else could not pass. The `[data]`
+    // line is part of those bytes: SE-2 marks a result wherever it enters the
+    // model's context, and a replay that ran the tool produced them anew.
     let expected = RecordedToolCall {
-        result: "$ echo $((27 * 43))\nexit 0\n1161".to_string(),
+        result: "[data] run_command echo $((27 * 43))\n$ echo $((27 * 43))\nexit 0\n1161"
+            .to_string(),
         ..recording.calls[0].tools[0].clone()
     };
     assert_eq!(lines[0]["result_sha256"], expected.result_digest());
