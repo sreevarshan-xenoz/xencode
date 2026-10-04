@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2279 tests passing, zero warnings (re-verified 2026-10-04, after RS-1)
+- [x] Workspace gates green — 16 crates, 2284 tests passing, zero warnings (re-verified 2026-10-04, after RS-7)
 
 ## Model Catalog Honesty
 
@@ -3185,7 +3185,11 @@ The agent edits code it cannot look up. The pieces exist and are disconnected
   across the Rust ecosystem and it is absent everywhere (docs.rs, tokio.rs,
   actix.rs, doc.rust-lang.org, the cargo book all 404); adoption is real only
   for JS/vendor docs. Keep it as a cheap fallback, not a design centre.
-  **OPT-IN-NETWORK.**
+  **OPT-IN-NETWORK.** *(Built 2026-10-04 as the `404` arm of `tool_web_fetch`,
+  with `llms_txt_url` in `xencode-analysis-rs::web`. The trap holds and was
+  re-measured rather than copied: live here, `docs.rs` answers **400** rather
+  than 404 and the other four answer **404**, so absence — not the index — is the
+  normal answer and the miss wording says no other location. See the W8 record.)*
 - **RS-8 A local documentation corpus** in the Dash/Zeal docset shape (HTML +
   a SQLite index) over std/core/nomicon/the book, optionally with a full-text
   index. **L**. Trap: no maintained Rust docsets exist, it is ≥1 GB, and it is a
@@ -9870,6 +9874,37 @@ Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate chang
   item's. The header names the address the answer landed on, so a redirected fetch
   is at least honest about where the text came from. `RS-7`'s `llms.txt` probing
   is a separate row and is not part of this commit.
+- [x] `RS-7` — 2026-10-04. The row's own trap is the design: the file is absent
+  almost everywhere, so this is one extra request behind exactly one answer — a
+  `404` — and nothing else. A page that arrives is never probed
+  (`a_page_that_arrives_is_never_probed_for_an_index`), and the branch is a
+  `match` arm on `FetchError::Status(404)` inside `tool_web_fetch`, not a new
+  tool, which is what "a branch inside RS-1" asked for. The address is derived by
+  `llms_txt_url` in `xencode-analysis-rs`: scheme and host kept, port kept, and
+  path, query and fragment dropped, because the convention is one index per site
+  rather than one per page. `None` for a URL with no host to hang a root on, so a
+  weird scheme cannot produce a weird request. It then goes through
+  `fetch_url_guarded`, the same guard the page went through, on the same host —
+  `the_index_fallback_cannot_step_off_the_address_being_fetched` proves a miss on
+  `169.254.169.254` is still refused by the guard and never turns into an
+  `llms.txt` request, which is the only way this branch could have become a second
+  route inward. What comes back is headed as an index and not the page, since a
+  list of links served as if it were the document is how the model goes on quoting
+  something it never read; the same `max_chars` cap applies.
+  *The absence was re-measured, not trusted from this row's text:* live on
+  2026-10-04, `docs.rs/llms.txt` answers **400**, and `tokio.rs`, `actix.rs`,
+  `doc.rust-lang.org` and the cargo book each answer **404**. So the no-index
+  wording is the common path and is written to stay a plain miss — it names no
+  other place an index might be, because "try `/docs/llms.txt` next" is how a
+  cheap fallback becomes a hunt.
+  *Verified by running it:* against a server the test started on loopback that
+  404s every path but `/llms.txt`, the tool returned
+  `[http://127.0.0.1:39335/docs/getting-started-v2.html — 404 not found. What follows is this site's own index for models, at http://127.0.0.1:39335/llms.txt, which is a list of its pages, not the page that was asked for]`
+  with the index text under it; with no index published it returned
+  `error: server returned status 404, and this site publishes no llms.txt index either — ask for an address you have actually seen, not a path you guessed`.
+  The approval prompt now says the second request is coming before you answer for
+  it, in the same line that shows the address. `xencode fetch` is untouched: a
+  person who typed a path knows what they asked for, and the retry is for a guess.
 
 #### W9 — Project DNA and architecture intelligence — 21 items
 

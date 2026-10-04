@@ -321,11 +321,14 @@ second opinion:
 
 ```text
 web_fetch http://127.0.0.1:9999/docs
-fetch: http://127.0.0.1:9999/docs  (would connect; the page is returned as text, capped)
+fetch: http://127.0.0.1:9999/docs  (would connect; the page is returned as text, capped; if it turns out to be missing, this site's own /llms.txt index is asked for on the same address)
 
 web_fetch http://169.254.169.254/latest/meta-data/
 fetch: http://169.254.169.254/latest/meta-data/  — this one would be refused: 169.254.169.254 is the link-local range, which is where a cloud serves its instance metadata and credentials
 ```
+
+The prompt says the same thing the fetch does, so the second request is not a
+surprise hidden behind a yes.
 
 Answering `a` — allow for the session — is the one answer this tool does not
 take. A yes about one page is not a yes about the next host, so the grant is
@@ -354,15 +357,44 @@ address so the next call can ask for the rest. A `max_chars` argument can lower
 that cap but not raise it — the cap exists to keep a whole page out of the
 context window, so a bigger number buys nothing.
 
+A guessed documentation path usually comes back as a missing page, and that is
+the one answer worth a second request. On a 404 the tool asks the same address's
+root for `/llms.txt`, the index some documentation sites publish for models,
+dropping the path, query and fragment because the convention is one file per
+site. What comes back is labelled as that index, because a list of pages handed
+over as if it were the page asked for is how a model goes on quoting a document
+it never read. Both halves are the real tool against a server the test started on
+loopback — a site that publishes an index, and one that does not:
+
+```text
+[http://127.0.0.1:39335/docs/getting-started-v2.html — 404 not found. What follows is this site's own index for models, at http://127.0.0.1:39335/llms.txt, which is a list of its pages, not the page that was asked for]
+# Site
+
+- [Guide](/guide.html): how to start
+```
+
+```text
+error: server returned status 404, and this site publishes no llms.txt index either — ask for an address you have actually seen, not a path you guessed
+```
+
+The second form is the common one. Measured here on 2026-10-04, `docs.rs`,
+`tokio.rs`, `actix.rs`, `doc.rust-lang.org` and the cargo book have no such file
+at their root — every one answers 404 except `docs.rs`, which answers 400 — so
+this is a fallback kept cheap, not a step the fetch takes by default: a page that
+arrives is never probed, the miss is reported as a plain miss with no hint that an
+index might exist elsewhere, and the index request goes through the same address
+guard as the page, so a miss cannot become a second way into this machine.
+
 A call that arrives while the setting is off — from a resumed transcript, say —
 is refused in the executor too, and answering the prompt does not change that:
-
 ```text
 error: web_fetch is not enabled: `xencode config set allow_web_fetch true` offers it, and every call still asks before the request leaves
 ```
 
 `xencode fetch <url>` is the same reading with you choosing the address, and it
-does not go through this gate.
+does not go through this gate. It asks for exactly the address you typed: the
+`/llms.txt` retry above is what the tool does when a model's guess misses, not
+what the command does when you give it a path.
 
 #### Asking what is known to be wrong with a dependency: `lookup_advisory`
 
@@ -2060,7 +2092,7 @@ is what used to happen.
 | `session_recording` | bool | Write down every model call of an agent turn — the request, the response bytes as they arrived, and what each tool returned — to `.xencode/cache/sessions/<run-id>.jsonl`, so `xencode replay` can run that turn again. Off by default. Only the routes whose bytes this program reads itself are recordable: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter. Asking for a recording of an Anthropic, Gemini or Qwen model is refused with the reason, because those have their own readers and a "recording" of them would be a paraphrase. |
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
 | `allow_online_docs` | bool | Whether the agent's `read_docs` tool may fetch a crate's documentation when cargo has not unpacked it on this machine. Off by default, and independent of `allow_cloud_models` — turning one on does not turn on the other, because one is a prompt leaving and the other is a text file arriving. With it off, `read_docs` answers from cargo's own copy and says what else would be needed to get more. Open it with `xencode config set allow_online_docs true`. |
-| `allow_web_fetch` | bool | Whether the agent is offered the `web_fetch` tool, which reads one page or API response at an address **the model names**. Off by default, and independent of both switches above. Turning it on only offers the tool: every call stops at the approval prompt showing the exact address and whether that address could land, and "allow for the session" does not apply to this tool — a yes about one page is not a yes about the next host. Approval is not a route into this machine either: the address is resolved and refused before the connection, and again at every redirect, so RFC1918, carrier-grade NAT, link-local and cloud-metadata addresses are unreachable even after a `y`, while `127.0.0.1` is allowed so a local dev server stays fetchable. The text handed back is capped at 30 000 characters and says how much of the page was left out. Open it with `xencode config set allow_web_fetch true`. |
+| `allow_web_fetch` | bool | Whether the agent is offered the `web_fetch` tool, which reads one page or API response at an address **the model names**. Off by default, and independent of both switches above. Turning it on only offers the tool: every call stops at the approval prompt showing the exact address and whether that address could land, and "allow for the session" does not apply to this tool — a yes about one page is not a yes about the next host. Approval is not a route into this machine either: the address is resolved and refused before the connection, and again at every redirect, so RFC1918, carrier-grade NAT, link-local and cloud-metadata addresses are unreachable even after a `y`, while `127.0.0.1` is allowed so a local dev server stays fetchable. The text handed back is capped at 30 000 characters and says how much of the page was left out. A page the server reports as missing buys one more request on the same address — its root `/llms.txt`, the index some documentation sites publish for models — returned labelled as that index, and reported as a plain miss when there is none. Open it with `xencode config set allow_web_fetch true`. |
 | `run_command_sandbox` | bool | Run each `run_command`, `background_start` and shell hook inside a `bubblewrap` (`bwrap`) mount namespace. Off by default; open it with `xencode config set run_command_sandbox true`, and it needs `bwrap` installed. With it on: the workspace and `~/.cargo` are bind-mounted writable so a build still works, the rest of the home directory is replaced by an empty tmpfs so `~/.ssh` and the files under it are *absent* rather than merely unreadable, and the network namespace is dropped. A single call that must reach the network passes `net: true` (an argument on `run_command` and `background_start`); shell hooks get no such grant and always run with the net off under the sandbox. There is **no silent fallback**: if the setting is on and `bwrap` is not present, the command is refused with the reason instead of being run unsandboxed. It bounds what a command can read outside the project — it does not contain the compiler: `build.rs` scripts and anything reachable from the writable workspace run free inside, so this is a fence on the home and the network, not a full jail. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048, "for_task": "bugfix" }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here; `f` cycles `for_task` through `bugfix`, `general` and none. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |
