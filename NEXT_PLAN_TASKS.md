@@ -9105,7 +9105,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **CAP-2** | Make `permissions` real for plugins (fact 9): refuse to load | core | fold into QTR-1 — done, see QTR-1's note |
 | **M-1** | give hooks their payload | capability | hook payload (before hooks can run anything: SE-4/QTR-3) |
 | **M-2** | enforce what a manifest declares | core | fold into QTR-1 — done, see QTR-1's note |
-| **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants |
+| **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants; done 2026-10-04 — see the note |
 | **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN |
 | **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers |
 | **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
@@ -9329,6 +9329,35 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
   net, not the compiler — `build.rs` and anything the workspace reaches run
   free) is in the README bullet and the config doc, not only here. *Not claimed:*
   Landlock is not used; this is the bubblewrap path QTR-3 named.
+
+- [x] `MD-1` — 2026-10-04. `PLAN` and `AUTONOMOUS` are now real
+  `ApprovalMode` variants enforced by the gate, not display labels — the fix
+  for "one real mode, four labels" (proposal row 16) and the exact failure the
+  industry finding "Plan Mode Isn't Read-Only" describes. `capability_gate`
+  (`crates/xencode-tui-rs/src/agent_tools.rs`) prices each capability per mode:
+  **PLAN** allows `filesystem.read` and **denies** `filesystem.write`,
+  `shell.execute`, `network.request` and `external.mcp`. It denies rather than
+  asks, which closes this item's own trap: the session-grant shortcut in
+  `classify` fires only when `decision == Ask`, so an "always allow edits for
+  this session" clicked while implementing can never leak into a later plan and
+  turn its denial back into an approval — pinned by
+  `plan_mode_is_read_only_and_a_stale_grant_cannot_leak_a_write_through_it`.
+  **AUTONOMOUS** allows reads, edits and shell free (the whole local task runs
+  with nobody watching) but **denies** `network.request` and `external.mcp`
+  rather than asking, because an unattended run has no one to answer a prompt —
+  which is precisely what separates it from `all-allow`, where those two still
+  prompt (the distinction `autonomous_mode_runs_local_work_free_but_denies_anything_off_the_machine`
+  pins against a live `AllAllow` → `Ask` on the same external call). Both parse
+  from their config words; unknown still falls back to `ask`. All five modes
+  cycle in the TUI's `Agent Approval` row (`APPROVAL_MODE_NAMES`, cycle test
+  updated). `permission_broker::choose_grant` leaves PLAN/AUTONOMOUS at
+  `Grant::Nothing` — a plan must never hand a worker `--yolo`, and the extended
+  `only_all_allow_produces_a_bypass` test now proves it for both. Live:
+  `xencode config set agent_approval plan` and `… autonomous` store the raw
+  word (verified against an isolated config dir); the gate reads it at decision
+  time. Tool-stripping (hiding write tools from the offered list in PLAN, as
+  opposed to denying them at the gate) is **MD-2**, not this item; this is the
+  gate half.
 
 #### W8 — Outward research capability — 6 items
 

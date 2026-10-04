@@ -329,7 +329,8 @@ pub struct XencodeConfig {
     #[serde(default = "default_true")]
     pub mouse_capture: bool,
 
-    /// Agent tool-approval mode: "ask", "edit-allow" or "all-allow".
+    /// Agent tool-approval mode: "ask", "edit-allow", "all-allow", "plan"
+    /// (read-only, enforced) or "autonomous" (local writes free, off-box denied).
     /// Unknown values fall back to "ask" at decision time.
     #[serde(default = "default_agent_approval")]
     pub agent_approval: String,

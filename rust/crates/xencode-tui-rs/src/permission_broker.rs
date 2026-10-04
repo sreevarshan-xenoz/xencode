@@ -501,9 +501,17 @@ mod tests {
 
     /// Only `AllAllow` ever produces a bypass control, and when it does, it is
     /// xencode's own doing — the grant is chosen from the mode, not the worker.
+    /// MD-1's `Plan` and `Autonomous` are in this loop because a plan must never
+    /// hand a worker `--yolo`, and autonomous's own gate denies off-box work
+    /// rather than launching a fully bypassed stranger.
     #[test]
     fn only_all_allow_produces_a_bypass() {
-        for mode in [ApprovalMode::Ask, ApprovalMode::EditAllow] {
+        for mode in [
+            ApprovalMode::Ask,
+            ApprovalMode::EditAllow,
+            ApprovalMode::Plan,
+            ApprovalMode::Autonomous,
+        ] {
             let (argv, grant) = plan_launch(
                 "claude",
                 mode,
