@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `/egress`: see exactly what would leave the machine before it does
+
+`/egress [text]` rebuilds the prompt a real turn would arm (deterministically,
+with no network call) and reports, without sending anything: which provider the
+current model id resolves to, whether that route is a server on this machine or
+an off-machine one, and whether the egress policy allows it or would refuse the
+turn before a single byte is sent. It then shows how many messages and bytes the
+turn would carry and how many credentials the redactor would hold back — named by
+their placeholder tokens, never their values. With no text it previews where the
+last user turn would have gone. This is the checkable view that makes the
+off-machine policy and the secret-redaction feature verifiable by eye rather than
+trusted on faith. It is a debug preview, deliberately not a per-turn confirmation
+gate.
+
 ### Security — secret-shaped test fixtures no longer look like real vendor keys
 
 The repository is public, and secret scanners fire on credential *shapes* rather

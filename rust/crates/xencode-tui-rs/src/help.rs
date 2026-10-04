@@ -141,6 +141,10 @@ const COMMANDS: &[Binding] = &[
         "/trust [status|forget]",
         "trust this workspace's AGENTS.md bytes as instructions, or report/withdraw",
     ),
+    (
+        "/egress [text]",
+        "show where the next turn would send your prompt, and what redaction holds back, without sending it",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

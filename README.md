@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2219 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2221 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -281,6 +281,7 @@ These seventeen are the only strings the chat input intercepts (`SLASH_COMMANDS`
 /hotspots [limit]           Rank files by churn, size and bus factor
 /agents                     Inventory the coding-agent CLIs installed on PATH
 /trust [status|forget]      Follow the workspace AGENTS.md as instructions, or report/withdraw — trust is per content hash
+/egress [text]              Show where the next turn would send your prompt, and what redaction holds back — without sending it
 ```
 
 Press `?` in the TUI for the live keybinding and command overlay.
