@@ -63,7 +63,7 @@ _arguments "${_arguments_options[@]}" : \
 '--dry-run[Validate and report the change without writing config.json]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':key -- Configuration key (e.g., default_model, ollama_url). A key naming a provider credential — `openai_api_key`, `openrouter_api_key`, `google_gemini_api_key`, `qwen_api_key`, `remote_key`, `nvidia_api_key` — is stored and never printed back:_default' \
+':key -- Configuration key (e.g., default_model, ollama_url). A key naming a provider credential — `openai_api_key`, `openrouter_api_key`, `google_gemini_api_key`, `qwen_api_key`, `remote_key`, `nvidia_api_key`, `brave_api_key`, `tavily_api_key` — is stored and never printed back:_default' \
 ':value -- Value to set. A leading hyphen is allowed because the value people set most often is `llama_cpp_args`, which is a server command line, and the line `xencode hw probe` hands them to paste starts with a flag. For a credential key the value may instead be `command\:<program> <args>`\: only that reference is kept, and the program supplies the secret when it is needed:_default' \
 && ret=0
 ;;

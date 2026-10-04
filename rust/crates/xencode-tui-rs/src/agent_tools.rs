@@ -164,6 +164,10 @@ pub fn tool_class(tool: &str) -> ToolClass {
         // RS-1: the address comes from the model, so the class is the trip
         // itself rather than anything it reads or writes.
         "web_fetch" => ToolClass::Network,
+        // RS-2: same reasoning with a different destination. The engine is named
+        // in the config, but the *question* comes from the model and leaves this
+        // machine, and a search is a trip, not a read.
+        "web_search" => ToolClass::Network,
         _ => ToolClass::Shell,
     }
 }
@@ -1118,6 +1122,115 @@ async fn llms_txt_fallback(url: &str, cap: usize) -> Option<String> {
     Some(out)
 }
 
+/// How much of a result's snippet is handed to the model. Engines differ wildly
+/// here — Tavily returns a paragraph it wrote, Wikipedia a sentence — and the
+/// list is the thing being paid for, not the prose under it.
+const SEARCH_SNIPPET_CHARS: usize = 240;
+
+/// Results a call returns when the model asks for no number. Five is enough to
+/// pick an address from and small enough that the list is not a page of its own.
+const SEARCH_DEFAULT_RESULTS: usize = 5;
+
+/// The agent's search call (RS-2): the question goes to the provider the person
+/// named and the answer is a list of addresses with what the engine said about
+/// each. No page is read here.
+///
+/// Keeping those two apart is the point of the shape. A list the model may then
+/// follow one entry at a time, each with its own approval, is a different thing
+/// from a tool that browses for it, which is why every provider caps the list and
+/// why the snippet is truncated rather than handed over whole.
+async fn tool_web_search(
+    provider: &xencode_analysis_rs::SearchProvider,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let Some(query) = arg_str(args, "query").filter(|q| !q.trim().is_empty()) else {
+        return err("web_search needs a non-empty string \"query\"");
+    };
+    // The cap is the caller's to lower and not to raise, exactly as a fetch's is:
+    // it exists to keep a hundred links out of the context window.
+    let want = args
+        .get("max_results")
+        .and_then(|v| v.as_u64())
+        .map(|v| (v as usize).clamp(1, xencode_analysis_rs::MAX_SEARCH_RESULTS))
+        .unwrap_or(SEARCH_DEFAULT_RESULTS);
+    let hits = match xencode_analysis_rs::search_web(provider, query, want).await {
+        Ok(hits) => hits,
+        Err(e) => return err(e.to_string()),
+    };
+    let slug = provider.slug();
+    if hits.is_empty() {
+        // The engine answered. Saying "no results" as an error would invite a
+        // retry of the same question, so this is stated as the flat answer it is.
+        return format!(
+            "[search — {slug} answered and found nothing for {query:?} — the wording is what \
+             to change, not the setting]"
+        );
+    }
+    let mut out = format!(
+        "[search — {slug} — {} result(s) for {query:?}]\n",
+        hits.len()
+    );
+    for (n, hit) in hits.iter().enumerate() {
+        out.push_str(&format!(
+            "{}. {}\n   {}\n",
+            n + 1,
+            truncate_one_line(&hit.title, 120),
+            hit.url
+        ));
+        if !hit.snippet.is_empty() {
+            out.push_str(&format!(
+                "   {}\n",
+                truncate_one_line(&hit.snippet, SEARCH_SNIPPET_CHARS)
+            ));
+        }
+    }
+    out.push_str(
+        "\n[these are the addresses the engine named, not pages that have been read — reading \
+         one is a separate request and a separate approval]",
+    );
+    out
+}
+
+/// The search provider the config names, resolved once when a run is built
+/// (RS-2).
+///
+/// The credential is chosen from the provider's *name* and never tried in turn
+/// across the two that take one: a Brave key must not reach Tavily's endpoint,
+/// which is the same rule that keeps one model provider's key off another's
+/// host. A setting that is half-filled comes back as `Err` carrying the words
+/// that say which half, so the person hears "set the instance address" rather
+/// than discovering the tool was never offered.
+pub fn search_provider_from_config(
+    config: &xencode_config_rs::XencodeConfig,
+) -> Result<xencode_analysis_rs::SearchProvider, String> {
+    let named = config.search_provider.trim();
+    if named.is_empty() || named.eq_ignore_ascii_case("none") {
+        return Ok(xencode_analysis_rs::SearchProvider::None);
+    }
+    let secret = match named.to_ascii_lowercase().as_str() {
+        "brave" => Some(xencode_config_rs::SecretProvider::Brave),
+        "tavily" => Some(xencode_config_rs::SecretProvider::Tavily),
+        _ => None,
+    };
+    let key = match secret {
+        Some(provider) => match config.api_keys.secret(provider) {
+            Ok(key) => key,
+            // A key that is present but unreadable is not an absent one. These are
+            // different fixes — re-entering a value versus putting `secret-tool`
+            // back on `PATH` — and collapsing them sends the person down the wrong
+            // one.
+            Err(problem) => {
+                return Err(format!(
+                    "web_search is set to `{named}` and its credential could not be read: {problem}"
+                ))
+            }
+        },
+        None => None,
+    };
+    xencode_analysis_rs::SearchProvider::parse(named, &config.search_searxng_url, key)
+        .map_err(|e| e.to_string())
+}
+
 fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
     let raw = arg_str(args, "path").filter(|s| !s.trim().is_empty());
     let (full, display, source) = match raw {
@@ -1473,6 +1586,9 @@ pub fn approval_summary(call: &ToolCall) -> String {
         // overlay leads with. A summary of `web_fetch` without it would ask
         // about a trip without saying where.
         .or_else(|| arg_str(&args, "url"))
+        // Same for a search (RS-2): the question is what leaves, and it is the
+        // only thing the person can judge the trip on.
+        .or_else(|| arg_str(&args, "query"))
         .unwrap_or("");
     if focus.is_empty() {
         call.name.clone()
@@ -1639,6 +1755,20 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                 });
                 out
             }
+            _ => summarize_call(call),
+        },
+        // RS-2: where a fetch's whole consequence is one address, a search's is
+        // the question and the engine it goes to. The engine is a config value
+        // rather than a call argument, so the preview says where to read it
+        // instead of pretending to know it, and says plainly that the answer is a
+        // list of links — not those links read.
+        "web_search" => match arg_str(&args, "query") {
+            Some(query) if !query.trim().is_empty() => format!(
+                "search: {}\n  (the question is sent to the search provider named in the \
+                 config — `xencode config show` says which one that is — and what comes back \
+                 is titles, addresses and short snippets. Nothing in that list is read.)",
+                truncate_one_line(query, 200)
+            ),
             _ => summarize_call(call),
         },
         _ => summarize_call(call),
@@ -3125,10 +3255,11 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
 ///
 /// These two entry points are the ones outside the chat loop: they read crate
 /// documentation offline only, and never fetch the web at all, because the two
-/// settings that permit those trips arrive through [`ApprovalCtx`]; they know no
-/// skills, because the session's loaded skills arrive the same way; and they
-/// carry no reproduction gate, because the session's gate does too. The loop is
-/// the only caller that has any of them.
+/// settings that permit those trips arrive through [`ApprovalCtx`]; they search
+/// on no engine, for the same reason — the provider is a config value and this
+/// path reads no config; they know no skills, because the session's loaded skills
+/// arrive the same way; and they carry no reproduction gate, because the session's
+/// gate does too. The loop is the only caller that has any of them.
 pub async fn execute_tool_call_timed(
     rt: &TaskRuntime,
     root: &Path,
@@ -3144,6 +3275,7 @@ pub async fn execute_tool_call_timed(
         None,
         false,
         false,
+        &Ok(xencode_analysis_rs::SearchProvider::None),
         None,
         &crate::sandbox::Sandbox::disabled(),
         None,
@@ -3163,6 +3295,7 @@ async fn execute_tool_call_plan(
     mcp: Option<&crate::mcp::McpHub>,
     online_docs: bool,
     web_fetch: bool,
+    search: &Result<xencode_analysis_rs::SearchProvider, String>,
     skills: Option<&xencode_plugin_rs::SkillRuntime>,
     sandbox: &crate::sandbox::Sandbox,
     repro: Option<&crate::reprogate::ReproGate>,
@@ -3328,6 +3461,19 @@ async fn execute_tool_call_plan(
                  and every call still asks before the request leaves",
         ),
         "web_fetch" => tool_web_fetch(&args).await,
+        // RS-2: the same shape as the fetch above. A model that was never shown
+        // the tool cannot run it, and a config that names an engine it cannot use
+        // yet — `searxng` with no address, a paid key that is missing — is answered
+        // with the setting to change rather than a transport failure.
+        "web_search" if matches!(search, Ok(xencode_analysis_rs::SearchProvider::None)) => err(
+            "web_search is not enabled: `xencode config set search_provider wikipedia` points \
+                 it at an engine, `searxng` at one you run yourself, and every call still asks \
+                 before the question leaves",
+        ),
+        "web_search" => match search {
+            Err(reason) => err(reason.clone()),
+            Ok(provider) => tool_web_search(provider, &args).await,
+        },
         "load_skill" => tool_load_skill(skills, &args),
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
@@ -3455,6 +3601,13 @@ pub struct ApprovalCtx {
     /// else — a resumed transcript, a caller that built its own request — is
     /// refused here rather than executed on the strength of having been named.
     pub web_fetch: bool,
+    /// The search engine this run may use, resolved from the config when the run
+    /// was built (RS-2). `Ok(SearchProvider::None)` means none is configured, and
+    /// the tool is then not in the list the model is shown; `Err` carries the
+    /// config's own words for the half that is missing, so a call that arrives
+    /// from a resumed transcript is answered with what to fix rather than run on
+    /// the strength of having been named.
+    pub search: Result<xencode_analysis_rs::SearchProvider, String>,
     /// The session this turn belongs to, handed to hooks on stdin (M-1) so a
     /// hook can tell runs apart. `None` where no session is open.
     pub session_id: Option<String>,
@@ -3487,6 +3640,17 @@ impl ApprovalCtx {
             .lock()
             .map(|grants| grants.clone())
             .unwrap_or_default()
+    }
+
+    /// Whether `web_search` belongs in the list a model is shown (RS-2).
+    ///
+    /// The test is what the config *names*, not what it resolves to. A half-filled
+    /// setting still offers the tool, because the alternative is that a person who
+    /// typed `search_provider searxng` sees the tool quietly missing and no reason
+    /// anywhere — asked that, it answers with the setting that is missing instead.
+    /// Only `none` (or nothing at all) keeps the name out of the offer.
+    pub fn search_offered(&self) -> bool {
+        !matches!(self.search, Ok(xencode_analysis_rs::SearchProvider::None))
     }
 
     /// Whether this session has touched secrets (SE-4). Read at every
@@ -3627,6 +3791,7 @@ async fn run_and_checkpoint(
         mcp,
         ctx.online_docs,
         ctx.web_fetch,
+        &ctx.search,
         Some(&ctx.skills),
         &ctx.sandbox,
         Some(&ctx.repro),
@@ -6981,6 +7146,7 @@ patched = ["{fixed}"]
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
                 web_fetch: false,
+                search: Ok(xencode_analysis_rs::SearchProvider::None),
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -7470,6 +7636,7 @@ patched = ["{fixed}"]
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
                 web_fetch: false,
+                search: Ok(xencode_analysis_rs::SearchProvider::None),
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -9651,5 +9818,294 @@ patched = ["{fixed}"]
         assert!(out.contains("here it is"), "{out}");
         assert!(out.contains("bytes fetched"), "{out}");
         assert!(!out.contains("llms.txt"), "{out}");
+    }
+
+    // ── RS-2: the search call, behind a setting that names an engine ────
+
+    /// SearXNG's documented JSON answer, one row of it. The shape is the one the
+    /// instance's own API returns, so this drives the real parser over a real
+    /// socket rather than a stand-in for it.
+    const ONE_INSTANCE_ANSWER: &str = concat!(
+        "{\"results\":[",
+        "{\"title\":\"Ownership - The Rust Programming Language\",",
+        "\"url\":\"https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html\",",
+        "\"content\":\"Ownership is the way Rust manages memory without a garbage collector.\"},",
+        "{\"title\":\"Rust (programming language)\",",
+        "\"url\":\"https://en.wikipedia.org/wiki/Rust_(programming_language)\",",
+        "\"content\":\"Rust is a multi-paradigm systems programming language.\"}]}"
+    );
+
+    #[test]
+    fn a_search_is_a_network_call_whatever_the_mode_says_about_the_rest() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({ "query": "rust ownership" }));
+        assert_eq!(tool_class("web_search"), ToolClass::Network);
+        assert_eq!(
+            tool_capabilities("web_search"),
+            vec![Capability::NetworkRequest]
+        );
+        for mode in [
+            ApprovalMode::Ask,
+            ApprovalMode::EditAllow,
+            ApprovalMode::AllAllow,
+        ] {
+            assert_eq!(
+                classify(root, "web_search", &none, mode, &[], false),
+                Permission::Ask,
+                "a search asks in {mode:?}"
+            );
+        }
+        for mode in [ApprovalMode::Plan, ApprovalMode::Autonomous] {
+            assert_eq!(
+                classify(root, "web_search", &none, mode, &[], false),
+                Permission::Deny,
+                "a search is refused outright in {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_search_prompt_leads_with_the_question_and_says_nothing_is_read() {
+        let call = call(
+            "web_search",
+            serde_json::json!({ "query": "rust ownership" }),
+        );
+        assert_eq!(approval_summary(&call), "web_search rust ownership");
+        let preview = approval_preview(Path::new("."), &call);
+        assert!(preview.contains("search: rust ownership"), "{preview}");
+        // The engine is a config value the preview cannot see, so it points at the
+        // command that says which one it is rather than naming one it might not be.
+        assert!(preview.contains("xencode config show"), "{preview}");
+        assert!(
+            preview.contains("Nothing in that list is read"),
+            "the prompt let a search look like a read: {preview}"
+        );
+    }
+
+    /// The engine is dialled for real, over a socket, and the list that comes back
+    /// is the list the instance sent: numbered, with the address on its own line,
+    /// and with the note that these are links rather than pages.
+    #[tokio::test]
+    async fn the_question_goes_to_the_instance_and_its_answers_come_back_as_a_list() {
+        let served = serve_page(ONE_INSTANCE_ANSWER, "application/json").await;
+        let base = served.trim_end_matches('/').to_string();
+        let provider = xencode_analysis_rs::SearchProvider::Searxng { base };
+        let out = tool_web_search(
+            &provider,
+            &args_of(serde_json::json!({ "query": "rust ownership", "max_results": 5 })),
+        )
+        .await;
+        assert!(out.starts_with("[search — searxng — 2 result(s)"), "{out}");
+        assert!(
+            out.contains("Ownership - The Rust Programming Language"),
+            "{out}"
+        );
+        assert!(
+            out.contains("https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html"),
+            "{out}"
+        );
+        assert!(out.contains("garbage collector"), "{out}");
+        assert!(out.contains("2. "), "{out}");
+        assert!(
+            out.contains("separate approval"),
+            "a list of links handed over as if they had been read: {out}"
+        );
+    }
+
+    /// A search that finds nothing is an answer, not a failure — and it has to read
+    /// that way, or the model spends the next three calls asking the same question
+    /// of the same engine.
+    #[tokio::test]
+    async fn an_engine_that_answers_with_nothing_says_so_without_an_error() {
+        let served = serve_page("{\"results\":[]}", "application/json").await;
+        let provider = xencode_analysis_rs::SearchProvider::Searxng {
+            base: served.trim_end_matches('/').to_string(),
+        };
+        let out = tool_web_search(
+            &provider,
+            &args_of(serde_json::json!({ "query": "zzzqqq" })),
+        )
+        .await;
+        assert!(!out.starts_with("error:"), "{out}");
+        assert!(out.contains("found nothing"), "{out}");
+        assert!(out.contains("wording"), "{out}");
+    }
+
+    /// Off is off in the executor as well as in the list, and a yes at the prompt
+    /// cannot buy it: same rule the fetch follows, because a call from a resumed
+    /// transcript is not a decision anybody made about leaving the machine.
+    #[tokio::test]
+    async fn a_search_is_refused_while_no_engine_is_named_however_it_was_answered() {
+        let root = temp_root("websearch-off");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.search = Ok(xencode_analysis_rs::SearchProvider::None);
+        let search = call("web_search", serde_json::json!({ "query": "rust" }));
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let search = search.clone();
+            tokio::spawn(async move {
+                execute_tool_call_approved(&rt, &root, &search, &ctx, None).await
+            })
+        };
+        let (request, responder) = h
+            .prompts
+            .recv()
+            .await
+            .expect("a search always asks, even refused later");
+        assert_eq!(request.class, ToolClass::Network);
+        responder.send(ApprovalAnswer::Approved).expect("responder");
+        let result = running.await.unwrap();
+        assert!(result.starts_with("error:"), "{result}");
+        assert!(result.contains("search_provider"), "{result}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The half-filled setting: the tool is offered because a name was chosen, and
+    /// the answer is the setting that is missing rather than a transport failure or
+    /// a tool that quietly was not there.
+    #[tokio::test]
+    async fn a_setting_that_is_half_filled_is_answered_with_the_half_missing() {
+        let root = temp_root("websearch-half");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.search = Err(
+            "search_provider is `searxng` but search_searxng_url is empty: point it at an \
+             instance you run"
+                .to_string(),
+        );
+        let search = call("web_search", serde_json::json!({ "query": "rust" }));
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let search = search.clone();
+            tokio::spawn(async move {
+                execute_tool_call_approved(&rt, &root, &search, &ctx, None).await
+            })
+        };
+        let (_, responder) = h.prompts.recv().await.expect("the search prompted");
+        responder.send(ApprovalAnswer::Approved).expect("responder");
+        let result = running.await.unwrap();
+        assert!(result.starts_with("error:"), "{result}");
+        assert!(result.contains("search_searxng_url"), "{result}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The whole path with a real instance answering on loopback: AllAllow still
+    /// prompts, the yes is per-call rather than standing, and the text that comes
+    /// back is the text the instance sent.
+    #[tokio::test]
+    async fn every_search_is_asked_for_and_the_approved_one_returns_the_engine_list() {
+        let served = serve_page(ONE_INSTANCE_ANSWER, "application/json").await;
+        let root = temp_root("websearch-on");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.search = Ok(xencode_analysis_rs::SearchProvider::Searxng {
+            base: served.trim_end_matches('/').to_string(),
+        });
+        let search = call(
+            "web_search",
+            serde_json::json!({ "query": "rust ownership" }),
+        );
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let search = search.clone();
+            tokio::spawn(async move {
+                execute_tool_call_approved(&rt, &root, &search, &ctx, None).await
+            })
+        };
+        let (request, responder) = h
+            .prompts
+            .recv()
+            .await
+            .expect("AllAllow still prompts for a search");
+        assert_eq!(request.summary, "web_search rust ownership");
+        responder.send(ApprovalAnswer::Approved).expect("responder");
+        let result = running.await.unwrap();
+        assert!(result.contains("Rust (programming language)"), "{result}");
+        assert!(
+            h.ctx.grants.lock().map(|g| g.is_empty()).unwrap_or(false),
+            "a search left a standing grant behind"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The provider is resolved from the settings a person writes, and the key is
+    /// chosen by the engine's name — a Brave credential is never tried against
+    /// Tavily's endpoint, the same rule that keeps one model provider's key off
+    /// another's host.
+    #[test]
+    fn the_named_engine_is_resolved_from_the_settings_and_its_own_key() {
+        let mut config = xencode_config_rs::XencodeConfig::default();
+        assert_eq!(
+            search_provider_from_config(&config),
+            Ok(xencode_analysis_rs::SearchProvider::None),
+            "the default config names no engine"
+        );
+        config.search_provider = String::new();
+        assert_eq!(
+            search_provider_from_config(&config),
+            Ok(xencode_analysis_rs::SearchProvider::None),
+            "an empty setting is the same as `none`"
+        );
+
+        config.search_provider = "wikipedia".to_string();
+        assert_eq!(
+            search_provider_from_config(&config),
+            Ok(xencode_analysis_rs::SearchProvider::Wikipedia)
+        );
+
+        config.search_provider = "searxng".to_string();
+        config.search_searxng_url = "http://127.0.0.1:8888/".to_string();
+        assert_eq!(
+            search_provider_from_config(&config),
+            Ok(xencode_analysis_rs::SearchProvider::Searxng {
+                base: "http://127.0.0.1:8888".to_string()
+            }),
+            "the trailing slash belongs to how the address was typed, not to the address"
+        );
+
+        // Both keys are in the file, so neither is read from the environment and the
+        // only question left is which one the named engine is handed.
+        config.api_keys.brave_api_key = Some("brave-FAKE-NOT-A-REAL-TEST-KEY".to_string());
+        config.api_keys.tavily_api_key = Some("tavily-FAKE-NOT-A-REAL-TEST-KEY".to_string());
+        config.search_provider = "brave".to_string();
+        assert_eq!(
+            search_provider_from_config(&config),
+            Ok(xencode_analysis_rs::SearchProvider::Brave {
+                key: "brave-FAKE-NOT-A-REAL-TEST-KEY".to_string()
+            })
+        );
+        config.search_provider = "tavily".to_string();
+        assert_eq!(
+            search_provider_from_config(&config),
+            Ok(xencode_analysis_rs::SearchProvider::Tavily {
+                key: "tavily-FAKE-NOT-A-REAL-TEST-KEY".to_string()
+            })
+        );
+
+        config.search_provider = "ddg".to_string();
+        let invented = search_provider_from_config(&config).unwrap_err();
+        assert!(invented.contains("`wikipedia`"), "{invented}");
+        assert!(invented.contains("`searxng`"), "{invented}");
+    }
+
+    /// The same call against the engine a person would actually get on a first
+    /// try — Wikipedia, keyless — so the live answer proves the parser and the
+    /// rendering, not only a server that was written to match them. `#[ignore]`
+    /// for the same reason as the rest of the live checks: it dials out, and only
+    /// a person can decide that. Run it with
+    /// `cargo test -p xencode-tui-rs -- --ignored web_search_live`.
+    #[tokio::test]
+    #[ignore]
+    async fn web_search_live_answers_a_real_question_with_no_key_at_all() {
+        let out = tool_web_search(
+            &xencode_analysis_rs::SearchProvider::Wikipedia,
+            &args_of(serde_json::json!({ "query": "rust ownership borrow checker" })),
+        )
+        .await;
+        println!("{out}");
+        assert!(!out.starts_with("error:"), "{out}");
+        assert!(out.contains("[search — wikipedia —"), "{out}");
+        assert!(out.contains("https://en.wikipedia.org/wiki/"), "{out}");
     }
 }

@@ -70,6 +70,59 @@ the convention is one file per site.
 - **The approval prompt says so beforehand**, in the line shown before you answer,
   rather than spending an extra request behind a yes that was given for one.
 
+### Added — `RS-2`: the agent can search, on an engine you name, and on no engine at all by default
+
+`web_fetch` reads an address the model has. `web_search` is the tool for when it
+does not: it puts the model's question to a search engine and hands back what that
+engine listed — titles, addresses, and the short snippet the engine printed.
+Nothing in that list is read, so a search cannot turn into browsing the web without
+anyone saying so; following one of those links is `web_fetch`, a separate request
+behind its own switch and its own approval.
+
+- **The default is `none`, and that is a measurement.** The obvious build — point
+  it at a free public engine and ship — was checked from this machine on 2026-10-04
+  and is not there: DuckDuckGo's `lite` endpoint answers with its *"Unfortunately,
+  bots use DuckDuckGo too"* CAPTCHA and its developer API is `410 Gone`; a public
+  SearXNG instance asked for `format=json` replies `200` with an HTML document,
+  which matches SearXNG's own documentation that public instances disable JSON;
+  MDN's JSON search endpoint is `404`. A default built on any of those is a tool
+  that breaks weekly, so every engine here is one a person writes into their own
+  config, and `none` leaves the tool out of what the model is offered entirely.
+- **Five names, and the keyless one that actually works.** `wikipedia` needs no
+  account and answers about people, places and concepts and nothing else; `searxng`
+  is an instance you run, addressed by `search_searxng_url`; `brave` and `tavily`
+  are a paid API behind `brave_api_key` / `tavily_api_key` (or `API_KEY_BRAVE` /
+  `API_KEY_TAVILY`). A search key is never a model route and is never sent to the
+  other engine's host — the same rule that keeps one provider's credential off
+  another provider's endpoint.
+- **Every call asks, and a yes does not stand.** A search is a network request
+  whatever the rest of the mode says: it prompts in ask, edit-allow and all-allow,
+  is refused in plan and autonomous, and "allow for the session" is not available
+  for it. The prompt leads with the question in full, because the question is what
+  leaves the machine, and says that nothing in the answer has been read.
+- **The instance you host is guarded like a page you host.** `search_searxng_url`
+  goes through the same address check as `web_fetch`, resolved and refused before
+  the connection, so a self-hosted engine cannot point the request at a private
+  network or the cloud's metadata service.
+- **A name that is half-configured stays offered and says what is missing.**
+  `search_provider searxng` with no URL, or `brave` with no key, answers with the
+  setting to fill in rather than a transport error or a tool that quietly vanished,
+  because the mistake is in the config and is worth naming before anything is
+  dialled. An engine that returns nothing is reported as an empty answer, not a
+  failure — a model told "no results" by an error spends the next three calls asking
+  the same question of the same engine.
+- **The typing is checked at the keyboard.** `xencode config set search_provider`
+  accepts only the five names and says so otherwise, so a typo surfaces when it is
+  written instead of at the first search of the next session. At most 10 results per
+  call; a question over 400 characters is refused.
+
+Verified against the real thing on 2026-10-04: with `search_provider` set to
+`wikipedia` and no key anywhere, the question *"rust ownership borrow checker"*
+came back as five titles with five `en.wikipedia.org` addresses and their snippets
+in 0.75s. The self-hosted path is exercised end to end against a real HTTP server
+answering SearXNG-shaped JSON on loopback, because there is no SearXNG instance on
+this machine to run it against.
+
 ### Added — `/gate`: a bug fix has to reproduce the bug first
 
 An agent that "fixed" a bug often never showed the bug happening. It wrote a

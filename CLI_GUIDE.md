@@ -396,6 +396,73 @@ does not go through this gate. It asks for exactly the address you typed: the
 `/llms.txt` retry above is what the tool does when a model's guess misses, not
 what the command does when you give it a path.
 
+#### Asking an engine you named for addresses: `web_search`
+
+`web_fetch` reads an address the model names. `web_search` is the other half of
+that: it finds addresses, by putting the model's question to a search engine
+**you** chose in config. It is offered only when `search_provider` names an
+engine, and the default is `none` — a machine that never touched the setting
+sends the model the same tool list it was sent before.
+
+The five names are `none`, `wikipedia`, `searxng`, `brave` and `tavily`. There is
+no default public instance, and that is a measurement rather than a caution:
+checked from this machine on 2026-10-04, DuckDuckGo's `lite` endpoint answers with
+its *"Unfortunately, bots use DuckDuckGo too"* CAPTCHA (and its developer API is
+`410 Gone`), a public SearXNG instance asked for `format=json` replies `200` with
+an HTML document, and MDN's JSON search endpoint is `404`. Wikipedia's own API is
+the keyless engine that does answer, and it answers about people, places and
+concepts and nothing else. `searxng` is an instance you run, addressed by
+`search_searxng_url`; `brave` and `tavily` are a paid API behind `brave_api_key`
+and `tavily_api_key` (or `API_KEY_BRAVE` / `API_KEY_TAVILY`). A search key is
+never a model route: it goes to that engine's host only, and picking `brave`
+never sends a Tavily credential anywhere.
+
+```text
+xencode config set search_provider wikipedia
+xencode config set search_provider searxng
+xencode config set search_searxng_url http://127.0.0.1:8888
+xencode config set brave_api_key <key>
+xencode config set search_provider none      # takes the tool away again
+```
+
+A search is a network call whatever else the mode says, so it asks in ask,
+edit-allow and all-allow, and is refused outright in plan and autonomous. The
+question is shown in full on the prompt, because the question is what leaves:
+
+```text
+web_search rust ownership
+search: rust ownership
+  (the question is sent to the search provider named in the config — `xencode config show` says which one that is — and what comes back is titles, addresses and short snippets. Nothing in that list is read.)
+```
+
+Answering does not buy the next one: "allow for the session" does not apply to
+this tool, the same rule as `web_fetch`. The answer comes back as a numbered list
+of the engine's own titles, links and snippets, headed with the engine and the
+question, and closed with the note that those are addresses rather than pages —
+reading one is a separate request behind `allow_web_fetch` with its own approval.
+Verified live on 2026-10-04 against Wikipedia with no key: the question *"rust
+ownership borrow checker"* came back as five titles and five `en.wikipedia.org`
+addresses in 0.75s.
+
+Two failures are deliberately not presented as a transport error, because they
+are facts about the config:
+
+```text
+error: web_search is not enabled: `xencode config set search_provider wikipedia` points it at an engine, `searxng` at one you run yourself, and every call still asks before the question leaves
+error: search_provider is `searxng` but search_searxng_url is empty: point it at an instance you run, e.g. `xencode config set search_searxng_url http://127.0.0.1:8888`
+```
+
+The first is the executor refusing a call that arrives while no engine is named —
+from a resumed transcript, say — which an approval cannot override. The second is
+why an engine named halfway stays offered instead of quietly disappearing: the
+answer names the half that is missing. An engine that answers with nothing is an
+answer, not an error, and says so, because a model told "no results" by a failure
+spends the next three calls asking the same question. At most 10 results per
+call; a question longer than 400 characters is refused. The address of a
+self-hosted instance goes through the same guard as a fetch, so
+`search_searxng_url` cannot point the request at a private network or the cloud
+metadata service.
+
 #### Asking what is known to be wrong with a dependency: `lookup_advisory`
 
 The third thing a model gets wrong about a dependency is its history: asked
@@ -2093,6 +2160,8 @@ is what used to happen.
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
 | `allow_online_docs` | bool | Whether the agent's `read_docs` tool may fetch a crate's documentation when cargo has not unpacked it on this machine. Off by default, and independent of `allow_cloud_models` — turning one on does not turn on the other, because one is a prompt leaving and the other is a text file arriving. With it off, `read_docs` answers from cargo's own copy and says what else would be needed to get more. Open it with `xencode config set allow_online_docs true`. |
 | `allow_web_fetch` | bool | Whether the agent is offered the `web_fetch` tool, which reads one page or API response at an address **the model names**. Off by default, and independent of both switches above. Turning it on only offers the tool: every call stops at the approval prompt showing the exact address and whether that address could land, and "allow for the session" does not apply to this tool — a yes about one page is not a yes about the next host. Approval is not a route into this machine either: the address is resolved and refused before the connection, and again at every redirect, so RFC1918, carrier-grade NAT, link-local and cloud-metadata addresses are unreachable even after a `y`, while `127.0.0.1` is allowed so a local dev server stays fetchable. The text handed back is capped at 30 000 characters and says how much of the page was left out. A page the server reports as missing buys one more request on the same address — its root `/llms.txt`, the index some documentation sites publish for models — returned labelled as that index, and reported as a plain miss when there is none. Open it with `xencode config set allow_web_fetch true`. |
+| `search_provider` | string | Which search engine, if any, the agent's `web_search` tool asks. `"none"` (the default) leaves the tool unoffered; the other names are `wikipedia`, `searxng`, `brave` and `tavily`. There is no default public instance on purpose: DuckDuckGo's free endpoints answer this machine with a bot CAPTCHA or `410 Gone`, a public SearXNG instance refuses to serve JSON, and MDN's JSON search endpoint is `404` (measured 2026-10-04), so a tool built on one would break weekly. Wikipedia is the keyless engine that does answer and covers people, places and concepts; `searxng` needs `search_searxng_url`; `brave` and `tavily` need their own key. The name is checked against that list as you type it, so a typo is told at the keyboard rather than at the first search of the next session. Every call still asks: a search sends the model's question off this machine, and a yes about one question is not a yes about the next. |
+| `search_searxng_url` | string | The address of the SearXNG instance to ask, used only when `search_provider` is `searxng`. Must be an `http://` or `https://` URL, or empty to clear it (`config set search_searxng_url ""`), and any trailing `/` is trimmed as it is stored. It has to be an instance you run, because that is the only kind that serves JSON. Whatever it holds is resolved and refused before the connection, by the same address guard `web_fetch` uses, so it cannot point the search at a private network or the cloud's metadata service. Setting `search_provider searxng` without this is answered by naming the missing half rather than by failing a request. |
 | `run_command_sandbox` | bool | Run each `run_command`, `background_start` and shell hook inside a `bubblewrap` (`bwrap`) mount namespace. Off by default; open it with `xencode config set run_command_sandbox true`, and it needs `bwrap` installed. With it on: the workspace and `~/.cargo` are bind-mounted writable so a build still works, the rest of the home directory is replaced by an empty tmpfs so `~/.ssh` and the files under it are *absent* rather than merely unreadable, and the network namespace is dropped. A single call that must reach the network passes `net: true` (an argument on `run_command` and `background_start`); shell hooks get no such grant and always run with the net off under the sandbox. There is **no silent fallback**: if the setting is on and `bwrap` is not present, the command is refused with the reason instead of being run unsandboxed. It bounds what a command can read outside the project — it does not contain the compiler: `build.rs` scripts and anything reachable from the writable workspace run free inside, so this is a fence on the home and the network, not a full jail. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048, "for_task": "bugfix" }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here; `f` cycles `for_task` through `bugfix`, `general` and none. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |

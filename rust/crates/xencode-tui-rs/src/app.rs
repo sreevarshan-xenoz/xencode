@@ -3449,6 +3449,10 @@ impl<'a> App<'a> {
             schemas: std::collections::HashMap::new(),
             online_docs: self.config.allow_online_docs,
             web_fetch: self.config.allow_web_fetch,
+            // Resolved once per run rather than per call: the engine and its key
+            // are config, and a run should not change its mind about either halfway
+            // through a turn (RS-2).
+            search: crate::agent_tools::search_provider_from_config(&self.config),
             session_id: self.memory.current_session().cloned(),
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             // The session's secret bit, shared across runs (SE-4): a read
@@ -9121,6 +9125,7 @@ fn offered_tools(
     mode: crate::agent_tools::ApprovalMode,
     repro: &crate::reprogate::ReproGate,
     web_fetch: bool,
+    search: bool,
 ) -> Vec<xencode_providers_rs::ToolDefinition> {
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
@@ -9135,6 +9140,14 @@ fn offered_tools(
     // Off, the model never sees the name; on, every call still asks.
     if web_fetch {
         tools.extend(xencode_providers_rs::web_tools());
+    }
+    // RS-2: the switch for a search is the setting that names an engine, not a
+    // second permission switch — there is nothing to permit when no engine was
+    // picked. `none` is the default, so the model on a machine that has not
+    // chosen one never sees the name; once one is named, every call still asks,
+    // because a question the model wrote is leaving the machine.
+    if search {
+        tools.extend(xencode_providers_rs::search_tools());
     }
     // Whatever `/mcp` started, read at the moment the turn begins. A plan
     // strips these too — they are `External`, which a plan cannot reach.
@@ -9289,6 +9302,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         approval.mode,
         &approval.repro,
         approval.web_fetch,
+        approval.search_offered(),
     );
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
@@ -11007,6 +11021,7 @@ mod tests {
             schemas: std::collections::HashMap::new(),
             online_docs: false,
             web_fetch: false,
+            search: Ok(xencode_analysis_rs::SearchProvider::None),
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -11129,6 +11144,7 @@ mod tests {
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
                 web_fetch: false,
+                search: Ok(xencode_analysis_rs::SearchProvider::None),
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -11569,6 +11585,7 @@ mod tests {
             crate::agent_tools::ApprovalMode::Ask,
             &crate::reprogate::ReproGate::new(),
             false,
+            false,
         );
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
@@ -11590,6 +11607,7 @@ mod tests {
             &xencode_plugin_rs::SkillRuntime::load(&dir, std::path::Path::new("")),
             crate::agent_tools::ApprovalMode::Ask,
             &crate::reprogate::ReproGate::new(),
+            false,
             false,
         );
         let names: Vec<&str> = with.iter().map(|tool| tool.name.as_str()).collect();
@@ -11618,6 +11636,7 @@ mod tests {
             &no_skills(),
             crate::agent_tools::ApprovalMode::Plan,
             &crate::reprogate::ReproGate::new(),
+            false,
             false,
         );
         let plan: Vec<&str> = plan_tools.iter().map(|tool| tool.name.as_str()).collect();
@@ -11657,6 +11676,7 @@ mod tests {
             crate::agent_tools::ApprovalMode::Ask,
             &crate::reprogate::ReproGate::new(),
             false,
+            false,
         );
         let ask: Vec<&str> = ask_tools.iter().map(|tool| tool.name.as_str()).collect();
         assert!(
@@ -11668,6 +11688,53 @@ mod tests {
             "a plan's list is a strict subset of ask's: plan {} vs ask {}",
             plan.len(),
             ask.len()
+        );
+    }
+
+    /// RS-2: the search tool's place in the offer is decided by the setting that
+    /// names an engine, and a plan takes it back out whatever that setting says.
+    /// A machine on the default never sees the name at all, so a model cannot
+    /// spend a round — or a person's attention — on a search with no engine.
+    #[test]
+    fn web_search_is_offered_only_when_an_engine_is_named() {
+        let no_skills = || {
+            xencode_plugin_rs::SkillRuntime::empty(
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            )
+        };
+        let names = |mode, search: bool| -> Vec<String> {
+            offered_tools(
+                &crate::mcp::McpHub::new(),
+                &no_skills(),
+                mode,
+                &crate::reprogate::ReproGate::new(),
+                false,
+                search,
+            )
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect()
+        };
+        let without = names(crate::agent_tools::ApprovalMode::Ask, false);
+        assert!(
+            !without.contains(&"web_search".to_string()),
+            "the default names no engine, and the model was shown one: {without:?}"
+        );
+        let with = names(crate::agent_tools::ApprovalMode::Ask, true);
+        assert!(
+            with.contains(&"web_search".to_string()),
+            "an engine was named and the model was not told: {with:?}"
+        );
+        assert_eq!(
+            with.len(),
+            without.len() + 1,
+            "opening a search adds the search tool and nothing else"
+        );
+        assert!(
+            !names(crate::agent_tools::ApprovalMode::Plan, true)
+                .contains(&"web_search".to_string()),
+            "a plan was offered a trip out of the machine"
         );
     }
 
@@ -12041,6 +12108,7 @@ mod tests {
             schemas: std::collections::HashMap::new(),
             online_docs: false,
             web_fetch: false,
+            search: Ok(xencode_analysis_rs::SearchProvider::None),
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -16062,6 +16130,7 @@ mod tests {
                 &no_skills(),
                 crate::agent_tools::ApprovalMode::Ask,
                 gate,
+                false,
                 false,
             )
             .iter()

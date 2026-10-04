@@ -50,18 +50,27 @@ pub enum SecretProvider {
     /// The bring-your-own OpenAI-compatible endpoint (`remote:` models).
     Remote,
     Nvidia,
+    /// Key for the Brave Search API. Used by `web_search` and by nothing else:
+    /// it is not a model provider, so it never joins a route.
+    Brave,
+    /// Key for Tavily, the other paid `web_search` backend.
+    Tavily,
 }
 
 impl SecretProvider {
-    /// Every provider that takes a credential, in the order the settings panels
-    /// list them.
-    pub const ALL: [SecretProvider; 6] = [
+    /// Every provider that takes a credential: the model services the settings
+    /// panels list, plus the two search engines `web_search` asks. `config show`
+    /// and `config set` walk this list, which is why a search key appears in them
+    /// without needing its own panel.
+    pub const ALL: [SecretProvider; 8] = [
         SecretProvider::OpenAi,
         SecretProvider::OpenRouter,
         SecretProvider::Gemini,
         SecretProvider::Qwen,
         SecretProvider::Remote,
         SecretProvider::Nvidia,
+        SecretProvider::Brave,
+        SecretProvider::Tavily,
     ];
 
     /// The name used in `config show` and the `doctor` rows.
@@ -73,6 +82,8 @@ impl SecretProvider {
             Self::Qwen => "qwen",
             Self::Remote => "remote",
             Self::Nvidia => "nvidia",
+            Self::Brave => "brave",
+            Self::Tavily => "tavily",
         }
     }
 
@@ -94,6 +105,8 @@ impl SecretProvider {
             // keeps working; the pattern-matching alias joins it rather than
             // replacing it.
             Self::Nvidia => &["NVIDIA_NIM_API_KEY", "API_KEY_NVIDIA"],
+            Self::Brave => &["API_KEY_BRAVE"],
+            Self::Tavily => &["API_KEY_TAVILY"],
         }
     }
 
@@ -108,6 +121,8 @@ impl SecretProvider {
             // is accepted as its alias, since that is the field name in the file.
             Self::Remote => "remote_key",
             Self::Nvidia => "nvidia_api_key",
+            Self::Brave => "brave_api_key",
+            Self::Tavily => "tavily_api_key",
         }
     }
 
@@ -121,6 +136,8 @@ impl SecretProvider {
             Self::Qwen => "qwen_api_key",
             Self::Remote => "remote_api_key",
             Self::Nvidia => "nvidia_api_key",
+            Self::Brave => "brave_api_key",
+            Self::Tavily => "tavily_api_key",
         }
     }
 
@@ -144,6 +161,8 @@ impl SecretProvider {
             Self::Qwen => keys.qwen_api_key.as_deref(),
             Self::Remote => keys.remote_api_key.as_deref(),
             Self::Nvidia => keys.nvidia_api_key.as_deref(),
+            Self::Brave => keys.brave_api_key.as_deref(),
+            Self::Tavily => keys.tavily_api_key.as_deref(),
         }
     }
 }

@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2284 tests passing, zero warnings (re-verified 2026-10-04, after RS-7)
+- [x] Workspace gates green — 16 crates, 2303 tests passing, zero warnings (re-verified 2026-10-04, after RS-2)
 
 ## Model Catalog Honesty
 
@@ -3113,6 +3113,16 @@ The agent edits code it cannot look up. The pieces exist and are disconnected
   SearXNG instances returned 403/HTML/429 for `format=json` across four
   instances, matching SearXNG's own docs that public instances disable JSON.
   A default public instance is a tool that breaks weekly. **OPT-IN-NETWORK.**
+  *(Built 2026-10-04 as `xencode-analysis-rs::search` plus the `web_search` tool,
+  and the row was re-measured before it was written: DuckDuckGo's `lite` endpoint
+  again answered 202 with the bot CAPTCHA and its developer API 410, a public
+  instance asked for `format=json` again returned an HTML document, and MDN's JSON
+  search endpoint is **404** — so the keyless half of this row is Wikipedia alone,
+  not Wikipedia/MDN. `search_provider` defaults to `none` and leaves the tool
+  unoffered; `wikipedia`, `searxng` (addressed by `search_searxng_url`), `brave`
+  and `tavily` (their own keys) are the four that offer it. The tool is
+  `ToolClass::Network`, so it reuses RS-1's asking and address guard rather than
+  adding rules.)*
 - **RS-3 Widen the read-only roots to the local registry and toolchain docs**
   (fact 21) so `search_files`/`read_file` can reach the *exact locked version's*
   upstream source, `README.md` and `CHANGELOG.md`. **S**. Trap: this is a
@@ -9905,6 +9915,54 @@ Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate chang
   The approval prompt now says the second request is coming before you answer for
   it, in the same line that shows the address. `xencode fetch` is untouched: a
   person who typed a path knows what they asked for, and the retry is for a guess.
+- [x] `RS-2` — 2026-10-04. The row's trap is what the item turned out to be, so
+  the row was measured again before writing a line of it. Live from this machine on
+  2026-10-04: `lite.duckduckgo.com/lite/` answers **202** with the *"Unfortunately,
+  bots use DuckDuckGo too"* page carrying `cc=botnet`, and
+  `duckduckgo.com/developer/search-api` is **410 Gone**; `searx.be/search?…&format=json`
+  answers **200** with `text/html` (11 354 bytes of document, no JSON in it), which
+  is SearXNG's own rule that public instances disable JSON; and MDN's
+  `en-US/search.json?q=rust` is **404**. *That last one is the row's divergence:*
+  "keyless Wikipedia/MDN" is now keyless Wikipedia only, because the MDN half is
+  not there to implement. `en.wikipedia.org/w/api.php?action=query&list=search` is
+  the free endpoint that does answer JSON, so it is the engine named in the docs
+  and in the tool's own description, with its scope said out loud — people, places
+  and concepts, not the general web.
+  *What shipped:* `SearchProvider` in `xencode-analysis-rs/src/search.rs` with
+  `None`, `Wikipedia`, `Searxng { base }`, `Brave { key }`, `Tavily { key }`, and
+  `PROVIDER_NAMES` as the one list both the config command and the parser read.
+  `search_provider` defaults to `none`, and with it `none` or empty the tool is not
+  in the list the model is sent at all (`web_search_is_offered_only_when_an_engine_is_named`).
+  A search is `ToolClass::Network`, so it inherits RS-1's rules rather than getting
+  new ones: asks in ask/edit-allow/all-allow, refused in plan and autonomous, and no
+  standing grant — `every_search_is_asked_for_and_the_approved_one_returns_the_engine_list`
+  asserts the grant list is still empty after an approved search. A key is chosen by
+  the engine's name and never by availability, so a Brave credential is not tried
+  against Tavily's host (`the_named_engine_is_resolved_from_the_settings_and_its_own_key`),
+  and `search_searxng_url` goes through `guard_destination`, the same address refusal
+  a fetched page gets. A half-filled name is answered with the half missing, not as
+  a transport error and not as an absent tool. At most 10 results, query capped at
+  400 characters. The provider is resolved once per run from config, not per call,
+  so a turn cannot change engine halfway through.
+  *Verified by running it:* live against Wikipedia with no key anywhere, the
+  question `rust ownership borrow checker` returned in 0.75s headed
+  `[search — wikipedia — 5 result(s) for "rust ownership borrow checker"]` with five
+  `en.wikipedia.org` addresses and their snippets, and the closing line saying those
+  are the addresses the engine named, not pages that have been read. The self-hosted
+  path was run against a real HTTP server the test started on loopback answering
+  SearXNG-shaped JSON, which returned `[search — searxng — 2 result(s) …]`.
+  The CLI was driven for real: `config set search_provider ""` and
+  `config set search_provider typo-engine` both answered
+  `error: search_provider must be one of none, wikipedia, searxng, brave, tavily; \`none\` leaves the tool unoffered`,
+  `config set brave_api_key <value>` answered `set brave_api_key = (stored, not shown)`
+  and `config show` printed `"brave_api_key": "set in config.json (value not shown)"`,
+  and `config set search_searxng_url ""` cleared it.
+  *Limits, stated:* there is no SearXNG instance on this machine to dial (the Docker
+  socket is permission-denied here), so `searxng` is proven against a real server
+  serving the real response shape, not against somebody else's instance; and
+  `brave`/`tavily` are implemented to their published request and response shapes but
+  have not been exercised against those APIs live, because there is no key for either
+  on this box and a paid call is the person's decision to make, not the agent's.
 
 #### W9 — Project DNA and architecture intelligence — 21 items
 
