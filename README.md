@@ -41,7 +41,7 @@ and fix your code — driven entirely from your terminal.
 
 ## ✨ Highlights
 
-- **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Colab GPU you rent, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
+- **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Google Colab GPU you bring up when you need one, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind` — and a git-backed record of those turns that stops the rewind from overwriting a file you edited yourself. A call whose arguments do not match the description that tool was offered with is answered back to the model instead of being run — including one whose arguments arrived as text that stopped halfway, which used to look like a call that asked for nothing. When a turn edited files, the model's claim of completion is not the gate: the workspace's own `cargo test` and `cargo clippy` run over the same approval gate and only exit `0` finishes the turn; failures come back to the model for up to `agent_repair_max_iters` repair rounds and past that the turn reports the task incomplete. A non-Rust workspace is not left unchecked: when there is no `Cargo.toml` but the turn edited files a language server covers, real diagnostics are pulled from that server (`clangd` for C and C++) and gate the turn the same way — an error feeds back for a repair round, a clean answer verifies it, and a workspace with no supported server is left untouched rather than given an unearned pass.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists. A candidate that would send the conversation somewhere the primary would not — a cloud API standing in for a local model, or the other way round — is skipped by design and named in the transcript.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 25 focus areas (body layouts via `Ctrl+U` — the three shipped presets plus any you declare in `layout_templates` — with 17 panels reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
@@ -49,7 +49,7 @@ and fix your code — driven entirely from your terminal.
 - **🔒 Secure by design** — token-authenticated collaboration server, a pattern-based OWASP Top 10 scanner (`xencode analyze`), a credential scrub that keeps a written secret out of the transcript, and an optional `bubblewrap` sandbox that keeps an approved shell command from reaching your home directory or the network.
 - **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). What a manifest declares is checked, not ignored: adding a prompt prefix requires the `prompt` permission and registering a shell-running hook requires `hooks`, so a plugin that uses a capability it did not ask for — or names one the host does not recognise — is refused and contributes nothing to the loop. No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold and why the rest did not — including the exact lines of prompt text each one puts ahead of the system prompt, and the git commit an installed plugin is pinned to. `xencode plugin install <git-url>` clones, verifies the manifest, and prints that declaration *before* anything is copied into the plugin directory; `xencode plugin update <name>` fetches the repository again and shows a diff, refusing to apply an update that changes the prompt text or hooks until it is acknowledged with `--yes`.
 - **📚 Skills, listed always and read on request** — a skill is one directory holding a `SKILL.md`: a name and a one-line description of when to use it at the top, the instructions below it. Xencode scans `skills/` in the settings directory (or `$XCODE_SKILLS_DIR`) and `.xencode/skills` inside your workspace — a project skill replaces a user skill of the same name — and puts only the *list* (a heading plus one line per skill) ahead of the system prompt. The instructions themselves stay on disk until the model asks for one, by name, through the read-only `load_skill` tool. So thirty installed skills cost a turn a short list rather than thirty documents: measured here on a local model, 30 skills added 736 tokens to the prompt while their 22,380 tokens of instructions were never sent. `/skills` reports what loaded, what was refused and what the list costs; `/skills reload` re-scans both directories.
-- **☁️ Rented GPUs, no infrastructure** — `xencode colab up` brings a Google Colab VM up with llama.cpp or Ollama serving an OpenAI endpoint and tunnels it to `127.0.0.1` over the official `colab ssh` bridge; the model picker, `remote:…` routing and Provider Health treat it like any other provider. No public URL, nothing exposed.
+- **☁️ A GPU on demand, no infrastructure** — `xencode colab up` brings a Google Colab VM up with llama.cpp or Ollama serving an OpenAI endpoint and tunnels it to `127.0.0.1` over the official `colab ssh` bridge; the model picker, `remote:…` routing and Provider Health treat it like any other provider. No public URL, nothing exposed.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an append-only audit trail, plus a Dockerfile and Compose setup for the API server.
 - **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), memory+disk cache, streaming with exponential backoff.
 
@@ -61,6 +61,7 @@ and fix your code — driven entirely from your terminal.
 | --- | --- |
 | **Privacy** | Local by default: code, context and models stay on your machine. A remote backend is a choice you make, never a dependency you inherit. |
 | **Lock-in** | Bring your own models — Ollama and llama.cpp locally; Gemini, Qwen, and OpenRouter (any OpenAI-compatible model id, including `vendor/model` Claude ids) in the cloud. |
+| **Cost** | The agent loop is usable without a subscription: open-weight models run on your own hardware, and when one machine is not enough `xencode colab up` puts a free-tier GPU behind the same provider list. Paid cloud routes exist for the model you choose to pay for, never as the only way to run. |
 | **Provider outages** | A sequential fallback chain re-runs the turn on your alternate models when a provider fails before its first token. |
 | **Context loss** | Persistent conversation memory, memory+disk cache, and a lexical (BM25) workspace context index. |
 | **Slow terminal tools** | Native Rust core for a snappy, instantly responsive TUI/CLI. |
@@ -588,8 +589,8 @@ flowchart TD
   network traffic; and on a machine that has never synced, the answer is that the
   advisory state is unknown, which is not the same claim as saying a crate is
   safe.
-- **Google Colab as a GPU you don't configure.** `xencode colab up` rents a
-  Colab VM, installs a pinned llama.cpp (CUDA when the VM has a GPU) or Ollama
+- **Google Colab as a GPU you don't configure.** `xencode colab up` brings up a
+  free-tier Colab VM, installs a pinned llama.cpp (CUDA when the VM has a GPU) or Ollama
   on it, and holds an SSH forward so the VM's OpenAI endpoint appears at
   `http://127.0.0.1:18000/v1` — then it writes that into `remote_base_url` and
   the runtime URL, so `remote:…` models, the model picker and Provider Health
@@ -820,6 +821,16 @@ Under consideration, in [`docs/ROADMAP.md`](docs/ROADMAP.md):
   in its own worktree; nothing schedules or merges many
 - **AI-generated commit messages** — the `Ctrl+S` panel takes text you type and
   runs `git commit -am`; nothing proposes the message from the diff
+- **More free GPUs behind the same bridge** — the 2026-10-04 backend pass found
+  two worth wiring in: Kaggle's two free T4s (about 30 GPU-hours a week, notebook
+  code runs as root, weights and server binary cached once as a private Kaggle
+  dataset) and the **$100 AMD Developer Cloud credit** that lands a root-SSH
+  MI300X VM with 192 GB of VRAM, which is already what `xencode remote` speaks.
+  Neither is built. Kaggle has no SSH at all, so it waits on a **private** way for
+  the box to dial out — the standing rule here is no public URLs, and the free
+  examples found online all expose an unauthenticated endpoint to the internet.
+  Tracked as **L-13 → L-15** in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md), each
+  gated on a probe that has not been run yet
 - **Session replay**, a git autopilot, a VS Code extension, a web interface
 
 Deliberately parked, not gaps to "fix": an `anthropic_api_key` field (see

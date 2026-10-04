@@ -1139,11 +1139,15 @@ Web research on 2026-09-23 across twenty-plus GPU backends, two independent
 passes. Both are cited below; where they disagree, that is said rather than
 averaged.
 
-- **Architecturally impossible for this pattern** — Kaggle, Hugging Face
+- **Architecturally impossible for this pattern** — Hugging Face
   Spaces, Replicate, Modal, Salad. No SSH or no private port path, so the model
   server is reachable only over a public URL — the exact ngrok-shaped free-tier
   ToS violation Milestone K ruled out. Modal's "tunnels" are unauthenticated
   public TLS URLs; Salad is container-groups only with no user VM.
+  **Kaggle was filed here on 2026-09-23 and is moved out of it by the 2026-10-04
+  pass below** — "no SSH" is still true, but it is not the same thing as
+  "unreachable", and several projects have since proven a way in. See
+  **L-13** and **L-14**.
 - **No GPU, or the wrong shape** — Oracle Always Free is Arm **CPU** only (and
   the A1 allotment was cut to 2 OCPU / 12 GB); GCP/AWS/Azure have no free GPU
   and need card + quota ceremony; Hetzner sells GPUs only as flat monthly
@@ -1170,10 +1174,118 @@ Metal path in L-3 is **UNVERIFIED**: it cannot be tested on this machine, which
 has no Apple hardware, so it ships as a detected-and-reported branch, not as a
 promised runtime.
 
+### Research refresh 2026-10-04 — the free-GPU field, read from source
+
+Prompted by "we get 30 hours of Kaggle GPU a week, use it". This pass read the
+actual notebooks and scripts of projects that already run a model server on free
+GPUs, and re-checked vendor pages, rather than reasoning from the 2026-09-23
+conclusion. Every claim below has a file or page behind it; what could not be
+checked in code is marked.
+
+**Kaggle is reachable, and it is much less hostile than assumed.**
+
+- Kaggle runs notebook code **as root** — `apt-get` with no sudo prompt. The
+  "no sudo" obstacle raised in the first pass does not exist
+  (`Tahsine/kaggle-llm-server` `1b_setup_llama.ipynb` cell 4;
+  `ayitas/borrowed-gpu` cell 3).
+- **llama.cpp publishes prebuilt Linux CUDA server binaries.** Listed from the
+  GitHub releases API on this date: `llama-b11382-bin-ubuntu-cuda-12.8-x64.tar.gz`
+  and a `cudart-llama-…-cuda-12.8-x64.tar.gz` variant (~594 MB). This contradicts
+  `w-sliman/llama-server-cuda-t4`, whose README asserts no such build exists and
+  which therefore hand-builds a stub `libcuda.so` to survive a driver-less build
+  box. That repo is the workaround for a problem that no longer applies; it is
+  also the reason not to trust a project's own write-up about upstream. Nobody
+  among the four originals uses a release tarball, so **every one of them pays a
+  ~26-minute compile and inherits the base-image drift they warn users about**.
+  A fresh build of the tarball path is still UNVERIFIED on Kaggle's actual image.
+- **The auth problem those projects all skip is one flag.** `llama-server` has
+  native `--api-key` / `--api-key-file` (`common/arg.cpp:3492`, `:3503`) and now
+  also serves an **Anthropic-compatible `/v1/messages`**
+  (`tools/server/README.md:1595`), which `xencode-providers-rs/src/anthropic.rs`
+  already speaks. `Tahsine` ships a bare OpenAI endpoint with `api_key="none"`
+  on a public `trycloudflare.com` URL — anyone who finds the hostname owns the
+  GPU and reads every prompt.
+- **Session shape, from Kaggle's own docs:** 12 h per session, 30 GPU-hours a
+  week, and a **60-minute idle timeout on interactive sessions**. Interactive
+  keep-alive in the wild is a cell that sleeps forever; the shape we want is
+  headless — `shivakrishnavaraprasad/Kaggle-llm-server` pushes a `script` kernel
+  with `kaggle kernels push` (no browser attached, verified in
+  `start_kaggle.py`) and scrapes the tunnel hostname out of **`kaggle kernels
+  logs`**, which is the only way a CLI-only tool can learn its own endpoint.
+- **Set-up-once-and-reuse is Kaggle Datasets, not Google Drive.** The pattern is
+  three notebooks: download the GGUF HuggingFace→Kaggle and publish it as a
+  private dataset, compile/publish the server binary as a second dataset, then a
+  third notebook that just mounts both and starts (so a session begins in about
+  a minute). Drive is **not** mountable on Kaggle — `drive.mount` is Colab-only;
+  on Kaggle the only route is `gdown` on an anyone-with-link file, which means a
+  publicly readable copy of the weights. **Dataset size caps are contradictory**:
+  100 GB per public dataset / 100 GB private total (product-feedback/195163)
+  versus a reported 20 GB per private dataset (general/136779); which applies
+  today is UNVERIFIED and gates whether a 22 GB model can be cached at all.
+- **Handing the URL and key back is the awkward part**, and `ayitas/borrowed-gpu`
+  solves it properly: the notebook POSTs `{base_url, api_key, model}` to a
+  **secret ntfy.sh topic** and a local poller rewrites the agent's config — no
+  log scraping, no copy-paste, and the key never appears in a public kernel
+  version. Its watchdog restarts the model server *and* the tunnel every 30 s and
+  re-publishes the new URL.
+- **Two durability risks, stated rather than buried.** (1) Kaggle's ToS limits
+  the service to "your own internal, personal, non-commercial use". (2) There is
+  an open [product-feedback thread asking Kaggle to flag or block outbound
+  tunnels — Cloudflare Tunnel, ngrok, localtunnel — from GPU sessions](https://www.kaggle.com/product-feedback/743898).
+  A feature built on an outbound tunnel is built on something the platform is
+  being asked to break.
+- `hamimmahmud0/kaggle-tunnel` (created 2026-03-25) runs a **reverse-direction
+  SSH** over Cloudflare: the Kaggle VM dials out, so no inbound rules, and the
+  laptop gets a real `ssh` to a local proxy port. That would let the L-1
+  `Backend::transport()` seam keep emitting `ssh` argv almost unchanged — but it
+  routes discovery through a third-party Cloudflare Worker broker and ships a
+  Tauri desktop app, neither of which we would take as a dependency.
+
+**AMD Developer Cloud is the strongest free source found, and it needs no new
+architecture.** AMD's own pages, fetched this date: **$100 of complimentary
+credit** for AMD AI Developer Program members, requested under *Member Perks →
+Request Cloud Credits* with affiliation, job function, intended use and a public
+LinkedIn/GitHub for verification; 2-3 business days to approve; **credits expire
+30 days after activation**; and *"if your credit expires and you have no active
+payment method on file, your AMD GPU VM will be destroyed"*. The hardware is a
+**real VM with a root SSH login using your own key** — Instinct **MI300X, 192 GB
+VRAM**, 20 vCPU / 240 GB RAM / 720 GB NVMe plus 5 TB scratch on the one-GPU
+config, at ~$1.99/hr so roughly 50 GPU-hours. Provisioning goes through
+DigitalOcean or Vultr portals, whose own copy says *"link your credit card"* — so
+whether the complimentary path truly needs no card is **UNVERIFIED and is the
+first thing to establish, before anyone plans on it**. Also unresolved: a 2025
+article on the same site speaks of a "25-hour quota" where today's page says
+$100/roughly 50 hours, and allocation is explicitly "determined by AMD in its
+sole discretion". A powered-off instance still burns credit. The same program
+hands **$50 of Fireworks AI credit valid 90 days** — a managed OpenAI-compatible
+endpoint serving open weights, which belongs to **L-11**, not here.
+This is L-2 shaped, exactly: BYO-SSH with a signup recipe attached, so it costs
+no new backend code — but ROCm is a different quant-kernel surface from CUDA and
+that has to be measured, not assumed.
+
+**Checked and disqualified on 2026-10-04** (all previously open questions, now
+closed): **Hugging Face ZeroGPU** is 5 minutes of an RTX PRO 6000 a day on a free
+account, 60 s per call, and only through the Gradio SDK — structurally unusable
+for a standing server. **GitHub Codespaces GPU is dead** (NCv3 retired 2025-08-29);
+the CPU side is 120 h/month free but its terms forbid hosting "any kind of
+production-facing application", so it is a CI-shaped tool, never an inference
+backend. **Northflank has no free GPU** (sandbox is 2 CPU services; GPUs are
+metered). **Cloudflare has no free GPU compute** — Containers needs the $5/mo
+Workers plan. **Civo's $250 credit requires a card inside 21 days.** **Gitpod's
+free individual plan is gone** (Classic PAYG sunset 2025-10-15, now from $20/mo).
+**Paperspace is being folded into DigitalOcean** with no free GPU. There is **no
+student DGX Cloud offer**; the NVIDIA Academic Grant Program is for researchers.
+**"Chai-1 free A100/H100 for verified users" does not exist** — Chai-1 is Chai
+Discovery's biomolecular model and Chai AI is a chatbot app; the claim was
+fabricated. Nothing found anywhere but Kaggle and AMD: a free, renewable,
+long-lived GPU box with root or a private path in.
+
 ### Do not build (decided, with reasons)
 
 - **Managed GPU-cloud backends** — see the RunPod contradiction and the
-  billing-abandonment risk above.
+  billing-abandonment risk above. This is about *paid* clouds; the free boxes
+  found on 2026-10-04 are tracked separately as **L-13 → L-15** and are gated on
+  a probe, not admitted by this bullet.
 - **An embedding / vector index, or Cursor-style remote repo indexing.**
   `xencode-context-rs` has deterministic retrieval *and* a retrieval eval that
   measures it. Swapping in embeddings would regress quality silently.
@@ -1387,6 +1499,43 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       smaller than one agent prompt; NVIDIA NIM is roughly 40 RPM behind a 429
       backoff. **Rate numbers are web-verified as of 2026-09-23 and will drift**
       — keep them in a dated table, not in prose.
+      **Re-measured against each provider's own page on 2026-10-04** (this is the
+      dated table the item asks for): **Groq free plan** — `openai/gpt-oss-120b`,
+      `gpt-oss-20b` and `qwen/qwen3.8-27b` at **30 RPM / 1,000 RPD / 8K TPM /
+      200K TPD**, no card; the 8K TPM is confirmed from Groq's own limits table
+      and the 200K TPD means **five to fifteen long-context agent calls a day**,
+      which is not an agent loop. No Llama remains on the free tier.
+      **NVIDIA NIM** — about 1,000 credits at 40 RPM, no card; whether the
+      credits renew is UNVERIFIED, and the account-side 404 below still stands.
+      **Cloudflare Workers AI** — **10,000 Neurons per day free on the Workers
+      Free plan**, resetting 00:00 UTC, priced at $0.011/1,000 beyond, served
+      through an OpenAI-compatible `/v1/chat/completions`; free-forever and no
+      card, and Cloudflare states it does not train on this data.
+      **ModelScope API-Inference** — its `api-inference.modelscope.cn/v1/models`
+      answers publicly and unprefixed, listing the current open-weight coding
+      stack (DeepSeek-V4-Pro/Flash, Qwen, GLM, MiniMax); reported around 2,000
+      calls a day at no cost. Two things must be settled before it is wired in:
+      the exact official quota (the 2,000 figure came from a docs mirror) and its
+      **mainland-China hosting plus an unconfirmed retention/training clause** —
+      a user pasting private source code has a right to know which jurisdiction
+      reads it.
+      **Disqualified on 2026-10-04, with the reason** — GitHub Models is **fully
+      retired as of 2026-07-30** (playground, catalog, inference API and BYOK all
+      gone, per GitHub's own docs page), so it is not a route; **Mistral's free
+      "Experiment" tier trains on prompts unless you deselect data sharing** and
+      runs about 1 request/second; **OpenRouter `:free` is 50 requests/day
+      without a card** (1,000 after ≥$10 credit) and its free router says prompts
+      are logged for training, with no current Qwen3-Coder/DeepSeek/Kimi/GLM in
+      the free set; **Cerebras has the strongest privacy answer but its free
+      tier is now a $5 credit expiring in 30 days behind a verified card**;
+      **Cohere's trial is 1,000 calls a month** and Command A is CC-BY-NC;
+      **DeepSeek's API is paid only**; **Gemini via AI Studio is free but
+      closed-weight**, and its free tier lets reviewers read prompts to improve
+      products. Contradictions left unresolved rather than averaged: Cerebras
+      "no card / 1M tokens a day" on an aggregator versus card-required on its own
+      docs; OpenRouter's collection page "not used for training" versus its free
+      router page "logged for training"; Groq "no retention by default" on a
+      privacy tracker versus 30-day retention in its own docs.
       **Done-when:** a real prompt is answered through each route from a clean
       config, the 8K-TPM trap is handled and documented rather than surfacing as
       a confusing 429, and no key is ever written by a test.
@@ -1496,6 +1645,131 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       ended at llama.cpp's context limit under the 0.6B model before reaching the
       `INCOMPLETE` cap; the deterministic Clean/Errors/Unverifiable branches are
       covered by the tool tests.)*
+
+#### Track K — free GPUs that are not a machine you can SSH into
+
+Added 2026-10-04 from the source-reading pass above. These are gated on a probe,
+not on a decision to build: nothing here ships until the private path is watched
+working, because a public tunnel is already ruled out by this milestone's own
+standing constraint.
+
+- [ ] **L-13 — a transport that is not SSH forwarding.** *Effort: M.* L-1's
+      `Backend::transport()` returns `ssh -N -L` argv, which assumes an inbound
+      port. Add the second shape the 2026-10-04 pass found necessary: a box that
+      dials out and is then reachable at a **private** address, with no child
+      `ssh` process and no port forward — `transport()` becomes a choice between
+      `SshForward` and a direct endpoint, and `forward_url()` returns the private
+      address instead of a loopback one. The candidate is Tailscale's
+      [userspace networking mode](https://tailscale.com/docs/concepts/userspace-networking),
+      which exists precisely for containers with no `/dev/net/tun`, plus
+      `tailscale serve` to hand tailnet traffic to a localhost port; this machine
+      already runs tailscale 1.102.3, so the local half is a known quantity and
+      the remote half is not.
+      **Done-when:** a live box reachable **only** at a private address answers a
+      real tool-calling prompt through `xencode`, `xencode remote status` names
+      that node, and `down` leaves no process and no node behind. **Blocked until
+      proved:** that userspace tailscaled starts, registers and serves inside a
+      restricted container at all — that is a one-kernel experiment, not an
+      assumption. If it fails, L-14 has no private path and this whole track is
+      parked with the reason written down.
+
+- [ ] **L-14 — `xencode kaggle up|status|down`: the 30 GPU-hours a week.**
+      *Effort: L. Depends on L-13.* Kaggle gives two T4s free and runs notebook
+      code as root, so the model server installs the same way Colab's does; the
+      difference is transport, and L-13 is the gate. Take the shape from
+      `shivakrishnavaraprasad/Kaggle-llm-server` (headless `kaggle kernels push`
+      of a `script` kernel, `kernels status` polled, no browser attached) and the
+      endpoint handoff from `ayitas/borrowed-gpu` (the kernel posts
+      `{base_url, api_key, model}` to a secret topic the local side reads, so
+      nothing is scraped and no key lands in a public kernel version). Cache the
+      weights and the server **once**, as a private Kaggle Dataset that later
+      sessions mount read-only — **not Google Drive**, which Kaggle cannot mount
+      and which would require a publicly readable copy. Skip the community's
+      26-minute compile and take the prebuilt
+      `llama-*-bin-ubuntu-cuda-12.8-x64.tar.gz` instead. Always pass `--api-key`;
+      every OSS example found exposes the endpoint unauthenticated. Reuse
+      `state.rs` with `kaggle.json`, `preflight.rs` for the `kaggle` CLI plus
+      `~/.kaggle/kaggle.json` (mode 0600, same treatment as L-4), and
+      `VM_MAX_AGE_HOURS`-style reaping with Kaggle's real numbers: 12 h per
+      session, 30 h per week, 60-minute idle timeout interactive.
+      **Done-when:** from a clean checkout, `xencode kaggle up` yields a
+      working OpenAI-compatible endpoint on two T4s that a real agent turn drives
+      to completion, `status` reports the running kernel and the weekly quota
+      spent, `down` stops it, and the second session starts in about a minute
+      because the dataset was cached by the first. **Also honest in the docs:**
+      Kaggle's terms limit this to personal non-commercial use, and an
+      [active product-feedback thread asks Kaggle to block outbound tunnels from
+      GPU sessions](https://www.kaggle.com/product-feedback/743898), so this is a
+      feature that could stop working through no fault of ours. If the dataset
+      size cap turns out to be the smaller reported 20 GB per private dataset,
+      the fallback shape is batch offload — push a kernel, poll, pull output
+      files — with no tunnel and no standing server at all.
+
+- [ ] **L-15 — the free boxes that need no code: AMD Developer Cloud, and the
+      grants behind them.** *Effort: S. Depends on L-2, not on L-13.* AMD gives
+      AI Developer Program members **$100 of credit for a root-SSH MI300X VM
+      (192 GB VRAM)**, which is L-2's existing BYO-SSH path with a signup recipe
+      attached — so the deliverable is documentation plus a capability probe, not
+      a backend. Two things must be established before it is promised anywhere:
+      whether the complimentary path really needs no payment method (AMD's own
+      pages contradict each other — the DigitalOcean and Vultr blurbs say "link
+      your credit card" while the terms describe destruction on expiry with no
+      card on file), and whether our quantisations actually run on ROCm, which is
+      a different kernel surface from CUDA. Note in the docs that a **powered-off
+      instance still burns credit** and credits **expire 30 days after
+      activation**, so `down` is destroy, not stop. Same shape covers the
+      research grants (EuroHPC Playground needs an EU startup; NSF ACCESS needs a
+      US affiliation; Civo needs a card in 21 days) as a detected-and-reported
+      list, not as features.
+      **Done-when:** a real MI300X box brought up with `xencode remote add` +
+      `up` completes a tool-calling agent turn with the quant we recommend, its
+      tokens-per-second measured and quoted, or the item is marked blocked with
+      whichever of the two questions killed it.
+
+#### Track F — free hosted routes that already speak our protocol
+
+Cheaper to ship than any GPU box: these are OpenAI-compatible endpoints serving
+open weights, so they ride L-11's per-prefix routing with no tunnel, no cold
+start and no session cap. The catch is not capacity, it is that a coding agent
+sends private source in every request and most free tiers answer that with
+"we read it".
+
+- [ ] **L-16 — `cloudflare:…` and `modelscope:…` routes.** *Effort: S. Rides
+      L-11's mechanism; do not re-implement a client.* Add two prefixes against
+      the existing OpenAI-compatible path, each with its key in the same
+      config-plus-env shape as `nvidia_api_key`, each classified in the shared
+      egress prefix table, each with the model ids the free tier actually
+      answers for. Cloudflare is the safer first: 10,000 Neurons a day on the
+      **free** Workers plan, resetting 00:00 UTC, OpenAI-compatible path, and it
+      states it does not train on this data. ModelScope carries the better model
+      lineup (DeepSeek-V4, Qwen, GLM, MiniMax, its `/v1/models` answering without
+      auth) but its quota figure and its retention/jurisdiction position are both
+      unresolved on purpose — see **L-17** — so it ships second or not at all.
+      **Done-when:** a real tool-calling agent turn completes through each shipped
+      prefix from a clean config, the neuron/token ceiling is surfaced as itself
+      ("this day's free budget is spent", not a bare 429 or a hung turn), and no
+      test writes a key.
+
+- [ ] **L-17 — a route's data policy is a checked fact, not a footnote.**
+      *Effort: M. Depends on the `/egress` preview shipped as PR-4.* The provider
+      table knows where a prompt goes; it does not know what happens there. Give
+      each route a declared `trains_on_prompts` / `retains_prompts` position, and
+      have `/egress` print it next to the destination it already reports, so
+      "this free route reads your source to improve its models" is visible before
+      the turn rather than in a terms page nobody opens. Under
+      `allow_cloud_models`-style strictness, a route that trains is refused
+      outright rather than warned about — the same shape as refusing an off-machine
+      route today. Seed it from the 2026-10-04 findings (Mistral trains unless
+      deselected; OpenRouter's free router says logged-for-training while its
+      collection page says otherwise; Gemini's free tier lets reviewers read
+      prompts; Groq's own docs say 30-day retention where a third-party tracker
+      says none; Cloudflare and Cerebras say neither retention nor training) and
+      leave each row **cited to the provider's own page with a date**, because
+      these clauses change without notice.
+      **Done-when:** `/egress` on a training-allowed route and on a
+      no-training route prints two different, correctly-sourced answers, a strict
+      setting refuses the first before dialling, and no row is filled in from a
+      recollection.
 
 ## Milestone M — stop being an island: hooks, skills, plugins, MCP, ACP (planned 2026-09-23)
 
