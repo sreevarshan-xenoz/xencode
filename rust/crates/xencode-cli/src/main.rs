@@ -202,6 +202,18 @@ enum Commands {
         action: AdvisoryAction,
     },
 
+    /// Supply-chain report: shell to the installed dependency checkers
+    /// (cargo-shear, cargo-deny) and stream their findings. Report only — it
+    /// never edits a manifest or auto-fixes a dependency.
+    Deps {
+        /// Project to check (default: the current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        #[arg(long, value_enum, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Send a query to a model
     Query {
         /// The prompt to send
@@ -1464,6 +1476,7 @@ async fn main() {
         Commands::Cache { action } => run_cache(action),
         Commands::Audit { action } => run_audit(action),
         Commands::Advisories { action } => run_advisories(action).await,
+        Commands::Deps { path, format } => run_deps(path, format),
         Commands::Query {
             prompt,
             model,
@@ -3867,6 +3880,183 @@ fn advisory_corpus(dir: Option<PathBuf>) -> Result<PathBuf, String> {
     }
     let cache_dir = xencode_config_rs::paths::cache_dir().map_err(|e| e.to_string())?;
     Ok(xencode_analysis_rs::advisories::corpus_dir(&cache_dir))
+}
+
+/// SE-6 — supply-chain report.
+///
+/// Shells out to whichever dependency checkers are installed (`cargo-shear`
+/// for unused dependencies, `cargo-deny` for advisories/bans/licenses),
+/// parses their JSON and streams the findings, alongside the local facts that
+/// need no external tool — duplicate majors and the delta of this `Cargo.lock`
+/// against the one committed at HEAD. It is report only: auto-fixing a
+/// dependency is how the supply chain becomes the attack, so nothing here
+/// edits a manifest.
+///
+/// A checker that is not installed is reported as such, never as a clean tree.
+fn run_deps(path: PathBuf, format: OutputFormat) -> Result<(), String> {
+    use xencode_analysis_rs::deps;
+
+    let manifest = xencode_context_rs::verify::manifest_dir(&path)?;
+
+    enum Outcome {
+        Ran(String),
+        Missing,
+        Failed(String),
+    }
+    // Invoke the hyphenated binary directly so a tool that is not installed is
+    // an OS NotFound, not a cargo "no such command" message on stderr.
+    let run_checker = |binary: &str, args: &[&str]| -> Outcome {
+        match std::process::Command::new(binary)
+            .current_dir(&manifest)
+            .args(args)
+            .output()
+        {
+            Ok(out) => Outcome::Ran(String::from_utf8_lossy(&out.stdout).into_owned()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Outcome::Missing,
+            Err(e) => Outcome::Failed(e.to_string()),
+        }
+    };
+
+    let mut findings: Vec<serde_json::Value> = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
+    let shear_status: String;
+    let deny_status: String;
+
+    match run_checker("cargo-shear", &["--format", "json", "--offline"]) {
+        Outcome::Ran(stdout) => match deps::parse_shear_json(&stdout) {
+            Ok(report) => {
+                shear_status =
+                    format!("{} error(s), {} warning(s)", report.errors, report.warnings);
+                for f in report.findings {
+                    let sev = if f.severity == "error" {
+                        "High"
+                    } else {
+                        "Medium"
+                    };
+                    lines.push(format!(
+                        "  [{sev}] unused-dependency {} — {} ({})",
+                        f.file,
+                        f.message,
+                        f.help.as_deref().unwrap_or("no suggestion")
+                    ));
+                    findings.push(serde_json::json!({
+                        "checker": "cargo-shear", "severity": f.severity,
+                        "kind": "unused-dependency", "file": f.file,
+                        "message": f.message, "help": f.help,
+                    }));
+                }
+            }
+            Err(e) => shear_status = e,
+        },
+        Outcome::Missing => shear_status = "cargo-shear not installed".to_string(),
+        Outcome::Failed(e) => shear_status = format!("cargo-shear failed: {e}"),
+    }
+
+    match run_checker(
+        "cargo-deny",
+        &["check", "--all-features", "--format", "json"],
+    ) {
+        Outcome::Ran(stdout) => match deps::parse_deny_json(&stdout) {
+            Ok(found) => {
+                deny_status = format!("{} finding(s)", found.len());
+                for f in found {
+                    let sev = if f.severity == "error" {
+                        "Critical"
+                    } else {
+                        "Medium"
+                    };
+                    let scope = f.krate.as_deref().unwrap_or("(project)");
+                    lines.push(format!(
+                        "  [{sev}] {} {} {scope} — {}",
+                        f.check, f.id, f.message
+                    ));
+                    findings.push(serde_json::json!({
+                        "checker": "cargo-deny", "severity": f.severity,
+                        "kind": f.check, "id": f.id, "crate": f.krate,
+                        "message": f.message,
+                    }));
+                }
+            }
+            Err(e) => deny_status = e,
+        },
+        Outcome::Missing => {
+            deny_status =
+                "cargo-deny not installed — advisories and licenses are not checked here; \
+                 use `xencode advisory check` for the offline RustSec/OSV corpus"
+                    .to_string();
+        }
+        Outcome::Failed(e) => deny_status = format!("cargo-deny failed: {e}"),
+    }
+
+    // Local, tool-free facts.
+    let lock_text = std::fs::read_to_string(manifest.join("Cargo.lock")).unwrap_or_default();
+    for dup in deps::duplicate_versions(&lock_text) {
+        lines.push(format!(
+            "  [Medium] duplicate-major {} pinned at {} versions: {}",
+            dup.krate,
+            dup.versions.len(),
+            dup.versions.join(", ")
+        ));
+        findings.push(serde_json::json!({
+            "checker": "local", "severity": "medium", "kind": "duplicate-major",
+            "crate": dup.krate, "versions": dup.versions,
+        }));
+    }
+    let mut delta_lines: Vec<String> = Vec::new();
+    if let Some((_, head)) = deps::head_lock_text(&manifest) {
+        let delta = deps::lock_delta(&head, &lock_text);
+        if !delta.added.is_empty() || !delta.removed.is_empty() || !delta.upgraded.is_empty() {
+            for (name, version) in &delta.added {
+                delta_lines.push(format!("  + {name} {version}"));
+                findings.push(serde_json::json!({
+                    "checker": "local", "kind": "lock-added", "crate": name, "version": version,
+                }));
+            }
+            for (name, version) in &delta.removed {
+                delta_lines.push(format!("  - {name} {version}"));
+                findings.push(serde_json::json!({
+                    "checker": "local", "kind": "lock-removed", "crate": name, "version": version,
+                }));
+            }
+            for (name, from, to) in &delta.upgraded {
+                delta_lines.push(format!("  ~ {name} {from} -> {to}"));
+                findings.push(serde_json::json!({
+                    "checker": "local", "kind": "lock-upgraded", "crate": name, "from": from, "to": to,
+                }));
+            }
+        }
+    }
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "checkers": { "cargo-shear": shear_status, "cargo-deny": deny_status },
+                "findings": findings,
+            })
+        );
+        return Ok(());
+    }
+
+    println!("dependency checkers");
+    println!("  cargo-shear (unused dependencies): {shear_status}");
+    println!("  cargo-deny (advisories, bans, licenses): {deny_status}");
+    if !lines.is_empty() {
+        println!("\nfindings");
+        for line in &lines {
+            println!("{line}");
+        }
+    } else {
+        println!("\nno checker raised a finding against a tool it could run");
+    }
+    if !delta_lines.is_empty() {
+        println!("\nlockfile vs HEAD (report only — review before merging):");
+        for line in delta_lines {
+            println!("{line}");
+        }
+    }
+    println!("\nreport only: this command edits no manifest. Re-run a checker's own fix yourself if you accept a finding.");
+    Ok(())
 }
 
 async fn run_advisories(action: AdvisoryAction) -> Result<(), String> {

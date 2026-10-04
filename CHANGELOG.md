@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `SE-6`: `xencode deps` — one supply-chain report over the checkers you have
+
+`xencode deps` shells out to whichever dependency checkers are installed
+(`cargo-shear` for unused dependencies, `cargo-deny` for advisories, bans and
+licenses), parses their JSON, and streams every finding in one place, together
+with two facts that need no external tool: crates pinned at more than one
+version in `Cargo.lock`, and the delta of the current lock against the one at
+`HEAD` — the diff to read before merging a dependency change. It is report only:
+auto-fixing a dependency is how the supply chain becomes the attack, so nothing
+here edits a manifest. A checker that is not installed is named as unavailable
+rather than counted clean — `cargo-shear` runs here and flags the real unused
+`dirs` dependency in the CLI manifest, while `cargo-deny` is reported as absent
+with a pointer to the offline `xencode advisory check`. `--format json` emits
+the checker statuses and a findings array.
+
 ### Added — `SE-5`: the security scan now reads credential *content*, not just file names
 
 The pattern scanner only fired on an assignment whose key looked secret —
