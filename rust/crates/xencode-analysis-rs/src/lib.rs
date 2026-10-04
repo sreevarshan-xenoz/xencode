@@ -26,5 +26,6 @@ pub use issues::{
 };
 pub use security::VulnerabilityScanner;
 pub use web::{
-    extract_text, fetch_url, FetchError, FetchedPage, FETCH_TIMEOUT_SECS, MAX_PAGE_BYTES,
+    cap_chars, extract_text, fetch_url, fetch_url_guarded, guard_destination, FetchError,
+    FetchedPage, DEFAULT_TEXT_CAP_CHARS, FETCH_TIMEOUT_SECS, MAX_PAGE_BYTES, MAX_REDIRECTS,
 };

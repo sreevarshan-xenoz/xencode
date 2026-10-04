@@ -66,6 +66,12 @@ pub enum ToolClass {
     /// A tool belonging to an external MCP server: we cannot preview its
     /// effect, cannot checkpoint it, and cannot undo it.
     External,
+    /// A request out to an address the model chose. Its own class rather than a
+    /// capability hanging off `Shell`, because the two cannot share a
+    /// permission: "always allow commands" is a statement about this machine,
+    /// and nothing about this machine implies consent to fetch a page nobody
+    /// named. `Network` is the one class the session grant refuses to buy off.
+    Network,
 }
 
 impl ToolClass {
@@ -78,6 +84,7 @@ impl ToolClass {
             Self::Edit => "file change",
             Self::Shell => "shell command",
             Self::External => "external tool",
+            Self::Network => "network request",
         }
     }
 }
@@ -154,6 +161,9 @@ pub fn tool_class(tool: &str) -> ToolClass {
         // costs whatever `run_command` costs in this mode, never less. Naming it
         // explicitly keeps it out of the unknown-tool fallback while saying why.
         "reproduce_bug" => ToolClass::Shell,
+        // RS-1: the address comes from the model, so the class is the trip
+        // itself rather than anything it reads or writes.
+        "web_fetch" => ToolClass::Network,
         _ => ToolClass::Shell,
     }
 }
@@ -262,12 +272,13 @@ impl Capability {
 /// one rule the class cannot carry: anything from an MCP server is a
 /// stranger's code, whatever its shape claims.
 ///
-/// `network.request` is currently mapped by nothing: no built-in tool is a
+/// `network.request` had no mapping when CAP-1 landed: no built-in tool was a
 /// pure network tool (`read_docs` fetches only through its own consent flag
 /// and stays a read here), and the `sh -c` strings whose network use would
-/// need prefix matching are SE-7's kernel job by the item's own trap, not
-/// the gate's. RS-1's network tools map onto the existing variant and its
-/// table row — that is the "for free" the plan promises.
+/// need prefix matching are SE-7's kernel job by the item's own trap, not the
+/// gate's. RS-1's `web_fetch` is the tool that arrives onto that existing
+/// table row — the gate's decision was written before the tool existed, which
+/// is the "for free" the plan promised.
 pub fn tool_capabilities(tool: &str) -> Vec<Capability> {
     if crate::mcp::is_mcp_tool(tool) {
         return vec![Capability::ExternalMcp];
@@ -276,6 +287,7 @@ pub fn tool_capabilities(tool: &str) -> Vec<Capability> {
         ToolClass::ReadOnly => vec![Capability::FilesystemRead],
         ToolClass::Edit => vec![Capability::FilesystemWrite],
         ToolClass::Shell => vec![Capability::ShellExecute],
+        ToolClass::Network => vec![Capability::NetworkRequest],
         // Unreachable today — the MCP check above owns every external name —
         // and kept so a future external class cannot fall through silently.
         ToolClass::External => vec![Capability::ExternalMcp],
@@ -374,7 +386,13 @@ pub fn classify(
     // Unreachable for a tainted shell: the rule above already returned Ask,
     // so a grant given before the secrets were read cannot cover a call
     // made after.
-    if decision == Permission::Ask && granted.contains(&class) {
+    //
+    // A network request is exempt from the shortcut for the same kind of reason.
+    // A grant is one decision reused, and the decision here was about one
+    // address; reusing it for the next is not what was agreed. So every page the
+    // model asks for is asked of the person, and "always allow" is refused for
+    // this class at the prompt rather than accepted and then ignored.
+    if decision == Permission::Ask && class != ToolClass::Network && granted.contains(&class) {
         Permission::Allow
     } else {
         decision
@@ -491,6 +509,19 @@ impl HeadlessPolicy {
         if class == ToolClass::ReadOnly {
             return Headless::Allow;
         }
+        // Named at launch or not, a caller with no one to ask cannot reach the
+        // network: the approval every fetch needs has nowhere to go, so the
+        // grant below would only promise a run that the interactive gate then
+        // refuses. This says which half is missing instead.
+        if class == ToolClass::Network {
+            return Headless::Refused {
+                reason: format!(
+                    "`{tool}` sends a request to an address the caller chose, and this \
+                     `xencode mcp serve` has no one to approve that trip. Run it in the \
+                     TUI, where each fetch is shown and asked."
+                ),
+            };
+        }
         if self.allows(tool) {
             return Headless::Allow;
         }
@@ -532,6 +563,7 @@ fn class_label(class: ToolClass) -> &'static str {
         ToolClass::Edit => "file-changing",
         ToolClass::Shell => "shell",
         ToolClass::External => "external",
+        ToolClass::Network => "network",
     }
 }
 
@@ -996,6 +1028,45 @@ async fn online_docs(name: &str, version: Option<&str>, path: Option<&str>, why:
     format!("[{name} {version} {what} — fetched from {url}, because {why}]\n{body}")
 }
 
+/// The agent's one outbound read (RS-1): a URL the model named, fetched through
+/// the guarded path and handed back as text.
+///
+/// `fetch_url_guarded`, never `fetch_url`. The difference is one argument at the
+/// call site and nothing else — the address was chosen by a model that was
+/// handed addresses by the pages, issues and files it reads, and the unguarded
+/// path will fetch `http://10.0.0.8/` if asked, which makes this tool an
+/// internal-network probe. Where the request landed is said out loud, in the
+/// header line, so a page that redirected somewhere else reads as one.
+async fn tool_web_fetch(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(url) = arg_str(args, "url").filter(|u| !u.trim().is_empty()) else {
+        return err("web_fetch needs a non-empty string \"url\"");
+    };
+    // The cap is the caller's to lower and not to raise: it exists to keep a
+    // whole page out of the context window, so a bigger number buys nothing.
+    let cap = args
+        .get("max_chars")
+        .and_then(|v| v.as_u64())
+        .map(|v| (v as usize).clamp(1, xencode_analysis_rs::DEFAULT_TEXT_CAP_CHARS))
+        .unwrap_or(xencode_analysis_rs::DEFAULT_TEXT_CAP_CHARS);
+    let page = match xencode_analysis_rs::web::fetch_url_guarded(url).await {
+        Ok(page) => page,
+        Err(e) => return err(e.to_string()),
+    };
+    let (text, dropped) = xencode_analysis_rs::cap_chars(&page.text, cap);
+    let title = page.title.as_deref().unwrap_or("(no title)");
+    let mut out = format!(
+        "[{} — {title} — {} bytes fetched]\n{text}",
+        page.url, page.bytes
+    );
+    if dropped > 0 {
+        out.push_str(&format!(
+            "\n[{dropped} more characters on this page; the whole text is at {}]",
+            page.url
+        ));
+    }
+    out
+}
+
 fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
     let raw = arg_str(args, "path").filter(|s| !s.trim().is_empty());
     let (full, display, source) = match raw {
@@ -1347,6 +1418,10 @@ pub fn approval_summary(call: &ToolCall) -> String {
     let focus = arg_str(&args, "path")
         .or_else(|| arg_str(&args, "command"))
         .or_else(|| arg_str(&args, "pattern"))
+        // The address is the whole decision for a fetch, so it is the line the
+        // overlay leads with. A summary of `web_fetch` without it would ask
+        // about a trip without saying where.
+        .or_else(|| arg_str(&args, "url"))
         .unwrap_or("");
     if focus.is_empty() {
         call.name.clone()
@@ -1489,6 +1564,25 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
         },
         "background_start" | "run_command" => match arg_str(&args, "command") {
             Some(command) if !command.trim().is_empty() => format!("command: sh -c {command:?}"),
+            _ => summarize_call(call),
+        },
+        // The one call whose entire consequence is its argument, so the preview
+        // can say more than what will happen — it can say whether it is allowed
+        // to happen at all. Same check the fetch makes, one host resolution,
+        // shown before the person answers rather than after.
+        "web_fetch" => match arg_str(&args, "url") {
+            Some(url) => {
+                let mut out = format!("fetch: {url}");
+                out.push_str(&match xencode_analysis_rs::web::guard_destination(url) {
+                    // Not "a public address": loopback passes the guard on
+                    // purpose, and a label that called `127.0.0.1` public would
+                    // teach the reader to distrust the label. The honest pair is
+                    // whether the request would go out or be refused.
+                    Ok(()) => "  (would connect; the page is returned as text, capped)".to_string(),
+                    Err(e) => format!("  — this one would be refused: {e}"),
+                });
+                out
+            }
             _ => summarize_call(call),
         },
         _ => summarize_call(call),
@@ -2974,10 +3068,11 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
 /// [`execute_tool_call`] with the caller's configured foreground timeout.
 ///
 /// These two entry points are the ones outside the chat loop: they read crate
-/// documentation offline only, because the setting that permits a fetch arrives
-/// through [`ApprovalCtx`], they know no skills, because the session's loaded
-/// skills arrive the same way, and they carry no reproduction gate, because the
-/// session's gate does too. The loop is the only caller that has any of them.
+/// documentation offline only, and never fetch the web at all, because the two
+/// settings that permit those trips arrive through [`ApprovalCtx`]; they know no
+/// skills, because the session's loaded skills arrive the same way; and they
+/// carry no reproduction gate, because the session's gate does too. The loop is
+/// the only caller that has any of them.
 pub async fn execute_tool_call_timed(
     rt: &TaskRuntime,
     root: &Path,
@@ -2991,6 +3086,7 @@ pub async fn execute_tool_call_timed(
         command_timeout,
         None,
         None,
+        false,
         false,
         None,
         &crate::sandbox::Sandbox::disabled(),
@@ -3010,6 +3106,7 @@ async fn execute_tool_call_plan(
     plan: Option<&PlanHandle>,
     mcp: Option<&crate::mcp::McpHub>,
     online_docs: bool,
+    web_fetch: bool,
     skills: Option<&xencode_plugin_rs::SkillRuntime>,
     sandbox: &crate::sandbox::Sandbox,
     repro: Option<&crate::reprogate::ReproGate>,
@@ -3166,6 +3263,15 @@ async fn execute_tool_call_plan(
         "search_files" => tool_search_files(root, &args),
         "read_docs" => tool_read_docs(root, &args, online_docs).await,
         "lookup_advisory" => tool_lookup_advisory(root, &args),
+        // RS-1. Off, this is not an error the model can retry around: the tool
+        // is not offered at all, so reaching here means a caller that never
+        // asked the user. On, it still cannot choose its own destination —
+        // `fetch_url_guarded` is the only entry point used, whatever the mode.
+        "web_fetch" if !web_fetch => err(
+            "web_fetch is not enabled: `xencode config set allow_web_fetch true` offers it, \
+                 and every call still asks before the request leaves",
+        ),
+        "web_fetch" => tool_web_fetch(&args).await,
         "load_skill" => tool_load_skill(skills, &args),
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
@@ -3287,6 +3393,12 @@ pub struct ApprovalCtx {
     /// every path that is not the chat loop: a call out of the machine has to
     /// be something the user decided, not something the agent worked around.
     pub online_docs: bool,
+    /// Whether `web_fetch` exists for this run at all (`allow_web_fetch`). A
+    /// second guard behind the offer: the tool is not in the list a model is
+    /// shown unless the user opened this, and a call that arrives from anywhere
+    /// else — a resumed transcript, a caller that built its own request — is
+    /// refused here rather than executed on the strength of having been named.
+    pub web_fetch: bool,
     /// The session this turn belongs to, handed to hooks on stdin (M-1) so a
     /// hook can tell runs apart. `None` where no session is open.
     pub session_id: Option<String>,
@@ -3458,6 +3570,7 @@ async fn run_and_checkpoint(
         Some(&ctx.plan),
         mcp,
         ctx.online_docs,
+        ctx.web_fetch,
         Some(&ctx.skills),
         &ctx.sandbox,
         Some(&ctx.repro),
@@ -3580,6 +3693,16 @@ pub async fn execute_tool_call_approved(
             }
             let decision = match answer.await {
                 Ok(answer) => {
+                    // A fetch is approved one address at a time. An "always allow"
+                    // answer on one page is not a standing permission to reach the
+                    // next, so this is recorded as the weaker thing it now is —
+                    // otherwise the run's own history would claim a consent the
+                    // gate refuses to honour, and `xencode runs` would show it.
+                    let answer = if class == ToolClass::Network {
+                        ApprovalAnswer::Approved
+                    } else {
+                        answer
+                    };
                     ctx.record_approval(&call.name, class, answer);
                     answer
                 }
@@ -6801,6 +6924,7 @@ patched = ["{fixed}"]
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
+                web_fetch: false,
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -7289,6 +7413,7 @@ patched = ["{fixed}"]
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
+                web_fetch: false,
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -9073,6 +9198,280 @@ patched = ["{fixed}"]
         .await;
         assert!(evidence.starts_with("error:"), "{evidence}");
         assert!(evidence.contains("already on record"), "{evidence}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ── RS-1: the one tool that leaves the machine ────────────────────
+
+    /// A local HTTP server that answers every GET with the same page, so the
+    /// fetch path can be driven end to end — through the gate, the prompt and
+    /// the real socket — with no network involved.
+    async fn serve_page(body: &'static str, content_type: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt as _;
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                if stream.write_all(response.as_bytes()).await.is_err() {
+                    continue;
+                }
+            }
+        });
+        format!("http://{addr}/")
+    }
+
+    #[test]
+    fn web_fetch_is_its_own_class_and_every_mode_that_asks_is_denied_otherwise() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({ "url": "https://example.org/" }));
+        assert_eq!(tool_class("web_fetch"), ToolClass::Network);
+        assert_eq!(
+            tool_capabilities("web_fetch"),
+            vec![Capability::NetworkRequest]
+        );
+        for mode in [
+            ApprovalMode::Ask,
+            ApprovalMode::EditAllow,
+            ApprovalMode::AllAllow,
+        ] {
+            assert_eq!(
+                classify(root, "web_fetch", &none, mode, &[], false),
+                Permission::Ask,
+                "a fetch asks in {mode:?}"
+            );
+        }
+        for mode in [ApprovalMode::Plan, ApprovalMode::Autonomous] {
+            assert_eq!(
+                classify(root, "web_fetch", &none, mode, &[], false),
+                Permission::Deny,
+                "a fetch is refused outright in {mode:?}"
+            );
+        }
+    }
+
+    /// The item's own wording: not grantable as one blanket "always allow all
+    /// hosts". A grant is one decision reused, and the decision here was about
+    /// one address, so it is the single class the shortcut below refuses to
+    /// apply — every other class still buys its prompt away, which is what makes
+    /// this assertion say something.
+    #[test]
+    fn no_session_grant_buys_off_a_fetch() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({ "url": "https://example.org/" }));
+        for granted in [
+            vec![ToolClass::Network],
+            vec![ToolClass::Network, ToolClass::Shell, ToolClass::Edit],
+        ] {
+            assert_eq!(
+                classify(
+                    root,
+                    "web_fetch",
+                    &none,
+                    ApprovalMode::AllAllow,
+                    &granted,
+                    false
+                ),
+                Permission::Ask,
+                "a grant of {granted:?} silenced the fetch prompt"
+            );
+        }
+        // The same list, one tool over: the shortcut itself still works, so the
+        // rule above is the exception and not a gate that stopped working.
+        assert_eq!(
+            classify(
+                root,
+                "run_command",
+                &none,
+                ApprovalMode::AllAllow,
+                &[ToolClass::Shell],
+                false
+            ),
+            Permission::Allow
+        );
+    }
+
+    #[test]
+    fn a_headless_caller_cannot_reach_the_network_however_it_was_granted() {
+        let root = Path::new(".");
+        let args = args_of(serde_json::json!({ "url": "https://example.org/" }));
+        // Named at launch, which is what would allow a shell or a write.
+        let policy = HeadlessPolicy::new(["web_fetch".to_string()]);
+        let decision = policy.decide(root, "web_fetch", &args);
+        let Headless::Refused { reason } = decision else {
+            panic!("a headless fetch was allowed: {decision:?}");
+        };
+        assert!(reason.contains("no one to approve"), "{reason}");
+    }
+
+    #[test]
+    fn the_fetch_prompt_leads_with_the_address_and_says_whether_it_can_land() {
+        let root = Path::new(".");
+        // Loopback is the case the label has to get right: the guard allows it,
+        // so the prompt may not call it a public address.
+        let allowed = call(
+            "web_fetch",
+            serde_json::json!({ "url": "http://127.0.0.1:9999/docs" }),
+        );
+        assert_eq!(
+            approval_summary(&allowed),
+            "web_fetch http://127.0.0.1:9999/docs"
+        );
+        let preview = approval_preview(root, &allowed);
+        assert!(
+            preview.contains("fetch: http://127.0.0.1:9999/docs"),
+            "{preview}"
+        );
+        assert!(preview.contains("would connect"), "{preview}");
+        assert!(!preview.contains("public"), "{preview}");
+        // The check the fetch will make is shown before the answer, so the
+        // person is not asked to approve a trip that cannot be taken.
+        let metadata = call(
+            "web_fetch",
+            serde_json::json!({ "url": "http://169.254.169.254/latest/meta-data/" }),
+        );
+        let preview = approval_preview(root, &metadata);
+        assert!(preview.contains("would be refused"), "{preview}");
+        assert!(preview.contains("169.254.169.254"), "{preview}");
+    }
+
+    /// Off is off in the executor too, not only in the list of tools: a call
+    /// that arrives from a resumed transcript is refused rather than run because
+    /// somebody once wrote the name into a file. And a yes cannot buy it back —
+    /// the gate asks about leaving the machine, which is a different question
+    /// from whether the user has switched the capability on, so the answer the
+    /// prompt gets is still refused, with the setting named.
+    #[tokio::test]
+    async fn a_fetch_is_refused_while_the_switch_is_off_however_it_was_answered() {
+        let root = temp_root("webfetch-off");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.web_fetch = false;
+        let fetch = call(
+            "web_fetch",
+            serde_json::json!({"url": "http://example.org/"}),
+        );
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let fetch = fetch.clone();
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &fetch, &ctx, None).await },
+            )
+        };
+        let (_, responder) = h.prompts.recv().await.expect("a fetch always asks");
+        responder.send(ApprovalAnswer::Approved).expect("responder");
+        let result = running.await.unwrap();
+        assert!(result.starts_with("error:"), "{result}");
+        assert!(result.contains("allow_web_fetch"), "{result}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The whole path, with the page actually served: the prompt names the
+    /// address, "always allow" is taken as the weaker yes it can only be, the
+    /// next call prompts again, and the text that comes back is the text the
+    /// server sent.
+    #[tokio::test]
+    async fn every_fetch_is_asked_for_and_the_approved_one_returns_the_page() {
+        let url = serve_page(
+            "<html><head><title>Guide</title></head><body><p>fetched body</p></body></html>",
+            "text/html",
+        )
+        .await;
+        let root = temp_root("webfetch-on");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.web_fetch = true;
+        let fetch = call("web_fetch", serde_json::json!({ "url": url }));
+
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let fetch = fetch.clone();
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &fetch, &ctx, None).await },
+            )
+        };
+        let (request, responder) = h
+            .prompts
+            .recv()
+            .await
+            .expect("AllAllow still prompts for a fetch");
+        assert_eq!(request.class, ToolClass::Network);
+        assert_eq!(request.class_label(), "network request");
+        assert_eq!(request.summary, format!("web_fetch {url}"));
+        // The answer a person gives when they mean "and the next ones too" —
+        // which, for an address, is not a promise this gate will keep.
+        responder
+            .send(ApprovalAnswer::ApprovedForSession)
+            .expect("responder");
+        let result = running.await.unwrap();
+        assert!(result.contains("fetched body"), "{result}");
+        assert!(result.contains(&url), "{result}");
+        assert!(result.contains("Guide"), "{result}");
+        assert!(
+            h.ctx.grants.lock().map(|g| g.is_empty()).unwrap_or(false),
+            "a fetch left a standing grant behind: {:?}",
+            h.ctx.grants.lock().map(|g| g.clone()).unwrap_or_default()
+        );
+        {
+            let rows = h.ctx.approvals.lock().unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0].decision,
+                xencode_context_rs::ApprovalDecision::Allowed,
+                "the run's own record claimed a consent the gate refused to keep"
+            );
+        }
+
+        // Same mode, same tool, second address-shaped call: asked again.
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let fetch = fetch.clone();
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &fetch, &ctx, None).await },
+            )
+        };
+        let (_, responder) = h
+            .prompts
+            .recv()
+            .await
+            .expect("the second fetch was not asked for");
+        responder.send(ApprovalAnswer::Approved).expect("responder");
+        assert!(running.await.unwrap().contains("fetched body"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Approval is about leaving the machine; it is not a key to the machine's
+    /// own back rooms. The guard runs on the approved call, so this refuses with
+    /// nobody listening and no packet sent.
+    #[tokio::test]
+    async fn an_approved_fetch_still_cannot_reach_a_private_address() {
+        let root = temp_root("webfetch-ssrf");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.web_fetch = true;
+        let fetch = call(
+            "web_fetch",
+            serde_json::json!({ "url": "http://169.254.169.254/latest/meta-data/" }),
+        );
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            let fetch = fetch.clone();
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &fetch, &ctx, None).await },
+            )
+        };
+        let (_, responder) = h.prompts.recv().await.expect("the fetch prompted");
+        responder.send(ApprovalAnswer::Approved).expect("responder");
+        let result = running.await.unwrap();
+        assert!(result.starts_with("error:"), "{result}");
+        assert!(result.contains("refusing to fetch"), "{result}");
+        assert!(result.contains("169.254.169.254"), "{result}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

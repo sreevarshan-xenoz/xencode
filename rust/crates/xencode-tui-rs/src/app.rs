@@ -3448,6 +3448,7 @@ impl<'a> App<'a> {
             hooks: self.session_hooks(),
             schemas: std::collections::HashMap::new(),
             online_docs: self.config.allow_online_docs,
+            web_fetch: self.config.allow_web_fetch,
             session_id: self.memory.current_session().cloned(),
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             // The session's secret bit, shared across runs (SE-4): a read
@@ -9119,6 +9120,7 @@ fn offered_tools(
     skills: &xencode_plugin_rs::SkillRuntime,
     mode: crate::agent_tools::ApprovalMode,
     repro: &crate::reprogate::ReproGate,
+    web_fetch: bool,
 ) -> Vec<xencode_providers_rs::ToolDefinition> {
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
@@ -9126,6 +9128,14 @@ fn offered_tools(
     tools.extend(xencode_providers_rs::command_tools());
     tools.extend(xencode_providers_rs::plan_tools());
     tools.extend(xencode_providers_rs::repro_tools());
+    // RS-1: the surface for reaching off this machine is opened by a config
+    // switch rather than by an approval mode, because the two decide different
+    // things — a mode says how much the agent may do with consent it already
+    // has, and this says whether requests out are part of the program at all.
+    // Off, the model never sees the name; on, every call still asks.
+    if web_fetch {
+        tools.extend(xencode_providers_rs::web_tools());
+    }
     // Whatever `/mcp` started, read at the moment the turn begins. A plan
     // strips these too — they are `External`, which a plan cannot reach.
     tools.extend(mcp.definitions());
@@ -9278,6 +9288,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         &approval.skills,
         approval.mode,
         &approval.repro,
+        approval.web_fetch,
     );
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
@@ -10995,6 +11006,7 @@ mod tests {
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
             online_docs: false,
+            web_fetch: false,
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -11116,6 +11128,7 @@ mod tests {
                 hooks: app.config.agent_hooks.clone(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
+                web_fetch: false,
                 session_id: None,
                 approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -11555,6 +11568,7 @@ mod tests {
             ),
             crate::agent_tools::ApprovalMode::Ask,
             &crate::reprogate::ReproGate::new(),
+            false,
         );
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
@@ -11576,6 +11590,7 @@ mod tests {
             &xencode_plugin_rs::SkillRuntime::load(&dir, std::path::Path::new("")),
             crate::agent_tools::ApprovalMode::Ask,
             &crate::reprogate::ReproGate::new(),
+            false,
         );
         let names: Vec<&str> = with.iter().map(|tool| tool.name.as_str()).collect();
         assert!(names.contains(&"load_skill"), "{names:?}");
@@ -11603,6 +11618,7 @@ mod tests {
             &no_skills(),
             crate::agent_tools::ApprovalMode::Plan,
             &crate::reprogate::ReproGate::new(),
+            false,
         );
         let plan: Vec<&str> = plan_tools.iter().map(|tool| tool.name.as_str()).collect();
         // Everything a plan may do stays offered.
@@ -11640,6 +11656,7 @@ mod tests {
             &no_skills(),
             crate::agent_tools::ApprovalMode::Ask,
             &crate::reprogate::ReproGate::new(),
+            false,
         );
         let ask: Vec<&str> = ask_tools.iter().map(|tool| tool.name.as_str()).collect();
         assert!(
@@ -12023,6 +12040,7 @@ mod tests {
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
             online_docs: false,
+            web_fetch: false,
             session_id: None,
             approvals: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -16044,6 +16062,7 @@ mod tests {
                 &no_skills(),
                 crate::agent_tools::ApprovalMode::Ask,
                 gate,
+                false,
             )
             .iter()
             .map(|tool| tool.name.clone())

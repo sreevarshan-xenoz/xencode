@@ -2181,6 +2181,11 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // and it is asked for. This only decides whether the copy already on
                 // disk is read, which is why the documented path stays offline.
                 "price_lookup" => config.price_lookup = parse_bool(&value)?,
+                // Whether the agent is offered `web_fetch` at all. The switch is
+                // about the address the model picks, which is why it is separate
+                // from the two above: this trip has no named host in front of it,
+                // so it stays unoffered until the user says it may be.
+                "allow_web_fetch" => config.allow_web_fetch = parse_bool(&value)?,
                 // Keep every model call of every run, in the clear, under
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.
@@ -5146,13 +5151,15 @@ fn format_image_text(meta: &ImageMeta) -> String {
 
 /// Cap for `--format text` page dumps: JSON keeps the whole body, but an
 /// unbounded terminal dump helps nobody. The trailer says how much was cut.
-pub const FETCH_TEXT_CAP_CHARS: usize = 30_000;
+/// The number is the one the fetch layer publishes, shared with the agent's
+/// `web_fetch` tool so "the same page" is the same size to both readers.
+pub const FETCH_TEXT_CAP_CHARS: usize = xencode_analysis_rs::DEFAULT_TEXT_CAP_CHARS;
 
 /// One-screen research summary for a fetched page. Pure — unit-tested.
 fn format_fetch_text(page: &FetchedPage) -> String {
     let title = page.title.as_deref().unwrap_or("(no title)");
-    let body = if page.text.chars().count() > FETCH_TEXT_CAP_CHARS {
-        let kept: String = page.text.chars().take(FETCH_TEXT_CAP_CHARS).collect();
+    let (kept, dropped) = xencode_analysis_rs::cap_chars(&page.text, FETCH_TEXT_CAP_CHARS);
+    let body = if dropped > 0 {
         format!("{kept}\n…[truncated to {FETCH_TEXT_CAP_CHARS} chars — use --format json for the full text]")
     } else {
         page.text.clone()
