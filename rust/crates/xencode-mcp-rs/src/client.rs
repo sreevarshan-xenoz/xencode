@@ -325,7 +325,10 @@ impl McpClient {
     /// `tools/list`. An empty list is an honest answer, not an error.
     pub async fn list_tools(&self) -> Result<Vec<protocol::McpTool>, McpError> {
         self.require(protocol::Feature::Tools)?;
-        let result = self.request("tools/list", Value::Null).await?;
+        // An empty object, not null: a strict server (Playwright MCP) drops a
+        // `tools/list` whose params are null without answering, which reads as
+        // a timeout rather than as the rejection it is.
+        let result = self.request("tools/list", json!({})).await?;
         Ok(protocol::parse_tools(&result))
     }
 
@@ -357,7 +360,7 @@ impl McpClient {
     /// `resources/list`. An empty list is an honest answer, not an error.
     pub async fn list_resources(&self) -> Result<Vec<protocol::McpResource>, McpError> {
         self.require(protocol::Feature::Resources)?;
-        let result = self.request("resources/list", Value::Null).await?;
+        let result = self.request("resources/list", json!({})).await?;
         Ok(protocol::parse_resources(&result))
     }
 
@@ -378,7 +381,7 @@ impl McpClient {
     /// `prompts/list`.
     pub async fn list_prompts(&self) -> Result<Vec<protocol::McpPrompt>, McpError> {
         self.require(protocol::Feature::Prompts)?;
-        let result = self.request("prompts/list", Value::Null).await?;
+        let result = self.request("prompts/list", json!({})).await?;
         Ok(protocol::parse_prompts(&result))
     }
 

@@ -2875,6 +2875,58 @@ The same six names reach a client as `mcp__xencode__<tool>` once that client
 imports them, which is why published names go through the same sanitize-and-fit-
 in-64 rule xencode's own MCP client applies to a tool it imports.
 
+### Recipe: driving a real browser with Playwright MCP (no product code)
+
+Browser verification is a documented recipe, not a feature: Playwright MCP is a
+Node subprocess you declare like any other server, and the agent drives it
+through the same approval gate as every external tool. Say plainly that it is a
+Node subprocess — there is no embedded browser in xencode.
+
+Declare it under `mcp_servers` (a `command` to spawn; `npx` must be on `PATH`):
+
+```json
+"mcp_servers": {
+    "playwright": {
+        "command": "npx",
+        "args": ["-y", "@playwright/mcp", "--headless", "--image-responses", "omit"],
+        "env": {
+            "PLAYWRIGHT_BROWSERS_PATH": "/home/sree/.cache/ms-playwright"
+        }
+    }
+}
+```
+
+`/mcp` starts it; a working handshake lists its tools (25 with
+`@playwright/mcp` 0.0.83):
+
+```console
+◈ ✓ playwright · 25 tool(s)
+```
+
+The agent reaches them as `mcp__playwright__<tool>` — `browser_navigate`,
+`browser_take_screenshot`, and the rest — each behind the `External` approval,
+which always asks: answer `a` once to allow the whole class for the session.
+Verified live against a local dev server: the agent ran
+`browser_navigate({"url": "http://127.0.0.1:8099/"})` (the server log showed a
+real Chromium `GET /` plus `/favicon.ico`), then
+`browser_take_screenshot({"filename": "shot.png"})`, which wrote a real
+1280×720 PNG (18,330 bytes) into the workspace. Attach it with `Space` in the
+file explorer (a `📌` marks it); on send it travels as a data URL in the final
+user turn.
+
+Three traps, all met live. First, xencode sends `{}` — not `null` — as the
+params of `tools/list`, `resources/list` and `prompts/list`, because a strict
+server answers the handshake and then drops a `null`-params list call without a
+word, which reads as a 30-second timeout. Second, twenty-five tool definitions
+are roughly nine thousand tokens of context: a local `llama-server` started with
+`-c 8192` refuses the turn (`request (9232 tokens) exceeds the available
+context size`), so start it bigger (verified with `-c 32768 -np 1`) or the turn
+fails before the model reads a word. Third, the attach half ends at the model:
+a text-only local model answers the image part with an error (`image input is
+not supported — hint: … you may need to provide the mmproj`), so the
+screenshot lands on disk and is sent, but having the model *read* it needs a
+vision-capable model, not a bolder prompt.
+
 ### Skills (`SKILL.md`)
 
 A skill is one directory holding one `SKILL.md`: a name and a one-line
