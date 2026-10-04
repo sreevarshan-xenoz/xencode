@@ -97,8 +97,8 @@ const COMMANDS: &[Binding] = &[
     ("/bytebot <task>", "autonomous task execution"),
     ("/plan [clear]", "expand or clear the agent's todo list"),
     (
-        "/rewind [turns]",
-        "undo the agent's file changes (session-only)",
+        "/rewind [turns] [--force]",
+        "undo the agent's file changes (session-only), refusing files edited by hand",
     ),
     (
         "/mcp [status|stop|read <server> <uri>|prompt <server> <name>]",

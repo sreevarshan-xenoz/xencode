@@ -3635,6 +3635,39 @@ impl CheckpointStore {
         self.lock().iter().filter(|group| !group.is_empty()).count()
     }
 
+    /// The files one turn wrote, in the order they were snapshotted. Used to
+    /// hand the turn's paths to the git checkpoint once the turn is over.
+    pub fn group_paths(&self, turn: usize) -> Vec<PathBuf> {
+        self.lock()
+            .get(turn)
+            .map(|group| group.iter().map(|one| one.full.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The files a `rewind(back)` would touch, without touching anything.
+    /// `/rewind` asks git about these before restoring, so that a hand edit
+    /// made after the agent's write is not silently overwritten.
+    pub fn pending_paths(&self, back: usize) -> Vec<PathBuf> {
+        let groups = self.lock();
+        let mut out = Vec::new();
+        let mut seen = 0;
+        for group in groups.iter().rev() {
+            if group.is_empty() {
+                continue;
+            }
+            seen += 1;
+            if seen > back {
+                break;
+            }
+            for checkpoint in group {
+                if !out.contains(&checkpoint.full) {
+                    out.push(checkpoint.full.clone());
+                }
+            }
+        }
+        out
+    }
+
     /// Undo the last `back` turns that changed files, newest first. Turns
     /// with no writes are skipped rather than counted.
     pub fn rewind(&self, back: usize) -> RewindReport {
