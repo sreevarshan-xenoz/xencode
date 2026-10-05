@@ -37,6 +37,7 @@ pub mod index;
 pub mod init;
 pub mod ledger;
 pub mod metrics;
+pub mod notes;
 pub(crate) mod parse;
 pub mod perf;
 pub mod power;
@@ -143,6 +144,9 @@ pub use ledger::{
 pub use metrics::{
     append_metrics, metrics_path, read_metrics, read_metrics_since, read_metrics_tail,
     CompactAction, MetricSource, MetricsIdentity, RequestMetrics,
+};
+pub use notes::{
+    append_note, note_lines, notes_path, read_notes, NoteWrite, NOTES_FILE, NOTES_MAX_LINES,
 };
 pub use pricing::{
     cost_of, format_usd, listing_provenance, lookup_path, pricing_path, CostReport, ModelCost,

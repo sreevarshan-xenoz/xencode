@@ -1004,40 +1004,65 @@ pub fn search_tools() -> Vec<ToolDefinition> {
 /// no files — it is presentation only. A model that ignores it loses the
 /// checklist and nothing else.
 pub fn plan_tools() -> Vec<ToolDefinition> {
-    vec![ToolDefinition {
-        name: "update_plan".to_string(),
-        description: "Replace your task list for the current request. Call it \
+    vec![
+        ToolDefinition {
+            name: "update_plan".to_string(),
+            description: "Replace your task list for the current request. Call it \
                       once when you decide the approach and again whenever an \
                       item's status changes; keep it to at most 12 short \
                       items. Statuses: pending, in_progress, done. This \
                       changes no files and runs no commands."
-            .to_string(),
-        parameters: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "description": "The complete plan, in the order you will do it",
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "text": {
-                                "type": "string",
-                                "description": "One short line describing the step"
+                        "type": "array",
+                        "description": "The complete plan, in the order you will do it",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {
+                                    "type": "string",
+                                    "description": "One short line describing the step"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "description": "pending | in_progress | done \
+                                                    (default pending)"
+                                }
                             },
-                            "status": {
-                                "type": "string",
-                                "description": "pending | in_progress | done \
-                                                (default pending)"
-                            }
-                        },
-                        "required": ["text"]
+                            "required": ["text"]
+                        }
                     }
-                }
-            },
-            "required": ["items"]
-        }),
-    }]
+                },
+                "required": ["items"]
+            }),
+        },
+        ToolDefinition {
+            name: "write_note".to_string(),
+            description: "Append one short note to your own scratchpad for this \
+                          project. A note is kept outside the conversation, so it \
+                          still reaches you on later turns and after the \
+                          conversation is compacted; the pad holds the last 40 \
+                          notes and the oldest go when it is full. It takes no \
+                          path and chooses no file — it writes these lines and \
+                          tells you what happened. Use it for something you worked \
+                          out and must not lose, not for text meant for the user."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "What to remember, as one or two short \
+                                        lines of your own words"
+                    }
+                },
+                "required": ["note"]
+            }),
+        },
+    ]
 }
 
 /// Reading one installed skill's full instructions (M-3). The prompt carries
@@ -1103,7 +1128,7 @@ mod tests {
         let tools = plan_tools();
         assert_eq!(
             tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            ["update_plan"]
+            ["update_plan", "write_note"]
         );
         let value = tools[0].to_api_value();
         let params = &value["function"]["parameters"];
@@ -1115,6 +1140,30 @@ mod tests {
         assert_eq!(props.len(), 2);
         assert!(props.contains_key("text") && props.contains_key("status"));
         assert_eq!(item["required"][0], "text");
+    }
+
+    #[test]
+    fn write_note_takes_one_line_and_no_path() {
+        // EV-6: the scratchpad is the one file the model may append to without
+        // naming it, so the schema must not offer a path to abuse.
+        let note = plan_tools()
+            .into_iter()
+            .find(|t| t.name == "write_note")
+            .expect("plan_tools offers write_note");
+        let value = note.to_api_value();
+        let params = &value["function"]["parameters"];
+        assert_eq!(
+            params["required"].as_array().unwrap(),
+            &vec!["note".to_string()]
+        );
+        let props = params["properties"].as_object().unwrap();
+        assert_eq!(props.len(), 1);
+        assert!(props.contains_key("note"));
+        assert!(
+            note.description.contains("40"),
+            "the description hides the cap the pad enforces: {}",
+            note.description
+        );
     }
 
     #[test]

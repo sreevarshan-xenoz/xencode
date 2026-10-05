@@ -4568,6 +4568,7 @@ async fn run_query_once(
         agents_md: live.agents_md.as_deref(),
         anchor_md: live.anchor_md.as_deref(),
         state_md: live.state_md.as_deref(),
+        notes_md: live.notes_md.as_deref(),
         git_summary: &live.git_summary,
         repo_map: &live.repo_map,
         retrieved: live.blocks,

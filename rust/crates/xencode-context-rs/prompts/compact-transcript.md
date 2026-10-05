@@ -3,6 +3,11 @@ You are compressing a working coding conversation into its durable layers. Keep 
 # Current state
 {state}
 
+# Notes the agent kept for itself
+{notes}
+
+These are this session's own scratch notes, kept outside the transcript so compaction cannot eat them. Carry one into the sections below only while it is still true, drop one the conversation has already settled, and never invent a fact to keep a note alive.
+
 # Transcript tail (this is the working window being folded)
 {transcript_tail}
 

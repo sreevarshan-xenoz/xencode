@@ -3411,6 +3411,7 @@ impl<'a> App<'a> {
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
+            notes_md: live.notes_md.as_deref(),
             git_summary: &live.git_summary,
             repo_map: &live.repo_map,
             retrieved: live.blocks,
@@ -4359,6 +4360,7 @@ impl<'a> App<'a> {
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
+            notes_md: live.notes_md.as_deref(),
             git_summary: &live.git_summary,
             repo_map: &live.repo_map,
             retrieved: live.blocks,
@@ -5126,6 +5128,7 @@ impl<'a> App<'a> {
                     .map(|check| check.text.clone())
                     .filter(|text| !text.trim().is_empty());
                 let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
+                let notes = xencode_context_rs::read_notes(&xencode);
                 let recent_a = "user: how does auth work?\nassistant: it uses the auth module";
                 let recent_b = "user: why is startup slow?\nassistant: profile the init path";
                 // Different recent windows (and git text) must NOT disturb the
@@ -5136,6 +5139,7 @@ impl<'a> App<'a> {
                     agents.as_deref(),
                     anchor.as_deref(),
                     state.as_deref(),
+                    notes.as_deref(),
                     &git,
                     "",
                     Vec::new(),
@@ -5147,6 +5151,7 @@ impl<'a> App<'a> {
                     agents.as_deref(),
                     anchor.as_deref(),
                     state.as_deref(),
+                    notes.as_deref(),
                     &git,
                     "",
                     Vec::new(),
@@ -5320,7 +5325,8 @@ impl<'a> App<'a> {
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                 let state = xencode_context_rs::believed_state(&xencode);
                 let snap = t.snapshot(&xencode).unwrap_or_default();
-                let prompt = xencode_context_rs::hard_compact_prompt(&state, &t);
+                let notes = xencode_context_rs::read_notes(&xencode);
+                let prompt = xencode_context_rs::hard_compact_prompt(&state, &t, notes.as_deref());
                 let _ = tx.send("[CTX_START]".to_string());
                 let _ = tx.send(format!(
                     "[CTX]📚 Canonical transcript synced (+{appended} new) → {} entries",
@@ -5348,7 +5354,11 @@ impl<'a> App<'a> {
                 let root = xencode_context_rs::default_root();
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                 let state = xencode_context_rs::believed_state(&xencode);
-                let prompt = xencode_context_rs::hard_compact_prompt(&state, &t);
+                let prompt = xencode_context_rs::hard_compact_prompt(
+                    &state,
+                    &t,
+                    xencode_context_rs::read_notes(&xencode).as_deref(),
+                );
                 let messages = one_shot_messages(&root, prompt);
                 let call = self.single_shot();
                 let entries = t.entries.len();
@@ -6437,6 +6447,7 @@ impl<'a> App<'a> {
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
+            notes_md: live.notes_md.as_deref(),
             git_summary: &live.git_summary,
             repo_map: &live.repo_map,
             retrieved: live.blocks,
@@ -7000,6 +7011,7 @@ impl<'a> App<'a> {
             let agents = xencode_context_rs::read_agents_md(&root);
             let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
             let state = std::fs::read_to_string(xencode.join("state.md")).ok();
+            let notes = xencode_context_rs::read_notes(&xencode);
             let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
             let doc = xencode_context_rs::assemble_prompt(
                 profile,
@@ -7007,6 +7019,7 @@ impl<'a> App<'a> {
                 agents.as_deref(),
                 anchor.as_deref(),
                 state.as_deref(),
+                notes.as_deref(),
                 &git,
                 &preview_repo_map(&index, &results, &changed),
                 blocks,
@@ -11887,7 +11900,7 @@ mod tests {
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
             built_in.len(),
-            18,
+            19,
             "the built-in surface, uncounted before this: {built_in:?}"
         );
         assert!(!built_in.contains(&"load_skill"), "{built_in:?}");
@@ -13543,7 +13556,7 @@ mod tests {
 
         let assemble = |profile: HardwareProfile, bodies: Vec<RetrievedBlock>| {
             xencode_context_rs::assemble_prompt(
-                profile, "system", None, None, None, "", &map, bodies, "",
+                profile, "system", None, None, None, None, "", &map, bodies, "",
             )
         };
         let body = |path: &str| RetrievedBlock {

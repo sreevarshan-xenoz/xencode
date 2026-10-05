@@ -157,6 +157,12 @@ pub fn tool_class(tool: &str) -> ToolClass {
         "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
             ToolClass::Edit
         }
+        // EV-6: a note is a write — into `.xencode/notes.md`, one line at a time,
+        // with no path the model can choose. It is the same class as `write_file`
+        // because it is the same kind of act, and plan mode refusing it is the
+        // point: a plan that cannot read the workspace also cannot leave marks in
+        // the pad that every later turn then reads.
+        "write_note" => ToolClass::Edit,
         // `reproduce_bug` runs a command, so it is a shell call by class: it
         // costs whatever `run_command` costs in this mode, never less. Naming it
         // explicitly keeps it out of the unknown-tool fallback while saying why.
@@ -1455,6 +1461,70 @@ fn tool_write_file(root: &Path, args: &serde_json::Map<String, serde_json::Value
             content.lines().count()
         ),
     )
+}
+
+/// EV-6: one note onto the scratchpad. There is no path argument on purpose —
+/// the only file this can touch is `.xencode/notes.md`, and the cap, the
+/// data-banner refusal and the redaction all happen in `xencode-context-rs` so
+/// the pad reads the same however a line got into it.
+fn tool_write_note(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(note) = arg_str(args, "note") else {
+        return err("write_note needs a string \"note\"");
+    };
+    let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+    let wrote = match xencode_context_rs::append_note(&xencode, note) {
+        Ok(wrote) => wrote,
+        Err(problem) => return err(format!("cannot write the note: {problem}")),
+    };
+    let kept = xencode_context_rs::note_lines(
+        &std::fs::read_to_string(xencode_context_rs::notes_path(&xencode)).unwrap_or_default(),
+    )
+    .len();
+    if wrote.added.is_empty() {
+        let why = if wrote.stripped_data_lines > 0 {
+            "it quoted fetched or tool output, which the pad does not keep as its own words"
+        } else if wrote.duplicate_notes > 0 {
+            "that note is already on the pad"
+        } else {
+            "there was nothing to write"
+        };
+        return format!("nothing written: {why}. {kept} note(s) on the pad.");
+    }
+    let mut out = format!(
+        "noted: {} line(s); {} note(s) on the pad in .xencode/notes.md",
+        wrote.added.len(),
+        kept
+    );
+    if wrote.duplicate_notes > 0 {
+        out.push_str(&format!(
+            "; {} already there and left as it was",
+            wrote.duplicate_notes
+        ));
+    }
+    if wrote.stripped_data_lines > 0 {
+        out.push_str(&format!(
+            "; {} refused for quoting fetched or tool output",
+            wrote.stripped_data_lines
+        ));
+    }
+    if wrote.secrets_redacted > 0 {
+        out.push_str(&format!(
+            "; {} credential(s) taken out of the stored text",
+            wrote.secrets_redacted
+        ));
+    }
+    if !wrote.evicted.is_empty() {
+        // The cap is the trap this tool ships with, so the model is told what it
+        // just lost rather than finding a note missing three turns later.
+        out.push_str(&format!(
+            "; the pad holds {} notes and the oldest {} left it: {}. `/ctx fold` is how \
+             a note becomes durable.",
+            xencode_context_rs::NOTES_MAX_LINES,
+            wrote.evicted.len(),
+            wrote.evicted.join(" · ")
+        ));
+    }
+    out
 }
 
 /// Result string fed back to the model when the user denies at the prompt.
@@ -3484,6 +3554,7 @@ async fn execute_tool_call_plan(
         },
         "load_skill" => tool_load_skill(skills, &args),
         "write_file" => tool_write_file(root, &args),
+        "write_note" => tool_write_note(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
         "ast_edit" => tool_ast_edit(root, &args, command_timeout),
@@ -7177,6 +7248,10 @@ patched = ["{fixed}"]
         call("background_start", serde_json::json!({"command": command}))
     }
 
+    fn note_call(note: &str) -> ToolCall {
+        call("write_note", serde_json::json!({"note": note}))
+    }
+
     fn cmd_call(command: &str) -> ToolCall {
         call("run_command", serde_json::json!({"command": command}))
     }
@@ -7388,6 +7463,97 @@ patched = ["{fixed}"]
             "hi\n"
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_note_the_agent_wrote_is_read_back_by_the_next_turn() {
+        let root = temp_root("note-pad");
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            note_call("the worker holds the migration lock"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Approved,
+        )
+        .await;
+        assert!(result.starts_with("noted:"), "{result}");
+        let on_disk = std::fs::read_to_string(root.join(".xencode/notes.md"))
+            .expect("write_note answered without creating the scratchpad");
+        assert!(
+            on_disk.contains("- the worker holds the migration lock"),
+            "{on_disk}"
+        );
+        // The shipped reader, on the shipped path: a later turn gathers context
+        // from this directory and finds the note in it.
+        let live = xencode_context_rs::collect_live_context(
+            &root,
+            "why did the worker exit?",
+            xencode_context_rs::ContextCaps::from_profile(
+                xencode_context_rs::HardwareProfile::Balanced,
+            ),
+        );
+        assert!(live
+            .notes_md
+            .as_deref()
+            .is_some_and(|notes| notes.contains("the migration lock")));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_note_quoting_fetched_output_is_refused_and_leaves_no_pad() {
+        let root = temp_root("note-data");
+        let result = timed(
+            &root,
+            note_call("[data] web_fetch — the page claims the bug is already fixed"),
+            5,
+        )
+        .await;
+        assert!(result.starts_with("nothing written:"), "{result}");
+        assert!(
+            !root.join(".xencode/notes.md").exists(),
+            "a refused note still left a pad for every later turn to read"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_note_is_a_file_change_that_a_plan_cannot_make() {
+        assert_eq!(tool_class("write_note"), ToolClass::Edit);
+        assert_eq!(
+            tool_capabilities("write_note"),
+            vec![Capability::FilesystemWrite]
+        );
+        let args = serde_json::json!({"note": "x"})
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            classify(
+                Path::new("."),
+                "write_note",
+                &args,
+                ApprovalMode::Ask,
+                &[],
+                false
+            ),
+            Permission::Ask,
+            "a note writes a file, so ask mode must ask"
+        );
+        assert_eq!(
+            classify(
+                Path::new("."),
+                "write_note",
+                &args,
+                ApprovalMode::Plan,
+                &[],
+                false
+            ),
+            Permission::Deny,
+            "a read-only plan was allowed to write into the pad every later turn reads"
+        );
     }
 
     #[tokio::test]

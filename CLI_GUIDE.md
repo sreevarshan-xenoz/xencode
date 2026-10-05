@@ -1297,6 +1297,48 @@ The markers are bytes, so both caps are re-checked after stamping: a fold trimme
 exactly 800 tokens and then stamped would otherwise have its last line's marker cut off
 mid-word. Trimming takes lines from the tail of each section, never half a line.
 
+##### Notes the agent keeps for itself: `write_note`
+
+A hard compaction rewrites the conversation, and a thing the model worked out two
+hours ago is exactly the thing that does not survive a rewrite. `write_note` is a tool
+the agent can call — one string argument, no path — that appends that thing to
+`.xencode/notes.md`, a file kept outside the transcript. It is the agent's own scratch
+pad, not a message for you and not a place to store code: the tool takes no path, so no
+call can address any file but that one.
+
+```text
+noted: 1 line(s); 1 note(s) on the pad in .xencode/notes.md
+```
+
+Three things are refused or rewritten on the way in, because the pad re-enters the
+prompt on every later turn and a bad line there is a bad line in front of every future
+request:
+
+- **Text someone else wrote.** A note quoting a fetched page, a file body or a tool
+  result carries that source's banner, and the line is not stored — the pad holds what
+  the agent concluded, not what it was handed. A call whose every line was refused
+  answers `nothing written: it quoted fetched or tool output, which the pad does not
+  keep as its own words. 1 note(s) on the pad.` and leaves no file behind, so a refusal
+  cannot create a scratchpad every later turn reads.
+- **A credential-shaped value** is replaced on the way in, the same pattern list the
+  prompt uses, and the reply says how many lines were redacted.
+- **A note already on the pad** is not written twice; the reply counts the duplicates it
+  skipped.
+
+The pad holds the last 40 notes and the oldest go when it is full, and the reply names
+the ones that left. Assembly gives it its own tier, `## Notes To Self`, budgeted at 250
+tokens, and when the pad is wider than that the **newest** notes are the ones carried —
+the same rule the recent-conversation tier uses, and the same margin requirement, so a
+turn with no room left sends no notes rather than half a set.
+
+Compaction cannot eat a note, and that is the point of putting it in a file. `/ctx fold`
+and `/ctx archive` hand the model the **whole** pad, not the tier's newest slice, under
+its own heading in the fold prompt (`# Notes the agent kept for itself`), because a hard
+compaction is a note's only route into `state.md` and the tier that survives it carries
+250 tokens. Nothing promotes a note on its own: the fold proposes, `/ctx promote` writes.
+Being a file the agent writes, `write_note` is a change to the working tree — plan mode
+refuses it, and in ask mode it needs the same approval `write_file` needs.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without
