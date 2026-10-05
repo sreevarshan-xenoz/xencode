@@ -5102,8 +5102,17 @@ impl<'a> App<'a> {
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                 let agents = xencode_context_rs::read_agents_md(&root);
                 let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
-                let state =
-                    xencode_context_rs::ContextState::from_disk(&xencode).map(|s| s.to_markdown());
+                // Read the durable tier the way a turn reads it: with the facts
+                // whose cited file has moved on already taken out (QM-2). This
+                // report describes the prompt, not the file behind it.
+                let state_raw = std::fs::read_to_string(xencode.join("state.md")).ok();
+                let state_check = state_raw
+                    .as_deref()
+                    .map(|text| xencode_context_rs::drop_stale_facts(text, &root));
+                let state = state_check
+                    .as_ref()
+                    .map(|check| check.text.clone())
+                    .filter(|text| !text.trim().is_empty());
                 let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
                 let recent_a = "user: how does auth work?\nassistant: it uses the auth module";
                 let recent_b = "user: why is startup slow?\nassistant: profile the init path";
@@ -5176,13 +5185,24 @@ impl<'a> App<'a> {
                 // indistinguishable from a broken reader — and after `/ctx fold`
                 // it matters what the assembler actually admitted: a state too
                 // big for the remaining margin is left out whole.
-                let promoted = state
+                // Counted from the file as written, so a fact taken out for
+                // staleness shows up as the "dropped as stale" suffix below
+                // rather than quietly lowering this number.
+                let promoted = state_raw
                     .as_deref()
                     .map(xencode_context_rs::ContextState::from_markdown)
                     .unwrap_or_default();
                 let tier4 = doc_a.tiers.iter().find(|tier| tier.name == "state.md");
+                let dropped = state_check
+                    .as_ref()
+                    .map(|check| check.dropped.clone())
+                    .unwrap_or_default();
+                let unverifiable = state_check
+                    .as_ref()
+                    .map(|check| check.unverifiable)
+                    .unwrap_or(0);
                 let _ = tx.send(format!(
-                    "[CTX]🧾 Tier 4 state.md — {} tokens in the prompt · {} fact line(s) on disk{}{}",
+                    "[CTX]🧾 Tier 4 state.md — {} tokens in the prompt · {} fact line(s) on disk{}{}{}{}",
                     tier4.map(|tier| tier.tokens).unwrap_or(0),
                     promoted.completed.len() + promoted.decisions.len() + promoted.unresolved.len(),
                     if tier4.is_none() && promoted.present() {
@@ -5196,8 +5216,29 @@ impl<'a> App<'a> {
                         " · a fold is waiting (see /ctx promote)"
                     } else {
                         ""
+                    },
+                    if dropped.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {} dropped as stale", dropped.len())
+                    },
+                    // Not a complaint about the facts: a report that the check
+                    // itself could not run here, so the person knows the tier is
+                    // going in unverified rather than verified and good.
+                    if unverifiable == 0 {
+                        String::new()
+                    } else {
+                        format!(" · {} not checkable here (no such commit locally)", unverifiable)
                     }
                 ));
+                // Named rather than counted: a fact that stopped being believed is
+                // the one thing in this report the person can act on, and a number
+                // alone does not say which claim the model has now lost.
+                for line in &dropped {
+                    let _ = tx.send(format!(
+                        "[CTX]   stale: {line} — the file it cites has changed since; /ctx fold to re-derive it"
+                    ));
+                }
 
                 // The newest record per profile, from the rollup rather than by
                 // re-reading every record ever written.

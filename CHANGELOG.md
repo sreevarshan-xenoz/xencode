@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QM-2`: a durable fact names the file it came from, and stops being believed when that file changes
+
+`state.md` holds sentences about the code, and the code moves. Nothing said which file a
+line was about, so a note written last week about `src/auth.rs` re-entered the prompt
+after the check it described had been rewritten — as a fact the model had no reason to
+doubt, because the tier above it is the one thing in the prompt a person reads as
+settled.
+
+`/ctx promote` now marks each line that names a file in the project with that file and
+this repository's current commit:
+
+```text
+- the token check runs before the handler in src/auth.rs [src:src/auth.rs@d53614d4]
+```
+
+The path has to be a file that exists here, so a word that only looks like one is left
+alone; a line naming no file gets no marker, and `## working-on` is never marked, because
+that section is the task rather than a claim about the code.
+
+Reading the tier back is where the mark pays. Before `state.md` enters a prompt, each
+marked line is checked against the repository: the file gone, dirty against the
+checkout, or different from the commit in the marker, and the line is left out of that
+turn. That third test is what catches a change that was committed on an otherwise clean
+tree, and a rename, whose old path no longer exists. The line is not deleted from the
+file — dropping happens per turn, and reverting the source brings the fact back. A commit
+this repository cannot resolve keeps the line and says `not checkable here`, since
+history that is unreadable is not history that proved the note wrong.
+
+`/ctx kv` names what it dropped rather than only shrinking:
+
+```console
+[CTX]🧾 Tier 4 state.md — 14 tokens in the prompt · 1 fact line(s) on disk · 1 dropped as stale
+[CTX]   stale: the token check runs before the handler in src/auth.rs [src:src/auth.rs@d53614d4] — the file it cites has changed since; /ctx fold to re-derive it
+```
+
+Those lines are from `rust/crates/xencode-tui-rs/tests/state_stale_notice.rs`, which
+builds a scratch repository with one commit, promotes a real fold into it, edits the file
+the fact cites and reads the panel again — and then does the same with a marker pointing
+at a commit that is not there. The assembly half is checked in
+`rust/crates/xencode-context-rs/tests/state_staleness.rs`, at the level that matters: the
+sentence is in the prompt, the cited file is edited, the sentence is gone from it.
+
+Markers are bytes, so the two caps on this tier — 15 fact lines, 800 tokens — are applied
+again after stamping. A fold trimmed to exactly the budget and then marked would
+otherwise have had its last line's marker truncated mid-word.
+
 ### Added — `QM-1`: the task summary a long session writes, and only keeps after you approve it
 
 The prompt has a tier for `state.md` — a few lines about what this project is in
