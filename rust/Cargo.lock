@@ -4056,7 +4056,6 @@ dependencies = [
  "clap_complete",
  "clap_mangen",
  "crossterm",
- "dirs",
  "ratatui",
  "serde_json",
  "tempfile",
