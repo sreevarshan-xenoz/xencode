@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `xencode analyze` no longer crashes on a line with an accent in it
+
+The line-length rule cut its quoted snippet at a byte index. For ASCII that is
+harmless; for anything else the index can land in the middle of a character, and
+slicing there does not truncate — it panics. One `é` sitting across byte 100 of a
+long Python line was enough to end the whole run:
+
+```
+thread 'main' panicked at …/analyzer.rs:89:25:
+end byte index 100 is not a char boundary; it is inside 'é' (bytes 99..101 of string)
+```
+
+Accented identifiers, an em-dash in prose, a `# -*- coding: utf-8 -*-` header — a
+project with any of them had `xencode analyze` exit on a panic instead of
+reporting. Both caps went through this: the 100-character rule for Python and the
+120-character rule for everything else.
+
+A line is now measured and cut in characters, which also fixes what the rule
+claims. It was a byte count labelled "chars", so 90 characters of CJK text —
+270 bytes — was flagged as a line too long, and no longer is. Re-run against the
+shape that crashed: the analysis exits **0** with both findings reported.
+
 ### Fixed — a damaged `config.json` is now refused, not quietly replaced
 
 `xencode llamacpp set-path /tmp/some.gguf` used to print
