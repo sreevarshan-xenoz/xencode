@@ -14001,3 +14001,210 @@ as where the product is going, and it must not be written as a feature list.
   per the check §R-0 states; the frozen L/M/N/O/P/Q/S headline of 284 is unchanged,
   because `EVd-8` is new work joining after §R-1 was written and new work does not
   rewrite it.
+
+## Milestone Z — the inference layer re-measured, and six defects reproduced against the tree (research appendix, drafted 2026-10-05)
+
+Two lanes, one rule. The first goes back over the ground `MI-`, `AC-`, `MM-` and
+`QN-` walk on — the local `llama.cpp` server — because the model layer is the part
+of the plan whose facts age fastest, and because `QK-3`'s work this week needed a
+running server and the measurement came free. The second is a sweep of the CLI and
+analysis crates for things that are *broken* rather than missing. The rule is the
+one `AGENTS.md` states: a number is quoted from a run on this machine, or it is
+labelled as handed over by a research pass and not reproduced here. Two of the
+pass's findings did not survive that rule and §Z-4 says which.
+
+Everything measured below ran against the build installed on this box:
+`llama-server` **0.4.0-dev, build 10809, commit 5266f24da7**, on an 8-core / 15 GiB
+laptop with a bare `llama-server -m … --alias …` launch and nothing configured.
+Model: `Qwen3-0.6B-Q4_K_M.gguf`, 396,705,472 bytes, sha256 beginning `ac2d9771` —
+the *same file* `MI-4` measured on 2026-09-24, which is what makes §Z-2 a correction
+rather than a second opinion.
+
+### Z-1 The server already says what it can do, and we do not read it
+
+`GET /props` on this build returns the whole capability report. Observed verbatim:
+
+```
+chat_template_caps = {'supports_object_arguments': True, 'supports_parallel_tool_calls': True,
+  'supports_preserve_reasoning': False, 'supports_reasoning_effort': False,
+  'supports_string_content': True, 'supports_system_role': True,
+  'supports_tool_calls': True, 'supports_tools': True, 'supports_typed_content': False}
+modalities   = {'vision': False, 'video': False, 'audio': False}
+media_marker = <__media_vDInAurkiv92eIIfmePeq5FKhw1ceqZi__>
+total_slots  = 4          is_sleeping = False        n_ctx = 7168
+```
+
+What the tree does with this: `xencode-models-rs/src/llamacpp.rs` reads `n_ctx` and
+`total_slots` out of the same response, and elsewhere the loaded model's path — not
+one capability field is read. `xencode-providers-rs/src/capabilities.rs:136`
+decides tool support as `route_supports_tools(model)` — a **prefix match on the model
+id**: false for `anthropic:` and `google_gemini:`, true for everything else, with a
+comment asserting the rest "carry native tool calls". A `grep` across every crate for
+`chat_template_caps`, `modalities` and `media_marker` returns **zero hits**.
+
+Three consequences, in descending order of how much they cost us:
+
+- `supports_reasoning_effort` is **`false` for this very template**, and it is
+  reported *per model*. Any control built on `reasoning_effort` as a field is
+  therefore built on a capability the server has already disclaimed. The mechanism
+  that works is `chat_template_kwargs` (§Z-2), and the only way to know which a
+  given model offers is to ask it.
+- `media_marker` is **random per launch** — `<__media_vDInAurkiv…__>` above is not a
+  constant. Any image path that hardcodes a marker placeholder silently sends pixels
+  as literal text, and `MM-3`'s local vision depends on this.
+- `modalities.vision` is `false` here and was `true` for the SmolVLM2 build the pass
+  loaded (`observed by the pass; not re-run here`). `MM-3` therefore has a real gate
+  available and does not use it — today the product has no way at all to know whether
+  the loaded model can see.
+
+### Z-2 A recorded finding does not reproduce: per-request thinking control works
+
+`MI-4` (done 2026-09-24) chose a launch flag over a request field and recorded the
+reason as measured: on `llama-server` b10809, *"three requests with different
+per-request values produced the same 681 completion tokens, 1981 characters of
+thinking and 314 characters of answer"*, including a `chat_template_kwargs` object
+turning thinking off. Same build, same weights (the sha above), two requests here:
+
+| request | completion tokens | `reasoning_content` | answer |
+|---|---|---|---|
+| plain, `max_tokens: 64` | **64** | present | `content` empty — the budget went entirely to thinking |
+| `"chat_template_kwargs":{"enable_thinking":false}` | **12** | absent | `- Text Files \n- Binary Files \n- Image Files` |
+
+The field is read. The most likely reason `MI-4` saw nothing is that its server was
+started differently — this run used a bare `llama-server -m … --alias …`, and
+`chat_template_kwargs` is applied by the template renderer, so a launch that takes
+the other rendering path would legitimately ignore it. That is a *conditional*
+finding and is written as one: **the field works on a default launch of this build,
+and whether it works is a per-launch, per-template property** — which is exactly why
+`LA-1` asks the server instead of assuming either way. `MI-4`'s launch flag stays
+correct as shipped; what changes is that the manuals may no longer say per-request
+control does nothing.
+
+One number from the same pair of responses belongs to `AC-5`: the second call
+reported `"prompt_tokens_details":{"cached_tokens":25}`. The host prompt cache is
+live, it is on by default, and the server tells us how much it reused. See §Z-3.
+
+### Z-3 The prompt cache makes `--parallel 1` a choice we stopped questioning
+
+`budget.rs::llama_cpp_args` emits `--flash-attn on`, `--cache-type-k`/`--cache-type-v`,
+`--ctx-size`, `--batch-size` and `--parallel 1`. Grep those four flags out of
+`llama-server --help` on this box and the installed build offers all of them *plus*,
+unused by us: `-cram, --cache-ram N` **(default 8192 MiB)**, `--cache-idle-slots`,
+`-kvu, --kv-unified` / `--kv-unified-per-slot N`, `-ctxcp, --ctx-checkpoints` and
+`--sleep-idle-seconds SECONDS`. Zero keyword hits in this plan for `cache-ram`,
+`kv-unified` or slot save/restore.
+
+Two facts follow. The first is that we already pay for a prompt cache we never
+configured — the default is 8 GiB, which on a 15 GiB machine is a decision made for
+us by a default. The second is that `--parallel 1` was justified as *memory* law, and
+unified KV plus a hot-swappable prefix cache is the mechanism that loosens it:
+`total_slots = 4` came back from a server nobody configured the slot count on. The
+honest statement of what we know is that **no measurement here has yet compared two
+alternating sessions with `-np 2` against one with `-np 1` and reported
+`cached_tokens` on both** — so `LA-4` is written as a measurement with a config
+switch, not as a change to the default. `Q-1.20`'s byte-coupling rule (the KV prefix
+breaks on any change above the split point) still holds and is the reason `LA-4` must
+not quietly reorder tiers.
+
+### Z-4 Two claims that did not survive checking, recorded so nobody re-proposes them
+
+- **"A `doctor` section advertises `--providers` and `--models` flags it does not
+  have."** False, and now shown rather than asserted: `xencode doctor --help` lists
+  `--env`, `--deps`, `--selfcheck`, `--format`, and a grep for `--providers` and
+  `--models` across every `.rs` file under `rust/crates/` returns nothing. Rejected;
+  no item.
+- **"A 20-document local rerank costs 15 s+ per query."** The half that is true is
+  the cost scale, and it was re-measured here rather than trusted: a
+  `--embedding --pooling rank --rerank` server on `qwen3-reranker-0.6b-q8_0.gguf`
+  (639,153,184 bytes) answered a 4-document `/rerank` in **1.83 s**, ranking
+  `src/auth.rs fn login()` above the three decoys correctly. The pass recorded 3.38 s
+  for the same call and 15 s+ for ~20 documents; the extrapolation to 20 documents was
+  **not measured here and is not repeated as a number**. `QN-5` stays parked either
+  way — 1.83 s for four candidates is already more than the whole turn budget a rerank
+  would be inserted into.
+
+### Z-5 New items, with the trap each one names
+
+| ID | item | effort | placement and trap |
+|---|---|---|---|
+| **LA-1** | Read the capability report the server already gives instead of inferring it from the model id: parse `chat_template_caps`, `modalities` and `media_marker` from `/props`, refuse tools or images when the reported flag is false, and use the marker the server names rather than a constant. | S–M | Joins W12; `MM-3` and `MI-2` are its customers and neither should ship a gate before it. Trap: `total_slots` and `n_ctx` are already read from this response, so the parse is not new machinery — the trap is treating `supports_tools: true` as "these calls will be useful", which is a different question and one `/props` cannot answer. |
+| **LA-2** | Per-request thinking control for mechanical turns, with the launch flag kept as the fallback. | S | Depends on `LA-1` for the precondition (it is `supports_reasoning_effort` versus `chat_template_kwargs` that decides the mechanism). Trap: §Z-2 measured one model on one launch. Correctness must be re-checked on a real task, because `MI-4` already measured that truncating a chain of thought changes the *answer*, not just the length. |
+| **LA-3** | Ask the server to count the templated prompt once per turn (`usage.prompt_tokens`, or `/tokenize` where that is unavailable) and put the number beside the budgeter's arithmetic in the overflow warning. | S | Refines `AC-5`, done. Measured here: `usage.prompt_tokens` came back **24** for a two-message system+user turn whose untemplated text is far shorter — the roles and framing are the difference. The same effect is written down at the count site already: `xencode-cli/src/main.rs:4577` records 13 tokens of framing out of 5,753 for a two-message request, and 384 by arithmetic against 566 counted by the server on a 512-token window. Trap: it costs a round-trip per turn, so exactly one count per turn, never one per tier. |
+| **LA-4** | Size the prompt cache deliberately and measure whether one parallel slot is still the right answer: emit `--cache-ram` from measured free RAM rather than taking the 8 GiB default, and offer `-np 2` behind a switch only after two alternating sessions show `cached_tokens > 0` on both. | M | Must not be enabled by default on the strength of §Z-3. Trap: cache RAM competes with weights on a 15 GiB box, and `Q-1.20`'s byte-coupling rule means a second slot is a prefix-stability question before it is a memory question. |
+| **LA-5** | Point `xencode server` at a `llama-server` **router** (`--models-dir`, `POST /models/load` and `/models/unload`, `GET /models/sse`, `--sleep-idle-seconds`) and load or unload by tier, instead of process-spawning a server per model. | M | Reopens the standing rejection of a *llama-swap clone* (§N register) on a changed premise: the swapping is now upstream and installed. Trap: the unload/reload cost was measured once already and that measurement must be carried forward, not rediscovered — reload latency is the whole reason the rejection was written. |
+
+### Z-6 Defects reproduced against the tree, each small enough to fix now
+
+These are broken, not missing. Each was reproduced on this machine by running the
+built binary, and each is one commit. They are listed in the order they should be
+fixed, cheapest-blast-radius last rather than first.
+
+| ID | defect | observed, not inferred |
+|---|---|---|
+| **DF-1** | **A malformed `config.json` is silently replaced by defaults, losing every setting and every API key in it.** | 21 call sites read `XencodeConfig::load().unwrap_or_default()` and then `save()` — 14 in `xencode-cli/src/main.rs`, 5 in `xencode-server-rs/src/routes.rs`, and one each in `xencode-tui-rs/src/detached.rs` and `app.rs`. Reproduced: a config containing `"default_model": "llamacpp:MYMARKERMODEL"` written as deliberately broken JSON, then `xencode llamacpp set-path /tmp/some.gguf` printed `llama_cpp_model_path = /tmp/some.gguf` and rewrote the file as the full default block with `"default_model": "qwen2.5:7b"`. The command succeeded. Nothing said the file had been unreadable. This is the only defect here that can lose a user's work, and it is worse than the rest because the file it destroys holds their keys. |
+| **DF-2** | **`xencode analyze` panics on a non-ASCII character that straddles the line-length cap.** | `xencode-analysis-rs/src/analyzer.rs:89` slices `&line[..100.min(line.len())]` and `:270` slices `&line[..120.min(line.len())]` — byte indices, not char boundaries. Reproduced twice: a 141-byte `.py` line whose `é` occupies bytes 99–100 exited **101** with `end byte index 100 is not a char boundary; it is inside 'é' (bytes 99..101 of string)`; the same shape at byte 119 in a `.txt` file panicked at `:270` the same way. Any project with a `# -*- coding: utf-8 -*-`-style comment, an em-dash in prose, or a source file with accented identifiers makes the analysis command crash rather than report. The fix is `char_indices`/`lines()` and a floor at the previous boundary; `context.rs` already does exactly this (`while end > 0 && !content.is_char_boundary(end)`), so the correct pattern is in this workspace. |
+| **DF-3** | **A hint tells the user to run a command that does not exist.** | `xencode-cli/src/main.rs:4028` says *"use `xencode advisory check` for the offline RustSec/OSV corpus"*. The real subcommand is `xencode advisories check` — confirmed from `xencode advisories --help` (`sync`, `show`, `check`, `status`). The wrong name has propagated into `CLI_GUIDE.md:550`, `CLI_GUIDE.md:562` (where it is explained as if it were real) and `CHANGELOG.md:359`. Fix the string, then the three doc lines, in one commit. |
+| **DF-4** | **A dependency declared and never used.** | `dirs = "7"` at `xencode-cli/Cargo.toml:36`; no `dirs::` path appears anywhere in that crate's `src/` or `tests/` (the identifier `dirs` that does occur is a local `Vec`). Path handling in this workspace goes through `xencode-config-rs/src/paths.rs` and XDG since `DB-4`, so the crate has a reason to exist and this dependency does not. |
+| **DF-5** | **A bare `xencode` with no controlling terminal reports an errno instead of telling you what happened.** | Reproduced: `printf '' \| xencode` printed `error: No such device or address (os error 6)` and exited. `main.rs:1466` routes a bare invocation to the TUI, which needs a terminal; in a pipe, a cron line or a CI step the user gets a raw `ENXIO` with no mention of the terminal and no pointer to the commands that *do* work without one. Which call raises it was not traced here — the item is the message, not the mechanism. |
+
+No item is proposed for anything the pass asserted without a run behind it. The
+pass also reported `README.md`'s test count as
+drifting; that is `§R-0`'s existing counting rule and gets folded into the next docs
+sweep rather than given an ID.
+
+### Z-7 Numbers handed over by the research pass and deliberately **not** re-run here
+
+Recorded so the next pass does not treat them as fresh, and so no manual quotes them
+as if they had been reproduced on this machine since:
+
+- **Speculative decoding is not worth it on this box.** `--spec-type ngram-mod`
+  measured **55.47 tok/s against a 54.88 tok/s baseline** (+1%, noise) on a
+  deliberately repetitive copy task; the `/completion` timings carry no
+  drafted/accepted counts, so the mechanism cannot even be confirmed from the outside.
+  `MI-5` stays parked. The one cheap retest that exists is an MTP draft file
+  (`mtp-gemma-4-E4B-it-Q4_0.gguf`, 56.9 MiB), which needs a 4.4 GiB host model first.
+- **Local vision is not good enough at the sizes this machine can run.** `SmolVLM2-2.2B-Q4_K_M`
+  plus its `mmproj` accepted an image (270 prompt tokens, 20.7 s cold and 7.5 s warm)
+  and failed to transcribe a 700×220 code screenshot. `MM-3` therefore stays on the
+  rented-GPU bridge, and this pass adds nothing to build locally.
+- **The iGPU is a trap, as `hwprobe` already warns.** `--device Vulkan0` measured
+  101 tok/s prompt processing against **15.58 tok/s decode**, versus `Vulkan1` at
+  514.7 / 72.4. Do not build an offload feature that routes to the first Vulkan
+  device enumerated.
+- **Embeddings licensing, one entry to avoid.** `Qwen3-Embedding`,
+  `nomic-embed-1.5` and `bge-m3` are Apache-2.0/MIT; Google's
+  `embeddinggemma-300m` ships under *Gemma terms*, which an open-source product
+  should not vendor. Irrelevant while `QN-5` stays parked, recorded so a future
+  dense arm starts from the permissive set.
+- **The advice table is 8 days old and names an older generation.** Verified locally
+  rather than from the brief: `xencode-models-rs/src/model_advice.json` carries
+  `as_of: 2026-09-27` and names `qwen3`, `qwen2.5`, `llama3.2`, `llama3.3`,
+  `phi4-mini`, `gemma3`. The pass reported that Ollama now serves newer families;
+  **that upstream claim was not verified here**, so the item is only what `LF-7` and
+  `MI-6` already built — the age signal fires, and refreshing the table is a data
+  edit with a live `ollama pull` check behind it, not code.
+
+### Z-8 Prohibitions this appendix adds
+
+- **No server-side agent tools.** This build offers `--tools`, `--mcp-servers-config`
+  and an `--agent` flag that give `llama-server` its own filesystem and shell tools.
+  Xencode's whole safety shape is the approval gate, `CAP-*` pricing and `SE-*`
+  brokering in *this* process; a model calling tools the C++ server picked would skip
+  every one of them. Declined outright, not deferred.
+- **No local-VLM tier.** §Z-7's failed transcription is the evidence; `MM-3` stays
+  where the plan put it.
+- **`--parallel` is not raised by default** on the strength of §Z-3. `LA-4` is the
+  measurement that would license it, and until that measurement exists the shipped
+  `--parallel 1` is correct.
+- **A `media_marker` constant is not allowed into the image path** — it is random per
+  launch and §Z-1 shows it.
+- **`DF-1` is fixed by refusing, not by repairing.** A config that does not parse gets
+  an error naming the file and what broke, and the command stops; nothing writes a
+  default block over somebody's secrets because their JSON had a trailing comma. A
+  repair tool would be a *second* feature and is not part of this item.
+- **Counting.** `LA-1`…`LA-5` and `DF-1`…`DF-5` add ten rows, taking the pool from
+  §Y-5's 310 to **320 rows over 317 unique IDs**. The frozen L/M/N/O/P/Q/S headline of
+  284 is unchanged: new work joining after §R-1 was written does not rewrite it, and
+  none of these ten re-sequences W0–W17. `DF-1`–`DF-5` are defects with no dependency
+  and may be taken in any order; `LA-2` waits on `LA-1`, and `LA-4` and `LA-5` are
+  gated on their own measurements.
