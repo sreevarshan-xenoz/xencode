@@ -109,6 +109,12 @@ their placeholder tokens, never their values. It rebuilds the same prompt a real
 turn arms, so the preview is what would genuinely leave the machine rather than
 an estimate; the stable head (system prompt and a trusted `AGENTS.md`) is never
 redacted. With no text it previews where the last user turn would have gone.
+The `made of:` line names the kinds of text those bytes are built from and how
+many tokens each owns, marking the ones that are data rather than instructions —
+a file read off disk, a fetched page, an `AGENTS.md` whose bytes have not been
+trusted — so a preview cannot read as though your own sentence and a webpage were
+the same kind of thing. Files pinned in the Explorer with `Space` are read through
+the same intake a real turn uses, so they are counted here too.
 
 #### Secrets in content, not just in file names
 

@@ -112,8 +112,9 @@ pub fn read_agents_md(root: &Path) -> Option<String> {
 }
 
 /// First line of an untrusted file's banner, kept short so the data marker
-/// reads like SE-2's tool-result labels.
-pub const UNTRUSTED_BANNER: &str = "[data] AGENTS.md — repository-provided, untrusted";
+/// reads like SE-2's tool-result labels. The wording lives in
+/// [`crate::SourceClass::AgentFile`] — one vocabulary for whose bytes are whose.
+pub const UNTRUSTED_BANNER: &str = crate::source::UNTRUSTED_AGENTS_BANNER;
 
 /// The untrusted form: the marker, the rule in one breath, then the file
 /// verbatim so the bytes the model reads are exactly the bytes on disk.

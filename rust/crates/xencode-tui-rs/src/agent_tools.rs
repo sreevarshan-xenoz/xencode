@@ -1506,7 +1506,15 @@ pub fn call_outcome(result: &str) -> CallOutcome {
 /// machine — this line is what makes that claim checkable per result instead
 /// of blanket. A server tool says `mcp`; a built-in tool says its own name
 /// plus the argument it pointed at, so a `git log` result names the command.
+///
+/// The leading token is not typed out here: it comes from
+/// [`xencode_context_rs::SourceClass`] (QK-3), the one vocabulary that says
+/// whose bytes are whose. What class the result lands in is decided by the
+/// tool's name — a fetch or a search is `Web`, an `mcp__…` tool is the server's
+/// output, anything else ran on this machine.
 pub fn mark_untrusted(call: &ToolCall, result: String) -> String {
+    let class = xencode_context_rs::SourceClass::of_tool(&call.name);
+    let token = class.marker().expect("every data class ships a marker");
     let label = if crate::mcp::is_mcp_tool(&call.name) {
         format!("mcp {}", call.name)
     } else {
@@ -1522,7 +1530,7 @@ pub fn mark_untrusted(call: &ToolCall, result: String) -> String {
             format!("{} {target}", call.name)
         }
     };
-    format!("[data] {label}\n{result}")
+    format!("{token}{label}\n{result}")
 }
 
 // ── Post-edit project checks (L-7) ────────────────────────────────────

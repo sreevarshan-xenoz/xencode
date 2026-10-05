@@ -53,6 +53,7 @@ pub mod scanner;
 pub mod seeds;
 pub mod session;
 pub mod shape;
+pub mod source;
 pub mod stale;
 pub mod state;
 pub mod symbols;
@@ -173,6 +174,9 @@ pub use session::{
     SESSION_FORMAT,
 };
 pub use shape::{shape_of, ShapeRead, TaskShape};
+pub use source::{
+    SourceClass, ATTACHED_DATA_NOTE, DATA_TOKEN, REPO_DATA_NOTE, UNTRUSTED_AGENTS_BANNER,
+};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
