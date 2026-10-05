@@ -1203,6 +1203,50 @@ reported the identical sha256 and `0 tokens in the prompt · 0 fact line(s) on d
 nothing promoted yet`, which is the point: the durable tier is the only thing that
 moved.
 
+##### Where a durable fact came from, and when it stops being believed
+
+A summary outlives the code it was written about, and the file above has no way to say
+so. `/ctx promote` therefore stamps each line that names a file in the project:
+
+```text
+- the token check runs before the handler in src/auth.rs [src:src/auth.rs@d53614d4]
+```
+
+The path is the file the line names — picked out of the sentence, and used only if that
+path is actually a file here, so a word that merely looks like one is left alone. The
+characters after `@` are this repository's current commit, taken from `git`. A line with
+no file in it gets no marker, `## working-on` is never stamped (it is the task, not a
+claim about the code), and a line that already carries a marker is left as written.
+
+Then every turn reads the tier through those markers before it enters the prompt. A
+stamped line is dropped from that turn when the file it cites has disappeared, has
+uncommitted changes, or differs from the commit recorded in the marker — which is what
+catches a change that was committed on a clean tree, and a rename, whose old path no
+longer exists. Dropping is per-turn: nothing is deleted from `state.md`, and the fact
+comes back on its own if the file is reverted. If the repository cannot resolve the
+recorded commit at all — a shallow clone, or history that has been pruned — the line is
+kept and the same row says `· 1 not checkable here (no such commit locally)`, because an
+unreadable past is not a disproven one and a tier going in unverified should not look
+like a tier that passed.
+
+`/ctx kv` says which lines it left out:
+
+```console
+[CTX]🧾 Tier 4 state.md — 14 tokens in the prompt · 1 fact line(s) on disk · 1 dropped as stale
+[CTX]   stale: the token check runs before the handler in src/auth.rs [src:src/auth.rs@d53614d4] — the file it cites has changed since; /ctx fold to re-derive it
+```
+
+That pair is real output, from `/ctx kv` in the test
+`rust/crates/xencode-tui-rs/tests/state_stale_notice.rs`: a scratch repository with one
+commit, a promoted fold citing `src/auth.rs`, then an edit to that file. The commit in
+your marker is whatever your head was, so those eight characters will not match. The
+count of fact lines is read from the file as written, which is why that row still counts
+one line on disk while reporting the prompt lost it.
+
+The markers are bytes, so both caps are re-checked after stamping: a fold trimmed to
+exactly 800 tokens and then stamped would otherwise have its last line's marker cut off
+mid-word. Trimming takes lines from the tail of each section, never half a line.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without

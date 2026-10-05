@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2349 tests passing, zero warnings (re-verified 2026-10-05, after `QM-1`; 19 ignored)
+- [x] Workspace gates green — 16 crates, 2362 tests passing, zero warnings (re-verified 2026-10-05, after `QM-2`; 19 ignored)
 
 ## Model Catalog Honesty
 
@@ -10014,7 +10014,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 21 items, 2 done
+#### W10 — Durable project knowledge — 21 items, 3 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10036,7 +10036,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
 | **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
 | **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
-| **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker |
+| **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
 | **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
 | **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed |
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
@@ -10083,8 +10083,6 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   in the TUI — its 638 pre-existing ones unmodified, the new one covering the
   attachment intake that `/egress` and the turn now share.
 
-#### W10 progress
-
 - [x] `QM-1` — 2026-10-05. `state.md` has a writer, and the writer is a person.
   `/ctx fold` sends the transcript-folding prompt to the model this session is
   talking to and queues the answer in `.xencode/state.candidate.md`; `/ctx promote`
@@ -10121,10 +10119,59 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   **What this does not do:** nothing folds on a threshold by itself — `/ctx compact`
   still only reports, though its closing line no longer promises a mechanism that does
   not exist (it named "when the model flags it", and no tool flags anything, the second
-  UI fiction in finding Q-1.6); facts carry no `[src:<path>@<commit>]` provenance
-  (`QM-2`), and no memory crosses sessions yet (`MEM-1`, `MEM-2`).
+  UI fiction in finding Q-1.6); and no memory crosses sessions yet (`MEM-1`,
+  `MEM-2`). The `[src:<path>@<commit>]` provenance this note deferred is `QM-2`,
+  recorded directly below.
   568 tests in `xencode-context-rs` (up from 555: 12 in `compact.rs`, one in the
   assembler) and 692 in the TUI, of which the two new ones are `tests/state_fold.rs`.
+
+- [x] `QM-2` — 2026-10-05. Every durable fact now says which file it is about, and
+  stops being believed the moment that file moves. `promote_state_candidate` stamps
+  ` [src:<path>@<commit8>]` on each fact line that names a file which actually exists
+  in the workspace — found by scanning the sentence's own words, so a token is only
+  cited when `root.join(token)` is a file, which is why "example.com" and a bare word
+  ending in `.rs` are not — and the commit is read from this repository's head through
+  the git primitives the tracker already uses (`current_git_info`, `revision`).
+  `## working-on` is never stamped: that section is the task, not a claim about the
+  code. Markers are bytes, so `STATE_FOLD_FACT_CAP` and `STATE_CAP_TOKENS` are applied
+  a second time *after* stamping, trimming from the tail of each section in turn —
+  without that, a fold measured to exactly 800 tokens loses its last line's marker
+  mid-word, and a marker cut in half is worse than no marker because it reads like a
+  citation.
+  **Invalidation is the read, not a janitor.** `drop_stale_facts` runs on the way into
+  the prompt (`collect_live_context`, and the `/ctx kv` report), so every consumer that
+  assembles a turn gets it: a stamped line is left out of that turn when the cited file
+  is gone, when it is in `dirty_paths` against the current checkout, or when
+  `git diff --name-only <commit>` says it changed since that commit. The third test is
+  the one that matters and the one a status check alone misses — a committed change on
+  an otherwise clean tree leaves no trace in `git status`, and a rename shows up here as
+  the old path no longer existing. *The trap in this item's own text cuts both ways:* a
+  path that does not exist yet is refused at stamp time rather than cited as a promise,
+  and a commit this repository cannot resolve keeps the fact and counts it
+  `unverifiable`, because silently gutting a person's durable notes after a `gc` or a
+  shallow clone is the worse failure.
+  **Done-when, measured on this machine.** `rust/crates/xencode-context-rs/tests/state_staleness.rs`
+  builds a real repository, promotes a real fold into it, and reads the assembled prompt
+  bytes: the fact `the token check runs before the handler in src/auth.rs` is in
+  `assemble_prompt(...).text` before the cited file is edited and absent after, present
+  again when the file is reverted — nothing was destroyed to make the assertion pass.
+  `rust/crates/xencode-tui-rs/tests/state_stale_notice.rs` drives the same repository
+  through the real command and reads the panel:
+  `Tier 4 state.md — 14 tokens in the prompt · 1 fact line(s) on disk · 1 dropped as
+  stale` followed by the dropped line itself, quoted with its marker and the way back
+  (`/ctx fold to re-derive it`), and separately the unresolvable-commit case, which
+  prints `1 not checkable here (no such commit locally)` beside no `dropped as stale`.
+  Both guards were watched to fail: muting the suffix makes the panel test panic on the
+  real line list, which is where the quoted output above came from.
+  **What this does not do:** it invalidates only what carries a marker, so a fact about
+  an interface, a decision or a number stays until a person or `MEM-3`'s verify-on-read
+  says otherwise; nothing re-folds by itself, the notice is the action; and `QK-4`'s
+  `doctor` row, which would count stale facts across sessions instead of per turn, is
+  still open.
+  580 tests in `xencode-context-rs` (up from 568: 10 in `compact.rs`, two in the new
+  `tests/state_staleness.rs`) and 693 in the TUI, whose single addition is
+  `tests/state_stale_notice.rs`. 2362 across the workspace, no failures, 19 ignored —
+  counted on 2026-10-05 by `cargo test --workspace`.
 
 #### W11 — Self-diagnosis, cost and operations — 20 items, 16 done
 

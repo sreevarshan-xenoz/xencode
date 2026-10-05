@@ -707,6 +707,11 @@ pub struct LiveContext {
     /// Retrieval was already weighted by it; this is here so the interface can
     /// show the reading instead of leaving a changed file list unexplained.
     pub shape: crate::ShapeRead,
+    /// Durable facts that were kept out of this turn because the file they cite
+    /// has moved on since they were written (QM-2). Named, not counted, because
+    /// a fact silently dropped from the tier is exactly the kind of thing a
+    /// person needs to see happen.
+    pub stale_state_facts: Vec<String>,
 }
 
 /// SE-2: what a repository-derived section says about itself. The system
@@ -731,7 +736,17 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     // `AGENTS.md` reaches the live turn marked as data, never as instructions.
     let agents_md = crate::trust::read_agents_md(root);
     let anchor_md = std::fs::read_to_string(xencode.join("anchor.md")).ok();
-    let state_md = std::fs::read_to_string(xencode.join("state.md")).ok();
+    // QM-2: the durable tier is checked against the files it describes on the way
+    // in. A fact about `src/auth.rs` written three weeks ago is a claim about a
+    // file that may not say that any more, and the model has no way to tell which
+    // it is meeting.
+    let state_check = std::fs::read_to_string(xencode.join("state.md"))
+        .ok()
+        .map(|text| crate::compact::drop_stale_facts(&text, root));
+    let state_md = state_check
+        .as_ref()
+        .map(|check| check.text.clone())
+        .filter(|text| !text.trim().is_empty());
     let git_summary = git_summary_text(root).unwrap_or_default();
     // Read once, and used for the weights and for what is reported about them,
     // so the two cannot disagree about which shape the turn was retrieved as.
@@ -763,6 +778,7 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         index_present,
         retrieved_total,
         shape,
+        stale_state_facts: state_check.map(|check| check.dropped).unwrap_or_default(),
     }
 }
 

@@ -361,16 +361,245 @@ pub fn promote_state_candidate(
             PromoteRefusal::CouldNotWrite(format!("{}: {problem}", path.display()))
         }
     })?;
-    let (state, report) = fold_state_from_reply(&text).map_err(|refused| match refused {
+    let (state, mut report) = fold_state_from_reply(&text).map_err(|refused| match refused {
         FoldRefusal::NoKnownSection => PromoteRefusal::NotAStateFold,
         FoldRefusal::NothingButData => PromoteRefusal::NothingButData,
     })?;
+    let mut state = state;
+    stamp_provenance(&mut state, &state_root(xencode_dir));
+    // Stamping is what makes the tier honest, and it is also bytes: the two caps
+    // are re-checked on the marked-up file, because that is the text tier 4 will
+    // truncate. A fold trimmed to exactly 800 tokens and then stamped would
+    // otherwise send a fact's `[src:…]` marker past the cut.
+    enforce_state_caps(&mut state, &mut report);
     state
         .write(xencode_dir)
         .map_err(|problem| PromoteRefusal::CouldNotWrite(problem.to_string()))?;
     std::fs::remove_file(&path)
         .map_err(|problem| PromoteRefusal::CouldNotWrite(problem.to_string()))?;
     Ok((state, report))
+}
+
+/// The workspace a promoted fact is about: the directory holding `.xencode`.
+///
+/// A fold that arrived through a path nobody typed — a test, a different working
+/// directory — still gets an answer rather than a panic, because the marker is
+/// only ever an extra on a line that was already going to be written.
+fn state_root(xencode_dir: &Path) -> PathBuf {
+    xencode_dir
+        .parent()
+        .map(|parent| parent.to_path_buf())
+        .unwrap_or_else(|| xencode_dir.to_path_buf())
+}
+
+/// Re-apply the line and token caps to a state whose lines have grown markers.
+///
+/// Trimming happens from the end of each list in turn, the same order
+/// [`fold_state_from_reply`] used before the stamp: the facts the model ranked
+/// first are the ones kept.
+fn enforce_state_caps(state: &mut ContextState, report: &mut FoldReport) {
+    let count = state.completed.len() + state.decisions.len() + state.unresolved.len();
+    if count > STATE_FOLD_FACT_CAP {
+        let mut over = count - STATE_FOLD_FACT_CAP;
+        for list in [
+            &mut state.completed,
+            &mut state.decisions,
+            &mut state.unresolved,
+        ] {
+            while over > 0 && !list.is_empty() {
+                list.pop();
+                over -= 1;
+                report.over_cap_dropped += 1;
+            }
+        }
+    }
+    loop {
+        if !state.present()
+            || crate::budget::est_tokens(state.to_markdown().len(), false)
+                <= crate::context::STATE_CAP_TOKENS
+        {
+            break;
+        }
+        // Round-robin from the end, so a stamped file that no longer fits loses
+        // the last item of each list rather than one whole section.
+        let mut trimmed = false;
+        for list in [
+            &mut state.completed,
+            &mut state.decisions,
+            &mut state.unresolved,
+        ] {
+            if !list.is_empty() {
+                list.pop();
+                trimmed = true;
+                report.over_cap_dropped += 1;
+            }
+        }
+        // Only the task sentence is left and it is over budget: this is the
+        // pre-stamp shape, and clearing the person's own line to make an
+        // arithmetic fit is not this function's call to make.
+        if !trimmed {
+            break;
+        }
+    }
+    report.kept_facts = state.completed.len() + state.decisions.len() + state.unresolved.len();
+}
+
+/// The opening of a provenance marker, as it appears inside a fact line:
+/// `… [src:rust/crates/x/src/auth.rs@a1b2c3d4]`.
+const SRC_OPEN: &str = "[src:";
+
+/// Where a fact came from, read back out of its marker.
+fn fact_source(line: &str) -> Option<(&str, &str)> {
+    let (_, tail) = line.rsplit_once(SRC_OPEN)?;
+    let tail = tail.strip_suffix(']')?;
+    let (path, commit) = tail.rsplit_once('@')?;
+    (!path.is_empty() && !commit.is_empty()).then_some((path, commit))
+}
+
+/// The first word in a fact that names a file this workspace actually holds.
+///
+/// Only a stat-able path is cited. A fact about `src/auth.rs` in a project that
+/// has no such file gets no marker, because there would be nothing to check it
+/// against later — and a marker that can never be verified reads like a
+/// guarantee.
+fn cited_path(line: &str, root: &Path) -> Option<String> {
+    for word in line.split_whitespace() {
+        let word = word.trim_end_matches(|c: char| ".;:!?)]}\"'`".contains(c));
+        if word.is_empty() || word.starts_with('-') || word.contains("://") {
+            continue;
+        }
+        let candidate = word.replace('\\', "/");
+        if !candidate.contains('/') && !candidate.contains('.') {
+            continue;
+        }
+        if root.join(&candidate).is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Mark every fact that cites a real file with that file and the revision it had
+/// right now. Returns how many lines were marked.
+///
+/// Written at promotion rather than at fold time, because the fold's answer is a
+/// proposal a person may still edit and `state.md` is the durable file:
+/// provenance belongs to the moment bytes become durable, not to the moment they
+/// were drafted. `## working-on` is left alone — it is the task, not a claim
+/// about a file.
+///
+/// A workspace with no commits gets no markers. There is no revision to name, and
+/// inventing one would let a later turn "verify" a fact against nothing.
+pub fn stamp_provenance(state: &mut ContextState, root: &Path) -> usize {
+    let Some(head) = crate::gitinfo::current_git_info(root)
+        .and_then(|info| info.revision().map(|head| head.to_string()))
+    else {
+        return 0;
+    };
+    let short: String = head.chars().take(8).collect();
+    let mut stamped = 0;
+    for list in [
+        &mut state.completed,
+        &mut state.decisions,
+        &mut state.unresolved,
+    ] {
+        for line in list.iter_mut() {
+            if line.contains(SRC_OPEN) {
+                continue;
+            }
+            if let Some(path) = cited_path(line, root) {
+                *line = format!("{line} {SRC_OPEN}{path}@{short}]");
+                stamped += 1;
+            }
+        }
+    }
+    stamped
+}
+
+/// What a staleness pass found, and what it took out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaleFacts {
+    /// The state as the prompt should carry it — empty when nothing survived, so
+    /// tier 4 is left out whole rather than rendered as a lone heading.
+    pub text: String,
+    /// The fact lines removed, kept whole so an interface can name them rather
+    /// than only count them.
+    pub dropped: Vec<String>,
+    /// Facts citing a revision this repository cannot resolve. They stay: an
+    /// answer nobody can check is not an answer that is wrong.
+    pub unverifiable: usize,
+}
+
+/// Drop the durable facts whose source file has moved on since they were written.
+///
+/// A fact is stale when the file it cites is gone, when it is dirty against the
+/// current checkout, or when it differs from the revision the marker names. The
+/// last of those is what a rename does to a cited path, and what a committed
+/// change does to a clean working tree — checking only `git status` would let
+/// both through as if nothing had happened.
+///
+/// Cheap by construction: one status read and one name-only diff per distinct
+/// revision in the file, however many facts cite it.
+pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
+    let mut check = StaleFacts {
+        text: state_md.to_string(),
+        ..Default::default()
+    };
+    if !state_md.contains(SRC_OPEN) {
+        return check;
+    }
+    let dirty: std::collections::HashSet<String> =
+        crate::gitinfo::dirty_paths(root).into_iter().collect();
+    let mut changed_since: std::collections::HashMap<
+        String,
+        Option<std::collections::HashSet<String>>,
+    > = std::collections::HashMap::new();
+    let mut state = ContextState::from_markdown(state_md);
+    for list in [
+        &mut state.completed,
+        &mut state.decisions,
+        &mut state.unresolved,
+    ] {
+        let lines = std::mem::take(list);
+        for line in &lines {
+            let Some((path, commit)) = fact_source(line) else {
+                list.push(line.clone());
+                continue;
+            };
+            if !root.join(path).is_file() || dirty.contains(path) {
+                check.dropped.push(line.clone());
+                continue;
+            }
+            let verdict = changed_since
+                .entry(commit.to_string())
+                .or_insert_with(|| {
+                    crate::gitinfo::git_stdout(root, &["diff", "--name-only", commit])
+                        .ok()
+                        .map(|out| {
+                            out.lines()
+                                .map(|line| line.replace('\\', "/"))
+                                .filter(|line| !line.is_empty())
+                                .collect()
+                        })
+                })
+                .as_ref()
+                .map(|paths| paths.contains(path));
+            match verdict {
+                Some(true) => check.dropped.push(line.clone()),
+                Some(false) => list.push(line.clone()),
+                None => {
+                    check.unverifiable += 1;
+                    list.push(line.clone());
+                }
+            }
+        }
+    }
+    check.text = if state.present() {
+        state.to_markdown()
+    } else {
+        String::new()
+    };
+    check
 }
 
 /// Parse a hard-compaction reply into `ContextState`. The `## recent` section
@@ -729,5 +958,318 @@ assistant: hello";
             Err(PromoteRefusal::NoCandidate)
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A real repository on disk, because a provenance marker that cannot be
+    /// checked against a commit proves nothing. `dir` is the `.xencode` directory
+    /// a promotion is given; its parent is the workspace the facts cite.
+    fn git_repo(label: &str) -> (PathBuf, std::path::PathBuf) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let root = std::env::temp_dir().join(format!("xencode-stale-{label}-{unique}"));
+        let dir = root.join(crate::XENCODE_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .expect("git should be on PATH for this test");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@xencode.local"]);
+        run(&["config", "user.name", "Xencode Test"]);
+        (root, dir)
+    }
+
+    /// Stage the workspace with one committed file the facts can cite.
+    fn committed_source(root: &Path, path: &str, body: &str) {
+        let file = root.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, body).unwrap();
+        std::process::Command::new("git")
+            .args(["add", path])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-q", "-m", "initial"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+    }
+
+    fn head_short(root: &Path) -> String {
+        let out = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .trim()
+            .chars()
+            .take(8)
+            .collect()
+    }
+
+    /// Queue a fold with these fact lines and promote it, returning the durable
+    /// text the promotion wrote.
+    fn promote_lines(dir: &Path, lines: &[&str]) -> String {
+        let state = ContextState {
+            working_on: "wiring provenance into the durable tier".to_string(),
+            completed: vec![],
+            decisions: lines.iter().map(|line| line.to_string()).collect(),
+            unresolved: vec![],
+        };
+        write_state_candidate(&state, dir).unwrap();
+        promote_state_candidate(dir).unwrap();
+        std::fs::read_to_string(dir.join("state.md")).unwrap()
+    }
+
+    #[test]
+    fn a_promoted_fact_citing_a_real_file_is_stamped_with_its_revision() {
+        let (root, dir) = git_repo("stamp");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let durable = promote_lines(&dir, &["auth.rs is the entry point: src/auth.rs"]);
+
+        let head = head_short(&root);
+        assert!(
+            durable.contains(&format!(" [src:src/auth.rs@{head}]")),
+            "the promoted fact did not carry the file and revision it was \
+             written against:\n{durable}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn editing_the_cited_file_takes_the_fact_out_of_the_prompt() {
+        // The item's own done-when, one level below the assembly: the file the
+        // fact describes is no longer what the fact says.
+        let (root, dir) = git_repo("dirty");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let durable = promote_lines(
+            &dir,
+            &[
+                "login lives in src/auth.rs",
+                "the crate is Rust-first and cites no file at all",
+            ],
+        );
+        let check = drop_stale_facts(&durable, &root);
+        assert!(
+            check.dropped.is_empty(),
+            "an untouched source dropped a fact: {:?}",
+            check.dropped
+        );
+
+        std::fs::write(root.join("src/auth.rs"), "fn login_as(user: &str) {}\n").unwrap();
+        let check = drop_stale_facts(&durable, &root);
+        assert_eq!(
+            check.dropped.len(),
+            1,
+            "the edited file's fact was not the only thing dropped: {:?}",
+            check.dropped
+        );
+        assert!(
+            check.dropped[0].contains("login lives in"),
+            "the wrong line went stale: {}",
+            check.dropped[0]
+        );
+        assert!(
+            check.text.contains("Rust-first"),
+            "a fact citing no file was taken out with one that did:\n{}",
+            check.text
+        );
+        assert!(
+            !check.text.contains("login lives in"),
+            "the stale fact is still in the text that reaches the prompt:\n{}",
+            check.text
+        );
+        assert_eq!(check.unverifiable, 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_committed_change_invalidates_the_fact_too() {
+        // A `git status` check alone would pass this fact through: the working
+        // tree is clean, and the file still says something else than it did when
+        // the fact was promoted.
+        let (root, dir) = git_repo("committed");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let durable = promote_lines(&dir, &["login lives in src/auth.rs"]);
+        std::fs::write(root.join("src/auth.rs"), "fn login_as(user: &str) {}\n").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-q", "-m", "rename the entry point"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+
+        let check = drop_stale_facts(&durable, &root);
+        assert_eq!(
+            check.dropped.len(),
+            1,
+            "a committed change to the cited file left its fact believed:\n{}",
+            check.text
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_cited_file_that_disappears_takes_its_fact_with_it() {
+        let (root, dir) = git_repo("deleted");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let durable = promote_lines(&dir, &["login lives in src/auth.rs"]);
+        std::fs::remove_file(root.join("src/auth.rs")).unwrap();
+        let check = drop_stale_facts(&durable, &root);
+        assert_eq!(check.dropped.len(), 1, "a deleted file kept its fact");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_revision_this_repository_cannot_resolve_keeps_the_fact_and_counts_it() {
+        // Squashed, rebased or gc'd history is not evidence that the code moved:
+        // the fact is unverifiable, and dropping the person's durable notes
+        // because a git object is gone is a worse failure than sending them.
+        let (root, dir) = git_repo("unresolvable");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let stamped = format!(
+            "# State\n\n## decisions\n- login lives in src/auth.rs {SRC_OPEN}src/auth.rs@deadbeef]\n"
+        );
+        let check = drop_stale_facts(&stamped, &root);
+        assert!(check.dropped.is_empty(), "an unverifiable fact was dropped");
+        assert_eq!(
+            check.unverifiable, 1,
+            "the kept fact was not reported as unverifiable: {check:?}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        let _ = dir;
+    }
+
+    #[test]
+    fn a_state_with_no_markers_passes_straight_through() {
+        // The common case — every state.md written before this item, and every
+        // fold that cites no path — must cost nothing and change nothing.
+        let (root, _dir) = git_repo("plain");
+        let text = "# State\n\n## decisions\n- Rust-first for new code\n";
+        let check = drop_stale_facts(text, &root);
+        assert_eq!(check.text, text);
+        assert!(check.dropped.is_empty());
+        assert_eq!(check.unverifiable, 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_promotion_into_a_repository_with_no_commits_stamps_nothing() {
+        // `(unborn HEAD)` as a revision would let a later turn "verify" a fact
+        // against a commit that does not exist. No history, no marker, no claim.
+        let (root, dir) = git_repo("unborn");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/auth.rs"), "fn login() {}\n").unwrap();
+        let durable = promote_lines(&dir, &["login lives in src/auth.rs"]);
+        assert!(
+            !durable.contains(SRC_OPEN),
+            "a fact was stamped with a revision this repository does not have:\n{durable}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_word_that_only_looks_like_a_path_is_not_cited() {
+        let (root, dir) = git_repo("lookalike");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let durable = promote_lines(
+            &dir,
+            &[
+                "see https://example.com/auth for the protocol",
+                "the module src/nothere.rs was removed last month",
+            ],
+        );
+        assert!(
+            !durable.contains(SRC_OPEN),
+            "a sentence citing nothing on disk was given a provenance marker \
+             it cannot honor:\n{durable}"
+        );
+        assert!(
+            durable.contains("src/nothere.rs"),
+            "the sentence about the removed module should stay, unmarked:\n{durable}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stamping_that_pushes_the_tier_past_its_cap_trims_the_tail_not_the_head() {
+        // Markers are bytes. A fold trimmed to exactly 800 tokens and then stamped
+        // overruns the tier it was just fitted to, so promotion re-applies the cap
+        // — and the trim keeps the model's own ranking: the first facts stay, the
+        // tail goes, and every line it removed is counted where the person can see
+        // the fold lost something.
+        let mut state = ContextState {
+            working_on: "wiring provenance in".to_string(),
+            completed: (0..STATE_FOLD_FACT_CAP + 5)
+                .map(|i| format!("fact {i} cites src/auth.rs"))
+                .collect(),
+            decisions: vec![],
+            unresolved: vec![],
+        };
+        let mut report = FoldReport::default();
+        enforce_state_caps(&mut state, &mut report);
+        let kept = state.completed.len() + state.decisions.len() + state.unresolved.len();
+        assert!(
+            kept <= STATE_FOLD_FACT_CAP,
+            "the line cap was not re-applied after stamping: {kept} lines"
+        );
+        assert_eq!(
+            state.completed.first().unwrap(),
+            "fact 0 cites src/auth.rs",
+            "trimming came off the front of the model's own ranking"
+        );
+        assert_eq!(report.over_cap_dropped, 5, "the drops were not counted");
+        assert_eq!(report.kept_facts, kept);
+    }
+
+    #[test]
+    fn a_tier_too_wide_for_its_token_budget_is_trimmed_to_fit_and_never_half_cut() {
+        let mut state = ContextState {
+            working_on: "the task".to_string(),
+            completed: vec!["x".repeat(4000); 3],
+            decisions: vec![],
+            unresolved: vec![],
+        };
+        let mut report = FoldReport::default();
+        enforce_state_caps(&mut state, &mut report);
+        assert!(
+            !state.present()
+                || crate::budget::est_tokens(state.to_markdown().len(), false)
+                    <= crate::context::STATE_CAP_TOKENS,
+            "the re-cap left a file tier 4 would still truncate mid-line"
+        );
+        assert!(report.over_cap_dropped >= 1);
+        // Only the task sentence left and still over budget: the person's own
+        // line is not this function's to discard.
+        let mut only_task = ContextState {
+            working_on: "x".repeat(40_000),
+            ..Default::default()
+        };
+        let mut quiet = FoldReport::default();
+        enforce_state_caps(&mut only_task, &mut quiet);
+        assert!(
+            only_task.present(),
+            "the working-on line was cleared to make an arithmetic fit"
+        );
+        assert_eq!(quiet.over_cap_dropped, 0);
     }
 }
