@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2362 tests passing, zero warnings (re-verified 2026-10-05, after `QM-2`; 19 ignored)
+- [x] Workspace gates green — 16 crates, 2375 tests passing, zero warnings (re-verified 2026-10-05, after `MEM-3`; 19 ignored)
 
 ## Model Catalog Honesty
 
@@ -4591,6 +4591,12 @@ The literature here is a warning, not a feature list.
   through `xencode-analysis-rs`/grep at inject time, dropped on falsity.
   *Effort: M.* *Trap:* only symbolic facts are mechanically checkable; "why"
   decisions are not, and pretending otherwise is how a stale memory survives.
+  **Done 2026-10-05 — and the tool this row pointed at does not exist.**
+  `xencode-analysis-rs` exposes no symbol lookup and no call graph (checked
+  against its own `lib.rs`), so the re-check is one `git grep` pass over the
+  working tree. That turned out to be the better choice: the on-disk index this
+  project does have is a snapshot, and a snapshot keeps certifying a symbol the
+  rename deleted.
 - **MEM-4 — Unrestricted write on "exit code 0 = verified".** **REJECT-tier**:
   exit 0 is not verification, no verifier exists (fact 7), and this is exactly
   the self-poisoning path AgentPoison measures.
@@ -10014,7 +10020,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 21 items, 3 done
+#### W10 — Durable project knowledge — 21 items, 4 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10026,7 +10032,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson |
 | **MEM-1** | A candidate-facts file the human promotes | capability | candidate-facts file the human promotes |
 | **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance |
-| **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts |
+| **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts — done 2026-10-05 against `git grep`, not `xencode-analysis-rs`, see the W10 progress note |
 | **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 |
 | **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
 | **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored |
@@ -10160,7 +10166,8 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   `Tier 4 state.md — 14 tokens in the prompt · 1 fact line(s) on disk · 1 dropped as
   stale` followed by the dropped line itself, quoted with its marker and the way back
   (`/ctx fold to re-derive it`), and separately the unresolvable-commit case, which
-  prints `1 not checkable here (no such commit locally)` beside no `dropped as stale`.
+  prints `1 not checkable here (the check could not run on this repository)` beside no
+  `dropped as stale`.
   Both guards were watched to fail: muting the suffix makes the panel test panic on the
   real line list, which is where the quoted output above came from.
   **What this does not do:** it invalidates only what carries a marker, so a fact about
@@ -10172,6 +10179,65 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   `tests/state_staleness.rs`) and 693 in the TUI, whose single addition is
   `tests/state_stale_notice.rs`. 2362 across the workspace, no failures, 19 ignored —
   counted on 2026-10-05 by `cargo test --workspace`.
+
+- [x] `MEM-3` — 2026-10-05. A fact about the code is now re-checked against the code.
+  **The row's own pointer was wrong and was corrected where it stands:**
+  `xencode-analysis-rs` has no symbol lookup and no call graph (read its `lib.rs`), so
+  the re-check is one `git grep -E` pass over the working `.rs` files. That turned out to
+  be the better tool for a reason the row did not mention: the project's own file index
+  under `.xencode/` is a snapshot, and a snapshot keeps certifying a symbol a rename
+  deleted.
+  **Recorded at promotion, not at read time, and that is the design.** A line is scanned
+  for names this tree declares — a word shaped like a Rust identifier, or anything in
+  backticks — and what matches is written into the line as ` [chk:validate_token,
+  reject_request>validate_token]`, capped at four claims because a marker is bytes out of
+  the same 800-token budget as the facts. Doing this at read time would have no way to
+  tell "this name is gone" from "this name was never ours", which is the difference
+  between a fact worth dropping and one that must not be touched: a note about
+  `mpsc::unbounded_channel` is about a dependency, and a dependency's method moving cannot
+  be allowed to delete a person's memory. Prose is out by the same rule — `auth` and
+  `parse` are English as often as identifiers, so `Rust-first for new code` and
+  `auth is checked before the handler runs` reach `state.md` exactly as folded.
+  **Two problems, not one.** A symbol that stopped being declared is
+  `SymbolGone`; the harder case is `CallGone`, where both names still exist and the call
+  between them no longer does, so a symbol check alone passes the line straight through.
+  The second is read off the caller's own file with a whole-word search, which is why the
+  test keeps the two functions in separate files: a declaration mentioning a name is not
+  a call, and one file would let the definition next door vouch for a call that had
+  already been deleted. `FactProblem` now carries all four reasons, and `/ctx kv` prints
+  the one that fired — `the code it names is no longer declared here` — beside the line
+  itself.
+  **The hole this closed on the way, which is the §P-3 trap in full.** `/ctx fold` and
+  `/ctx archive` handed the model `state.md` as written. The fold *rewrites* that file, so
+  a disproven fact in its prompt would come back as a fresh line stamped with the current
+  commit and a re-read symbol list — a stale memory surviving its own check by being
+  re-blessed. `believed_state` is now the only tier either of them reads.
+  **Unverified is never false.** With no repository to search — a folder copied out of a
+  project, a machine without `git` — the fact is kept and counted `not checkable here`.
+  Cost, measured here: one pass reads 7471 declaration lines across 221 tracked `.rs`
+  files in about 0.10–0.12 s, at most once per turn and only when a line carries a check.
+  **Done-when, watched failing.** `compact.rs` gained twelve tests over real scratch
+  repositories; `tests/state_staleness.rs` builds a repository whose call and target sit
+  in two files, commits a rename, and reads `assemble_prompt(...).text`; the TUI's
+  `tests/state_stale_notice.rs` drives `/ctx promote` and `/ctx kv` through the same
+  repository. Six mutations, each watched breaking the test that should catch it: let
+  undeclared names be recorded, drop the call claim at promotion, make a call check always
+  pass, stop counting a check that could not run, swap the reason the panel prints, and
+  let the fold prompt read the unfiltered tier.
+  **Counted.** 593 tests in `xencode-context-rs` (up from the 580 `QM-2` recorded: twelve
+  new in `compact.rs`, one new in `tests/state_staleness.rs`) and 693 in the TUI, where the
+  panel test gained its `MEM-3` phases rather than becoming a second run. 2375 across the
+  workspace, no failures, 19 ignored — counted on 2026-10-05 by
+  `cargo test --workspace --no-fail-fast`, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` both clean. The one failure seen
+  along the way was not this item's:
+  `a_server_that_exits_during_handshake_reports_its_own_words` in
+  `xencode-mcp-rs/tests/stdio.rs` panicked with `MCP server \`dead\` closed the connection`
+  in two of the three full-workspace runs taken today, and passed in the third and in every
+  run of that crate on its own. It asserts on the tail of a child process's stderr, so the
+  likeliest cause is that tail losing the race while ~60 suites run at once — observed, not
+  established, and left as a known load-sensitive flake rather than patched inside a
+  `MEM-3` commit.
 
 #### W11 — Self-diagnosis, cost and operations — 20 items, 16 done
 
@@ -14538,3 +14604,84 @@ sounds like a clue.
 joins W6 and one joins W14, and all five are effort S with no dependency on unfinished
 work — `AA-1` and `AA-5` are the two that make the interface untrustworthy rather than
 merely awkward, and are the two to take first.
+
+## Milestone AB — two things the durable tier cannot tell you, found while building `MEM-3` (research appendix, drafted 2026-10-05)
+
+`MEM-3` needed a way to ask the repository whether a claim about its code is still true.
+Building that surfaced two gaps in what this product reports about its own memory. Both
+were read in the code before being written down; neither is inferred from a document.
+
+### AB-1 A verified build recipe has no age, and nothing can tell you when it was proved
+
+`.xencode/anchor.md` is the last part of the byte-stable head — `SYSTEM + AGENTS.md +
+anchor.md`, in that order (`context.rs:75`, `context.rs:123`) — so it is the tier a model
+reads as settled fact, and the one a running llama.cpp server keeps in its reusable KV
+prefix. It says, of a command, *this was run here and exited zero* (`anchor.rs`'s own rule:
+"Nothing is claimed before it is run … only `prove` promotes one").
+
+**That proof never ages.** Verified on this tree, 2026-10-05:
+
+- `grep -n "Verified|proved_at|mtime|SystemTime|elapsed|stale"` over
+  `xencode-context-rs/src/anchor.rs` — **no matches**. The module keeps `Provenance`,
+  which records *where a candidate came from* (CI, a task runner, a manifest, the README,
+  inferred), not *when it last passed*.
+- `write_anchor` (`anchor.rs:758-772`) writes `anchor.md` and nothing else: no sidecar, no
+  metadata file, no entry in the index. `is_current` compares rendered text, so the file's
+  own mtime is the only trace of when it was made — and it changes on every rewrite that
+  alters the text, which is not the same thing as when the commands were run.
+- Two product paths call `prove`. `xencode anchor` re-proves every recipe and rewrites the
+  file, but only when a person types it (`xencode-cli/src/main.rs:7640-7656`).
+  `verify.rs:491` proves the *test* recipe live, right before using it, so that path is
+  honest. The tier that reaches every prompt is the one nobody re-runs.
+- The module's first design rule forbids the obvious fix: *"The output must be
+  deterministic … the render contains no clock"*, because a timestamp in that file changes
+  the stable head and destroys the llama.cpp KV prefix reuse the file exists to protect.
+
+So the failure is not that a recipe can go wrong — `cargo nextest run` stops being the
+right command after a workspace split or a toolchain pin, and the prompt keeps asserting it
+was verified here. The failure is that **the age of that claim is unknowable from anything
+the product writes.** A person cannot ask, and `/ctx kv` cannot say, whether the verified
+command was proved this afternoon or before the repository changed.
+
+- **Item AB-1** — record when the anchor was proved, outside the rendered file, and say so
+  where the tier is reported. `xencode anchor` already re-runs everything, so it is the
+  writer: put the run time in a sidecar (`.xencode/anchor.meta`, or one field in the
+  existing index metadata) and have `/ctx kv`, `xencode doctor` and `QK-4`'s memory audit
+  print *"anchor proved N days ago; run `xencode anchor` to re-check"* past some age. The
+  rendered `anchor.md` must not gain a byte, or the item trades a stale claim for the loss
+  of KV reuse across every request. *Effort: S.* *Trap:* the age is metadata about a proof,
+  never a re-assertion of it — a recipe that has aged out is reported as old, not as
+  failed, and nothing may silently demote `verified` to `declared` in the text while a
+  running server holds the old prefix. Depends on `QK-4` for the audit surface; the
+  sidecar write does not.
+
+### AB-2 One count covers two different reasons a check could not run
+
+`StaleFacts.unverifiable` is a single number, and `drop_stale_facts` increments it from two
+distinct places: a `[src:…]` marker naming a commit this repository cannot resolve, and a
+`[chk:…]` marker in a tree `git grep` cannot be run against (no repository, no `git`, or a
+`git` that errored).
+
+That is not a theoretical tidiness problem — it produced a wrong sentence in this
+repository's own manual. `/ctx kv` printed `not checkable here (no such commit locally)`,
+which `CLI_GUIDE.md` quoted as the QM-2 behaviour; after `MEM-3` the same suffix appears for
+a folder that has **no git at all**, where there is no commit to name. The wording was
+widened to `(the check could not run on this repository)` in the same change, which fixes
+the lie but keeps the ambiguity: the number still cannot tell a person which of the two
+went wrong, and the two have different remedies — a shallow clone is fetched, an
+unsearchable folder is not a repository yet.
+
+- **Item AB-2** — split the bucket into `no_such_commit` and `not_a_searchable_tree`, carry
+  both in `StaleFacts`, and print whichever is non-zero. Three short lines in
+  `compact.rs`, one in `app.rs`'s tier-4 row, and the two existing test phases in
+  `state_stale_notice.rs` already pin each cause separately, so the wording is checked
+  rather than asserted. *Effort: S.* *Trap:* do not merge these into `dropped` — an
+  unreadable check is not a disproven fact, which is the rule both `QM-2` and `MEM-3` are
+  built on.
+
+### Counting
+
+`AB-1` and `AB-2` add two rows over two new IDs, taking the pool from §AA's 326 rows over
+323 unique IDs to **328 rows over 325 unique IDs**. Both join W10 next to `QK-4`, which is
+the audit surface `AB-1` reports into; neither re-sequences anything, both are effort S, and
+`AB-2` is the one that fixes a sentence a person is being told right now.

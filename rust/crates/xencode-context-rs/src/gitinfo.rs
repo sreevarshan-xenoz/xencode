@@ -87,10 +87,10 @@ pub fn parse_numstat(output: &str) -> Vec<DiffFile> {
     files
 }
 
-/// Run git and return stdout, or a short error. The only place in this module
-/// that starts a git process, so every history and diff entry point reports
-/// failures the same way — and so no query can be added that misses the two
-/// settings below.
+/// Run git and return stdout, or a short error. [`run_git`] is the only place in
+/// this module that starts a git process, so every history and diff entry point
+/// reports failures the same way — and so no query can be added that misses the
+/// two settings below.
 ///
 /// A cloned repository can name its own `core.fsmonitor` hook, which git then
 /// runs as part of an ordinary read, and a machine-wide `/etc/gitconfig` can
@@ -100,6 +100,21 @@ pub fn parse_numstat(output: &str) -> Vec<DiffFile> {
 /// system file is left unread. Repository-local config still applies: that is
 /// where the user's own `core.commitGraph` setting lives.
 pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> Result<String, String> {
+    run_git(root, args, &[])
+}
+
+/// The same process settings, for a search command, where "nothing matched" is an
+/// answer rather than a failure.
+///
+/// `git grep` exits 1 when the tree holds no match. A caller asking whether a
+/// name is still declared here has to be able to tell that apart from git failing
+/// to run, or every renamed symbol looks like a broken repository and nothing gets
+/// reported at all.
+pub(crate) fn git_search(root: &Path, args: &[&str]) -> Result<String, String> {
+    run_git(root, args, &[1])
+}
+
+fn run_git(root: &Path, args: &[&str], also_ok: &[i32]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -108,7 +123,8 @@ pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> Result<String, String> {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .map_err(|e| format!("git failed to start: {e}"))?;
-    if !output.status.success() {
+    let code = output.status.code().unwrap_or(-1);
+    if !output.status.success() && !also_ok.contains(&code) {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if detail.is_empty() {
             format!("git {} failed", args.join(" "))

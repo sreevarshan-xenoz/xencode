@@ -141,6 +141,10 @@ pub struct FoldReport {
     pub over_cap_dropped: usize,
     /// Lines whose credential-shaped text was replaced on the way in.
     pub secrets_redacted: usize,
+    /// Fact lines stamped with the file they cite and the revision it had.
+    pub provenance_stamped: usize,
+    /// Fact lines given a claim a later turn can re-run against the code.
+    pub checks_recorded: usize,
 }
 
 /// Why a reply was refused as a state fold outright.
@@ -367,11 +371,20 @@ pub fn promote_state_candidate(
     })?;
     let mut state = state;
     stamp_provenance(&mut state, &state_root(xencode_dir));
-    // Stamping is what makes the tier honest, and it is also bytes: the two caps
-    // are re-checked on the marked-up file, because that is the text tier 4 will
-    // truncate. A fold trimmed to exactly 800 tokens and then stamped would
-    // otherwise send a fact's `[src:…]` marker past the cut.
+    // The same moment, the other half of the guarantee: a line about a file is
+    // stamped, a line about the code inside it is given a check. Both are written
+    // here because both belong to durability, and a candidate a person edited in
+    // between gets the same treatment as one that was never touched.
+    record_checks(&mut state, &state_root(xencode_dir));
+    // Stamping and checking are what make the tier honest, and they are also
+    // bytes: the two caps are re-checked on the marked-up file, because that is
+    // the text tier 4 will truncate. A fold trimmed to exactly 800 tokens and then
+    // stamped would otherwise send a fact's `[src:…]` marker past the cut.
     enforce_state_caps(&mut state, &mut report);
+    // Counted from the file that is about to be written, not from what the two
+    // passes reported: a line the cap trimmed away carries no check.
+    report.provenance_stamped = lines_carrying(&state, SRC_OPEN);
+    report.checks_recorded = lines_carrying(&state, CHK_OPEN);
     state
         .write(xencode_dir)
         .map_err(|problem| PromoteRefusal::CouldNotWrite(problem.to_string()))?;
@@ -449,9 +462,12 @@ fn enforce_state_caps(state: &mut ContextState, report: &mut FoldReport) {
 const SRC_OPEN: &str = "[src:";
 
 /// Where a fact came from, read back out of its marker.
+///
+/// The marker does not have to end the line: a fact can carry a check after it,
+/// so the closing bracket is found rather than assumed to be the last character.
 fn fact_source(line: &str) -> Option<(&str, &str)> {
     let (_, tail) = line.rsplit_once(SRC_OPEN)?;
-    let tail = tail.strip_suffix(']')?;
+    let tail = tail.split_once(']')?.0;
     let (path, commit) = tail.rsplit_once('@')?;
     (!path.is_empty() && !commit.is_empty()).then_some((path, commit))
 }
@@ -522,30 +538,374 @@ pub struct StaleFacts {
     /// The state as the prompt should carry it — empty when nothing survived, so
     /// tier 4 is left out whole rather than rendered as a lone heading.
     pub text: String,
-    /// The fact lines removed, kept whole so an interface can name them rather
-    /// than only count them.
-    pub dropped: Vec<String>,
-    /// Facts citing a revision this repository cannot resolve. They stay: an
-    /// answer nobody can check is not an answer that is wrong.
+    /// The fact lines removed, each with the reason it went, so an interface can
+    /// name them and say what changed instead of only counting.
+    pub dropped: Vec<DroppedFact>,
+    /// Facts that could not be checked — a revision this repository cannot
+    /// resolve, or code it cannot search. They stay: an answer nobody can check is
+    /// not an answer that is wrong.
     pub unverifiable: usize,
 }
 
-/// Drop the durable facts whose source file has moved on since they were written.
+/// Why a durable fact was kept out of this turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactProblem {
+    /// The file the fact cites is no longer there.
+    SourceMissing,
+    /// The file the fact cites has changed since the revision it was written at.
+    SourceChanged,
+    /// A name the fact talks about is no longer declared anywhere in this code.
+    SymbolGone,
+    /// The call the fact describes no longer happens where its caller is defined.
+    CallGone,
+}
+
+impl FactProblem {
+    /// The half-sentence an interface puts between the fact and what to do about
+    /// it. Kept here so every surface explains a dropped fact the same way.
+    pub fn reason(self) -> &'static str {
+        match self {
+            FactProblem::SourceMissing => "the file it cites is gone",
+            FactProblem::SourceChanged => "the file it cites has changed since",
+            FactProblem::SymbolGone => "the code it names is no longer declared here",
+            FactProblem::CallGone => "the call it describes is no longer in that code",
+        }
+    }
+}
+
+/// One fact line that left this turn, with its reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedFact {
+    pub line: String,
+    pub problem: FactProblem,
+}
+
+/// How many claims one fact line may carry. A line about six symbols is a line
+/// about the shape of a module, not a checkable assertion, and the marker is bytes
+/// out of the same 800-token budget the facts are.
+const CHECK_CAP: usize = 4;
+
+/// The opening of a check marker: `… [chk:parse_reply,fold_state>write_candidate]`.
+const CHK_OPEN: &str = "[chk:";
+
+/// A claim about this repository's own code, read off a fact line at promotion and
+/// re-run against the code on every later turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Check {
+    /// A name this tree declared when the fact was written.
+    Symbol(String),
+    /// `a` called `b`, in the words of the fact itself.
+    Calls(String, String),
+}
+
+/// The declaration line a `git grep` pass looks for: one of Rust's introducing
+/// keywords followed by a name, at a word boundary.
+const DECL_PATTERN: &str =
+    r"(^|[^[:alnum:]_])(fn|struct|enum|trait|type|mod)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*";
+
+/// Names this repository declares, and the files declaring each of them.
+///
+/// `None` means git could not answer at all — no repository, no git — and a caller
+/// must treat that as unchecked, never as gone. An empty map is a real answer: this
+/// tree declares nothing that a Rust fact could cite.
+///
+/// One subprocess for the whole pass, whatever the file holds, and it reads the
+/// working tree: an index written before a rename would happily keep certifying a
+/// symbol that stopped existing weeks ago.
+fn declared_symbols(root: &Path) -> Option<std::collections::HashMap<String, Vec<String>>> {
+    let out =
+        crate::gitinfo::git_search(root, &["grep", "-H", "-E", DECL_PATTERN, "--", "*.rs"]).ok()?;
+    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for line in out.lines() {
+        let Some((path, text)) = line.split_once(':') else {
+            continue;
+        };
+        for name in declared_in_line(text) {
+            map.entry(name).or_default().push(path.to_string());
+        }
+    }
+    Some(map)
+}
+
+/// The names one source line introduces.
+///
+/// Comment lines are skipped: a doc comment saying "the type of a thing" would
+/// otherwise declare a symbol called `of`, and a check recorded against an invented
+/// name fails on a fact that is perfectly true.
+fn declared_in_line(text: &str) -> Vec<String> {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.starts_with('#') {
+        return Vec::new();
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    let mut names = Vec::new();
+    let mut index = 0;
+    while index + 1 < words.len() {
+        let keyword = words[index]
+            .trim_start_matches(|c: char| !(c.is_alphabetic() || c == '_'))
+            .trim_end_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
+        if matches!(keyword, "fn" | "struct" | "enum" | "trait" | "type" | "mod") {
+            let name: String = words[index + 1]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                names.push(name);
+                index += 2;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    names
+}
+
+/// The words of a line, with the punctuation a sentence adds taken off, and each
+/// one marked by whether its author wrapped it in backticks.
+///
+/// Splitting on backticks rather than stripping them keeps the two cases apart: a
+/// quoted word is a name the writer meant, a bare one has to look like one.
+fn line_words(line: &str) -> Vec<(String, bool)> {
+    let mut words = Vec::new();
+    for (index, span) in line.split('`').enumerate() {
+        let quoted = index % 2 == 1;
+        for word in span.split_whitespace() {
+            let clean = word
+                .trim_matches(|c: char| "\"'()[]".contains(c))
+                .trim_end_matches(|c: char| ".;:!?,`".contains(c));
+            if !clean.is_empty() {
+                words.push((clean.to_string(), quoted));
+            }
+        }
+    }
+    words
+}
+
+/// The name a written word carries: `crate::db::pool` names `pool`.
+fn last_segment(word: &str) -> String {
+    word.rsplit("::").next().unwrap_or(word).to_string()
+}
+
+/// Is this word a name somebody wrote for the compiler, or is it prose?
+///
+/// Underscores and interior capitals are the shapes Rust names take; a bare
+/// `auth` or `parse` is as likely to be the English word, and a sentence must not
+/// become a check that can fail on someone else's spelling of it.
+fn code_shaped(word: &str) -> bool {
+    word.len() >= 3
+        && word.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && (word.contains('_') || word.chars().skip(1).any(|c| c.is_uppercase()))
+}
+
+/// The code names a fact line mentions, in the order it mentions them.
+///
+/// Backticked spans are taken as names however they are spelled — a person who
+/// wrote `pool` in backticks meant the thing in the code.
+fn mentioned_names(line: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for (word, quoted) in line_words(line) {
+        let name = last_segment(&word);
+        let looks_named = if quoted {
+            name.len() >= 3 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        } else {
+            code_shaped(&name)
+        };
+        if looks_named && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// The call claims a line makes, as `caller, callee` pairs.
+///
+/// Only the plain active form is read ("`a` calls `b`"). A passive or a chained
+/// sentence is left unchecked rather than guessed at: a check recorded against the
+/// wrong pair drops a true fact, which is the one mistake this cannot walk back.
+fn call_claims(line: &str) -> Vec<(String, String)> {
+    let mut claims = Vec::new();
+    for window in line_words(line).windows(3) {
+        if !(window[1].0.eq_ignore_ascii_case("calls")
+            || window[1].0.eq_ignore_ascii_case("invokes"))
+        {
+            continue;
+        }
+        let caller = last_segment(&window[0].0);
+        let callee = last_segment(&window[2].0);
+        if code_shaped(&caller) && code_shaped(&callee) {
+            let claim = (caller, callee);
+            if !claims.contains(&claim) {
+                claims.push(claim);
+            }
+        }
+    }
+    claims
+}
+
+fn encode_checks(checks: &[Check]) -> String {
+    let body = checks
+        .iter()
+        .map(|check| match check {
+            Check::Symbol(name) => name.clone(),
+            Check::Calls(caller, callee) => format!("{caller}>{callee}"),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{CHK_OPEN}{body}]")
+}
+
+/// The checks a line already carries, if any.
+fn line_checks(line: &str) -> Vec<Check> {
+    let Some((_, tail)) = line.rsplit_once(CHK_OPEN) else {
+        return Vec::new();
+    };
+    let Some(body) = tail.split_once(']').map(|(body, _)| body) else {
+        return Vec::new();
+    };
+    body.split(',')
+        .filter(|item| !item.is_empty())
+        .map(|item| match item.split_once('>') {
+            Some((caller, callee)) => Check::Calls(caller.to_string(), callee.to_string()),
+            None => Check::Symbol(item.to_string()),
+        })
+        .collect()
+}
+
+/// Give every fact that talks about this code a claim a later turn can re-run.
+/// Returns how many lines were marked.
+///
+/// Only a name this tree declares *now* is ever written down, and that is the whole
+/// reason this happens at promotion instead of at read time. A fact about
+/// `mpsc::unbounded_channel` names something the project does not declare, so it
+/// gets no check and no later turn can drop it because a dependency's method moved.
+/// Deciding at read time would have no way to tell "this name is gone" apart from
+/// "this name was never ours", and the difference is exactly the difference between
+/// a fact worth dropping and one that must not be touched.
+pub fn record_checks(state: &mut ContextState, root: &Path) -> usize {
+    let Some(declared) = declared_symbols(root) else {
+        return 0;
+    };
+    let mut marked = 0;
+    for list in [
+        &mut state.completed,
+        &mut state.decisions,
+        &mut state.unresolved,
+    ] {
+        for line in list.iter_mut() {
+            if line.contains(CHK_OPEN) {
+                continue;
+            }
+            let mut checks: Vec<Check> = mentioned_names(line)
+                .into_iter()
+                .filter(|name| declared.contains_key(name))
+                .map(Check::Symbol)
+                .collect();
+            for (caller, callee) in call_claims(line) {
+                if declared.contains_key(&caller) && declared.contains_key(&callee) {
+                    let claim = Check::Calls(caller, callee);
+                    if !checks.contains(&claim) {
+                        checks.push(claim);
+                    }
+                }
+            }
+            checks.truncate(CHECK_CAP);
+            if checks.is_empty() {
+                continue;
+            }
+            *line = format!("{line} {}", encode_checks(&checks));
+            marked += 1;
+        }
+    }
+    marked
+}
+
+/// A byte that makes an identifier when neighbours do: letters, digits, underscore.
+fn is_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Does this text use this name, counting it as one word?
+///
+/// `use crate::db::pool;` and `pool()` both mention `pool`; a search for the bare
+/// letters would also believe `pool_size`, which is a different thing wearing the
+/// same start of a name.
+fn text_mentions(text: &str, name: &str) -> bool {
+    let bytes = text.as_bytes();
+    let want = name.as_bytes();
+    if want.is_empty() {
+        return false;
+    }
+    let mut from = 0;
+    while let Some(offset) = text[from..].find(name) {
+        let start = from + offset;
+        let end = start + want.len();
+        let before_ok = start == 0 || !is_name_byte(bytes[start - 1]);
+        let after_ok = end >= bytes.len() || !is_name_byte(bytes[end]);
+        if before_ok && after_ok {
+            return true;
+        }
+        from = end;
+    }
+    false
+}
+
+/// Re-run one claim against the code as it is now. `Err(())` is "cannot say".
+fn verify_check(
+    check: &Check,
+    declared: &std::collections::HashMap<String, Vec<String>>,
+    root: &Path,
+) -> Result<bool, ()> {
+    match check {
+        Check::Symbol(name) => Ok(declared.contains_key(name)),
+        Check::Calls(caller, callee) => {
+            let files = declared.get(caller).ok_or(())?;
+            let mut read_any = false;
+            for file in files {
+                let Ok(text) = std::fs::read_to_string(root.join(file)) else {
+                    continue;
+                };
+                read_any = true;
+                if text_mentions(&text, callee) {
+                    return Ok(true);
+                }
+            }
+            if read_any {
+                Ok(false)
+            } else {
+                Err(())
+            }
+        }
+    }
+}
+
+/// Count the fact lines carrying one kind of marker, after any trimming.
+fn lines_carrying(state: &ContextState, marker: &str) -> usize {
+    [&state.completed, &state.decisions, &state.unresolved]
+        .into_iter()
+        .flatten()
+        .filter(|line| line.contains(marker))
+        .count()
+}
+
+/// Drop the durable facts the code has since contradicted.
 ///
 /// A fact is stale when the file it cites is gone, when it is dirty against the
 /// current checkout, or when it differs from the revision the marker names. The
 /// last of those is what a rename does to a cited path, and what a committed
 /// change does to a clean working tree — checking only `git status` would let
-/// both through as if nothing had happened.
+/// both through as if nothing had happened. A fact carrying `[chk:…]` is dropped
+/// as well when a name it was written against is no longer declared in this tree,
+/// or when the call it describes no longer appears where its caller is defined.
 ///
-/// Cheap by construction: one status read and one name-only diff per distinct
-/// revision in the file, however many facts cite it.
+/// Cheap by construction: one status read, one name-only diff per distinct
+/// revision in the file, and one search of the tree per turn, however many facts
+/// they cover.
 pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
     let mut check = StaleFacts {
         text: state_md.to_string(),
         ..Default::default()
     };
-    if !state_md.contains(SRC_OPEN) {
+    if !state_md.contains(SRC_OPEN) && !state_md.contains(CHK_OPEN) {
         return check;
     }
     let dirty: std::collections::HashSet<String> =
@@ -554,6 +914,10 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
         String,
         Option<std::collections::HashSet<String>>,
     > = std::collections::HashMap::new();
+    // The tree is searched at most once per turn, and only because a fact asked.
+    // A `None` there means git could not be run here, and every fact holding a
+    // check reports that as unchecked rather than as contradicted.
+    let mut declared: Option<Option<std::collections::HashMap<String, Vec<String>>>> = None;
     let mut state = ContextState::from_markdown(state_md);
     for list in [
         &mut state.completed,
@@ -562,33 +926,63 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
     ] {
         let lines = std::mem::take(list);
         for line in &lines {
-            let Some((path, commit)) = fact_source(line) else {
-                list.push(line.clone());
-                continue;
-            };
-            if !root.join(path).is_file() || dirty.contains(path) {
-                check.dropped.push(line.clone());
-                continue;
-            }
-            let verdict = changed_since
-                .entry(commit.to_string())
-                .or_insert_with(|| {
-                    crate::gitinfo::git_stdout(root, &["diff", "--name-only", commit])
-                        .ok()
-                        .map(|out| {
-                            out.lines()
-                                .map(|line| line.replace('\\', "/"))
-                                .filter(|line| !line.is_empty())
-                                .collect()
+            let mut problem: Option<FactProblem> = None;
+            let mut unchecked = false;
+            if let Some((path, commit)) = fact_source(line) {
+                if !root.join(path).is_file() {
+                    problem = Some(FactProblem::SourceMissing);
+                } else if dirty.contains(path) {
+                    problem = Some(FactProblem::SourceChanged);
+                } else {
+                    let verdict = changed_since
+                        .entry(commit.to_string())
+                        .or_insert_with(|| {
+                            crate::gitinfo::git_stdout(root, &["diff", "--name-only", commit])
+                                .ok()
+                                .map(|out| {
+                                    out.lines()
+                                        .map(|line| line.replace('\\', "/"))
+                                        .filter(|line| !line.is_empty())
+                                        .collect()
+                                })
                         })
-                })
-                .as_ref()
-                .map(|paths| paths.contains(path));
-            match verdict {
-                Some(true) => check.dropped.push(line.clone()),
-                Some(false) => list.push(line.clone()),
+                        .as_ref()
+                        .map(|paths| paths.contains(path));
+                    match verdict {
+                        Some(true) => problem = Some(FactProblem::SourceChanged),
+                        Some(false) => {}
+                        None => unchecked = true,
+                    }
+                }
+            }
+            if problem.is_none() {
+                for claim in line_checks(line) {
+                    let answers = declared
+                        .get_or_insert_with(|| declared_symbols(root))
+                        .as_ref()
+                        .ok_or(());
+                    match answers.and_then(|map| verify_check(&claim, map, root)) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            problem = Some(match claim {
+                                Check::Symbol(_) => FactProblem::SymbolGone,
+                                Check::Calls(..) => FactProblem::CallGone,
+                            });
+                            break;
+                        }
+                        Err(()) => unchecked = true,
+                    }
+                }
+            }
+            match problem {
+                Some(problem) => check.dropped.push(DroppedFact {
+                    line: line.clone(),
+                    problem,
+                }),
                 None => {
-                    check.unverifiable += 1;
+                    if unchecked {
+                        check.unverifiable += 1;
+                    }
                     list.push(line.clone());
                 }
             }
@@ -600,6 +994,22 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
         String::new()
     };
     check
+}
+
+/// The durable tier as far as this repository currently agrees with it.
+///
+/// A fold prompt is a path into a model like any other, and the fold's job is to
+/// write `state.md` again. Handing that model a fact the code has already
+/// contradicted lets it re-derive the stale note as a fresh one — and promotion
+/// then stamps it with the *current* commit and re-reads the symbols, so the
+/// line comes back with a brand-new marker saying it is sound. The one path that
+/// rewrites durable memory is the one place a disproven fact must not appear.
+pub fn believed_state(xencode_dir: &Path) -> ContextState {
+    let root = state_root(xencode_dir);
+    match std::fs::read_to_string(xencode_dir.join("state.md")) {
+        Ok(text) => ContextState::from_markdown(&drop_stale_facts(&text, &root).text),
+        Err(_) => ContextState::default(),
+    }
 }
 
 /// Parse a hard-compaction reply into `ContextState`. The `## recent` section
@@ -1022,6 +1432,38 @@ assistant: hello";
             .collect()
     }
 
+    /// Stage and commit whatever the test has written since, so the next check runs
+    /// against a clean tree — the state a person's repository is actually in when a
+    /// stale fact reaches it. Without this, only the `git status` half of
+    /// [`drop_stale_facts`] would ever be exercised here.
+    fn commit_all(root: &Path, message: &str) {
+        for args in [&["add", "-A"][..], &["commit", "-q", "-m", message][..]] {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    /// A directory that is not a repository and has no parent that is one, for the
+    /// case where the code cannot be searched at all.
+    fn no_repo(label: &str) -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-nogit-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     /// Queue a fold with these fact lines and promote it, returning the durable
     /// text the promotion wrote.
     fn promote_lines(dir: &Path, lines: &[&str]) -> String {
@@ -1080,9 +1522,9 @@ assistant: hello";
             check.dropped
         );
         assert!(
-            check.dropped[0].contains("login lives in"),
+            check.dropped[0].line.contains("login lives in"),
             "the wrong line went stale: {}",
-            check.dropped[0]
+            check.dropped[0].line
         );
         assert!(
             check.text.contains("Rust-first"),
@@ -1271,5 +1713,370 @@ assistant: hello";
             "the working-on line was cleared to make an arithmetic fit"
         );
         assert_eq!(quiet.over_cap_dropped, 0);
+    }
+
+    #[test]
+    fn a_fact_about_this_code_carries_a_claim_a_later_turn_can_rerun() {
+        let (root, dir) = git_repo("record");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        committed_source(
+            &root,
+            "src/handlers.rs",
+            "fn reject_request() { crate::auth::validate_token(); }\n",
+        );
+        let state = ContextState {
+            working_on: "wiring checks into the durable tier".to_string(),
+            completed: vec![],
+            decisions: vec![
+                "validate_token rejects an empty token".to_string(),
+                "reject_request calls validate_token".to_string(),
+            ],
+            unresolved: vec![],
+        };
+        write_state_candidate(&state, &dir).unwrap();
+        let (_, report) = promote_state_candidate(&dir).unwrap();
+        let durable = std::fs::read_to_string(dir.join("state.md")).unwrap();
+
+        assert!(
+            durable.contains(CHK_OPEN),
+            "a fact naming this repository's own code was written with nothing a \
+             later turn could re-check:\n{durable}"
+        );
+        assert!(
+            durable.contains("reject_request>validate_token"),
+            "the call the second line describes was not recorded as a check, so it \
+             could never be found missing:\n{durable}"
+        );
+        assert_eq!(
+            report.checks_recorded, 2,
+            "the fold reported a different number of checked lines than the file \
+             carries:\n{durable}"
+        );
+        assert_eq!(
+            report.provenance_stamped, 0,
+            "neither line cites a file, so neither should have been stamped:\n{durable}"
+        );
+
+        // Nothing has moved since: both facts are believed and cost nothing.
+        let check = drop_stale_facts(&durable, &root);
+        assert!(
+            check.dropped.is_empty(),
+            "unmoved code contradicted its own facts: {:?}",
+            check.dropped
+        );
+        assert_eq!(check.unverifiable, 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_renamed_symbol_takes_the_fact_that_named_it_out_of_the_prompt() {
+        // The item's done-when. The fact cites no file, so the provenance marker
+        // cannot see this change — the name in the code is the only evidence.
+        let (root, dir) = git_repo("rename");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        let durable = promote_lines(&dir, &["validate_token rejects an empty token"]);
+        assert!(durable.contains(CHK_OPEN), "{durable}");
+
+        std::fs::write(root.join("src/auth.rs"), "pub fn check_token() {}\n").unwrap();
+        commit_all(&root, "rename the token check");
+
+        let check = drop_stale_facts(&durable, &root);
+        assert_eq!(
+            check.dropped.len(),
+            1,
+            "a fact naming a symbol that no longer exists was sent to the model"
+        );
+        assert_eq!(
+            check.dropped[0].problem,
+            FactProblem::SymbolGone,
+            "the drop was blamed on the wrong thing: {:?}",
+            check.dropped[0]
+        );
+        assert!(
+            !check.text.contains("validate_token rejects"),
+            "the contradicted fact is still in the text that reaches the prompt:\n{}",
+            check.text
+        );
+        assert_eq!(check.unverifiable, 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_call_that_stopped_happening_drops_the_line_that_described_it() {
+        // Both names are still declared, so a symbol check alone passes this line
+        // straight through. The two are kept in separate files because a declaration
+        // mentioning a name is not a call: searching the caller's own file would
+        // believe the fact for the definition sitting next to it.
+        let (root, dir) = git_repo("callgone");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        committed_source(
+            &root,
+            "src/handlers.rs",
+            "fn reject_request() { crate::auth::validate_token(); }\n",
+        );
+        let durable = promote_lines(&dir, &["reject_request calls validate_token"]);
+        assert!(
+            durable.contains("reject_request>validate_token"),
+            "{durable}"
+        );
+
+        std::fs::write(root.join("src/handlers.rs"), "fn reject_request() {}\n").unwrap();
+        commit_all(&root, "the request path no longer reaches the token check");
+
+        let check = drop_stale_facts(&durable, &root);
+        assert_eq!(
+            check.dropped.len(),
+            1,
+            "the call went away and the line describing it stayed believed"
+        );
+        assert_eq!(
+            check.dropped[0].problem,
+            FactProblem::CallGone,
+            "reported as the wrong problem: {:?}",
+            check.dropped[0]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_name_this_project_never_declared_earns_no_check_and_never_a_drop() {
+        // The trap in this item: `unbounded_channel` is a dependency's method, not
+        // this tree's. Recording it would drop a true note the first time the
+        // dependency changed, and there would be no way to tell that from a rename.
+        let (root, dir) = git_repo("foreign");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        let durable = promote_lines(
+            &dir,
+            &["the bridge uses mpsc::unbounded_channel for token output"],
+        );
+        assert!(
+            !durable.contains(CHK_OPEN),
+            "a fact naming something this repository does not declare was given a \
+             check it cannot survive:\n{durable}"
+        );
+        let check = drop_stale_facts(&durable, &root);
+        assert!(
+            check.dropped.is_empty(),
+            "a dependency's name was treated as this project's own: {:?}",
+            check.dropped
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_sentence_of_plain_prose_earns_no_check() {
+        // `auth` and `parse` are English as often as they are identifiers, and a
+        // check recorded against the word rather than the name fails on a fact that
+        // is perfectly true. Only backticks or a code shape make a word a name.
+        let (root, dir) = git_repo("prose");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        let durable = promote_lines(
+            &dir,
+            &[
+                "Rust-first for new code, decided in review",
+                "auth is checked before the handler runs",
+            ],
+        );
+        assert!(
+            !durable.contains(CHK_OPEN),
+            "an ordinary sentence was marked up as a claim about the code:\n{durable}"
+        );
+        assert_eq!(drop_stale_facts(&durable, &root).dropped.len(), 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_check_written_after_a_source_marker_does_not_blind_the_source_check() {
+        // Promotion stamps `[src:…]` and then appends `[chk:…]`, so the cited file is
+        // no longer at the end of the line. The source check reads its marker by name;
+        // if it read position, every fact about both a file and its code would stop
+        // being checked against the file.
+        let (root, dir) = git_repo("both");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        let durable = promote_lines(&dir, &["validate_token lives in src/auth.rs"]);
+        assert!(
+            durable.contains(SRC_OPEN) && durable.contains(CHK_OPEN),
+            "a fact naming both a file and a symbol should carry both markers:\n{durable}"
+        );
+
+        std::fs::write(root.join("src/auth.rs"), "pub fn check_token() {}\n").unwrap();
+        let check = drop_stale_facts(&durable, &root);
+        assert_eq!(
+            check.dropped.len(),
+            1,
+            "the cited file changed under the fact and nothing was dropped"
+        );
+        assert_eq!(
+            check.dropped[0].problem,
+            FactProblem::SourceChanged,
+            "the file, not the symbol, is what moved here: {:?}",
+            check.dropped[0]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_line_naming_many_symbols_is_capped_at_the_first_few() {
+        let (root, _dir) = git_repo("cap");
+        committed_source(
+            &root,
+            "src/handlers.rs",
+            "fn alpha_one() {}\nfn beta_two() {}\nfn gamma_three() {}\nfn delta_four() {}\nfn epsilon_five() {}\n",
+        );
+        let mut state = ContextState {
+            working_on: "the cap".to_string(),
+            completed: vec![
+                "alpha_one, beta_two, gamma_three, delta_four and epsilon_five are the handlers"
+                    .to_string(),
+            ],
+            decisions: vec![],
+            unresolved: vec![],
+        };
+        assert_eq!(record_checks(&mut state, &root), 1);
+        let line = &state.completed[0];
+        let items = line_checks(line);
+        let names: Vec<String> = items
+            .iter()
+            .map(|check| match check {
+                Check::Symbol(name) => name.clone(),
+                Check::Calls(caller, callee) => format!("{caller}>{callee}"),
+            })
+            .collect();
+        assert_eq!(
+            names.len(),
+            CHECK_CAP,
+            "the marker carries {} names for a line naming five, and the budget is \
+             {CHECK_CAP}:\n{line}",
+            names.len()
+        );
+        assert_eq!(
+            names,
+            vec![
+                "alpha_one".to_string(),
+                "beta_two".to_string(),
+                "gamma_three".to_string(),
+                "delta_four".to_string()
+            ],
+            "the cap did not keep the names the line puts first:\n{line}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn code_that_cannot_be_searched_keeps_the_fact_and_says_so() {
+        // No repository means no answer, not a negative one. A folder copied out of
+        // a project, or a machine without git, must not read as "this code is gone".
+        let outside = no_repo("search");
+        let marked = format!(
+            "# State\n\n## decisions\n- validate_token rejects an empty token {CHK_OPEN}validate_token]\n"
+        );
+        let check = drop_stale_facts(&marked, &outside);
+        assert!(
+            check.dropped.is_empty(),
+            "unsearchable code was reported as code that contradicted the fact"
+        );
+        assert_eq!(
+            check.unverifiable, 1,
+            "the check that could not run was not counted: {check:?}"
+        );
+        std::fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
+    fn a_fold_prompt_is_handed_only_the_tier_the_code_still_agrees_with() {
+        // The fold rewrites `state.md` itself. A disproven fact reaching this prompt
+        // would be re-derived as a fresh line and stamped with the *current* commit,
+        // which is the one way a stale memory can survive its own check.
+        let (root, dir) = git_repo("fold");
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        let durable = promote_lines(
+            &dir,
+            &[
+                "validate_token rejects an empty token",
+                "the crate is Rust-first, decided in review",
+            ],
+        );
+        let mut t = Transcript::new("s1");
+        t.add("user", "rename the token check");
+        t.add("assistant", "the validator is called check_token now");
+
+        let prompt = hard_compact_prompt(&believed_state(&dir), &t);
+        assert!(
+            prompt.contains("validate_token rejects an empty token"),
+            "a believed fact was already missing from the fold prompt:\n{prompt}"
+        );
+
+        std::fs::write(root.join("src/auth.rs"), "pub fn check_token() {}\n").unwrap();
+        commit_all(&root, "rename the token check");
+
+        let prompt = hard_compact_prompt(&believed_state(&dir), &t);
+        assert!(
+            !prompt.contains("validate_token rejects an empty token"),
+            "the falsified fact was handed to the model that rewrites the durable \
+             tier:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("Rust-first"),
+            "the sentence of prose left with it:\n{prompt}"
+        );
+        assert!(
+            std::fs::read_to_string(dir.join("state.md"))
+                .unwrap()
+                .contains("validate_token rejects an empty token"),
+            "filtering the fold prompt edited the person's file: {durable}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_name_counts_as_one_word_not_as_the_start_of_one() {
+        assert!(text_mentions("use crate::db::pool;\n", "pool"));
+        assert!(text_mentions("  pool()?;\n", "pool"));
+        assert!(
+            !text_mentions("let pool_size = 4;\n", "pool"),
+            "pool_size is a different thing wearing the start of this name"
+        );
+        assert!(!text_mentions("the pumping station", "pool"));
+    }
+
+    #[test]
+    fn a_declaration_is_read_off_a_source_line_and_not_off_its_comment() {
+        assert_eq!(
+            declared_in_line("pub(crate) fn drop_stale_facts(state: &str) {"),
+            vec!["drop_stale_facts".to_string()]
+        );
+        assert_eq!(
+            declared_in_line("struct FoldReport {"),
+            vec!["FoldReport".to_string()]
+        );
+        assert!(
+            declared_in_line("/// The `type` of a thing is decided by fn login().").is_empty(),
+            "a doc comment would otherwise declare symbols out of its own words"
+        );
+        assert!(declared_in_line("#[derive(Clone)]").is_empty());
+    }
+
+    #[test]
+    fn a_backticked_word_is_read_as_a_name_however_ordinary_it_looks() {
+        assert_eq!(
+            mentioned_names("`pool` is reused per request"),
+            vec!["pool".to_string()]
+        );
+        assert!(
+            mentioned_names("pool is reused per request").is_empty(),
+            "the bare English word is not a name someone wrote for the compiler"
+        );
+        assert_eq!(
+            mentioned_names("`crate::db::pool` is reused"),
+            vec!["pool".to_string()]
+        );
+        assert_eq!(
+            call_claims("`reject_request` calls `validate_token` before the handler"),
+            vec![("reject_request".to_string(), "validate_token".to_string())]
+        );
+        assert!(
+            call_claims("validate_token is called by reject_request").is_empty(),
+            "a passive sentence was read as a call in the wrong direction"
+        );
     }
 }

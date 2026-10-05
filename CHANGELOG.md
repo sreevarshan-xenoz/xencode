@@ -7,7 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `QM-2`: a durable fact names the file it came from, and stops being believed when that file changes
+### Added — `MEM-3`: a fact about the code is re-checked against the code, and dropped when it stops being true
+
+A durable note is often about a symbol rather than a file: `validate_token rejects an
+empty token`, `reject_request calls validate_token`. The marker added by `QM-2` cannot see
+either of them — no file is named, so nothing ties the line to a revision, and the note
+went into every later prompt whether or not the function it describes still exists.
+
+`/ctx promote` now reads each line for the names this repository declares and writes them
+down beside it:
+
+```text
+- validate_token rejects an empty token [chk:validate_token]
+- reject_request calls validate_token [chk:reject_request,validate_token,reject_request>validate_token]
+```
+
+Every turn that reads the tier re-runs those names against the tree, with one search of
+the working `.rs` files shared by the whole file and only run when a line carries a check.
+A name that is no longer declared takes its fact out of that turn; so does a
+`caller>callee` pair that no longer appears in the file where the caller is defined, which
+is the case a symbol check alone would pass. The search reads the working tree rather
+than this project's own file index, because an index is a snapshot and a snapshot keeps
+certifying a symbol that a rename removed.
+
+Two rules stop this from throwing away notes that are correct. Only a name the project
+declares *at promotion time* is ever recorded, so a line about
+`mpsc::unbounded_channel` — a dependency's function — carries no check and cannot be
+dropped when that dependency moves; deciding at read time would have no way to tell "this
+name is gone" from "this name was never ours". And an ordinary word is not a name unless
+it is shaped like one or written in backticks, because `auth` and `parse` are English as
+often as they are identifiers. A line records at most four claims, the first four in the
+sentence.
+
+`/ctx kv` says which check failed, in the same row that names the dropped line:
+
+```console
+[CTX]🧾 Tier 4 state.md — 14 tokens in the prompt · 1 fact line(s) on disk · 1 dropped as stale
+[CTX]   stale: validate_token rejects an empty token [chk:validate_token] — the code it names is no longer declared here; /ctx fold to re-derive it
+```
+
+As with `QM-2`, dropping is per turn and not destructive: `state.md` keeps the line, a
+tree that cannot be searched keeps it too and reports it as uncheckable, and reverting the
+rename brings it back.
+
+One hole this closes on the way: `/ctx fold` and `/ctx archive` used to hand the model the
+tier exactly as written. The fold *rewrites* `state.md`, so a disproven fact in that prompt
+came back as a fresh line stamped with the current commit — the one way a stale note could
+survive its own check. Both now read the filtered tier.
+
+Checked at three levels. `compact.rs` gains twelve tests over real scratch repositories: a
+renamed symbol drops its fact, a deleted call drops the line describing it while both names
+still exist, a dependency's name and a sentence of prose get no marker at all, a folder with
+no `git` in it keeps its facts, and the fold prompt is handed only the tier the code still
+agrees with. `rust/crates/xencode-context-rs/tests/state_staleness.rs` builds a repository
+with the call and its target in two separate files, commits a rename, and reads the
+assembled prompt bytes. `rust/crates/xencode-tui-rs/tests/state_stale_notice.rs` drives the
+same repository through `/ctx promote` and `/ctx kv` and reads the panel quoted above. Each
+of those guards was watched failing — recording names the tree does not declare, dropping
+the call claim, letting a call check always pass, or letting the fold read the unfiltered
+tier breaks the test that should catch it.
+
+One wording fix came out of this: `not checkable here` used to add `(no such commit
+locally)`, which became untrue the moment a second reason for not checking existed, so the
+row now says `(the check could not run on this repository)` and covers both.
+
 
 `state.md` holds sentences about the code, and the code moves. Nothing said which file a
 line was about, so a note written last week about `src/auth.rs` re-entered the prompt

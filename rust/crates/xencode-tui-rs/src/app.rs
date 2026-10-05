@@ -2024,6 +2024,18 @@ fn fold_lines(report: &xencode_context_rs::FoldReport) -> Vec<String> {
             report.secrets_redacted
         ));
     }
+    if report.provenance_stamped > 0 {
+        lines.push(format!(
+            "[CTX]   {} line(s) marked with the file they cite and this revision — when that file moves, the line leaves the prompt and /ctx kv says so.",
+            report.provenance_stamped
+        ));
+    }
+    if report.checks_recorded > 0 {
+        lines.push(format!(
+            "[CTX]   {} line(s) given a claim this code can be re-checked against — a named symbol that disappears drops the line the same way.",
+            report.checks_recorded
+        ));
+    }
     if report.over_cap_dropped > 0 {
         lines.push(format!(
             "[CTX]   {} line(s) were past what state.md may hold ({} lines, {} tokens) and dropped — the model's own first items were kept.",
@@ -5224,19 +5236,28 @@ impl<'a> App<'a> {
                     },
                     // Not a complaint about the facts: a report that the check
                     // itself could not run here, so the person knows the tier is
-                    // going in unverified rather than verified and good.
+                    // going in unverified rather than verified and good. Worded for
+                    // both causes — a commit this repository cannot resolve, and code
+                    // it cannot search — because naming only the first would blame a
+                    // missing commit for a folder that has no git in it at all.
                     if unverifiable == 0 {
                         String::new()
                     } else {
-                        format!(" · {} not checkable here (no such commit locally)", unverifiable)
+                        format!(
+                            " · {} not checkable here (the check could not run on this \
+                             repository)",
+                            unverifiable
+                        )
                     }
                 ));
                 // Named rather than counted: a fact that stopped being believed is
                 // the one thing in this report the person can act on, and a number
                 // alone does not say which claim the model has now lost.
-                for line in &dropped {
+                for fact in &dropped {
                     let _ = tx.send(format!(
-                        "[CTX]   stale: {line} — the file it cites has changed since; /ctx fold to re-derive it"
+                        "[CTX]   stale: {} — {}; /ctx fold to re-derive it",
+                        fact.line,
+                        fact.problem.reason()
                     ));
                 }
 
@@ -5297,8 +5318,7 @@ impl<'a> App<'a> {
                 let (t, appended) = self.canonical_transcript();
                 let root = xencode_context_rs::default_root();
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-                let state =
-                    xencode_context_rs::ContextState::from_disk(&xencode).unwrap_or_default();
+                let state = xencode_context_rs::believed_state(&xencode);
                 let snap = t.snapshot(&xencode).unwrap_or_default();
                 let prompt = xencode_context_rs::hard_compact_prompt(&state, &t);
                 let _ = tx.send("[CTX_START]".to_string());
@@ -5327,8 +5347,7 @@ impl<'a> App<'a> {
                 let (t, appended) = self.canonical_transcript();
                 let root = xencode_context_rs::default_root();
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-                let state =
-                    xencode_context_rs::ContextState::from_disk(&xencode).unwrap_or_default();
+                let state = xencode_context_rs::believed_state(&xencode);
                 let prompt = xencode_context_rs::hard_compact_prompt(&state, &t);
                 let messages = one_shot_messages(&root, prompt);
                 let call = self.single_shot();

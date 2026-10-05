@@ -707,11 +707,11 @@ pub struct LiveContext {
     /// Retrieval was already weighted by it; this is here so the interface can
     /// show the reading instead of leaving a changed file list unexplained.
     pub shape: crate::ShapeRead,
-    /// Durable facts that were kept out of this turn because the file they cite
-    /// has moved on since they were written (QM-2). Named, not counted, because
-    /// a fact silently dropped from the tier is exactly the kind of thing a
-    /// person needs to see happen.
-    pub stale_state_facts: Vec<String>,
+    /// Durable facts that were kept out of this turn because the code behind them
+    /// moved on — a cited file that changed, a named symbol that is gone (QM-2,
+    /// MEM-3). Each one carries its reason, and the interface names them instead of
+    /// letting the tier quietly shrink.
+    pub stale_state_facts: Vec<crate::compact::DroppedFact>,
 }
 
 /// SE-2: what a repository-derived section says about itself. The system

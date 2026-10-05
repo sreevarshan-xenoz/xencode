@@ -82,10 +82,11 @@ pub use cochange::{
     RECENCY_WINDOW_DAYS, TOP_PARTNERS,
 };
 pub use compact::{
-    drop_stale_facts, fold_state_from_reply, hard_compact_prompt, parse_hard_compact_reply,
-    promote_state_candidate, read_state_candidate, should_compact, soft_compact, stamp_provenance,
-    state_candidate_path, write_state_candidate, CompactReport, CompactionKind, FoldRefusal,
-    FoldReport, PromoteRefusal, StaleFacts, STATE_CANDIDATE_FILE, STATE_FOLD_FACT_CAP,
+    believed_state, drop_stale_facts, fold_state_from_reply, hard_compact_prompt,
+    parse_hard_compact_reply, promote_state_candidate, read_state_candidate, record_checks,
+    should_compact, soft_compact, stamp_provenance, state_candidate_path, write_state_candidate,
+    CompactReport, CompactionKind, DroppedFact, FactProblem, FoldRefusal, FoldReport,
+    PromoteRefusal, StaleFacts, STATE_CANDIDATE_FILE, STATE_FOLD_FACT_CAP,
 };
 pub use context::{
     assemble_chat, assemble_prompt, collect_live_context, git_summary_text, read_retrieved_bodies,
