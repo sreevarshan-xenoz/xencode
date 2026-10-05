@@ -36,7 +36,9 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sreevarshan-xenoz/xenco
 xencode
 ```
 
-Launches the immersive TUI. Run `/init` once per project for project-aware
+Launches the immersive TUI, from a terminal — that is where it draws. Run it in a
+pipe, a redirect or a CI step and it says so, and names the commands that need no
+terminal at all. Run `/init` once per project for project-aware
 answers, then just ask.
 
 Local models need nothing else. For cloud models, `xencode config set

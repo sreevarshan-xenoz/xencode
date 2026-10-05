@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2324 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2331 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -229,7 +229,7 @@ xencode --help
 # 2) Check your local model health
 xencode models list
 
-# 3) Launch the immersive terminal UI (the default experience)
+# 3) Launch the immersive terminal UI (the default experience — needs a terminal)
 xencode tui
 
 # 4) Run a quick query without leaving your shell
