@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EV-6`: the agent can keep a note to itself that compaction cannot eat
+
+A thing the model worked out mid-task — which lock the worker holds, that retries are
+capped at three, that one file is generated and must not be edited — lived only in the
+conversation, and the conversation is the thing a compaction rewrites. The durable
+alternative required a person: `/ctx fold` proposes, `/ctx promote` writes `state.md`,
+so between those two acts the note was nowhere.
+
+`write_note` is a new tool for the agent. It takes one string and no path, and appends
+that line to `.xencode/notes.md` under a `# Notes to self` heading. The file is read
+back on every later turn as its own tier of the prompt (`## Notes To Self`, 250 tokens,
+newest notes first when the pad is wider), and because it sits outside the transcript a
+soft compaction that drops the turn which wrote the note cannot drop the note. The pad
+holds the last 40 lines and says which ones it evicted.
+
+Three bounds keep an always-present tier from becoming a place to park other people's
+bytes: a line carrying a source banner — a fetched page, a file body, a tool result — is
+refused and the refusal counts, a credential-shaped value is taken out on the way in, and
+a note already on the pad is not written twice. A call whose every line was refused
+leaves no file behind at all. `/ctx fold` and `/ctx archive` now hand the model the whole
+pad, not the tier's newest slice, under a `# Notes the agent kept for itself` heading in
+the fold prompt, so a note the model still believes can be proposed into `state.md` —
+where only a person's `/ctx promote` makes it durable. Being a write to the working tree,
+the tool is refused in plan mode and asks in ask mode, like `edit_file`.
+
 ### Added — `MEM-3`: a fact about the code is re-checked against the code, and dropped when it stops being true
 
 A durable note is often about a symbol rather than a file: `validate_token rejects an

@@ -54,6 +54,11 @@ pub enum SourceClass {
     AnchorFile,
     /// `state.md` — this session's own task notes.
     ProjectState,
+    /// `notes.md` — the scratchpad the agent wrote into itself (EV-6). The model's
+    /// own words recorded on this machine, which is what `History` already is, so
+    /// it is not data; it is also not something a later conversation must believe,
+    /// so [`SourceClass::may_persist_durable`] stays shut for it.
+    Scratchpad,
     /// What the person typed, this turn.
     UserTurn,
     /// Remembered user and assistant text from conversation memory.
@@ -84,6 +89,7 @@ impl SourceClass {
             SourceClass::AgentFile { trusted: false } => "AGENTS.md (untrusted)",
             SourceClass::AnchorFile => "anchor.md",
             SourceClass::ProjectState => "state.md",
+            SourceClass::Scratchpad => "notes.md",
             SourceClass::UserTurn => "your words",
             SourceClass::History => "conversation",
             SourceClass::AttachedFile => "attached file",
@@ -118,6 +124,7 @@ impl SourceClass {
                 | SourceClass::AgentFile { trusted: true }
                 | SourceClass::AnchorFile
                 | SourceClass::ProjectState
+                | SourceClass::Scratchpad
                 | SourceClass::History
         )
     }
@@ -145,7 +152,10 @@ impl SourceClass {
             // written by this session about its own task (state.md), or the
             // human's own exchange (history). SE-2 leaves these unlabelled on
             // purpose: they are not fetched bodies.
-            SourceClass::AnchorFile | SourceClass::ProjectState | SourceClass::History => None,
+            SourceClass::AnchorFile
+            | SourceClass::ProjectState
+            | SourceClass::Scratchpad
+            | SourceClass::History => None,
         }
     }
 
@@ -217,12 +227,13 @@ pub fn totals_by_class(tiers: &[crate::TierDoc]) -> Vec<(SourceClass, u64)> {
 /// writer (`QM-1`), which drops any line carrying a data banner — has to derive
 /// its list from the enum. A private list in a test would let a new class slip
 /// past a guard that is supposed to cover every way text can arrive.
-pub const ALL: [SourceClass; 13] = [
+pub const ALL: [SourceClass; 14] = [
     SourceClass::Instructions,
     SourceClass::AgentFile { trusted: true },
     SourceClass::AgentFile { trusted: false },
     SourceClass::AnchorFile,
     SourceClass::ProjectState,
+    SourceClass::Scratchpad,
     SourceClass::UserTurn,
     SourceClass::History,
     SourceClass::AttachedFile,
@@ -264,6 +275,7 @@ mod tests {
                 "AGENTS.md (trusted)",
                 "anchor.md",
                 "conversation",
+                "notes.md",
                 "state.md",
                 "system prompt",
                 "your words",
@@ -277,6 +289,7 @@ mod tests {
         // what the turn read, so a fetched body can ride inside it: the gate
         // stays shut for the summary and the writer must strip or mark instead.
         assert!(!SourceClass::ProjectState.may_persist_durable());
+        assert!(!SourceClass::Scratchpad.may_persist_durable());
         assert!(!SourceClass::AnchorFile.may_persist_durable());
         assert!(!SourceClass::History.may_persist_durable());
     }

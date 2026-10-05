@@ -87,7 +87,16 @@ pub fn soft_compact(transcript: &mut Transcript, keep_fraction: f32) -> CompactR
 /// Build the single model call that folds the transcript into a layered
 /// summary (§11 layer separation). Output shape mirrors `state.md` sections so
 /// `parse_hard_compact_reply` can rebuild the state deterministically.
-pub fn hard_compact_prompt(state: &ContextState, transcript: &Transcript) -> String {
+///
+/// `notes` is the EV-6 scratchpad, handed over whole: it is capped at
+/// [`crate::notes::NOTES_MAX_LINES`] lines, and the fold is the route a note has
+/// to become durable. The reply it produces is a candidate a person promotes, so
+/// folding a note is not the same as believing one.
+pub fn hard_compact_prompt(
+    state: &ContextState,
+    transcript: &Transcript,
+    notes: Option<&str>,
+) -> String {
     let recent = transcript
         .recent(6)
         .iter()
@@ -99,7 +108,16 @@ pub fn hard_compact_prompt(state: &ContextState, transcript: &Transcript) -> Str
     } else {
         "(empty)".to_string()
     };
-    crate::prompts::compaction_prompt(&state_text, &transcript_tail(transcript), &recent)
+    let notes_text = match notes {
+        Some(text) if !text.trim().is_empty() => text.trim().to_string(),
+        _ => "(no notes)".to_string(),
+    };
+    crate::prompts::compaction_prompt(
+        &state_text,
+        &notes_text,
+        &transcript_tail(transcript),
+        &recent,
+    )
 }
 
 fn transcript_tail(transcript: &Transcript) -> String {
@@ -210,7 +228,7 @@ impl std::fmt::Display for PromoteRefusal {
 /// (`Repository`, `AttachedFile`) are whole notes ending in a blank line, and
 /// `state.md` keeps one line per fact, so a quoted note arrives here as that
 /// line without the break after it.
-fn data_markers() -> Vec<&'static str> {
+pub(crate) fn data_markers() -> Vec<&'static str> {
     crate::source::ALL
         .iter()
         .filter(|class| class.is_data())
@@ -1116,7 +1134,7 @@ mod tests {
             decisions: vec![],
             unresolved: vec![],
         };
-        let prompt = hard_compact_prompt(&state, &t);
+        let prompt = hard_compact_prompt(&state, &t, None);
         assert!(
             prompt.contains("[data] read_file src/f9.rs"),
             "the verbatim recent window dropped the source line"
@@ -1134,7 +1152,7 @@ mod tests {
             decisions: vec![],
             unresolved: vec![],
         };
-        let p = hard_compact_prompt(&state, &t);
+        let p = hard_compact_prompt(&state, &t, None);
         assert!(p.contains("## working-on"));
         assert!(p.contains("## completed"));
         assert!(p.contains("## decisions"));
@@ -2000,7 +2018,7 @@ assistant: hello";
         t.add("user", "rename the token check");
         t.add("assistant", "the validator is called check_token now");
 
-        let prompt = hard_compact_prompt(&believed_state(&dir), &t);
+        let prompt = hard_compact_prompt(&believed_state(&dir), &t, None);
         assert!(
             prompt.contains("validate_token rejects an empty token"),
             "a believed fact was already missing from the fold prompt:\n{prompt}"
@@ -2009,7 +2027,7 @@ assistant: hello";
         std::fs::write(root.join("src/auth.rs"), "pub fn check_token() {}\n").unwrap();
         commit_all(&root, "rename the token check");
 
-        let prompt = hard_compact_prompt(&believed_state(&dir), &t);
+        let prompt = hard_compact_prompt(&believed_state(&dir), &t, None);
         assert!(
             !prompt.contains("validate_token rejects an empty token"),
             "the falsified fact was handed to the model that rewrites the durable \

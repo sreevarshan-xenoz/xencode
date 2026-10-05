@@ -150,9 +150,10 @@ pub fn worktree_brief(task: &str) -> String {
 /// Fill the three holes in the transcript-folding prompt. Replacement rather
 /// than a formatting macro, so the file's own braces and angle brackets in the
 /// markdown shape it asks for are just text.
-pub fn compaction_prompt(state: &str, transcript_tail: &str, recent: &str) -> String {
+pub fn compaction_prompt(state: &str, notes: &str, transcript_tail: &str, recent: &str) -> String {
     body(COMPACT_TRANSCRIPT)
         .replace("{state}", state)
+        .replace("{notes}", notes)
         .replace("{transcript_tail}", transcript_tail)
         .replace("{recent}", recent)
 }
@@ -328,10 +329,16 @@ mod tests {
 
     #[test]
     fn the_compaction_prompt_has_no_holes_left_after_filling() {
-        let filled = compaction_prompt("# Current state\n- working-on: x", "user: hi", "user: hi");
-        for hole in ["{state}", "{transcript_tail}", "{recent}"] {
+        let filled = compaction_prompt(
+            "# Current state\n- working-on: x",
+            "# Notes to self\n- the pool opens in main",
+            "user: hi",
+            "user: hi",
+        );
+        for hole in ["{state}", "{notes}", "{transcript_tail}", "{recent}"] {
             assert!(!filled.contains(hole), "{hole} was never filled in");
         }
+        assert!(filled.contains("the pool opens in main"));
         assert!(filled.contains("# Current state\n- working-on: x"));
         assert!(filled.contains("## recent (last 6 messages, verbatim)\nuser: hi"));
     }

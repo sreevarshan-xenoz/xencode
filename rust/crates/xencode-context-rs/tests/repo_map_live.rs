@@ -102,6 +102,7 @@ fn the_map_on_this_repository_names_what_the_bodies_miss() {
         agents_md: None,
         anchor_md: None,
         state_md: None,
+        notes_md: None,
         git_summary: "",
         repo_map: &map,
         retrieved: Vec::new(),

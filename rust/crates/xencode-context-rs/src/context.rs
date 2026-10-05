@@ -25,6 +25,10 @@ use std::path::Path;
 pub const AGENTS_CAP_TOKENS: u64 = 1200;
 pub const ANCHOR_CAP_TOKENS: u64 = 2000;
 pub const STATE_CAP_TOKENS: u64 = 800;
+/// EV-6 — what the scratchpad may take per turn. Smaller than tier 4 on
+/// purpose: a note is a reminder, not a record, and the file it comes from is
+/// itself capped, so the newest notes are what a turn sees.
+pub const NOTES_CAP_TOKENS: u64 = 250;
 pub const GIT_CAP_TOKENS: u64 = 300;
 /// Tiers 4–6 stop consuming once less than this remains for recent messages.
 pub const MARGIN_TOKENS: u64 = 200;
@@ -181,13 +185,14 @@ pub fn stable_system_text(
 ///
 /// `retrieved` must already be sorted best-first; the budgeter trims from the
 /// bottom. `recent_text` should be the rolling message window, oldest first.
-#[allow(clippy::too_many_arguments)] // eight positional args are the documented contract (§10 tiers)
+#[allow(clippy::too_many_arguments)] // nine positional args are the documented contract (§10 tiers)
 pub fn assemble_prompt(
     profile: HardwareProfile,
     system: &str,
     agents_md: Option<&str>,
     anchor_md: Option<&str>,
     state_md: Option<&str>,
+    notes_md: Option<&str>,
     git_summary: &str,
     repo_map: &str,
     retrieved: Vec<RetrievedBlock>,
@@ -236,6 +241,23 @@ pub fn assemble_prompt(
             class: SourceClass::ProjectState,
         });
         remaining = remaining.saturating_sub(state_tok);
+    }
+
+    // ── Tier 4b: notes.md — the agent's own scratchpad (EV-6) ────────────
+    // It lives outside the transcript, so neither a soft drop of old entries nor
+    // a hard fold can eat it; that is the whole point of writing it to a file.
+    // The newest notes are what the budget carries — the same rule tier 7 uses —
+    // and the file's own cap is what stops it growing forever.
+    let (notes_head, notes_tok) =
+        truncate_tail_to_tokens(notes_md.unwrap_or(""), NOTES_CAP_TOKENS, false);
+    let notes_included = !notes_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if notes_included {
+        tiers.push(TierDoc {
+            name: "notes.md",
+            tokens: notes_tok,
+            class: SourceClass::Scratchpad,
+        });
+        remaining = remaining.saturating_sub(notes_tok);
     }
 
     // ── Tier 5: git summary ──────────────────────────────────────────────
@@ -301,6 +323,10 @@ pub fn assemble_prompt(
     if state_included {
         text.push_str("\n\n## Current Task State\n\n");
         text.push_str(&state_head);
+    }
+    if notes_included {
+        text.push_str("\n\n## Notes To Self\n\n");
+        text.push_str(&notes_head);
     }
     if git_included {
         text.push_str("\n\n## Git\n\n");
@@ -368,6 +394,8 @@ pub struct ChatInput<'a> {
     pub agents_md: Option<&'a str>,
     pub anchor_md: Option<&'a str>,
     pub state_md: Option<&'a str>,
+    /// The agent's own scratchpad (`notes.md`), read from `.xencode/` — EV-6.
+    pub notes_md: Option<&'a str>,
     pub git_summary: &'a str,
     /// The symbol-only repo map ([`crate::repo_map_text`]); admitted only on a
     /// prompt budgeted like `Low`, and empty when there is no index.
@@ -529,6 +557,19 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         remaining = remaining.saturating_sub(state_tok);
     }
 
+    // ── Tier 4b: notes.md (EV-6) ────────────────────────────────────────
+    let (notes_head, notes_tok) =
+        truncate_tail_to_tokens(input.notes_md.unwrap_or(""), NOTES_CAP_TOKENS, false);
+    let notes_included = !notes_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if notes_included {
+        tiers.push(TierDoc {
+            name: "notes.md",
+            tokens: notes_tok,
+            class: SourceClass::Scratchpad,
+        });
+        remaining = remaining.saturating_sub(notes_tok);
+    }
+
     // ── Tier 5: git summary ──────────────────────────────────────────────
     let (git_head, git_tok) = truncate_to_tokens(input.git_summary, GIT_CAP_TOKENS, false);
     let git_included = !git_head.is_empty() && remaining >= MARGIN_TOKENS;
@@ -628,6 +669,11 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         user_turn.push_str(&state_head);
         user_turn.push_str("\n\n");
     }
+    if notes_included {
+        user_turn.push_str("## Notes To Self\n\n");
+        user_turn.push_str(&notes_head);
+        user_turn.push_str("\n\n");
+    }
     if git_included {
         user_turn.push_str("## Git\n\n");
         user_turn.push_str(REPO_DATA_NOTE);
@@ -690,6 +736,10 @@ pub struct LiveContext {
     pub agents_md: Option<String>,
     pub anchor_md: Option<String>,
     pub state_md: Option<String>,
+    /// The EV-6 scratchpad, as written by `write_note`. No staleness filter: a
+    /// note is the agent's own reminder about this task, not a claim about a file
+    /// that a later commit can falsify.
+    pub notes_md: Option<String>,
     pub git_summary: String,
     /// The symbol-only repo map for this turn, built from the index and seeded
     /// by what retrieval and the working tree already picked. Whether it is
@@ -748,6 +798,7 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         .map(|check| check.text.clone())
         .filter(|text| !text.trim().is_empty());
     let git_summary = git_summary_text(root).unwrap_or_default();
+    let notes_md = crate::notes::read_notes(&xencode);
     // Read once, and used for the weights and for what is reported about them,
     // so the two cannot disagree about which shape the turn was retrieved as.
     let shape = crate::shape_of(query);
@@ -772,6 +823,7 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         agents_md,
         anchor_md,
         state_md,
+        notes_md,
         git_summary,
         repo_map,
         blocks,
@@ -898,6 +950,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             None,
+            None,
             "",
             "",
             vec![],
@@ -913,6 +966,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             None,
+            None,
             "",
             "",
             vec![],
@@ -926,6 +980,7 @@ mod tests {
         let cut = assemble_prompt(
             HardwareProfile::Low,
             &sys,
+            None,
             None,
             None,
             None,
@@ -950,6 +1005,7 @@ mod tests {
             None,
             None,
             Some(&state),
+            None,
             "",
             "",
             vec![],
@@ -971,6 +1027,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             None,
+            None,
             "main @ abc1234",
             "",
             Vec::new(),
@@ -983,6 +1040,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             Some(folded),
+            None,
             "main @ abc1234",
             "",
             Vec::new(),
@@ -1016,6 +1074,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             None,
+            None,
             "",
             "",
             Vec::new(),
@@ -1044,6 +1103,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             Some("# state: fixing auth"),
+            None,
             "🎋 main @ abc1234 — 1 dirty file(s)",
             "",
             sample_retrieved(),
@@ -1076,6 +1136,7 @@ mod tests {
             Some(&"# Rules\n".repeat(200)),
             Some(&"# Anchor\n\n".repeat(200)),
             None,
+            None,
             "",
             "",
             long_retrieved,
@@ -1093,6 +1154,7 @@ mod tests {
         let doc = assemble_prompt(
             HardwareProfile::High,
             SYSTEM,
+            None,
             None,
             None,
             None,
@@ -1127,6 +1189,7 @@ mod tests {
         let doc = assemble_prompt(
             HardwareProfile::Balanced,
             SYSTEM,
+            None,
             None,
             None,
             None,
@@ -1269,6 +1332,7 @@ mod tests {
             agents_md: Some(AGENTS),
             anchor_md: Some(ANCHOR),
             state_md: Some("# state: fixing auth"),
+            notes_md: None,
             git_summary: "main @ abc1234",
             repo_map: "",
             retrieved,
@@ -1377,6 +1441,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             "",
             &sample_map(),
             Vec::new(),
@@ -1394,6 +1459,7 @@ mod tests {
         let high = assemble_prompt(
             HardwareProfile::High,
             SYSTEM,
+            None,
             None,
             None,
             None,
@@ -1457,6 +1523,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             Some("# state: fixing auth"),
+            None,
             "main @ abc1234",
             "",
             sample_retrieved(),
@@ -1686,6 +1753,7 @@ mod tests {
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
+            notes_md: None,
             git_summary: &live.git_summary,
             repo_map: "",
             retrieved: live.blocks,

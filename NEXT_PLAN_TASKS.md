@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2375 tests passing, zero warnings (re-verified 2026-10-05, after `MEM-3`; 19 ignored)
+- [x] Workspace gates green — 16 crates, 2386 tests passing, zero warnings (re-verified 2026-10-05, after `EV-6`; 19 ignored)
 
 ## Model Catalog Honesty
 
@@ -2428,6 +2428,8 @@ never is.
 - **EV-6 notes-to-self scratchpad** — a `write_note` tool in a compaction-exempt
   tier, like `[d]`. S (2-4 d). Trap: unbounded growth; cap and fold into hard
   compaction. Done-when: notes survive a hard compaction and appear in assembly.
+  **Done 2026-10-05 — the growth trap has three bounds, not one.** See the W10
+  progress note.
 - **EV-7 failure reflection → human-promoted lesson** — after N failed rounds or a
   `/rewind`, the agent *drafts* a lesson and the user approves it into
   `AGENTS.md`. S (3-4 d). Trap: auto-commit is drift, not learning.
@@ -10020,7 +10022,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 21 items, 4 done
+#### W10 — Durable project knowledge — 21 items, 5 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10028,10 +10030,10 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 |---|---|---|---|
 | **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — deliberately after W7 |
 | **EV-5** | sub-directory instruction files | capability | sub-directory instruction files (QB-3 is the same thing) |
-| **EV-6** | notes-to-self scratchpad | capability | notes-to-self scratchpad |
+| **EV-6** | notes-to-self scratchpad | capability | notes-to-self scratchpad — done 2026-10-05, the pad is a tier of its own and the fold gets the whole file, see the W10 progress note |
 | **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson |
-| **MEM-1** | A candidate-facts file the human promotes | capability | candidate-facts file the human promotes |
-| **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance |
+| **MEM-1** | A candidate-facts file the human promotes | capability | candidate-facts file the human promotes — open: the promotion half is built (`QM-1`'s candidate file and `/ctx promote`), the agent-drafted queue it was meant to hold is `EV-7`'s, and `EV-6`'s pad is not that queue because a note is this session's own working text |
+| **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance — **covered by committed work, no separate task left**: `QM-1` gave the tier a writer with a human promotion step, `QM-2` the `[src:path@commit]` provenance and the git-dirty staleness this row asked for, `MEM-3` the verify-on-read. Counted with those rows, not as its own commit |
 | **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts — done 2026-10-05 against `git grep`, not `xencode-analysis-rs`, see the W10 progress note |
 | **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 |
 | **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
@@ -10049,6 +10051,60 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `EV-6` — 2026-10-05. The agent can now keep a note to itself that a compaction
+  cannot eat. **What the row named as the trap is the part that needed three bounds, not
+  one.** `write_note` takes one string and no path — the only file it can touch is
+  `.xencode/notes.md`, and `xencode-context-rs/src/notes.rs` is the only writer, so the
+  cap, the refusals and the redaction read the same however a line got in. Growth is
+  bounded at three places: the file holds the last 40 notes and the reply names the ones
+  it evicted; the tier is 250 tokens (`NOTES_CAP_TOKENS`) and takes the **newest** tail
+  when the pad is wider, the same rule tier 7 uses for the conversation; and admission is
+  the same `remaining >= MARGIN_TOKENS` gate every other tier passes, so a turn with no
+  room left sends no notes rather than half a set. Emitting and budgeting follow one flag,
+  so text and tier can never disagree.
+  **Why a note is not treated as somebody else's bytes, and what that cost.** The new
+  `SourceClass::Scratchpad` (`ALL` is 14 now) is not a data class: the pad holds what this
+  session concluded, which is the same family as the transcript lines `History` already
+  carries unclassified. That is only safe because `write_note` refuses a line carrying any
+  data banner before storing it — a page body, a file body or a tool result quoted into a
+  note would otherwise become an always-present tier made of untrusted text, which is
+  `QK-3`'s whole objection. A credential-shaped value is taken out on the way in with the
+  same patterns the prompt uses, a note already on the pad is not written twice, and a
+  call whose every line was refused creates no file at all, so a refusal cannot leave a
+  scratchpad for every later turn to read. `may_persist_durable()` stays `false`: a note
+  reaches `state.md` only through `/ctx fold` and a person's `/ctx promote`.
+  **The fold gets the whole file, not the tier's slice.** `hard_compact_prompt` takes the
+  pad as an argument and `prompts/compact-transcript.md` renders it under
+  `# Notes the agent kept for itself`, because a hard compaction is a note's only route
+  into the durable tier and the tier that survives one carries 250 tokens — a note older
+  than that window would never be offered to the model at all.
+  **Gating was reused, not invented.** `write_note` is `ToolClass::Edit`, so it asks under
+  `Ask`, is refused under `Plan`, and is denied before the approval prompt while the
+  repro gate (`G-2`) locks production edits, exactly like the other file writers.
+  **Done-when, watched failing.** `tests/notes_tier.rs` builds a real `.xencode/notes.md`
+  through the same function the tool calls: a 26-entry transcript soft-compacted at 0.5
+  drops the turn that wrote the note — asserted gone — while the assembled prompt still
+  carries it; `hard_compact_prompt` is asserted to carry it too; and a 40-note pad of
+  wide lines is asserted to put `note 39:` in the prompt, `note 0:` out of the prompt, and
+  `note 0:` inside the fold prompt. Three mutations, each watched breaking what should
+  catch it: muting the tier's emit (all three tests failed), disabling the 40-line
+  eviction (the unit test failed and named the surviving line), disabling the data-banner
+  refusal (the unit test and the TUI executor's own refusal test both failed, the latter
+  answering `noted: 1 line(s)` for text it should have refused).
+  **Counted.** 601 tests in `xencode-context-rs` (593 at `MEM-3`, plus five in `notes.rs`
+  and three in `tests/notes_tier.rs`) and 696 in the TUI. `xencode-providers-rs` gained one
+  schema test. **One number the item broke on purpose:** the built-in tool surface
+  assertion in `app.rs` counted 18 and now counts 19 — a new tool reaching the model is
+  the change, so the assertion moved rather than the feature. One function written and
+  deleted before this commit: `clear_notes` had no caller outside its own test, and a
+  bounded pad that evicts does not need a reset the product never offers.
+  2386 passing across the workspace — 2387 tests, 19 ignored, and none of the failures
+  this item's — counted on 2026-10-05 by `cargo test --workspace --no-fail-fast` with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`
+  both clean. The known load-sensitive `xencode-mcp-rs`
+  `a_server_that_exits_during_handshake_reports_its_own_words` failed under the full run
+  again and passed when that crate was run on its own; it is unchanged by this item.
 
 - [x] `QK-3` — 2026-10-05. One vocabulary for whose bytes these are, in
   `xencode-context-rs/src/source.rs`. `SourceClass` has thirteen variants and
