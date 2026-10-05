@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QM-1`: the task summary a long session writes, and only keeps after you approve it
+
+The prompt has a tier for `state.md` — a few lines about what this project is in
+the middle of, which re-enter the head of every later turn. It was read on every
+turn and written by nothing, so it arrived empty: `/ctx compact` told you "state.md
+only changes when the model flags it", describing a writer that did not exist, and
+`/ctx archive` printed the summary prompt without ever sending it.
+
+Three commands now carry a transcript into that tier:
+
+- `/ctx fold` sends the summary prompt to the model you are talking to and queues
+  the answer in `.xencode/state.candidate.md`. It does not write `state.md`.
+- `/ctx promote` writes the candidate to `state.md`, atomically, and removes it.
+- `/ctx drop` discards a waiting fold and leaves `state.md` alone.
+
+The reason for the extra step is what a summary is made of: the model folds
+together pages it fetched, files it read and commands it ran, and any of those can
+carry instructions that were not meant for it. So the fold refuses a line that
+arrived under a data banner rather than keeping it with a warning, replaces
+credential-shaped text with `[redacted]`, and holds to the two caps that tier is
+already budgeted for — 15 fact lines, 800 tokens of rendered text — trimming across
+the sections in turn so no one section is starved. The report says how many lines
+were kept and names each thing it took out, so a fold that quietly lost your
+decision looks different from one that had none.
+
+Measured on this machine against a local `llama-server` (build 10809) serving a
+Qwen3-0.6B model: after a real fold was promoted, `/ctx kv` reported the
+byte-stable head unchanged — `Stable prefix 813 bytes — sha256 7fd5d5d3…` — with
+`Tier 4 state.md — 77 tokens in the prompt · 3 fact line(s) on disk`, and the same
+command with `state.md` moved away reported the same hash and zero tokens. The
+tier sits below the three cached sections, so carrying the task forward costs a
+longer prompt without invalidating anything the server had already worked out.
+
+`rust/crates/xencode-tui-rs/tests/state_fold.rs` replays a recorded fold answer
+over a loopback socket and checks the whole sequence, including the case the
+design is for: the model quoted a tool failure's `[data]` line verbatim into its
+summary, and that line reached neither the candidate nor `state.md`. A server that
+does not answer leaves both files exactly as they were.
+
 ### Fixed — the interface now says it opened without your settings
 
 A `config.json` a hand edit had broken used to be answered in silence. The

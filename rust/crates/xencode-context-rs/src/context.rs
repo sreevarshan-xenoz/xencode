@@ -944,6 +944,55 @@ mod tests {
     }
 
     #[test]
+    fn a_promoted_fold_fills_tier_4_and_leaves_the_stable_head_byte_identical() {
+        // QM-1's two halves at once. The tier that a `state.md` writer fills must
+        // report non-zero, and it must do it without moving tiers 1–3: state.md
+        // sits below `STABLE_END_MARKER`, so the KV-cache head a running server
+        // already holds stays valid turn after turn.
+        let empty = assemble_prompt(
+            HardwareProfile::Balanced,
+            SYSTEM,
+            Some(AGENTS),
+            Some(ANCHOR),
+            None,
+            "main @ abc1234",
+            "",
+            Vec::new(),
+            "user: how does auth work?",
+        );
+        let folded = "# State\n\n## working-on\nGive state.md a writer\n\n## decisions\n- Rust-first for new code [d]\n";
+        let after = assemble_prompt(
+            HardwareProfile::Balanced,
+            SYSTEM,
+            Some(AGENTS),
+            Some(ANCHOR),
+            Some(folded),
+            "main @ abc1234",
+            "",
+            Vec::new(),
+            "user: why is startup slow?",
+        );
+        assert!(
+            !empty.tiers.iter().any(|t| t.name == "state.md"),
+            "tier 4 was reported before any state existed"
+        );
+        let tier4 = after
+            .tiers
+            .iter()
+            .find(|t| t.name == "state.md")
+            .expect("the fold did not reach tier 4");
+        assert!(tier4.tokens > 0);
+        assert_eq!(tier4.class, SourceClass::ProjectState);
+        assert!(after.text.contains("## Current Task State"));
+        assert_eq!(empty.stable_prefix, after.stable_prefix);
+        assert_eq!(
+            empty.stable_prefix_sha256(),
+            after.stable_prefix_sha256(),
+            "writing state.md moved the KV-cache head"
+        );
+    }
+
+    #[test]
     fn stable_prefix_honors_fixed_order_and_marker() {
         let doc = assemble_prompt(
             HardwareProfile::Balanced,

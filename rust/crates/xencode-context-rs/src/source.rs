@@ -211,25 +211,31 @@ pub fn totals_by_class(tiers: &[crate::TierDoc]) -> Vec<(SourceClass, u64)> {
     totals
 }
 
+/// Every class, in the order the reports list them.
+///
+/// This is public because a consumer that must handle *all* classes — the fold
+/// writer (`QM-1`), which drops any line carrying a data banner — has to derive
+/// its list from the enum. A private list in a test would let a new class slip
+/// past a guard that is supposed to cover every way text can arrive.
+pub const ALL: [SourceClass; 13] = [
+    SourceClass::Instructions,
+    SourceClass::AgentFile { trusted: true },
+    SourceClass::AgentFile { trusted: false },
+    SourceClass::AnchorFile,
+    SourceClass::ProjectState,
+    SourceClass::UserTurn,
+    SourceClass::History,
+    SourceClass::AttachedFile,
+    SourceClass::Repository,
+    SourceClass::Tool,
+    SourceClass::McpServer,
+    SourceClass::Web,
+    SourceClass::Hook,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const ALL: [SourceClass; 13] = [
-        SourceClass::Instructions,
-        SourceClass::AgentFile { trusted: true },
-        SourceClass::AgentFile { trusted: false },
-        SourceClass::AnchorFile,
-        SourceClass::ProjectState,
-        SourceClass::UserTurn,
-        SourceClass::History,
-        SourceClass::AttachedFile,
-        SourceClass::Repository,
-        SourceClass::Tool,
-        SourceClass::McpServer,
-        SourceClass::Web,
-        SourceClass::Hook,
-    ];
 
     #[test]
     fn every_data_class_carries_a_marker() {

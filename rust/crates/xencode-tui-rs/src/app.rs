@@ -2003,6 +2003,38 @@ fn count_report(
     lines
 }
 
+/// What a fold took out of the summary on its way to the durable tier, one chat
+/// line per thing taken out — and only that line. A fold that needed no
+/// correction says nothing: the person asked whether their state is trustworthy,
+/// and a paragraph about zero dropped lines reads like a warning about nothing.
+fn fold_lines(report: &xencode_context_rs::FoldReport) -> Vec<String> {
+    let mut lines = vec![format!(
+        "[CTX]📝 Fold checked — {} fact lines kept",
+        report.kept_facts
+    )];
+    if report.stripped_data_lines > 0 {
+        lines.push(format!(
+            "[CTX]   {} line(s) carried a data banner — quoted from a page, a file or a tool result — and were not written.",
+            report.stripped_data_lines
+        ));
+    }
+    if report.secrets_redacted > 0 {
+        lines.push(format!(
+            "[CTX]   {} line(s) had credential-shaped text replaced with [redacted].",
+            report.secrets_redacted
+        ));
+    }
+    if report.over_cap_dropped > 0 {
+        lines.push(format!(
+            "[CTX]   {} line(s) were past what state.md may hold ({} lines, {} tokens) and dropped — the model's own first items were kept.",
+            report.over_cap_dropped,
+            xencode_context_rs::STATE_FOLD_FACT_CAP,
+            xencode_context_rs::context::STATE_CAP_TOKENS
+        ));
+    }
+    lines
+}
+
 impl<'a> App<'a> {
     /// Whether a spinner-showing operation is running. The renderer draws
     /// spinner frames from `spinner_tick` in several panels, so while any of
@@ -4827,7 +4859,7 @@ impl<'a> App<'a> {
                 ));
                 let _ = tx.send(format!("[CTX]💾 Pre-rewrite snapshot → {}", snap.display()));
                 let _ = tx.send(
-                    "[CTX]✅ Deterministic, no LLM call — state.md only changes when the model flags it. Chat now shows the working projection."
+                    "[CTX]✅ Deterministic, no LLM call — chat now shows the working projection. state.md is not touched here: /ctx fold writes it a candidate, /ctx promote makes it durable."
                         .to_string(),
                 );
             }
@@ -5138,6 +5170,34 @@ impl<'a> App<'a> {
                         "❌ NO — KV reuse is broken"
                     }
                 ));
+                // QM-1: tier 4 reported on its own. The budget and the text were
+                // computed for state.md on every turn while nothing in the
+                // product could write the file, so an empty tier was
+                // indistinguishable from a broken reader — and after `/ctx fold`
+                // it matters what the assembler actually admitted: a state too
+                // big for the remaining margin is left out whole.
+                let promoted = state
+                    .as_deref()
+                    .map(xencode_context_rs::ContextState::from_markdown)
+                    .unwrap_or_default();
+                let tier4 = doc_a.tiers.iter().find(|tier| tier.name == "state.md");
+                let _ = tx.send(format!(
+                    "[CTX]🧾 Tier 4 state.md — {} tokens in the prompt · {} fact line(s) on disk{}{}",
+                    tier4.map(|tier| tier.tokens).unwrap_or(0),
+                    promoted.completed.len() + promoted.decisions.len() + promoted.unresolved.len(),
+                    if tier4.is_none() && promoted.present() {
+                        " · left out: no margin for it in this budget"
+                    } else if tier4.is_none() {
+                        " · nothing promoted yet"
+                    } else {
+                        ""
+                    },
+                    if xencode_context_rs::read_state_candidate(&xencode).is_some() {
+                        " · a fold is waiting (see /ctx promote)"
+                    } else {
+                        ""
+                    }
+                ));
 
                 // The newest record per profile, from the rollup rather than by
                 // re-reading every record ever written.
@@ -5215,6 +5275,123 @@ impl<'a> App<'a> {
                 ));
                 for line in prompt.lines() {
                     let _ = tx.send(format!("[CTX]    {line}"));
+                }
+            }
+            Some("fold") => {
+                // QM-1: `/ctx archive` shows the fold prompt; this sends it, and
+                // turns the answer into the durable tier — through a candidate
+                // file, because a summary the model folded is not durable until
+                // a person says so (QK-3 shuts `state.md` to everything the
+                // human did not say, and a compaction can quote a fetched body).
+                let (t, appended) = self.canonical_transcript();
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let state =
+                    xencode_context_rs::ContextState::from_disk(&xencode).unwrap_or_default();
+                let prompt = xencode_context_rs::hard_compact_prompt(&state, &t);
+                let messages = one_shot_messages(&root, prompt);
+                let call = self.single_shot();
+                let entries = t.entries.len();
+                tokio::spawn(async move {
+                    let _ = tx.send("[CTX_START]".to_string());
+                    let _ = tx.send(format!(
+                        "[CTX]📚 Canonical transcript synced (+{appended} new) → {entries} entries"
+                    ));
+                    let _ = tx.send(format!(
+                        "[CTX]🧠 Folding {entries} entries into state.md's shape — asking {}.",
+                        call.model
+                    ));
+                    let reply = match call.ask(&messages).await {
+                        Err(problem) => {
+                            let _ = tx.send(format!("[CTX]❌ The fold call failed: {problem}"));
+                            return;
+                        }
+                        Ok(reply) => reply,
+                    };
+                    let (proposed, report) = match xencode_context_rs::fold_state_from_reply(&reply)
+                    {
+                        Err(refused) => {
+                            let _ = tx.send(format!(
+                                    "[CTX]🚫 Nothing was queued — {refused}. The transcript is untouched."
+                                ));
+                            for line in reply.lines().take(8) {
+                                let _ = tx.send(format!("[CTX]    {line}"));
+                            }
+                            return;
+                        }
+                        Ok(folded) => folded,
+                    };
+                    let path = match xencode_context_rs::write_state_candidate(&proposed, &xencode)
+                    {
+                        Ok(path) => path,
+                        Err(problem) => {
+                            let _ =
+                                tx.send(format!("[CTX]❌ The fold could not be queued: {problem}"));
+                            return;
+                        }
+                    };
+                    for line in fold_lines(&report) {
+                        let _ = tx.send(line);
+                    }
+                    let _ = tx.send(format!("[CTX]💾 Queued → {}", path.display()));
+                    for line in proposed.to_markdown().lines() {
+                        let _ = tx.send(format!("[CTX]    {line}"));
+                    }
+                    let _ = tx.send(
+                        "[CTX]ℹ️ Nothing is durable yet: /ctx promote writes state.md, /ctx drop discards this."
+                            .to_string(),
+                    );
+                });
+            }
+            Some("promote") => {
+                let xencode =
+                    xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
+                let _ = tx.send("[CTX_START]".to_string());
+                match xencode_context_rs::promote_state_candidate(&xencode) {
+                    Ok((state, report)) => {
+                        for line in fold_lines(&report) {
+                            let _ = tx.send(line);
+                        }
+                        let text = state.to_markdown();
+                        let _ = tx.send(format!(
+                            "[CTX]🧱 state.md written — {} fact lines, ≈{} tokens in tier 4. The next turn reads it from disk.",
+                            report.kept_facts,
+                            xencode_context_rs::est_tokens(text.len(), false)
+                        ));
+                        let _ = tx.send(
+                            "[CTX]   Tiers 1–3 are above this file, so the byte-stable head a running server already holds is untouched."
+                                .to_string(),
+                        );
+                    }
+                    Err(problem) => {
+                        let _ = tx.send(format!("[CTX]🚫 Nothing was written — {problem}."));
+                    }
+                }
+            }
+            Some("drop") => {
+                let xencode =
+                    xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
+                let path = xencode_context_rs::state_candidate_path(&xencode);
+                let _ = tx.send("[CTX_START]".to_string());
+                if !path.exists() {
+                    let _ = tx.send(
+                        "[CTX]ℹ️ No fold is waiting — /ctx fold makes one, and state.md was not touched."
+                            .to_string(),
+                    );
+                    return;
+                }
+                match std::fs::remove_file(&path) {
+                    Ok(()) => {
+                        let _ = tx.send(format!(
+                            "[CTX]🗑️ Discarded the waiting fold at {} — state.md is unchanged.",
+                            path.display()
+                        ));
+                    }
+                    Err(problem) => {
+                        let _ = tx.send(format!(
+                            "[CTX]❌ The waiting fold could not be removed: {problem}"
+                        ));
+                    }
                 }
             }
             Some("prompts") => {
