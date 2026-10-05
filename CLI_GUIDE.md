@@ -111,11 +111,14 @@ while the subagent works. Four more reach the same engines the CLI runs:
 facts, `/verify [skip...]` runs the machine-checkable checklist (fmt, lint,
 test), `/hotspots [limit]` ranks files by churn, size and bus factor, and
 `/agents` inventories the coding-agent CLIs installed on `PATH`, and
-`/trust` decides whether this workspace's `AGENTS.md` enters the model's
+`/trust` decides whether an `AGENTS.md` enters the model's
 context as instructions or stays marked `[data]` — by content hash, persisted
-in `.xencode/cache/agents_trust.json`, so an edit to the file asks again.
-`/trust status` reports which one it is right now; `/trust forget` withdraws
-trust for the current bytes. `/egress [text]` shows, without sending anything,
+in `.xencode/cache/agents_trust.json`, so an edit to the file asks again. With
+no argument it means this workspace's own file; `/trust src/auth/AGENTS.md`
+names a directory's. `/trust status` reports which one it is right now;
+`/trust forget` withdraws trust for the current bytes — both take the same
+path, and a grant covers only the file it names.
+`/egress [text]` shows, without sending anything,
 where the next turn would actually go: the provider a model id resolves to,
 whether that route stays on this machine or leaves it, whether the egress policy
 allows it (or would refuse the turn before sending), how many messages and bytes
@@ -1180,17 +1183,23 @@ files are read, none larger than 8 KiB, directories under `.git/` or `.xencode/`
 walked into, and a path that resolves outside the workspace — through a symlink or a `..`
 in a target — is refused before it is read.
 
-**What a directory's file is worth today, and what it is not.** A file nobody has trusted
-carries the same `[data]` banner the root `AGENTS.md` uses, so nested bytes cannot slip into
-the instruction position unmarked. `/trust` reads the workspace's own file and nothing else,
-so a *directory's* file has no way to be trusted yet: in a fresh clone — and in any repository
-whose nested files are their authors' bytes — every block arrives marked as data, which the
-model is told to read as information about the project and not to obey. The section header
-says so per block: a block with no data mark is project convention and applies below the root
-file, a marked one is not an instruction. Trusting a named path is the missing half and is
-recorded as `QK-8`; nothing about it is built until that item lands. A clean tree, or a turn
-touching only files at the root, loads nothing at all, and the prompt is exactly what it was
-before.
+**Granting one of them by path.** A file nobody has trusted carries the same
+`[data]` banner the root `AGENTS.md` uses, so nested bytes cannot slip into the
+instruction position unmarked. `/trust src/auth/AGENTS.md` grants a single
+directory's file: its argument is a path, resolved against the workspace root and
+never against whatever directory xencode happens to be sitting in, and it is
+refused unless its last segment is `AGENTS.md` and it resolves inside this
+project — a source file, a name that climbs out through `..`, git's own `.git/`
+store and xencode's state under `.xencode/` are each rejected before the trust
+file is touched. Trust is the exact bytes of the one file named, so a turn can
+carry a trusted rule beside an untrusted neighbour, and `/trust status` and
+`/trust forget` take the same path and answer for that file alone. The section
+header therefore draws the line block by block: a block with no data mark is
+project convention and applies below the root file, a marked one is not an
+instruction. The decision stays a person's — `/trust` is a command typed at the
+prompt, and no tool the model can call reaches it. A clean tree, or a turn
+touching only files at the root, loads nothing at all, and the prompt is exactly
+what it was before.
 
 Two properties are what make this safe to ship on a local model. The section is a *dynamic*
 tier: which directories a turn works in changes turn to turn, and anything that moves
@@ -1209,7 +1218,13 @@ itself. A turn with no room left gets no nested instructions at all rather than 
 repository with `git init`, commits two packages that each have an `AGENTS.md`, edits one of
 them, and reads the assembled prompt — asserting the edited package's rule is in it, the
 other package's is not, an untrusted file arrives behind its banner, and two turns working
-in two different packages produce a byte-identical stable prefix.
+in two different packages produce a byte-identical stable prefix. The path check is proven
+where it lives, in `xencode-context-rs/src/trust.rs`: one turn dirty in two packages, only
+one of them named to `/trust`, and the assertion is per block — the granted package carries
+no data mark while its neighbour still does, and the workspace's own file is untouched by a
+grant that named a directory. Every refusal is a case of its own: `src/main.rs`, a file
+under `.git/` and one under `.xencode/`, a name that climbs out of the workspace, and an
+`AGENTS.md` that does not exist yet.
 
 #### Carrying the task forward: `/ctx fold`, `/ctx promote`, `/ctx drop`
 

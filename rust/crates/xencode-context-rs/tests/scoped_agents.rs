@@ -57,7 +57,7 @@ fn commit(root: &Path, message: &str) {
 /// A committed two-package tree with one instruction file per package.
 ///
 /// Both files are untrusted when the repository is built, which is what a fresh
-/// clone actually is; the test that wants them trusted calls [`trust`] itself.
+/// clone actually is; the test that wants them trusted calls [`trust_file`] itself.
 fn repo(label: &str) -> PathBuf {
     let root = scratch(label);
     for package in ["auth", "api"] {
@@ -75,23 +75,13 @@ fn repo(label: &str) -> PathBuf {
     root
 }
 
-/// Trust one nested file's exact bytes, the way `/trust` does for the file it
-/// reads. The bytes are re-read from disk rather than named here: a rule that
-/// differs from its file by one newline is a rule nobody trusted.
+/// Grant one instruction file the way the `/trust` command does, by naming its
+/// path. Using the real function rather than writing the store by hand is the
+/// point: this file is where the reader and the grant are tested together, and
+/// a rule that differs from its file by one newline is a rule nobody trusted.
 fn trust_file(root: &Path, rel: &str) {
-    let content = std::fs::read_to_string(root.join(rel)).unwrap();
-    let cache = root.join(".xencode").join("cache");
-    std::fs::create_dir_all(&cache).unwrap();
-    let store = cache.join("agents_trust.json");
-    let mut hashes: Vec<String> = std::fs::read_to_string(&store)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
-    let sha = xencode_context_rs::agents_sha256(&content);
-    if !hashes.contains(&sha) {
-        hashes.push(sha);
-    }
-    std::fs::write(&store, serde_json::to_string(&hashes).unwrap()).unwrap();
+    xencode_context_rs::trust_agents_at(root, rel)
+        .unwrap_or_else(|e| panic!("could not trust {rel}: {e}"));
 }
 
 const AUTH_RULE: &str = "every handler here calls check_auth before reading a request body";

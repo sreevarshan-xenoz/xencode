@@ -142,8 +142,9 @@ const COMMANDS: &[Binding] = &[
     ),
     ("/agents", "inventory installed coding-agent CLIs on PATH"),
     (
-        "/trust [status|forget]",
-        "trust this workspace's AGENTS.md bytes as instructions, or report/withdraw",
+        "/trust [status|forget] [path]",
+        "trust an AGENTS.md's exact bytes as instructions — this workspace's, or a \
+         directory's such as src/auth/AGENTS.md — or report/withdraw",
     ),
     (
         "/egress [text]",

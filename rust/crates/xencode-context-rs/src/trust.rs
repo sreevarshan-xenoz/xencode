@@ -13,6 +13,12 @@
 //! configuration and from human answers at prompts, never from this file.
 //! What lives here decides only whether the file's bytes enter the model's
 //! context as instructions or as data.
+//!
+//! The decision is named to a file. `/trust` grants the workspace's own
+//! `AGENTS.md`, and — since EV-5 gave a turn the instruction files of the
+//! directories it works in — a directory's file such as `src/auth/AGENTS.md`.
+//! Both go into the same set of content hashes, so a grant is still about exact
+//! bytes: an edit to either file asks the question again.
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -65,10 +71,75 @@ fn write_trust(xencode_dir: &Path, hashes: &BTreeSet<String>) -> Result<(), Stri
 /// Trust the current bytes of `root/AGENTS.md`. Returns the hash trusted, or a
 /// reason when there is nothing to trust (no file).
 pub fn trust_agents(root: &Path) -> Result<String, String> {
-    let content = std::fs::read_to_string(root.join("AGENTS.md"))
-        .map_err(|_| format!("no AGENTS.md in {} to trust", root.display()))?;
+    trust_agents_at(root, "AGENTS.md")
+}
+
+/// QK-8 — the workspace file `relative` names, checked to be one of *this*
+/// project's own instruction files.
+///
+/// A path is the one part of the trust decision that arrives as text, so it is
+/// resolved against the workspace root and never against whatever directory
+/// xencode happens to be sitting in. Three things follow: it has to end in
+/// `AGENTS.md`, because that is the only name the context reader will ever load
+/// instructions from; it has to resolve, symlinks included, to somewhere inside
+/// the workspace; and it cannot be git's own store or xencode's state, which are
+/// not directories of the project.
+pub fn resolve_agents_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    if relative.trim().is_empty() {
+        return Err("no file was named".to_string());
+    }
+    let candidate = if Path::new(relative).is_absolute() {
+        PathBuf::from(relative)
+    } else {
+        root.join(relative)
+    };
+    let named_agents_md = candidate
+        .file_name()
+        .is_some_and(|name| name == "AGENTS.md");
+    if !named_agents_md {
+        return Err(format!(
+            "{relative} is not an AGENTS.md — and only an AGENTS.md is ever read as \
+             project instructions, so trusting anything else would grant nothing"
+        ));
+    }
+    let real = candidate
+        .canonicalize()
+        .map_err(|_| format!("no {relative} in {} to trust", root.display()))?;
+    let root_real = root
+        .canonicalize()
+        .map_err(|_| format!("{} cannot be resolved", root.display()))?;
+    let Ok(rest) = real.strip_prefix(&root_real) else {
+        return Err(format!(
+            "{} resolves outside this workspace",
+            real.display()
+        ));
+    };
+    let rest = rest.display().to_string().replace('\\', "/");
+    if rest.is_empty() || rest == "AGENTS.md" {
+        return Ok(real);
+    }
+    let internal = rest == ".git"
+        || rest.starts_with(".git/")
+        || rest == ".xencode"
+        || rest.starts_with(".xencode/");
+    if internal {
+        return Err(format!(
+            "{relative} is inside git's own store or xencode's state, not a directory \
+             of this project"
+        ));
+    }
+    Ok(real)
+}
+
+/// Trust the current bytes of one instruction file of this workspace, named by
+/// `relative` — `AGENTS.md` at the root, or a directory's own file such as
+/// `src/auth/AGENTS.md`. Returns the hash trusted.
+pub fn trust_agents_at(root: &Path, relative: &str) -> Result<String, String> {
+    let path = resolve_agents_path(root, relative)?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
     if content.trim().is_empty() {
-        return Err("AGENTS.md is empty, so there is nothing to trust".to_string());
+        return Err(format!("{relative} is empty, so there is nothing to trust"));
     }
     let xencode = root.join(crate::XENCODE_DIR);
     let sha = agents_sha256(&content);
@@ -77,6 +148,22 @@ pub fn trust_agents(root: &Path) -> Result<String, String> {
         write_trust(&xencode, &hashes)?;
     }
     Ok(sha)
+}
+
+/// Withdraw trust for the current bytes of one named instruction file. Answers
+/// with the hash it removed, or `None` when those bytes were not trusted in the
+/// first place. Bytes that no longer exist cannot be hashed, so a file that has
+/// gone is forgotten by hash with [`untrust_agents`].
+pub fn untrust_agents_at(root: &Path, relative: &str) -> Result<Option<String>, String> {
+    let path = resolve_agents_path(root, relative)?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let sha = agents_sha256(&content);
+    if untrust_agents(root, &sha)? {
+        Ok(Some(sha))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Drop trust for one content hash. Returns whether anything was removed.
@@ -436,7 +523,8 @@ mod tests {
     }
 
     /// Trust one set of bytes directly, the way `/trust` does for the file it
-    /// reads — a nested `AGENTS.md` has no `/trust` path of its own.
+    /// reads — usable when a test has the text in hand rather than a path, so
+    /// the bytes it grants are exactly the bytes on disk.
     fn trust_bytes(root: &Path, content: &str) {
         let xencode = root.join(crate::XENCODE_DIR);
         let mut hashes = trusted_agents_hashes(&xencode);
@@ -656,6 +744,154 @@ mod tests {
             !scoped.contains("the package rule"),
             "a file over the read ceiling was sent anyway:\n{scoped}"
         );
+        cleanup(&dir);
+    }
+
+    /// One directory's block out of a section, found by the heading the reader
+    /// gives it. A section carries several files and only one of them may be
+    /// granted, so the question is never "is there a data mark in here" but
+    /// "which block is marked".
+    fn block(section: &str, label: &str) -> String {
+        let head = format!("### {label}/AGENTS.md");
+        let start = section.find(&head).unwrap() + head.len();
+        let rest = &section[start..];
+        match rest.find("\n### ") {
+            Some(next) => rest[..next].to_string(),
+            None => rest.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_directorys_own_file_is_granted_by_path_and_withdrawn_again() {
+        // QK-8: EV-5 made a directory's file worth reading, and `trust_agents`
+        // could only ever name the workspace one — so on a live turn every
+        // nested block arrived as data the model was told not to follow.
+        let dir = workspace("# root rule\n");
+        std::fs::create_dir_all(dir.join("src/auth")).unwrap();
+        std::fs::create_dir_all(dir.join("src/api")).unwrap();
+        let rule = "every handler here calls check_auth first\n";
+        let other = "this package opens sockets; never from a test\n";
+        std::fs::write(dir.join("src/auth/AGENTS.md"), rule).unwrap();
+        std::fs::write(dir.join("src/api/AGENTS.md"), other).unwrap();
+        // One turn working in both packages: the grant has to single one out.
+        let targets = ["src/auth/mod.rs".to_string(), "src/api/mod.rs".to_string()];
+        let section = || read_scoped_agents_md(&dir, &targets, FULL).unwrap();
+        assert!(
+            block(&section(), "src/auth").contains(UNTRUSTED_BANNER)
+                && block(&section(), "src/api").contains(UNTRUSTED_BANNER),
+            "a directory file nobody granted must not read as instructions"
+        );
+
+        let sha = trust_agents_at(&dir, "src/auth/AGENTS.md").unwrap();
+        assert_eq!(sha, agents_sha256(rule));
+        let granted = section();
+        assert!(
+            !block(&granted, "src/auth").contains(UNTRUSTED_BANNER)
+                && block(&granted, "src/auth").contains(rule),
+            "granting the file by path changed nothing about the bytes it carries:\n{granted}"
+        );
+        // The sibling is the whole point of naming a path: one grant, one file.
+        assert!(
+            block(&granted, "src/api").contains(UNTRUSTED_BANNER),
+            "trusting one directory's file trusted its neighbour too:\n{granted}"
+        );
+        // A grant is the exact bytes of one file, so nothing else in the
+        // workspace gained instruction status from it — not even the root file.
+        assert!(
+            !agents_content_is_trusted(&dir, "# root rule\n"),
+            "the workspace's own file was trusted by naming a directory's"
+        );
+
+        // Withdrawal is the same path, and the marker comes back.
+        assert_eq!(
+            untrust_agents_at(&dir, "src/auth/AGENTS.md")
+                .unwrap()
+                .as_deref(),
+            Some(sha.as_str())
+        );
+        assert!(block(&section(), "src/auth").contains(UNTRUSTED_BANNER));
+        // Bytes that were never granted cannot be withdrawn; saying so is an
+        // answer, not an error.
+        assert_eq!(untrust_agents_at(&dir, "src/auth/AGENTS.md").unwrap(), None);
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn a_trust_path_can_only_name_an_agents_md_inside_this_workspace() {
+        // The path is text that grants a durable decision, so the check is the
+        // feature: no other file name, nowhere outside this project's own
+        // directories, and nothing written to the store on the way out.
+        let dir = workspace("# root rule\n");
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let outside = std::env::temp_dir().join(format!(
+            "xencode-trust-outside-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("AGENTS.md"), "# not this project\n").unwrap();
+        // Both are real files with the right name, and neither is a directory of
+        // the project: git's own store, and xencode's state.
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::write(dir.join(".git").join("AGENTS.md"), "# git's own\n").unwrap();
+        let xencode_state = dir.join(crate::XENCODE_DIR).join("cache");
+        std::fs::create_dir_all(&xencode_state).unwrap();
+        std::fs::write(xencode_state.join("AGENTS.md"), "# xencode's own\n").unwrap();
+
+        for refused in [
+            "src/main.rs",
+            "src/auth/mod.rs",
+            "AGENTS.md/readme",
+            ".git/AGENTS.md",
+            ".xencode/cache/AGENTS.md",
+            &format!(
+                "../{}/AGENTS.md",
+                outside.file_name().unwrap().to_str().unwrap()
+            ),
+            outside.join("AGENTS.md").to_str().unwrap(),
+            "",
+        ] {
+            let reason = trust_agents_at(&dir, refused).unwrap_err();
+            assert!(
+                !reason.is_empty(),
+                "{refused:?} was refused with no reason to show the person"
+            );
+        }
+        // The escape is reported as what it is, because that is the answer a
+        // person needs: not "no such file", but "not this project's file".
+        let escaped =
+            trust_agents_at(&dir, outside.join("AGENTS.md").to_str().unwrap()).unwrap_err();
+        assert!(
+            escaped.contains("outside this workspace"),
+            "an outside path was refused for the wrong reason: {escaped}"
+        );
+        let wrong_name = trust_agents_at(&dir, "src/main.rs").unwrap_err();
+        assert!(
+            wrong_name.contains("not an AGENTS.md"),
+            "a file that is not an AGENTS.md was refused for the wrong reason: {wrong_name}"
+        );
+        // These exist on disk and have the right name, so the only thing that
+        // makes them refuse is knowing they are not directories of the project.
+        for internal in [".git/AGENTS.md", ".xencode/cache/AGENTS.md"] {
+            let reason = trust_agents_at(&dir, internal).unwrap_err();
+            assert!(
+                reason.contains("git's own store or xencode's state"),
+                "{internal} was refused for the wrong reason: {reason}"
+            );
+        }
+        // A directory of this project whose file does not exist yet is refused
+        // rather than created by the act of trusting it.
+        std::fs::create_dir_all(dir.join("src/api")).unwrap();
+        assert!(trust_agents_at(&dir, "src/api/AGENTS.md")
+            .unwrap_err()
+            .contains("no src/api/AGENTS.md"));
+        assert!(
+            trusted_agents_hashes(&dir.join(crate::XENCODE_DIR)).is_empty(),
+            "a refusal wrote to the trust store"
+        );
+        let _ = std::fs::remove_dir_all(&outside);
         cleanup(&dir);
     }
 }
