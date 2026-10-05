@@ -10025,7 +10025,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 |
 | **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
 | **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored |
-| **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1 |
+| **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1; done 2026-10-05, see the W10 progress note |
 | **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows |
 | **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
 | **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
@@ -10036,6 +10036,47 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed |
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
+
+#### W10 progress
+
+- [x] `QK-3` — 2026-10-05. One vocabulary for whose bytes these are, in
+  `xencode-context-rs/src/source.rs`. `SourceClass` has thirteen variants and
+  three questions: `is_data()` (may the model obey it), `marker()` (the banner it
+  must carry into the context), and `may_persist_durable()` (may it be written
+  into a store every later conversation reads). The class is decided by *arrival*
+  at the seam — a fetch is `Web` because it came off the network — never by
+  grading text, which is the rule §Q-8 states and AgentPoison's >80%-from-<0.1%
+  result justifies: a classifier asked to spot poisoned memory is the thing being
+  attacked.
+  **Two live consumers, so this is not a decorative enum.** (1) SE-2's
+  `mark_untrusted` now takes its leading `[data] ` token from
+  `SourceClass::of_tool(&call.name)` instead of typing it out; the emitted bytes
+  are unchanged, which is asserted against `trust::UNTRUSTED_BANNER` and by all
+  638 existing TUI tests passing unmodified, so recorded transcripts still replay
+  the way they were written. (2) Every budget tier in `TierDoc` now names its
+  class, so `/egress` (PR-4) reports what a turn is *made of*, not only how big
+  it is. Observed live in a scratch repository against a running
+  `llama-server` build 10809, with `AGENTS.md` left untrusted and one file pinned
+  in the Explorer: `made of: system prompt 195 t · AGENTS.md (untrusted) 102 t
+  (data) · conversation 38 t · repository 19 t (data) · attached file 17 t (data)
+  · your words …` — the obeyable classes carry no `(data)` flag, the fetched and
+  read-from-disk ones do, and the byte count rose from 1327 to 1657 when the
+  attachment was included.
+  **Two real decisions the tests forced.** `anchor.md`, `state.md` and history
+  are *not* data — they are this machine's own records (`.gitignore:77` ignores
+  `.xencode/`, and `xencode anchor` records only commands that actually ran), so
+  they carry no marker, exactly as SE-2 ships them today. But
+  `may_persist_durable()` is drawn tighter than `is_data()`: only the human's own
+  words and a trusted `AGENTS.md` may become durable without promotion, because
+  `QM-1`'s writer fills `state.md` from a compaction summary and a summary can
+  quote a fetched body — so `ProjectState`, `AnchorFile` and `History` are refused
+  at write time while staying obeyable at read time.
+  **What this does not do:** it writes nothing new and enforces no new refusal.
+  The gate has its first customer at `QM-1` (and `MEM-1`, `EV-7`, `OR-8`), and
+  those items must call `may_persist_durable()` rather than reinvent it.
+  555 tests in `xencode-context-rs` (8 in `source.rs`, 3 in the assembler) and 639
+  in the TUI — its 638 pre-existing ones unmodified, the new one covering the
+  attachment intake that `/egress` and the turn now share.
 
 #### W11 — Self-diagnosis, cost and operations — 20 items, 16 done
 

@@ -1027,6 +1027,44 @@ fn encode_attached_image(path: &str) -> Result<(String, Option<String>), String>
     ))
 }
 
+/// The whole attachment intake for one turn, in the sorted order that keeps the
+/// KV prefix stable: text and documents inline as `<file>` blocks, images
+/// encoded for message parts, and a visible note in the block for any file that
+/// will *not* be sent so a skipped attachment is never silent.
+///
+/// The turn and `/egress` both call this, because a preview that left the
+/// pinned files out would understate what the turn sends — and QK-3's ledger
+/// would report a turn as made only of instructions while a file rode in it.
+fn attachment_intake<'a>(paths: impl IntoIterator<Item = &'a String>) -> (String, Vec<String>) {
+    let mut sorted: Vec<&String> = paths.into_iter().collect();
+    sorted.sort();
+    let mut block = String::new();
+    let mut image_urls: Vec<String> = Vec::new();
+    for path in sorted {
+        let path = path.as_str();
+        if xencode_analysis_rs::is_image_path(std::path::Path::new(path)) {
+            match encode_attached_image(path) {
+                Ok((url, note)) => {
+                    image_urls.push(url);
+                    if let Some(note) = note {
+                        block.push_str(&format!(
+                            "<file path=\"{path}\">\n(image changed before sending: {note})\n</file>\n\n"
+                        ));
+                    }
+                }
+                Err(reason) => block.push_str(&format!(
+                    "<file path=\"{path}\">\n(image not sent: {reason})\n</file>\n\n"
+                )),
+            }
+        } else if xencode_context_rs::is_document_path(std::path::Path::new(path)) {
+            block.push_str(&doc_attach_block(path, &parse_attached_document(path)));
+        } else {
+            append_text_attachment(&mut block, path);
+        }
+    }
+    (block, image_urls)
+}
+
 /// Merge image data URLs into the final user turn as content parts,
 /// preserving the assembled text ahead of them. Pure — unit-tested.
 /// Returns false (leaving `messages` untouched) when there is nothing to
@@ -3296,31 +3334,7 @@ impl<'a> App<'a> {
         // Sorted for a deterministic prompt (and KV prefix) across turns.
         // Images ride as message parts, not inlined text: read_to_string
         // would silently drop them, and raw bytes would corrupt the prompt.
-        let mut attached_paths: Vec<&String> = self.attached_files.iter().collect();
-        attached_paths.sort();
-        let mut attached_block = String::new();
-        let mut attached_image_urls: Vec<String> = Vec::new();
-        for path in attached_paths {
-            if xencode_analysis_rs::is_image_path(std::path::Path::new(path)) {
-                match encode_attached_image(path) {
-                    Ok((url, note)) => {
-                        attached_image_urls.push(url);
-                        if let Some(note) = note {
-                            attached_block.push_str(&format!(
-                                "<file path=\"{path}\">\n(image changed before sending: {note})\n</file>\n\n"
-                            ));
-                        }
-                    }
-                    Err(reason) => attached_block.push_str(&format!(
-                        "<file path=\"{path}\">\n(image not sent: {reason})\n</file>\n\n"
-                    )),
-                }
-            } else if xencode_context_rs::is_document_path(std::path::Path::new(path)) {
-                attached_block.push_str(&doc_attach_block(path, &parse_attached_document(path)));
-            } else {
-                append_text_attachment(&mut attached_block, path);
-            }
-        }
+        let (attached_block, attached_image_urls) = attachment_intake(&self.attached_files);
         // Refresh what the server says while this turn is in flight, so a
         // server restarted outside xencode is picked up by the next turn.
         self.probe_context_window(tx.clone());
@@ -6153,6 +6167,11 @@ impl<'a> App<'a> {
         );
         let live = xencode_context_rs::collect_live_context(&root, &preview_prompt, caps);
         let system = self.agent_system_prompt();
+        // The files pinned for this turn are part of what leaves the machine, so
+        // the preview reads them through the same intake the turn uses — a
+        // preview that said "nothing attached" while a file sat in the composer
+        // would be a preview of a turn nobody could send.
+        let (attached_block, _) = attachment_intake(&self.attached_files);
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: self.hardware.profile,
             context_window,
@@ -6163,7 +6182,7 @@ impl<'a> App<'a> {
             git_summary: &live.git_summary,
             repo_map: &live.repo_map,
             retrieved: live.blocks,
-            attached_block: "",
+            attached_block: &attached_block,
             history: &history,
             prompt: &preview_prompt,
         });
@@ -6197,6 +6216,26 @@ impl<'a> App<'a> {
                 assembly.turns.len()
             ),
         ];
+        // QK-3: not only how big the turn is, but whose words it is made of.
+        // Data classes are named as data here so the report cannot read as if
+        // a fetched page and the user's own sentence were the same kind of thing.
+        let totals = assembly.source_totals();
+        if !totals.is_empty() {
+            let parts: Vec<String> = totals
+                .iter()
+                .filter(|(_, tokens)| *tokens > 0)
+                .map(|(class, tokens)| {
+                    format!(
+                        "{} {tokens} t{}",
+                        class.name(),
+                        if class.is_data() { " (data)" } else { "" }
+                    )
+                })
+                .collect();
+            if !parts.is_empty() {
+                lines.push(format!("   made of: {}", parts.join(" · ")));
+            }
+        }
         if held_back == 0 {
             lines.push(
                 "   redaction: nothing credential-shaped in the dynamic tiers to hold back"
@@ -12753,6 +12792,42 @@ mod tests {
         super::append_text_attachment(&mut block2, bin.to_str().unwrap());
         assert!(block2.contains("(attachment not sent:"), "{block2}");
         assert!(block2.contains(&bin.display().to_string()), "{block2}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The one intake both the turn and `/egress` use. Sorted, because the same
+    /// files pinned in a different order must not change the prompt's bytes, and
+    /// never silent, because the preview promises what a turn sends: a file that
+    /// cannot be read shows up as a note rather than as nothing.
+    #[test]
+    fn the_attachment_intake_is_sorted_and_says_what_it_did_not_send() {
+        let dir = image_test_dir("intake");
+        let second = dir.join("b.rs");
+        let first = dir.join("a.rs");
+        std::fs::write(&second, "// second").unwrap();
+        std::fs::write(&first, "// first").unwrap();
+        let gone = dir.join("gone.rs");
+        let paths = vec![
+            second.to_str().unwrap().to_string(),
+            gone.to_str().unwrap().to_string(),
+            first.to_str().unwrap().to_string(),
+        ];
+        let (block, images) = super::attachment_intake(&paths);
+        assert!(images.is_empty(), "no image was pinned: {block}");
+        let a_at = block
+            .find("// first")
+            .expect("the readable file is inlined");
+        let b_at = block
+            .find("// second")
+            .expect("the readable file is inlined");
+        assert!(
+            a_at < b_at,
+            "the block must be sorted by path, not by pin order"
+        );
+        assert!(
+            block.contains("(attachment not sent:"),
+            "the unreadable file must be named, not dropped: {block}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

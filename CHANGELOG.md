@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-3`: `/egress` now says whose words the turn is made of
+
+One vocabulary in `xencode-context-rs/src/source.rs` answers, for every piece of
+text that reaches the model, *where did this come from, and may the model obey
+it?* Thirteen source classes — the system prompt, a trusted or untrusted
+`AGENTS.md`, `anchor.md`, `state.md`, your own words, conversation history, a
+pinned file, the repository, a local tool, an MCP server, a fetched page, a hook.
+The class is decided where the bytes arrive, never by inspecting them: nothing
+here tries to guess whether a sentence looks like an instruction, because a
+classifier built to spot poisoned memory is the thing poisoning attacks beat.
+
+- **`/egress` grew a `made of:` line.** It names each source and its tokens and
+  flags the data ones, so a preview of what leaves the machine cannot read as
+  though a fetched page and your own sentence were the same kind of thing.
+  Measured live against a running `llama-server`: `made of: system prompt 195 t ·
+  AGENTS.md (untrusted) 102 t (data) · conversation 38 t · repository 19 t (data)
+  · attached file 17 t (data) · your words …`
+- **Files you pinned in the Explorer are now in that preview.** `/egress` and the
+  turn itself read attachments through the same code, so the byte count no longer
+  understates the turn — it rose from 1327 to 1657 with one file pinned.
+- **Tool results are labelled from the same source.** SE-2's `[data]` line is now
+  derived from the class instead of being typed out at the call site; the bytes
+  the model sees are unchanged, so existing transcripts replay as recorded.
+- **A write gate for the features that need one.** `may_persist_durable()` allows
+  only your own words and a trusted `AGENTS.md` into a store every later
+  conversation reads. `state.md`, `anchor.md` and history stay obeyable at read
+  time but refused at write time, because a summary the model wrote can quote a
+  fetched body inside it.
+
+This commit enforces nothing new and writes nothing new: it is the gate the
+upcoming `state.md` writer, candidate-facts file and lesson promotion have to
+consult. 555 tests in the context crate and 639 in the TUI pass, the TUI's 638
+pre-existing ones unmodified.
+
 ### Added — `RS-1`: the agent can read one web page, and only after you switch it on and say yes to that address
 
 `xencode config set allow_web_fetch true` offers the agent the `web_fetch` tool,
