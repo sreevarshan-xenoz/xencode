@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the interface now says it opened without your settings
+
+A `config.json` a hand edit had broken used to be answered in silence. The
+command line refuses to overwrite such a file, and `xencode doctor` reports it, but
+opening the interface still gave a normal-looking session built on default
+settings: the model you never chose, the approval mode you never picked. The first
+time it said anything was after you had changed a setting, when the save came back
+`config.json unchanged: …`.
+
+Now the first frame says it, in two parts. The overlay — one row tall, so it carries
+only the short half — reads:
+
+```text
+ ⚠ settings not read — this session starts on defaults
+```
+
+and the chat gets the whole refusal, which file, where the JSON broke and how to fix
+it, in the sentence the command line prints. That copy stays on screen after the
+toast has faded, so the explanation is still there when you go looking for it.
+
+It is a notice, not a lock. The session opens, every panel is where it should be,
+and the file is left exactly as it was — defaults are a usable session, and a person
+who wants to open the interface to go and repair the file must be able to.
+
+Checked on the running interface: launched against a config with a trailing comma,
+the toast was on the screen seconds after start with the full refusal below it in
+the chat; eight seconds later the toast had expired and the chat line had not, and
+the file's checksum was what it had been before.
+
 ### Fixed — the interactive screen says it needs a terminal instead of an errno
 
 Run `xencode` from a pipe, a redirect, a cron line or a CI step — anywhere the

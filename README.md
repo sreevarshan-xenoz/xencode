@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2331 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2334 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -693,7 +693,11 @@ flowchart TD
   parse is not saved over at all: the command stops with an error naming it and
   where the JSON broke, rather than loading defaults and writing them back over
   your keys, and `xencode config reset` — which keeps the unreadable bytes in a
-  backup on its way — is the one command allowed to. Keep it out of git
+  backup on its way — is the one command allowed to. The interactive screen says
+  so the moment it opens — a toast reading `settings not read — this session starts
+  on defaults`, and the whole refusal, path and repair included, written into the
+  chat where it stays after the toast has gone. It is a notice, not a block: a
+  session on defaults is still a session. Keep it out of git
   regardless — file permissions are the only layer.
 
 Start from the annotated example (it lists every real key):
