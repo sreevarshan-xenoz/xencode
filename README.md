@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2303 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2324 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -689,7 +689,11 @@ flowchart TD
   readable by others is tightened the next time a setting is saved
   (`xencode config set`). Every save that changes the file keeps the copy it
   replaced as `config.json.bak.<UTC time>` next to it, also owner-only, newest five
-  — a saving gone wrong is recoverable without a backup tool. Keep it out of git
+  — a saving gone wrong is recoverable without a backup tool. A file that does not
+  parse is not saved over at all: the command stops with an error naming it and
+  where the JSON broke, rather than loading defaults and writing them back over
+  your keys, and `xencode config reset` — which keeps the unreadable bytes in a
+  backup on its way — is the one command allowed to. Keep it out of git
   regardless — file permissions are the only layer.
 
 Start from the annotated example (it lists every real key):

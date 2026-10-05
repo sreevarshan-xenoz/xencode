@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a damaged `config.json` is now refused, not quietly replaced
+
+`xencode llamacpp set-path /tmp/some.gguf` used to print
+`llama_cpp_model_path = /tmp/some.gguf` and exit 0 on a config file that could not
+be read. What it had actually written was the default block: the loader had fallen
+back to defaults because the JSON did not parse — a trailing comma was enough — and
+the save then stored those defaults over your settings and every provider key. The
+file's own version guard already stopped this for a config written by a *newer*
+xencode; a corrupt one walked straight past it.
+
+- **A save refuses to write over bytes it cannot read.** The check sits in the
+  writer, not the reader, so it covers every way in: the two `llamacpp` commands
+  that load-then-save, and the Settings panel, whose existing
+  `config.json unchanged:` note now fires for a broken file as well as a newer one.
+  The five `xencode serve` routes only read the config, and a headless session
+  turns persistence off, so neither of them could have destroyed anything.
+- **The error names the file and where it broke**:
+  `/tmp/df1/config.json is not readable JSON: trailing comma at line 1 column 83.
+  Nothing was read from it and nothing was written to it, so whatever the file held
+  is still there.` `xencode doctor` reports the same in its `config` row.
+- **`xencode config reset` still works**, and it is the way out: it is the one save
+  allowed past the refusal, because discarding the file is what the command means,
+  and it copies the unreadable bytes to a `config.json.bak.<time>` first.
+- **An empty `config.json` is no settings, not damage.** `touch` leaves one, and
+  there is nothing in it to protect, so it loads as defaults and saves normally.
+
+Nothing here repairs a broken file — that would be a second feature. It stops the
+damage, says which file to go and edit, and keeps the bytes that were there.
+
 ### Added — `QK-3`: `/egress` now says whose words the turn is made of
 
 One vocabulary in `xencode-context-rs/src/source.rs` answers, for every piece of

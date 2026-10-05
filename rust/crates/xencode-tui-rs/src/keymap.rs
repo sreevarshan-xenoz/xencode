@@ -2767,6 +2767,47 @@ mod tests {
         std::env::set_var("XCODE_CONFIG_DIR", "");
     }
 
+    /// The same refusal for the damage a hand edit makes — the case that used to
+    /// end in a silent reset. The settings panel loads with defaults when the
+    /// file cannot be read, and the next change it saves would have written that
+    /// default block over the person's own file.
+    #[test]
+    fn a_settings_save_stops_at_a_config_that_is_not_readable_json() {
+        let _guard = CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("xencode-broken-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, b"{\"default_model\": \"ollama:mine\",}").unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+
+        let mut app = App::for_tests();
+        app.persist_config = true;
+        app.save_config();
+
+        let line = app
+            .messages
+            .iter()
+            .find(|m| m.content.contains("config.json unchanged"))
+            .expect("the refusal reaches the transcript");
+        assert!(
+            line.content.contains("not readable JSON"),
+            "{}",
+            line.content
+        );
+        // Named by path and by what broke, because the person has to go edit it.
+        assert!(line.content.contains("config.json"), "{}", line.content);
+        assert!(line.content.contains("trailing comma"), "{}", line.content);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "the unreadable file is untouched"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", "");
+    }
+
     #[test]
     fn commit_message_is_fully_typable_including_j_k_and_globals() {
         let mut app = app_with(FocusArea::GitCommit);
