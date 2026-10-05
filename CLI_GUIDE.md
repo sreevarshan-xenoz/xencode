@@ -1150,6 +1150,67 @@ A wider budget leaves the tier out, because there the bodies themselves are the
 orientation — which is why the line above does not appear in a `/ctx` preview on
 this machine: it has enough memory to be a `Balanced` one.
 
+#### Instructions for the directories a turn is working in
+
+`AGENTS.md` at the workspace root is the whole of what a project tells the model, and it is
+sent on every turn whether the turn is about that corner of the tree or not. A repository
+can now say more locally: an `AGENTS.md` inside `src/auth/` is read on a turn that changes
+a file under `src/auth/`.
+
+The walk starts at the directory of every file `git status` reports as changed and goes up
+to, but not including, the workspace root — the root file is already the stable tier and is
+not paid for twice. What comes back is one section below the marker that closes the stable
+head:
+
+```text
+## Instructions For These Directories
+
+### src/AGENTS.md
+
+…
+
+### src/auth/AGENTS.md
+
+…
+```
+
+Least specific first, nearest last, so the rule that applies most narrowly is the one read
+closest to the question. Four bounds keep it a feature rather than a leak: at most four
+files are read, none larger than 8 KiB, directories under `.git/` or `.xencode/` are never
+walked into, and a path that resolves outside the workspace — through a symlink or a `..`
+in a target — is refused before it is read.
+
+**What a directory's file is worth today, and what it is not.** A file nobody has trusted
+carries the same `[data]` banner the root `AGENTS.md` uses, so nested bytes cannot slip into
+the instruction position unmarked. `/trust` reads the workspace's own file and nothing else,
+so a *directory's* file has no way to be trusted yet: in a fresh clone — and in any repository
+whose nested files are their authors' bytes — every block arrives marked as data, which the
+model is told to read as information about the project and not to obey. The section header
+says so per block: a block with no data mark is project convention and applies below the root
+file, a marked one is not an instruction. Trusting a named path is the missing half and is
+recorded as `QK-8`; nothing about it is built until that item lands. A clean tree, or a turn
+touching only files at the root, loads nothing at all, and the prompt is exactly what it was
+before.
+
+Two properties are what make this safe to ship on a local model. The section is a *dynamic*
+tier: which directories a turn works in changes turn to turn, and anything that moves
+inside the cached head costs a full re-prefill, so `xencode` puts it below the marker and
+`/ctx kv` proves the head hash still matches. And it is bounded by a cap of its own — 500
+tokens for the whole section (`SCOPED_AGENTS_CAP_TOKENS`), the same kind of ceiling
+`state.md` and `notes.md` are given — rather than by whatever the root file left of its 1200.
+The shared ceiling was the first design and it broke in practice: the root `AGENTS.md` is the
+file a real project writes first and fills up, and a project at its cap would have loaded no
+directory rules at all. Files are taken nearest-first, so when 500 tokens do not reach all of
+them the budget runs out on the directory *furthest* from the work: the rules next to the
+edited file stay whole, and `truncated` is reported the way an over-long root file reports
+itself. A turn with no room left gets no nested instructions at all rather than a fragment.
+
+`rust/crates/xencode-context-rs/tests/scoped_agents.rs` is the live proof: it builds a
+repository with `git init`, commits two packages that each have an `AGENTS.md`, edits one of
+them, and reads the assembled prompt — asserting the edited package's rule is in it, the
+other package's is not, an untrusted file arrives behind its banner, and two turns working
+in two different packages produce a byte-identical stable prefix.
+
 #### Carrying the task forward: `/ctx fold`, `/ctx promote`, `/ctx drop`
 
 Tier 4 of the prompt is `state.md` — a few lines about the current task that

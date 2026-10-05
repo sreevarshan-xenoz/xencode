@@ -195,9 +195,13 @@ impl SourceClass {
 
     /// `AGENTS.md` is one file in two classes, told apart by the banner `SE-3`
     /// adds when the bytes have not been trusted.
+    ///
+    /// Presence, not position: the root file's banner leads it, but the EV-5 set
+    /// of nested files opens with a line explaining whose files these are, and a
+    /// section holding even one untrusted file is a section of data.
     pub fn of_agents_md(text: &str) -> SourceClass {
         SourceClass::AgentFile {
-            trusted: !text.starts_with(
+            trusted: !text.contains(
                 SourceClass::AgentFile { trusted: false }
                     .marker()
                     .unwrap_or_default(),
@@ -356,6 +360,17 @@ mod tests {
             SourceClass::AgentFile { trusted: false }
         );
         assert!(!SourceClass::of_agents_md(&untrusted).may_persist_durable());
+        // EV-5: a section of nested files explains itself before the first
+        // banner, so keying on position would call untrusted bytes trusted.
+        let section = format!(
+            "Project instructions from the directories this turn is working in.\n\n\
+             ### src/auth/AGENTS.md\n\n{untrusted}"
+        );
+        assert_eq!(
+            SourceClass::of_agents_md(&section),
+            SourceClass::AgentFile { trusted: false },
+            "a banner that is not the first thing in the section was ignored"
+        );
     }
 
     #[test]

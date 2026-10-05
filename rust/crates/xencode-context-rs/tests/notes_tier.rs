@@ -40,6 +40,7 @@ fn turn(root: &Path, recent: &str) -> String {
         "You are a coding agent.",
         live.agents_md.as_deref(),
         live.anchor_md.as_deref(),
+        None,
         live.state_md.as_deref(),
         live.notes_md.as_deref(),
         &live.git_summary,
@@ -90,6 +91,7 @@ fn a_note_the_agent_wrote_reaches_the_next_turns_prompt() {
             "You are a coding agent.",
             live.agents_md.as_deref(),
             live.anchor_md.as_deref(),
+            None,
             live.state_md.as_deref(),
             live.notes_md.as_deref(),
             &live.git_summary,
@@ -196,6 +198,7 @@ fn the_tier_carries_the_newest_notes_and_the_fold_still_gets_the_whole_pad() {
     let doc = xencode_context_rs::assemble_prompt(
         xencode_context_rs::HardwareProfile::Balanced,
         "You are a coding agent.",
+        None,
         None,
         None,
         None,
