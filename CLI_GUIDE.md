@@ -1150,6 +1150,59 @@ A wider budget leaves the tier out, because there the bodies themselves are the
 orientation — which is why the line above does not appear in a `/ctx` preview on
 this machine: it has enough memory to be a `Balanced` one.
 
+#### Carrying the task forward: `/ctx fold`, `/ctx promote`, `/ctx drop`
+
+Tier 4 of the prompt is `state.md` — a few lines about the current task that
+re-enter the head of every later turn. Nothing wrote it. `/ctx compact` folded a
+transcript into a summary for the chat window and left the file alone (the line it
+used to print, "state.md only changes when the model flags it", described a writer
+that did not exist), and `/ctx archive` only printed the fold prompt it would have
+sent.
+
+`/ctx fold` sends it. What comes back is a summary the model wrote out of whatever
+the transcript held — including pages it fetched and files it read — so the fold
+does not write `state.md`. It writes `.xencode/state.candidate.md` and says what it
+took out of the reply on the way:
+
+```console
+[CTX]📚 Canonical transcript synced (+3 new) → 3 entries
+[CTX]🧠 Folding 3 entries into state.md's shape — asking llamacpp:/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf.
+[CTX]📝 Fold checked — 2 fact lines kept
+[CTX]   1 line(s) carried a data banner — quoted from a page, a file or a tool result — and were not written.
+[CTX]ℹ️ Nothing is durable yet: /ctx promote writes state.md, /ctx drop discards this.
+```
+
+That block is the replay in `rust/crates/xencode-tui-rs/tests/state_fold.rs`, whose
+recorded answer is a real Qwen3-0.6B fold: the transcript it was given held a tool
+failure under a `[data]` source line, and the model carried that line verbatim into
+`## unresolved`. A line that arrived under such a banner is somebody else's bytes,
+so it is dropped rather than kept-and-labelled; a line with credential-shaped text in
+it is written with that text replaced by `[redacted]`. The two caps are the ones tier
+4 is already budgeted for — 15 fact lines and 800 tokens of rendered text — trimmed
+across completed, decisions and unresolved in turn so no one section is starved,
+keeping the model's own first items.
+
+`/ctx promote` is the act that makes a fold durable. It checks the candidate again,
+because an edit made in between can break the shape or paste a fetched block back in,
+writes `state.md` atomically and removes the candidate. `/ctx drop` discards a waiting
+fold and leaves `state.md` as it was. A fold whose every line was quoted data is
+refused outright, and a server that does not answer writes nothing at all.
+
+Writing the file cannot disturb what a running server caches, because `state.md` sits
+below the system prompt, `AGENTS.md` and `anchor.md`. `/ctx kv` prints both halves of
+that claim:
+
+```console
+[CTX]🧱 Stable prefix 813 bytes — sha256 7fd5d5d33424fdbca8d6e63dd9f3285fcfb0f8bd49a99b813c2121fe72f147b1 · cross-request identical: ✅ yes
+[CTX]🧾 Tier 4 state.md — 77 tokens in the prompt · 3 fact line(s) on disk
+```
+
+Those two lines came from this repository against a `llama-server` on that same model,
+after a real fold was promoted. With `state.md` moved out of the way the command
+reported the identical sha256 and `0 tokens in the prompt · 0 fact line(s) on disk ·
+nothing promoted yet`, which is the point: the durable tier is the only thing that
+moved.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without

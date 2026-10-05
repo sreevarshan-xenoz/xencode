@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2334 tests passing, zero warnings (re-verified 2026-10-05, after `DF-6`; 19 ignored)
+- [x] Workspace gates green — 16 crates, 2349 tests passing, zero warnings (re-verified 2026-10-05, after `QM-1`; 19 ignored)
 
 ## Model Catalog Honesty
 
@@ -4372,7 +4372,10 @@ All verified by reading the file at the line given, on 2026-09-23.
    repository-memory proposal wants to invent is already provisioned, already
    below the KV marker, already empty, and already has a UI message describing a
    mechanism that does not exist. **Defect-shaped finding, and it is the second
-   such UI fiction after `README.md:108`.**
+   such UI fiction after `README.md:108`.** *(Fixed by QM-1 on 2026-10-05:
+   `/ctx fold` queues the summary as a candidate and `/ctx promote` writes
+   `state.md` behind it, so the tier has a writer and the `/ctx compact` line
+   names those two commands instead of a mechanism that never existed.)*
 7. **There is no failure classifier and no verdict vocabulary.** Plan status is
    exactly `Pending | InProgress | Done` (`agent_tools.rs:1485-1489`), with
    `parse_status` (`:1522-1531`) folding every other spelling into `Pending` —
@@ -10011,7 +10014,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 21 items
+#### W10 — Durable project knowledge — 21 items, 2 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10032,7 +10035,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
 | **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
 | **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
-| **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction |
+| **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker |
 | **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
 | **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed |
@@ -10079,6 +10082,49 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   555 tests in `xencode-context-rs` (8 in `source.rs`, 3 in the assembler) and 639
   in the TUI — its 638 pre-existing ones unmodified, the new one covering the
   attachment intake that `/egress` and the turn now share.
+
+#### W10 progress
+
+- [x] `QM-1` — 2026-10-05. `state.md` has a writer, and the writer is a person.
+  `/ctx fold` sends the transcript-folding prompt to the model this session is
+  talking to and queues the answer in `.xencode/state.candidate.md`; `/ctx promote`
+  writes `state.md` from it atomically and removes the candidate; `/ctx drop`
+  discards it. The indirection is `QK-3`'s rule applied rather than argued about:
+  `SourceClass::ProjectState.may_persist_durable()` is false, because a summary is
+  folded out of pages the model fetched and files it read, so nothing this program
+  folds becomes durable until a human moves it. The fold therefore *drops* a line
+  carrying any data banner — the set is derived from `SourceClass::ALL`, so a
+  fourteenth class cannot slip past the guard — replaces credential-shaped text with
+  `[redacted]` through `trace::redact_secrets`, and holds to the two caps tier 4 is
+  already budgeted for: `STATE_FOLD_FACT_CAP` 15 lines, trimmed across completed /
+  decisions / unresolved in turn so no section is starved, and
+  `context::STATE_CAP_TOKENS` 800 of rendered text. `/ctx promote` re-runs the same
+  validation, because a hand edit made in between can break the shape or paste a
+  fetched block back in; a fold whose every line was quoted data is refused outright.
+  **Done-when, measured on this machine** against the running `llama-server` build
+  10809 with `Qwen3-0.6B-Q4_K_M.gguf`: `/ctx kv` reports `Stable prefix 813 bytes —
+  sha256 7fd5d5d3… · cross-request identical: ✅ yes` next to `Tier 4 state.md — 77
+  tokens in the prompt · 3 fact line(s) on disk`, and with `state.md` moved out of the
+  way the *same* hash appears beside `0 tokens in the prompt · 0 fact line(s) on disk
+  · nothing promoted yet` — the durable tier moved, the cached head did not. The
+  assembler asserts the same thing as bytes (`a_promoted_fold_fills_tier_4_and_leaves_
+  the_stable_head_byte_identical`).
+  **The fixture is a recording, not an expectation.**
+  `rust/crates/xencode-tui-rs/tests/fixtures/cassettes/state-fold-reply.json` holds
+  real traffic from that server, requested the way this program's one-shot asks
+  (`stream: false`, temperature 0), and it shows the exact case the design is for: the
+  model carried a tool failure's `[data]` line verbatim into `## unresolved`.
+  `tests/state_fold.rs` replays it over a loopback socket through `/ctx fold`, and
+  checks that the candidate exists and `state.md` does not, that the quoted line
+  reached neither, that promotion is what changes that, and that a server which is not
+  there leaves both files alone.
+  **What this does not do:** nothing folds on a threshold by itself — `/ctx compact`
+  still only reports, though its closing line no longer promises a mechanism that does
+  not exist (it named "when the model flags it", and no tool flags anything, the second
+  UI fiction in finding Q-1.6); facts carry no `[src:<path>@<commit>]` provenance
+  (`QM-2`), and no memory crosses sessions yet (`MEM-1`, `MEM-2`).
+  568 tests in `xencode-context-rs` (up from 555: 12 in `compact.rs`, one in the
+  assembler) and 692 in the TUI, of which the two new ones are `tests/state_fold.rs`.
 
 #### W11 — Self-diagnosis, cost and operations — 20 items, 16 done
 

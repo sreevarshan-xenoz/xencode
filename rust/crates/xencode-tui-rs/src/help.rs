@@ -87,7 +87,7 @@ const COMMANDS: &[Binding] = &[
     ("/init [abort|status]", "generate & control project docs"),
     (
         "/ctx …",
-        "context engine: status/track/compact/eval/kv/archive",
+        "context engine: track/eval/kv/archive · fold→promote",
     ),
     ("/advise [filter]", "repository insights"),
     (

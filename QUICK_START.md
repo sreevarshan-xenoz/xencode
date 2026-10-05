@@ -240,7 +240,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 ### In the TUI
 ```
 /init [abort|status]  - Generate & control project docs
-/ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/prompts)
+/ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/fold/promote/drop/prompts)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
 /impact <file>        - Blast radius of one file (crates · files · churn, in a fan-out panel)
 /bytebot <task>       - Delegate a task to the autonomous agent

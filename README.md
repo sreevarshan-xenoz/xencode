@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2334 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2349 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -268,9 +268,9 @@ These seventeen are the only strings the chat input intercepts (`SLASH_COMMANDS`
 
 ```
 /init [abort|status]        Index the repo / stop / inspect an index run
-/ctx [status|track|compact|eval|kv|archive|prompts]
+/ctx [status|track|compact|eval|kv|archive|fold|promote|drop|prompts]
                             Context bundle: state, tracking, compaction, retrieval eval,
-                            and the prompt files this build sends
+                            the durable task summary and the prompt files this build sends
 /advise [filter]            Live refactor insights (same report as Ctrl+L)
 /impact <file>              Blast radius of one file — crates, files, churn (fan-out panel)
 /bytebot <task>             Delegate the task to the agent loop and watch its real calls

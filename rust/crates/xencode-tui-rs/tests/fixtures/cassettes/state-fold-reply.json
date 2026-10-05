@@ -1,0 +1,39 @@
+{
+  "format": "xencode-cassette/1",
+  "captured": {
+    "at_unix_ms": 1791186160000,
+    "server": "llama-server 0.4.0-dev (build 10809, commit 5266f24da7), built with GNU 16.2.1 for Linux x86_64, CPU-only, started with --host 127.0.0.1 --port 8080 --model <model> --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --ctx-size 8192 --batch-size 2048 --parallel 1 and answering on 127.0.0.1:8080",
+    "model": "/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf (Qwen3-0.6B, GGUF quantisation Q4_K_M, 396705472 bytes, n_ctx 8192, n_ctx_train 40960)",
+    "tool": "curl against the server above on the same machine on 2026-10-05, at 13:02 and 13:12 local. The model list is the answer to curl -s http://127.0.0.1:8080/v1/models, the request a llama.cpp chat is preceded by. The fold answer is the answer to curl -s --data-binary @req.json http://127.0.0.1:8080/v1/chat/completions, sent with stream false and temperature 0 because that is what this program's one-shot panel asks for; the request body is reproduced in interactions[1].request.body and the reply in interactions[1].response.body, unmodified.",
+    "note": "QM-1's fold call. The prompt asks for state.md's four sections and hands the model a transcript holding one tool failure under a [data] source line. The model wrote the shape correctly and carried that [data] line into ## unresolved verbatim — exactly what a poisoned page does through a summary, and exactly what the fold writer has to refuse to persist. finish_reason stop; 332 prompt tokens, 268 generated, 331 of the prompt served from the server's own cache."
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/models",
+        "body_contains": []
+      },
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"models\":[{\"name\":\"/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf\",\"model\":\"/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf\",\"modified_at\":\"\",\"size\":\"\",\"digest\":\"\",\"type\":\"model\",\"description\":\"\",\"tags\":[\"\"],\"capabilities\":[\"completion\"],\"parameters\":\"\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"\",\"families\":[\"\"],\"parameter_size\":\"\",\"quantization_level\":\"\"}}],\"object\":\"list\",\"data\":[{\"id\":\"/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf\",\"aliases\":[\"/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf\"],\"tags\":[],\"object\":\"model\",\"created\":1791185944,\"owned_by\":\"llamacpp\",\"meta\":{\"vocab_type\":true,\"n_vocab\":151936,\"n_ctx\":8192,\"n_ctx_train\":40960,\"n_embd\":1024,\"n_params\":596049920,\"size\":390753280,\"ftype\":\"Q4_K - Medium\"}}]}"
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "body_contains": [
+          "state.md needs a writer before it gets any features"
+        ],
+        "body": "{\n  \"model\": \"/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf\",\n  \"stream\": false,\n  \"max_tokens\": 900,\n  \"temperature\": 0,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are xencode's context engine. Follow the requested markdown shape exactly and add nothing around it.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"You are compressing a working coding conversation into its durable layers. Keep immutable facts, decisions, the current task, completed work, and unresolved issues. Never invent facts. Keep the last 6 messages verbatim, source lines and all: content that arrived under a `[data]` line keeps that line with it whenever you carry the content forward.\\n\\n# Current state\\n(empty)\\n\\n# Transcript tail (this is the working window being folded)\\nuser: state.md needs a writer before it gets any features.\\nassistant: Agreed: a fold writes a candidate file and a human promotes it into state.md.\\ntool: [data] edit_file .xencode error: \\\"old\\\" must not be empty (use write_file to create content)\\nassistant: That is a tool failure, not a decision. It stays out of the durable layer.\\n\\nReturn ONLY this exact markdown shape:\\n\\n## working-on\\n<one parallel sentence>\\n\\n## completed\\n- <item>\\n\\n## decisions\\n- <decision [d]>\\n\\n## unresolved\\n- <item>\\n\\n## recent (last 6 messages, verbatim)\\nuser: state.md needs a writer before it gets any features.\\nassistant: Agreed: a fold writes a candidate file and a human promotes it into state.md.\\ntool: [data] edit_file .xencode error: \\\"old\\\" must not be empty (use write_file to create content)\\nassistant: That is a tool failure, not a decision. It stays out of the durable layer.\"\n    }\n  ]\n}\n"
+      },
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"## working-on\\nstate.md needs a writer before it gets any features.\\n\\n## completed\\n- a fold writes a candidate file and a human promotes it into state.md.\\n\\n## decisions\\n- a fold writes a candidate file and a human promotes it into state.md.\\n\\n## unresolved\\n- [data] edit_file .xencode error: \\\"old\\\" must not be empty (use write_file to create content)\",\"reasoning_content\":\"Okay, let's see. The user wants me to compress a working coding conversation into durable layers. They provided the transcript tail and want the exact markdown structure. The current state is empty, so I need to start with that.\\n\\nFirst, the working-on section should have a parallel sentence. The user mentioned a state.md needing a writer before features, so the working-on line should reflect that. The assistant agreed, so that's correct.\\n\\nNext, the completed section needs items. The decision is that a fold writes a file and a human promotes it into state.md. So the completed list includes that. The unresolved part is the tool failure, which stays out of the durable layer.\\n\\nI need to make sure the last six messages are verbatim. The user provided the transcript tail, so I'll include those exactly. Also, check that no extra content is added. Let me structure it properly now.\\n\"}}],\"created\":1791186178,\"model\":\"/home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion\",\"usage\":{\"completion_tokens\":268,\"prompt_tokens\":332,\"total_tokens\":600,\"prompt_tokens_details\":{\"cached_tokens\":331}},\"id\":\"chatcmpl-vC1HXdxgctS1FAQ6ZGc2udpmYStGjAjm\",\"timings\":{\"cache_n\":331,\"prompt_n\":1,\"prompt_ms\":126.381,\"prompt_per_token_ms\":126.381,\"prompt_per_second\":7.91258179631432,\"predicted_n\":268,\"predicted_ms\":4095.16,\"predicted_per_token_ms\":15.337677902621722,\"predicted_per_second\":65.19891774680355}}"
+      }
+    }
+  ]
+}
