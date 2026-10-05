@@ -14263,3 +14263,231 @@ as if they had been reproduced on this machine since:
   none of these eleven re-sequences W0–W17. `DF-1`–`DF-6` are defects with no dependency
   and may be taken in any order; `LA-2` waits on `LA-1`, and `LA-4` and `LA-5` are
   gated on their own measurements.
+
+## Milestone AA — five ways the command line misreports itself, each reproduced on this machine (research appendix, drafted 2026-10-05)
+
+A research pass handed over six suspected defects in the command-line surface. Each
+was checked before being written down: the code path read at the cited line, and
+where the claim could be seen, `rust/target/debug/xencode` built from this tree was
+run and its output and exit status recorded. **Five are real** and become items.
+**One is false** and is recorded so nobody re-proposes it. One of the six was
+reported as a defect of its own and turns out to be the same defect as another, in a
+different branch.
+
+Everything below was observed against this machine on 2026-10-05: a
+`llama-server` build 10809 answering on `127.0.0.1:8080` with
+`Qwen3-0.6B-Q4_K_M.gguf` loaded, and no Ollama running. Where a claim could not be
+observed because the service it needs is not here, the row says so instead of
+implying a run.
+
+### AA-1 `xencode models health` reports healthy for a model that cannot be used
+
+`xencode models health llamacpp:TOTALLY-FAKE-MODEL-XYZ` printed:
+
+```
+  Provider:      llama.cpp (http://localhost:8080)
+  Status:        healthy
+  Response time: 0.002s
+```
+
+and exited **0**. There is no model by that name. The reason is in the branch: for a
+`llamacpp:` / `llama.cpp:` / `llama:` prefix (`xencode-cli/src/main.rs:2442-2447`) the
+command calls `llama_client.ping()` and prints `Status: healthy` — a TCP-level check
+wearing a model's name. It never asks the server which model it has. The pass that
+reported this claimed the command "always says healthy"; that is wrong and the
+correction matters, because the Ollama branch really does ask: `check_health`
+(`xencode-models-rs/src/ollama.rs:273-284`) posts `/api/generate` with `prompt: "hi"`
+and `num_predict: 1`, and its three statuses are printed verbatim. Reproduced here
+against a stopped Ollama: `xencode models health llama3:latest` answered
+`Status: unavailable` with `Error: error sending request for url
+(http://localhost:11434/api/generate)`. So the defect is exactly one branch, not the
+command.
+
+The server already answers the real question for free. `GET /v1/models` on the same
+port returned `data[0].id = /home/sree/.cache/llama.cpp/Qwen3-0.6B-Q4_K_M.gguf` with
+`meta.n_ctx 8192` and `meta.n_ctx_train 40960` — the loaded model's own name, which is
+what `ensure_llamacpp_model_loaded` compares against before it will send a prompt, and
+what refuses with `HTTP 400 Bad Request` when the name does not match. A health check
+that does the same comparison cannot print `healthy` about a model the very next turn
+would fail on.
+
+- **Item AA-1** — make the llama.cpp branch of `models health` ask the server which
+  models it has and report the requested name against that answer, the way the Ollama
+  branch reports the model it actually reached. *Done-when:* `models health
+  llamacpp:<a-name-not-loaded>` prints a failure naming that model while the server is
+  up, and `models health llamacpp:<the-loaded-model>` still prints healthy. Effort S.
+  Joins W11.
+- **Trap.** The fix must not become a generating probe. The Ollama branch pays for a
+  real one-token completion on every call; on a CPU box with a 4B model that is seconds
+  and a slot. `GET /v1/models` costs nothing and is already the request the router
+  makes before it loads a model, so the honest answer is available without spending a
+  completion. `LA-1` is the same idea one level up and is the better dependency to
+  take first.
+
+### AA-2 `xencode doctor` prints its failures and exits 0
+
+`xencode doctor --selfcheck` on this tree printed, at the end of its list:
+
+```
+  FAIL   provider:ollama        localhost:11434 refused: nothing is listening; …
+  FAIL   model                  Ollama at http://localhost:11434: Ollama not running: …
+  failing: provider:ollama, model
+```
+
+and exited **0**. The exit status is the whole problem: a script, a CI step or a
+pre-flight chain that runs `doctor` sees success on a machine where two checks
+failed. The information exists and is thrown away one function above where it is
+computed — `render_checks` (`xencode-cli/src/main.rs:6088-6093`) collects the failing
+names into `failing`, prints `failing: …` for a human, puts `"ok": false` into the
+`--format json` object, and returns nothing; `run_selfcheck` then returns `Ok(())`
+unconditionally (`:6006-6012`), and only an `Err` reaches `exit(1)` (`:1699-1701`).
+`run_doctor` (`:5425-5440`) delegates to `run_bug_report`, `run_selfcheck` and
+`run_doctor_deps` the same way, so all three surfaces share the defect.
+
+This plan already holds itself to a higher bar elsewhere: `xencode colab preflight`
+(§K-2a) "prints a fix line per failing check and exits non-zero". `doctor` is the more
+used command and does less with its own answer.
+
+- **Item AA-2** — have `doctor`, in whichever of its three surfaces ran, exit non-zero
+  when a check in `failing` is a real failure, keeping `--format json`'s `ok` field as
+  the machine-readable half. *Done-when:* the run above exits non-zero with the same
+  output, a run with everything passing still exits 0, and the manuals state which
+  exit code means what. Effort S. Joins W11.
+- **Traps, both checked rather than assumed.** First, an exit code is an interface:
+  `grep -rn "xencode doctor" .github/workflows/` returns nothing, so no CI step here
+  depends on the current always-zero behaviour — but any user script that treats
+  `doctor` as a no-op probe will start seeing failures, which is why the change wants a
+  changelog line and not only a commit. Second, the three surfaces are not equally
+  strict and the item must not quietly raise one: a `WARN` or `ABSENT` row (no index
+  manifest yet, say) is not a failure and must not change the exit status. Only rows
+  already counted in `failing` may.
+
+### AA-3 `xencode review` compares against a branch this repository may not have
+
+`--base` is declared `#[arg(long, default_value = "main")]`
+(`xencode-cli/src/main.rs:716`) and the value is interpolated straight into
+`git diff {base}...HEAD` (`xencode-context-rs/src/gitinfo.rs:125-133`). Nothing in the
+workspace resolves `origin/HEAD` or reads `init.defaultBranch` — a grep for
+`default_branch`, `symbolic-ref` and `origin/HEAD` across `rust/crates/` returns zero
+hits — and `resolve_review_root` (`main.rs:5282-5295`) only runs
+`git rev-parse --show-toplevel`. This repository happens to be on `main`, so the
+default is right here and the defect is invisible here; it is not invisible on a
+`master` or `trunk` repository, where the command ends with git's own
+`unknown revision` and exit 1.
+
+To be exact about the blast radius: it fails loudly. A person gets an error naming the
+branch, not a confident review of the wrong diff. So this is not a trust defect like
+`AA-1` and `AA-2` — it is a default chosen for one hosting service.
+
+- **Item AA-3** — take the default base from the repository instead of from a
+  constant: `git symbolic-ref refs/remotes/origin/HEAD`, then `init.defaultBranch`,
+  then `main` as the last resort, and say which of the three was used in the review
+  header. *Done-when:* a repository whose only branch is `master` reviews cleanly with
+  no `--base`, and a repository with no remote says it fell back and to what. Effort S.
+  Joins W14.
+- **Trap.** Falling back to `HEAD` or to the single local branch would review an empty
+  or self-referential diff and report "no changes" as a clean review. Every candidate
+  has to be checked to exist as a *different* commit from the head being reviewed; a
+  review that silently compares a branch with itself is worse than the error it
+  replaces.
+
+### AA-4 A failed query leaves an empty session behind, and `memory list` shows it as a conversation
+
+`ConversationMemory::start_session` inserts a `ConversationSession` with
+`messages: Vec::new()` and calls `save_memory()` immediately
+(`xencode-memory-rs/src/lib.rs:135-152`, the write at `:121-131`). `xencode query`
+calls it at `main.rs:4401-4403` — before the cache check, before routing, before any
+generation — and `add_message` runs only on the success arm (`:4739-4741`); a provider
+error returns from `Err(format!("Query failed: {}", e))` at `:4744` with the record
+already on disk. `list_sessions` returns every key it holds (`memory/lib.rs:195-197`)
+and `memory list` prints all of them (`main.rs:4812-4821`) with no emptiness filter.
+
+Observed on this machine after a day of driving the tool: the live
+`~/.local/state/xencode/conversation_memory.json` holds **5 sessions, 5 of them with
+zero messages**, and `xencode memory list` prints all five. Those five were created by
+this session's own single-shot runs, which is the honest provenance and also the point
+— a query that never reached a model still leaves a row that looks like a conversation.
+The older store under `~/.xencode/` shows 35 empty of 86 on the same read.
+
+- **Item AA-4** — do not write a session record until it has something in it, and do
+  not list a session with no messages. *Done-when:* a query that fails at the provider
+  leaves the memory file byte-identical, and `memory list` on a store holding an empty
+  session does not show it. Effort S. Joins W6, where the task-state rows live.
+- **Traps.** One: the empty records are already in users' files, so the listing filter
+  is a behaviour change on existing data and needs a way for a person to see and delete
+  them deliberately — silently hiding a record someone might want to inspect is its own
+  defect. Two: `start_session` is shared with the interactive path, which expects a
+  session id to exist before the first message is written. Moving the save is the fix,
+  not moving the id.
+
+### AA-5 Output that explains itself in internals — four instances, all read from the tree
+
+Four strings address the reader as if the reader were the code. Each is quoted exactly
+as written, with the site:
+
+- Every `xencode query` prints, before it does anything else, `retrieval: up to {N}
+  files, {M} characters each (character arithmetic, not measured)`
+  (`main.rs:4484-4487`). The parenthetical is a defence of an internal budgeting
+  heuristic; a person cannot act on it and did not ask for it.
+- The same path prints `read as {shape} work — {reasons}` (`main.rs:4492-4496`), and
+  the general-case reason is `no word for broken code in the prompt, so the weights are
+  used as they stand` (`xencode-context-rs/src/shape.rs:164-167`). "The weights" are
+  internal retrieval-scoring constants that the user cannot see, cannot set and cannot
+  check.
+- `doctor`'s model row prints `Ollama at {url}: {error}` where `error` is
+  `OllamaError::NotRunning` carrying a `reqwest` message (`main.rs:5813`,
+  `ollama.rs:95,141-150`). Reproduced: `FAIL model Ollama at http://localhost:11434:
+  Ollama not running: error sending request for url (http://localhost:11434/api/show)`
+  — the fix line below it correctly says `ollama serve`, and the detail names a REST
+  route inside the provider's API.
+- `models health` does the same on the same path: `Error: error sending request for url
+  (http://localhost:11434/api/generate)` and, for an empty model name,
+  `…/api/version`. Seen verbatim in the `AA-1` runs above.
+
+The pattern is one place where a user-facing sentence is assembled out of a transport
+error's `Display`. `ollama serve` is the advice that helps; `/api/show` is noise that
+sounds like a clue.
+
+- **Item AA-5** — each of the four says what happened in terms a person can act on, and
+  the internal detail moves to where an already-broken install can be reported: keep
+  `xencode doctor --format json`'s raw field, drop the route name from the sentence.
+  *Done-when:* the `doctor` and `models health` rows for a stopped Ollama read as
+  prose, `xencode query` prints no line defending an unmeasured heuristic, and the JSON
+  surface still carries the original error text for anyone filing an issue. Effort S.
+  Joins W11.
+- **Trap.** This is a wording item with a truth test attached, not a logging item: the
+  honest fix keeps the *fact* ("the model was not found", "nothing is listening on
+  11434") and drops the *mechanism*. Replacing a leaky detail with a vague sentence
+  loses information a person needs to choose between `ollama serve` and a wrong port.
+  Milestone J is the register this belongs to and predates it; check for an existing
+  row before starting.
+
+### What did not survive checking
+
+- **"The generated manual page lists subcommands that do not exist, and is missing
+  `release-notes`."** False on both halves, and the way it was got is worth recording
+  because the same mistake will re-check it. The pass ran `grep -c release-notes
+  docs/man/xencode.1`, got 0, and concluded the committed page was stale. The page is
+  roff, where hyphens are written escaped: the file contains
+  `xencode\-release\-notes(1)` at line 124 with its description at 125, and
+  `grep -F 'release\-notes'` finds it while a plain-text search for `release-notes`
+  does not. `run_generate` (`main.rs:6524-6543`) builds the page from `Cli::command()`
+  through `clap_mangen`, so there is no hand-written list for it to fall out of step
+  with, and it emits no per-subcommand flags for a reference to dangle from. CI
+  regenerates and gates the artifact (`.github/workflows/ci.yml:50-51`). **No item.**
+  The lesson for the next pass is that a grep over a man page has to account for
+  `\-`, and that "0 hits" from a grep is evidence about the grep until the file is read.
+- **"The empty-model-name case reports healthy without asking about any model."** Real
+  in the code — `check_health("")` takes the ping-only branch (`ollama.rs:249-270`) —
+  and it is the same defect as `AA-1` in a different branch, so it is folded there
+  rather than counted as a fifth finding. It could not be observed here: with Ollama
+  down, `models health ""` printed `unavailable`, so the ping-only path was reached but
+  its "healthy" outcome was not.
+
+### Counting
+
+`AA-1`…`AA-5` add five rows over five new IDs, taking the pool from §Z-8's 321 to
+**326 rows over 323 unique IDs**. None of them re-sequences W0–W17: three join W11, one
+joins W6 and one joins W14, and all five are effort S with no dependency on unfinished
+work — `AA-1` and `AA-5` are the two that make the interface untrustworthy rather than
+merely awkward, and are the two to take first.
