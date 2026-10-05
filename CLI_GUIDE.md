@@ -1,7 +1,8 @@
 # 🤖 Xencode CLI Guide
 
 The command-line interface for the Xencode AI assistant (Rust binary).
-Running `xencode` with no subcommand launches the TUI.
+Running `xencode` with no subcommand launches the TUI, which needs a terminal;
+every other subcommand works headless in a pipe or a CI step.
 
 ## 🚀 Installation
 
@@ -36,6 +37,20 @@ xencode --version
 
 ### `xencode` / `xencode tui`
 Launch the immersive terminal UI (default when no subcommand is given).
+
+**It needs a terminal.** The screen draws on standard output and reads keys from
+the controlling terminal, so a bare `xencode` in a pipe, a redirect, a cron line
+or a CI step says so plainly instead of failing inside the terminal library:
+
+```
+$ printf '' | xencode
+error: the interactive screen needs a terminal to draw on, and standard output here is not one (a pipe, a redirect, a cron line or a CI step). Without a terminal these work: `xencode query <prompt>` for one answer, `xencode run <task>` for an agent turn, `xencode scan`, `xencode analyze`, `xencode doctor`. `xencode --help` lists the rest.
+```
+
+That is the live output of the command above, and it exits non-zero: the screen
+was asked for and cannot be shown. Every other subcommand is unaffected — the
+whole CLI works headless, and `xencode run --detach` is built for the case where
+the terminal may disappear mid-task.
 
 TUI keys — press `?` (or `F1`) in the TUI for the live, panel-aware
 keybinding overlay; the authoritative list lives there. Essentials:

@@ -9116,14 +9116,31 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
     Ok(())
 }
 
+/// What to say when the interactive screen is asked for somewhere it cannot be
+/// drawn. This used to be the terminal library's `ENXIO` — "No such device or
+/// address" — which named neither the terminal nor a command that would have
+/// worked in its place.
+const NO_TERMINAL: &str = concat!(
+    "the interactive screen needs a terminal to draw on, and standard output here is not one ",
+    "(a pipe, a redirect, a cron line or a CI step). Without a terminal these work: ",
+    "`xencode query <prompt>` for one answer, `xencode run <task>` for an agent turn, ",
+    "`xencode scan`, `xencode analyze`, `xencode doctor`. `xencode --help` lists the rest."
+);
+
 async fn run_tui() -> Result<(), String> {
+    use std::io::IsTerminal;
     // A panic from here on would otherwise leave raw mode and the alternate
     // screen switched on, hiding its own message: restore the terminal first
     // and record the crash where `xencode doctor` can find it.
     if let Some(record) = xencode_tui_rs::panic::default_record_path() {
         xencode_tui_rs::panic::install_panic_hook(record);
     }
-    crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+    if !io::stdout().is_terminal() {
+        return Err(NO_TERMINAL.to_string());
+    }
+    crossterm::terminal::enable_raw_mode().map_err(|e| {
+        format!("the interactive screen could not take over the terminal ({e}). {NO_TERMINAL}")
+    })?;
     let mut stdout = io::stdout();
     // Mouse capture is deliberately absent here: the app turns it on from the
     // `mouse_capture` setting on its first frame, so a user who handed the

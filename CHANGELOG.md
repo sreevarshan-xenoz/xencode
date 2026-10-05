@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the interactive screen says it needs a terminal instead of an errno
+
+Run `xencode` from a pipe, a redirect, a cron line or a CI step — anywhere the
+interactive screen cannot be drawn — and it answered:
+
+```
+error: No such device or address (os error 6)
+```
+
+That is `ENXIO`, the operating system's error number, printed straight through the
+terminal library without a word about what it meant. It named no terminal and
+offered no way forward, and it read like a failure of the whole tool rather than of
+one impossible request.
+
+The screen now checks the obvious case before it touches the terminal at all. With
+no terminal to draw on you get what was asked for, why it cannot happen here, and
+the commands that do work headless:
+
+```
+error: the interactive screen needs a terminal to draw on, and standard output here is not one (a pipe, a redirect, a cron line or a CI step). Without a terminal these work: `xencode query <prompt>` for one answer, `xencode run <task>` for an agent turn, `xencode scan`, `xencode analyze`, `xencode doctor`. `xencode --help` lists the rest.
+```
+
+The exit code stays non-zero, because the screen was requested and cannot be shown.
+A terminal that is there but cannot be taken over is refused with these same words
+plus the error underneath, so no way out of this function prints a bare number.
+Nothing else changed: `xencode` in a terminal opens exactly as it did — confirmed by
+launching it in a terminal pane and reading the first frame — and no other
+subcommand goes near this code.
+
 ### Fixed — the command-line tool no longer carries a dependency it never used
 
 `xencode deps` had one real complaint about this workspace: the CLI crate
