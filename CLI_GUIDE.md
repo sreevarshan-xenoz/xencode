@@ -1225,9 +1225,9 @@ catches a change that was committed on a clean tree, and a rename, whose old pat
 longer exists. Dropping is per-turn: nothing is deleted from `state.md`, and the fact
 comes back on its own if the file is reverted. If the repository cannot resolve the
 recorded commit at all — a shallow clone, or history that has been pruned — the line is
-kept and the same row says `· 1 not checkable here (no such commit locally)`, because an
-unreadable past is not a disproven one and a tier going in unverified should not look
-like a tier that passed.
+kept and the same row says `· 1 not checkable here (the check could not run on this
+repository)`, because an unreadable past is not a disproven one and a tier going in
+unverified should not look like a tier that passed.
 
 `/ctx kv` says which lines it left out:
 
@@ -1243,7 +1243,57 @@ your marker is whatever your head was, so those eight characters will not match.
 count of fact lines is read from the file as written, which is why that row still counts
 one line on disk while reporting the prompt lost it.
 
+##### When a fact names the code instead of a file
+
+A fact can also claim something about the symbols themselves, with no path in it, and
+that claim is checked the same way. `/ctx promote` reads each line for names this
+repository declares — a word shaped like a Rust identifier (`validate_token`, `FoldReport`),
+or any word written in backticks — and records what it found:
+
+```text
+- validate_token rejects an empty token [chk:validate_token]
+- reject_request calls validate_token [chk:reject_request,validate_token,reject_request>validate_token]
+```
+
+Every later turn re-runs those names against the tree — one search of the working `.rs`
+files per turn, shared by all the lines, and only when a line carries a check. The fact
+leaves that prompt when a name is no longer declared anywhere, or when a `caller>callee`
+pair no longer appears in the file where the caller is defined. The search reads the
+working tree rather than the `.xencode/` index on purpose: an index is a snapshot, and a
+snapshot goes on certifying a symbol a rename deleted.
+
+Two rules keep this from dropping notes that are true:
+
+- **Only a name this project declares is ever recorded.** `mpsc::unbounded_channel` is a
+  dependency's function, so it gets no check — otherwise a line about it would disappear
+  the moment that dependency moved, and there would be no way to tell "this name is gone"
+  from "this name was never ours".
+- **Ordinary prose gets no check.** `auth` and `parse` are English as often as they are
+  identifiers; `Rust-first for new code` and `auth is checked before the handler runs` are
+  written to `state.md` exactly as you folded them. A word becomes a name only when it
+  looks like one or is in backticks. A line records at most four claims, the first four in
+  the sentence, because the marker is bytes out of the same budget as the facts.
+
+The panel says which of the two checks failed:
+
+```console
+[CTX]🧾 Tier 4 state.md — 14 tokens in the prompt · 1 fact line(s) on disk · 1 dropped as stale
+[CTX]   stale: validate_token rejects an empty token [chk:validate_token] — the code it names is no longer declared here; /ctx fold to re-derive it
+```
+
+That is the same test as above, taken on after promoting the line, renaming the function
+and committing it. And when there is no repository to search at all — a folder copied out
+of a project, a machine without `git` — the line is kept and reported as `not checkable
+here`, because a tree that cannot be read is not a tree that said otherwise.
+
+`/ctx fold` and `/ctx archive` read this filtered tier too. The fold rewrites `state.md`,
+so handing it a fact the code has disproved would let the model re-derive it as a fresh
+line stamped with the current commit — the one way a stale note could survive its own
+check. On this repository the search costs about 0.1 seconds for 221 tracked `.rs` files
+(7471 declaration lines, measured 2026-10-05), once per turn at most.
+
 The markers are bytes, so both caps are re-checked after stamping: a fold trimmed to
+
 exactly 800 tokens and then stamped would otherwise have its last line's marker cut off
 mid-word. Trimming takes lines from the tail of each section, never half a line.
 

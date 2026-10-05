@@ -1,5 +1,6 @@
-//! QM-2, the half a person sees: when a durable fact's cited file has moved on,
-//! `/ctx kv` says which fact left the prompt instead of silently shrinking it.
+//! QM-2 and MEM-3, the half a person sees: when a durable fact's cited file has
+//! moved on, or the code it names has stopped existing, `/ctx kv` says which fact
+//! left the prompt instead of silently shrinking it.
 //!
 //! The staleness itself is decided in `xencode-context-rs/tests/state_staleness.rs`,
 //! at the level the plan's done-when names — assembly. This file drives the real
@@ -216,6 +217,87 @@ async fn the_context_panel_names_a_durable_fact_it_had_to_drop() {
             .iter()
             .any(|line| line.contains("· 1 fact line(s) on disk")),
         "the hand-written fact did not reach the panel's count at all: {quiet:#?}"
+    );
+
+    // ── MEM-3: a fact about the code, re-checked against the code ───────────
+    // The symbol case, through the real command. This fact cites no file, so the
+    // provenance marker above cannot see it at all — the name in the tree is the
+    // only evidence, and the panel has to say that much when the name goes.
+    std::fs::write(
+        root.join("src/token_check.rs"),
+        "pub fn validate_token(token: &str) -> bool {\n    !token.is_empty()\n}\n",
+    )
+    .unwrap();
+    git(&root, &["add", "src/token_check.rs"]);
+    git(
+        &root,
+        &["commit", "-q", "-m", "the token validator, by name"],
+    );
+    std::fs::write(
+        xencode.join(STATE_CANDIDATE_FILE),
+        "## working-on\n- finish the durable-tier reader\n\n## decisions\n- validate_token rejects an empty token\n",
+    )
+    .unwrap();
+    let promoted = submit_and_wait(&mut app, "/ctx promote", "state.md written").await;
+    let durable = std::fs::read_to_string(&state_path).unwrap();
+    let marked = durable
+        .lines()
+        .find(|line| line.contains("validate_token rejects"))
+        .unwrap_or_else(|| panic!("the promoted fact is not in state.md:\n{durable}"));
+    assert!(
+        marked.contains("[chk:validate_token"),
+        "a fact naming this repository's own code was made durable with no claim \
+         a later turn could re-run:\n{marked}"
+    );
+    assert!(
+        promoted
+            .iter()
+            .any(|line| line.contains("given a claim this code can be re-checked against")),
+        "the promotion wrote a check and never told the person it had: {promoted:#?}"
+    );
+
+    // While the name is declared, the panel stays quiet about it.
+    let clean = context_panel(&mut app).await;
+    assert!(
+        !clean
+            .iter()
+            .any(|line| line.contains("dropped as stale") || line.contains("stale: ")),
+        "a fact naming code that is still there was reported as stale: {clean:#?}"
+    );
+
+    // ── the done-when: rename the function, commit it ──────────────────────
+    std::fs::write(
+        root.join("src/token_check.rs"),
+        "pub fn check_the_token(token: &str) -> bool {\n    !token.is_empty()\n}\n",
+    )
+    .unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "rename the token validator"]);
+
+    let lines = context_panel(&mut app).await;
+    let count = lines
+        .iter()
+        .find(|line| line.contains("dropped as stale"))
+        .unwrap_or_else(|| {
+            panic!("a fact whose symbol stopped existing was not reported: {lines:#?}")
+        });
+    assert!(
+        count.contains("1 dropped as stale"),
+        "the panel says a set of facts went stale when one symbol moved: {count}"
+    );
+    let named = lines
+        .iter()
+        .find(|line| line.contains("stale: ") && line.contains("validate_token rejects"))
+        .unwrap_or_else(|| panic!("the dropped fact was counted but never named: {lines:#?}"));
+    assert!(
+        named.contains("the code it names is no longer declared here"),
+        "the panel blames a symbol rename on the wrong kind of change: {named}"
+    );
+    assert!(
+        std::fs::read_to_string(&state_path)
+            .unwrap()
+            .contains("validate_token rejects an empty token"),
+        "a stale fact was deleted from state.md instead of kept out of one prompt"
     );
 
     std::env::set_current_dir(previous).unwrap();
