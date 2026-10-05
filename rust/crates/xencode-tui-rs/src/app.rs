@@ -2020,7 +2020,14 @@ impl<'a> App<'a> {
     }
 
     pub fn new() -> Self {
-        let config = XencodeConfig::load().unwrap_or_default();
+        // A config this build cannot read is not a reason to refuse the session —
+        // defaults are a usable session — but it is a reason to say so before the
+        // person changes a setting that would then sit only in memory. `DF-1`
+        // stopped the writing; this is the notice that was missing next to it.
+        let (config, unreadable) = match XencodeConfig::load() {
+            Ok(config) => (config, None),
+            Err(problem) => (XencodeConfig::default(), Some(problem)),
+        };
         let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
             .unwrap_or_else(|_| ConversationMemory::new(50));
         memory.start_session(None);
@@ -2056,6 +2063,20 @@ impl<'a> App<'a> {
         // preset says that instead. The row itself waits for the first frame,
         // which is the first moment the screen has a size to describe.
         app.layout_restored = restored;
+        // DF-6: the same treatment for the settings file. The session is not
+        // refused — defaults are a usable session, and a broken file is one the
+        // person may want to open the interface to go and fix — but saying
+        // nothing left them changing settings that could never be written back.
+        // The overlay has room for one line, so it carries only what happened;
+        // the full refusal, with the path and how to repair it, goes into the
+        // chat, where it wraps and stays after the toast has gone.
+        if let Some(problem) = unreadable {
+            app.push_toast(
+                crate::toast::ToastKind::Warning,
+                "settings not read — this session starts on defaults".to_string(),
+            );
+            app.system_line(&format!("settings not read: {problem}"));
+        }
         app
     }
 

@@ -2165,6 +2165,23 @@ An empty or whitespace-only `config.json` is *not* treated as damage: it is what
 `touch` leaves, there are no bytes in it to protect, and refusing to save over it
 would be a dead end.
 
+The interactive screen refuses nothing, because a session on defaults is still a
+usable session — it says out loud that this is what happened. On the first frame a
+toast names the situation, and the full refusal is written into the chat, where it
+stays after the toast has faded:
+
+```text
+ ⚠ settings not read — this session starts on defaults
+
+settings not read: /tmp/df6-live/config.json is not readable JSON: trailing comma
+at line 1 column 59. Nothing was read from it and nothing was written to it, so
+whatever the file held is still there. Repair it by hand or restore a
+`config.json.bak.<time>` copy from beside it.
+```
+
+That is a frame captured from the running interface, not a sketch: the file named
+in it was unchanged by the session that opened on it.
+
 `config set` keys (values are validated; `config show` prints the JSON):
 `mcp_servers`, `agent_hooks` and `model_profiles` are nested structures, so they are edited directly in the JSON instead, or managed in the TUI where a panel exists for them.
 
