@@ -4031,7 +4031,7 @@ fn run_deps(path: PathBuf, format: OutputFormat) -> Result<(), String> {
         Outcome::Missing => {
             deny_status =
                 "cargo-deny not installed — advisories and licenses are not checked here; \
-                 use `xencode advisory check` for the offline RustSec/OSV corpus"
+                 use `xencode advisories check` for the offline RustSec/OSV corpus"
                     .to_string();
         }
         Outcome::Failed(e) => deny_status = format!("cargo-deny failed: {e}"),

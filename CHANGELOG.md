@@ -407,7 +407,7 @@ auto-fixing a dependency is how the supply chain becomes the attack, so nothing
 here edits a manifest. A checker that is not installed is named as unavailable
 rather than counted clean — `cargo-shear` runs here and flags the real unused
 `dirs` dependency in the CLI manifest, while `cargo-deny` is reported as absent
-with a pointer to the offline `xencode advisory check`. `--format json` emits
+with a pointer to the offline `xencode advisories check`. `--format json` emits
 the checker statuses and a findings array.
 
 ### Added — `SE-5`: the security scan now reads credential *content*, not just file names
