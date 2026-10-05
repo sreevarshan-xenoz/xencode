@@ -3410,6 +3410,7 @@ impl<'a> App<'a> {
             system: &system,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
+            scoped_md: live.scoped_md.as_deref(),
             state_md: live.state_md.as_deref(),
             notes_md: live.notes_md.as_deref(),
             git_summary: &live.git_summary,
@@ -4359,6 +4360,7 @@ impl<'a> App<'a> {
             system: &system,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
+            scoped_md: live.scoped_md.as_deref(),
             state_md: live.state_md.as_deref(),
             notes_md: live.notes_md.as_deref(),
             git_summary: &live.git_summary,
@@ -5129,6 +5131,15 @@ impl<'a> App<'a> {
                     .filter(|text| !text.trim().is_empty());
                 let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
                 let notes = xencode_context_rs::read_notes(&xencode);
+                // EV-5: the nested instruction files this workspace would load
+                // right now, so the comparison below covers a turn that has them
+                // rather than one that does not.
+                let dirty = xencode_context_rs::dirty_paths(&root);
+                let scoped = xencode_context_rs::read_scoped_agents_md(
+                    &root,
+                    &dirty,
+                    xencode_context_rs::context::SCOPED_AGENTS_CAP_TOKENS,
+                );
                 let recent_a = "user: how does auth work?\nassistant: it uses the auth module";
                 let recent_b = "user: why is startup slow?\nassistant: profile the init path";
                 // Different recent windows (and git text) must NOT disturb the
@@ -5138,6 +5149,7 @@ impl<'a> App<'a> {
                     CTX_SYSTEM,
                     agents.as_deref(),
                     anchor.as_deref(),
+                    scoped.as_deref(),
                     state.as_deref(),
                     notes.as_deref(),
                     &git,
@@ -5150,6 +5162,7 @@ impl<'a> App<'a> {
                     CTX_SYSTEM,
                     agents.as_deref(),
                     anchor.as_deref(),
+                    scoped.as_deref(),
                     state.as_deref(),
                     notes.as_deref(),
                     &git,
@@ -6446,6 +6459,7 @@ impl<'a> App<'a> {
             system: &system,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
+            scoped_md: live.scoped_md.as_deref(),
             state_md: live.state_md.as_deref(),
             notes_md: live.notes_md.as_deref(),
             git_summary: &live.git_summary,
@@ -6964,8 +6978,8 @@ impl<'a> App<'a> {
             };
             let shape = xencode_context_rs::shape_of(&query);
             let opts = xencode_context_rs::RetrieveOptions::for_live_chat(caps.top_k, shape.shape);
-            let changed: HashSet<String> =
-                xencode_context_rs::dirty_paths(&root).into_iter().collect();
+            let changed_paths = xencode_context_rs::dirty_paths(&root);
+            let changed: HashSet<String> = changed_paths.iter().cloned().collect();
             let results = xencode_context_rs::retrieve(&query, &index, &changed, &opts);
             if results.is_empty() {
                 let _ = tx.send(
@@ -7013,11 +7027,17 @@ impl<'a> App<'a> {
             let state = std::fs::read_to_string(xencode.join("state.md")).ok();
             let notes = xencode_context_rs::read_notes(&xencode);
             let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
+            let scoped = xencode_context_rs::read_scoped_agents_md(
+                &root,
+                &changed_paths,
+                xencode_context_rs::context::SCOPED_AGENTS_CAP_TOKENS,
+            );
             let doc = xencode_context_rs::assemble_prompt(
                 profile,
                 CTX_SYSTEM,
                 agents.as_deref(),
                 anchor.as_deref(),
+                scoped.as_deref(),
                 state.as_deref(),
                 notes.as_deref(),
                 &git,
@@ -13556,7 +13576,7 @@ mod tests {
 
         let assemble = |profile: HardwareProfile, bodies: Vec<RetrievedBlock>| {
             xencode_context_rs::assemble_prompt(
-                profile, "system", None, None, None, None, "", &map, bodies, "",
+                profile, "system", None, None, None, None, None, "", &map, bodies, "",
             )
         };
         let body = |path: &str| RetrievedBlock {

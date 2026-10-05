@@ -101,6 +101,7 @@ fn the_map_on_this_repository_names_what_the_bodies_miss() {
         system: "You are an assistant.",
         agents_md: None,
         anchor_md: None,
+        scoped_md: None,
         state_md: None,
         notes_md: None,
         git_summary: "",

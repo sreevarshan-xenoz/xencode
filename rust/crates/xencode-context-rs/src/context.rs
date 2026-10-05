@@ -50,6 +50,17 @@ pub fn budget_wants_repo_map(target_tokens: u64) -> bool {
 /// The marker that closes the stable prefix (byte-identical every request).
 pub const STABLE_END_MARKER: &str = "<!-- xencode:stable-prefix-end -->";
 
+/// EV-5 — what one turn's nested `AGENTS.md` files may cost in total.
+///
+/// A cap of its own rather than whatever the root file left of its 1200,
+/// because the root file is the one a real project writes first and fills up:
+/// sharing a ceiling would mean the directories nearest the work got the
+/// leftovers and, on a project with a full-size root file, nothing at all.
+/// Like every dynamic tier it is charged against the window below
+/// [`STABLE_END_MARKER`], so the prompt grows by what these files actually say
+/// and no more.
+pub const SCOPED_AGENTS_CAP_TOKENS: u64 = 500;
+
 /// A retrieved file's fenced body, ready to inject.
 #[derive(Debug, Clone)]
 pub struct RetrievedBlock {
@@ -185,12 +196,13 @@ pub fn stable_system_text(
 ///
 /// `retrieved` must already be sorted best-first; the budgeter trims from the
 /// bottom. `recent_text` should be the rolling message window, oldest first.
-#[allow(clippy::too_many_arguments)] // nine positional args are the documented contract (§10 tiers)
+#[allow(clippy::too_many_arguments)] // eleven positional args are the documented contract (§10 tiers)
 pub fn assemble_prompt(
     profile: HardwareProfile,
     system: &str,
     agents_md: Option<&str>,
     anchor_md: Option<&str>,
+    scoped_md: Option<&str>,
     state_md: Option<&str>,
     notes_md: Option<&str>,
     git_summary: &str,
@@ -226,6 +238,32 @@ pub fn assemble_prompt(
     let stable_prefix = stable.prefix;
     let mut remaining = target.saturating_sub(stable.tokens);
     truncated |= stable.truncated || stable.tokens > target;
+
+    // ── Tier 3b: the directories this turn is working in (EV-5) ──────────
+    // Nested `AGENTS.md` files are instructions, but which ones apply changes
+    // with the files being touched, so they cannot join the byte-stable head:
+    // a head that moves costs a local server a full re-prefill every turn. They
+    // sit here instead, directly below the marker, and are charged against the
+    // window like any other dynamic tier, under their own [cap][SCOPED_AGENTS_CAP_TOKENS].
+    let (scoped_head, scoped_tok) =
+        truncate_to_tokens(scoped_md.unwrap_or(""), SCOPED_AGENTS_CAP_TOKENS, false);
+    // The same tier hitting its cap is a truncation wherever it happens, and
+    // the root file's own overflow already reports it this way.
+    let scoped_cut = scoped_md.is_some_and(|text| scoped_head.len() < text.len());
+    let scoped_included = !scoped_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if scoped_included {
+        tiers.push(TierDoc {
+            name: "AGENTS.md (scoped)",
+            tokens: scoped_tok,
+            class: scoped_md
+                .map(SourceClass::of_agents_md)
+                .unwrap_or(SourceClass::AgentFile { trusted: true }),
+        });
+        remaining = remaining.saturating_sub(scoped_tok);
+        truncated |= scoped_cut;
+    } else if !scoped_head.is_empty() {
+        truncated = true;
+    }
 
     // ── Tier 4: state.md ─────────────────────────────────────────────────
     // Admitted only with margin to spare; the emit below follows the same
@@ -320,6 +358,10 @@ pub fn assemble_prompt(
 
     // ── Assemble ─────────────────────────────────────────────────────────
     let mut text = stable_prefix.clone();
+    if scoped_included {
+        text.push_str("\n\n## Instructions For These Directories\n\n");
+        text.push_str(&scoped_head);
+    }
     if state_included {
         text.push_str("\n\n## Current Task State\n\n");
         text.push_str(&state_head);
@@ -382,7 +424,7 @@ pub struct ChatTurn {
 pub const HISTORY_TURN_OVERHEAD_TOKENS: u64 = 4;
 
 /// All inputs for [`assemble_chat`] in one struct — the chat counterpart of
-/// [`assemble_prompt`]'s eight positional arguments.
+/// [`assemble_prompt`]'s eleven positional arguments.
 #[derive(Debug, Clone)]
 pub struct ChatInput<'a> {
     pub profile: HardwareProfile,
@@ -393,6 +435,8 @@ pub struct ChatInput<'a> {
     pub system: &'a str,
     pub agents_md: Option<&'a str>,
     pub anchor_md: Option<&'a str>,
+    /// `AGENTS.md` files in the directories this turn's dirty files sit in (EV-5).
+    pub scoped_md: Option<&'a str>,
     pub state_md: Option<&'a str>,
     /// The agent's own scratchpad (`notes.md`), read from `.xencode/` — EV-6.
     pub notes_md: Option<&'a str>,
@@ -544,6 +588,33 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         });
     }
 
+    // ── Tier 3b: the directories this turn is working in (EV-5) ──────────
+    // Below the marker, under its own cap — see the same block in
+    // [`assemble_prompt`] for why the position is the whole design.
+    let (scoped_head, scoped_tok) = truncate_to_tokens(
+        input.scoped_md.unwrap_or(""),
+        SCOPED_AGENTS_CAP_TOKENS,
+        false,
+    );
+    let scoped_cut = input
+        .scoped_md
+        .is_some_and(|text| scoped_head.len() < text.len());
+    let scoped_included = !scoped_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if scoped_included {
+        tiers.push(TierDoc {
+            name: "AGENTS.md (scoped)",
+            tokens: scoped_tok,
+            class: input
+                .scoped_md
+                .map(SourceClass::of_agents_md)
+                .unwrap_or(SourceClass::AgentFile { trusted: true }),
+        });
+        remaining = remaining.saturating_sub(scoped_tok);
+        truncated |= scoped_cut;
+    } else if !scoped_head.is_empty() {
+        truncated = true;
+    }
+
     // ── Tier 4: state.md ─────────────────────────────────────────────────
     let (state_head, state_tok) =
         truncate_to_tokens(input.state_md.unwrap_or(""), STATE_CAP_TOKENS, false);
@@ -664,6 +735,11 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         });
     }
     let mut user_turn = String::new();
+    if scoped_included {
+        user_turn.push_str("## Instructions For These Directories\n\n");
+        user_turn.push_str(&scoped_head);
+        user_turn.push_str("\n\n");
+    }
     if state_included {
         user_turn.push_str("## Current Task State\n\n");
         user_turn.push_str(&state_head);
@@ -735,6 +811,11 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
 pub struct LiveContext {
     pub agents_md: Option<String>,
     pub anchor_md: Option<String>,
+    /// The `AGENTS.md` files of the directories this turn's edited files sit in
+    /// (EV-5), nearest last. Deliberately *not* part of the stable head: which
+    /// directories a turn touches changes turn to turn, and a stable head that
+    /// changes with it throws away the key/value cache a local server holds.
+    pub scoped_md: Option<String>,
     pub state_md: Option<String>,
     /// The EV-6 scratchpad, as written by `write_note`. No staleness filter: a
     /// note is the agent's own reminder about this task, not a claim about a file
@@ -799,6 +880,16 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         .filter(|text| !text.trim().is_empty());
     let git_summary = git_summary_text(root).unwrap_or_default();
     let notes_md = crate::notes::read_notes(&xencode);
+    // Working-tree paths, read once: they seed retrieval and they decide which
+    // directories this turn is actually in. `dirty_paths` returns them sorted,
+    // and the order is what makes the scoped tier byte-stable across turns.
+    let changed_paths = dirty_paths(root);
+    let changed: HashSet<String> = changed_paths.iter().cloned().collect();
+    // EV-5: an `AGENTS.md` sitting in a directory being edited is that
+    // directory's own directive, and the root file says nothing about it. It
+    // joins as a dynamic tier, so the cached stable head is untouched.
+    let scoped_md =
+        crate::trust::read_scoped_agents_md(root, &changed_paths, SCOPED_AGENTS_CAP_TOKENS);
     // Read once, and used for the weights and for what is reported about them,
     // so the two cannot disagree about which shape the turn was retrieved as.
     let shape = crate::shape_of(query);
@@ -808,7 +899,6 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     let mut retrieved_total = 0;
     if let Some(index) = RetrievalIndex::load(&xencode) {
         index_present = true;
-        let changed: HashSet<String> = dirty_paths(root).into_iter().collect();
         let opts = RetrieveOptions::for_live_chat(caps.top_k, shape.shape);
         let results = retrieve(query, &index, &changed, &opts);
         retrieved_total = results.len();
@@ -822,6 +912,7 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     LiveContext {
         agents_md,
         anchor_md,
+        scoped_md,
         state_md,
         notes_md,
         git_summary,
@@ -951,6 +1042,7 @@ mod tests {
             Some(ANCHOR),
             None,
             None,
+            None,
             "",
             "",
             vec![],
@@ -967,6 +1059,7 @@ mod tests {
             Some(ANCHOR),
             None,
             None,
+            None,
             "",
             "",
             vec![],
@@ -980,6 +1073,7 @@ mod tests {
         let cut = assemble_prompt(
             HardwareProfile::Low,
             &sys,
+            None,
             None,
             None,
             None,
@@ -1002,6 +1096,7 @@ mod tests {
         let doc = assemble_prompt(
             HardwareProfile::Low,
             &sys,
+            None,
             None,
             None,
             Some(&state),
@@ -1028,6 +1123,7 @@ mod tests {
             Some(ANCHOR),
             None,
             None,
+            None,
             "main @ abc1234",
             "",
             Vec::new(),
@@ -1039,6 +1135,7 @@ mod tests {
             SYSTEM,
             Some(AGENTS),
             Some(ANCHOR),
+            None,
             Some(folded),
             None,
             "main @ abc1234",
@@ -1075,6 +1172,7 @@ mod tests {
             Some(ANCHOR),
             None,
             None,
+            None,
             "",
             "",
             Vec::new(),
@@ -1102,6 +1200,7 @@ mod tests {
             SYSTEM,
             Some(AGENTS),
             Some(ANCHOR),
+            None,
             Some("# state: fixing auth"),
             None,
             "🎋 main @ abc1234 — 1 dirty file(s)",
@@ -1137,6 +1236,7 @@ mod tests {
             Some(&"# Anchor\n\n".repeat(200)),
             None,
             None,
+            None,
             "",
             "",
             long_retrieved,
@@ -1154,6 +1254,7 @@ mod tests {
         let doc = assemble_prompt(
             HardwareProfile::High,
             SYSTEM,
+            None,
             None,
             None,
             None,
@@ -1189,6 +1290,7 @@ mod tests {
         let doc = assemble_prompt(
             HardwareProfile::Balanced,
             SYSTEM,
+            None,
             None,
             None,
             None,
@@ -1331,6 +1433,7 @@ mod tests {
             system: SYSTEM,
             agents_md: Some(AGENTS),
             anchor_md: Some(ANCHOR),
+            scoped_md: None,
             state_md: Some("# state: fixing auth"),
             notes_md: None,
             git_summary: "main @ abc1234",
@@ -1442,6 +1545,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             "",
             &sample_map(),
             Vec::new(),
@@ -1459,6 +1563,7 @@ mod tests {
         let high = assemble_prompt(
             HardwareProfile::High,
             SYSTEM,
+            None,
             None,
             None,
             None,
@@ -1522,6 +1627,7 @@ mod tests {
             SYSTEM,
             Some(AGENTS),
             Some(ANCHOR),
+            None,
             Some("# state: fixing auth"),
             None,
             "main @ abc1234",
@@ -1752,6 +1858,7 @@ mod tests {
             system: SYSTEM,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
+            scoped_md: live.scoped_md.as_deref(),
             state_md: live.state_md.as_deref(),
             notes_md: None,
             git_summary: &live.git_summary,

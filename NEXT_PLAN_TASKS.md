@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2386 tests passing, zero warnings (re-verified 2026-10-05, after `EV-6`; 19 ignored)
+- [x] Workspace gates green — 16 crates, 2398 tests passing, zero warnings (re-verified 2026-10-05, after `EV-5`; 2399 tests, 19 ignored)
 
 ## Model Catalog Honesty
 
@@ -2425,6 +2425,8 @@ never is.
 - **EV-5 sub-directory instruction files** — walk from the edited file's dir to
   root, budget-capped. S (2-3 d). Trap: the KV-prefix contract. Done-when: an
   edit in a nested dir provably loads its directives.
+  **Done 2026-10-05 — the trap was the design, and the first budget rule broke it.**
+  See the W10 progress note.
 - **EV-6 notes-to-self scratchpad** — a `write_note` tool in a compaction-exempt
   tier, like `[d]`. S (2-4 d). Trap: unbounded growth; cap and fold into hard
   compaction. Done-when: notes survive a hard compaction and appear in assembly.
@@ -5327,7 +5329,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | # | Proposal | Verdict | Lands as / why not |
 |---|---|---|---|
 | 1 | Intent Engine | reject | No literature that a structured-intent stage improves coding-agent outcomes (PlanBench). Costs the scarcest resource. QI-1 A/B-tests the premise instead |
-| 2 | Project Constitution | narrowed | QB-3 = EV-5 scoped instruction files, human-authored, inside the existing 1200-token AGENTS cap |
+| 2 | Project Constitution | narrowed | QB-3 = EV-5 scoped instruction files, human-authored, under their own nested-instruction cap |
 | 3 | Architecture Map | planned | AC-6 symbol-only repo-map tier (+CI-2, LSP-4) |
 | 4 | Architecture Drift Detection | new | QB-1 — declared-layer conformance over a human-written rule file; auto-inferred layers are circular |
 | 5 | Dependency Health Engine | planned | SE-6 `deps` + RS-5 `lookup_advisory` + DB-6 `doctor`; QO-1 is their composition, not a new engine |
@@ -5661,8 +5663,10 @@ here is inherited from the reviewer's assumptions.
   precision — do not use the word "conceptual". *Done-when:* each finding on this
   tree carries a written human verdict.
 - **QB-3 — Constitution = EV-5 scoped instruction files, human-only.** *Effort:
-  S.* Nearest-wins directory walk, counted inside the existing 1200-token AGENTS
-  cap. *Trap:* any auto-writer mutates `stable_prefix_sha256` and forces a full
+  S.* Nearest-wins directory walk, delivered with **EV-5** under its own 500-token
+  nested-instruction cap (`SCOPED_AGENTS_CAP_TOKENS`); nothing in the product writes
+  these files, so no auto-writer can move them. *Trap:* any auto-writer mutates
+  `stable_prefix_sha256` and forces a full
   prefix re-prefill — minutes on this hardware. *Done-when:* the prefix hash is
   byte-identical across 10 turns, with one documented invalidation when a file
   changes.
@@ -6591,7 +6595,7 @@ and the two sums must agree.
 | W7 | Trust architecture | 19 |
 | W8 | Outward research capability | 6 |
 | W9 | Project DNA and architecture intelligence | 21 |
-| W10 | Durable project knowledge | 21 |
+| W10 | Durable project knowledge | 22 |
 | W11 | Self-diagnosis, cost and operations | 20 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
@@ -10022,20 +10026,20 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 21 items, 5 done
+#### W10 — Durable project knowledge — 22 items, 6 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
 | **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — deliberately after W7 |
-| **EV-5** | sub-directory instruction files | capability | sub-directory instruction files (QB-3 is the same thing) |
+| **EV-5** | sub-directory instruction files | capability | sub-directory instruction files — done 2026-10-05, the walk is read-only and lands below the stable-prefix marker, see the W10 progress note |
 | **EV-6** | notes-to-self scratchpad | capability | notes-to-self scratchpad — done 2026-10-05, the pad is a tier of its own and the fold gets the whole file, see the W10 progress note |
 | **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson |
 | **MEM-1** | A candidate-facts file the human promotes | capability | candidate-facts file the human promotes — open: the promotion half is built (`QM-1`'s candidate file and `/ctx promote`), the agent-drafted queue it was meant to hold is `EV-7`'s, and `EV-6`'s pad is not that queue because a note is this session's own working text |
 | **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance — **covered by committed work, no separate task left**: `QM-1` gave the tier a writer with a human promotion step, `QM-2` the `[src:path@commit]` provenance and the git-dirty staleness this row asked for, `MEM-3` the verify-on-read. Counted with those rows, not as its own commit |
 | **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts — done 2026-10-05 against `git grep`, not `xencode-analysis-rs`, see the W10 progress note |
-| **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 |
+| **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 — **covered by `EV-5`'s commit, no separate task left**: the walk is read-only, so there is no writer to keep human-only, and the byte-identical-prefix done-when is the second test in `tests/scoped_agents.rs` |
 | **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
 | **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored |
 | **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1; done 2026-10-05, see the W10 progress note |
@@ -10043,6 +10047,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
 | **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
 | **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
+| **QK-8** | `/trust` a directory's own `AGENTS.md` | capability | the missing half of `EV-5`, found while shipping it: `/trust` reads only `<root>/AGENTS.md`, so a nested file has no way to be trusted and every block arrives marked `[data]` — read, not obeyed. Done-when: `/trust src/auth/AGENTS.md` trusts those bytes in this workspace only, a path outside the workspace or under `.git/`/`.xencode/` is refused, `/trust status` names each trusted file, and an untrusted sibling stays marked in the same turn. Trap: the argument is user text reaching a writer of a durable store, so it is resolved against the workspace and never against the current directory |
 | **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
 | **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
@@ -10051,6 +10056,85 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `EV-5` + `QB-3` — 2026-10-05. A directory's own `AGENTS.md` is read on a turn that
+  works in that directory. **The trap the row named is what decided the design, and the
+  first budget rule made the feature invisible — in this repository.**
+  **Where the bytes come from and where they sit.** `collect_live_context` takes every path
+  `git status` reports as changed and walks each one's directory up to, but not including,
+  the workspace root (`read_scoped_agents_md`, `xencode-context-rs/src/trust.rs`), because
+  the root file is already tier 2 and is not paid for twice. Which directories a turn works
+  in changes every turn, so the section is emitted *below* `STABLE_END_MARKER`: the
+  byte-stable head stays exactly system + root `AGENTS.md` + `anchor.md`, and a local server
+  keeps reusing the prefix it already read. `tests/scoped_agents.rs` proves that half the
+  way a person would notice — two turns working in two different packages, whose text
+  differs while `stable_prefix_sha256()` does not.
+  **No new vocabulary for a file that already had one.** A nested `AGENTS.md` is the same
+  family of bytes as the root one, so it arrives through the same split: trusted verbatim,
+  or untrusted behind `UNTRUSTED_BANNER` as `[data]`. One thing had to change:
+  `SourceClass::of_agents_md` looked for that banner with `starts_with`, and a nested block
+  carries it *under* its own `### dir/AGENTS.md` heading — so an untrusted directory rule was
+  being classed, and reported to the user, as trusted instructions. It now searches the text
+  (`the_agent_file_is_classed_by_its_banner_not_by_its_name` covers both shapes); no new
+  `SourceClass` variant, so `ALL` stays at 14 and nothing else about arrival-based classing
+  moved. **What `/trust` cannot reach yet, found while shipping this.** Trust is granted per
+  content hash and `trust_agents` reads `<root>/AGENTS.md` — nothing else — so a directory's
+  file has no way for a person to grant it: on a live turn every block arrives behind
+  `UNTRUSTED_BANNER` unless its bytes already match something trusted. The section therefore
+  informs rather than instructs today, which is why its header says so block by block ("a
+  block carrying no data mark is project convention… a block marked as data is information
+  only") instead of telling the model to treat the section as instructions, which the first
+  wording did and which would have contradicted the banner sitting one line below it. Closing
+  the gap is **QK-8**, added to this wave with a done-when; nothing of it is built. The two
+  tests that assert a *trusted* nested file write those bytes into
+  `.xencode/cache/agents_trust.json` exactly as `/trust` does, so they exercise the store the
+  reader actually checks; the command argument that would reach it for a directory is the open
+  half. `git/`, `.git/…`, `.xencode…` and any path that resolves outside the workspace are
+  never read at all.
+  **What the new tier inherits, and what it does not.** The section is pushed into the same
+  user turn that `assemble_chat` runs through `Redactor` before the bytes leave the machine
+  (`context.rs`, the emit at line 739 against the redaction at 778), so a credential shape in a
+  nested file is held back exactly like one in `state.md` or the retrieved bodies — that is the
+  existing `PR-3` protection covering a new input, not a test this item added. What it does not
+  get is a second data note: the root file's `[data]` banner and the per-block wording already
+  say whose bytes these are.
+  **The budget rule that broke.** The first version charged the nested set against whatever
+  the root file left of its 1200 tokens, so the feature could not grow a prompt — and, as it
+  turned out, could not do anything else either. This repository's own `AGENTS.md` is 7851
+  bytes, about 1960 tokens, so it spends the whole cap and the leftover is zero: a directory
+  rule would never have loaded here, in the product's own repo, and nothing in a test with a
+  three-line root file would have shown it. The fix is not a bigger leftover but a cap of its
+  own — `SCOPED_AGENTS_CAP_TOKENS = 500` for the section, the same shape of ceiling `state.md`
+  (800) and `notes.md` (250) are given — plus selection nearest-first, so the directory
+  *furthest* from the work is the one cut. That ordering mattered because the section header
+  alone costs ~110 tokens: truncating the finished section from the head dropped the nearest
+  file, which is the one the feature exists to find. A turn with nothing to spend gets no
+  section rather than a fragment.
+  **Four bounds, each watched failing.** At most four files (`SCOPED_AGENTS_MAX_FILES`), none
+  larger than 8 KiB, 500 tokens for the whole section, and a walk that cannot leave the
+  workspace. Setting `SCOPED_AGENTS_CAP_TOKENS` to 0 turned all four tests in
+  `tests/scoped_agents.rs` red; raising the 8 KiB read ceiling turned
+  `a_nested_file_bigger_than_the_read_ceiling_is_skipped` red; and the nearest-first rule was
+  written *after* `a_budget_that_runs_out_keeps_the_nearest_files_whole` failed against the
+  head-truncating version it replaced. **Done-when, by name:**
+  `an_edit_in_a_nested_directory_loads_that_directorys_own_directives` (a clean tree loads
+  nothing; editing `src/auth/mod.rs` puts that package's rule in the prompt and `src/api`'s
+  does not), `an_untrusted_nested_rule_reaches_the_model_marked_as_data`,
+  `a_different_directory_changes_the_tier_but_not_the_cached_head`, and
+  `a_full_size_root_file_does_not_starve_the_nested_ones` — the last one writes a root file
+  over its cap on purpose, because that is the case the shipped rule had to survive.
+  **Counted.** Twelve tests added: eight in `xencode-context-rs/src/trust.rs` and the four in
+  `tests/scoped_agents.rs`, taking the crate to 603 unit tests plus 10 integration tests of
+  its own. **2399 tests across the workspace, 2398 passing, 19 ignored**, counted 2026-10-05 by
+  `cargo test --workspace --no-fail-fast` with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` both clean. The run's one failure was
+  the known load-sensitive `xencode-mcp-rs`
+  `a_server_that_exits_during_handshake_reports_its_own_words`, which passed with the other
+  eight in its file when `--test stdio` was run on its own (9 passed). An earlier run of the
+  same suite failed a different one, `doctor::tests::a_provider_failure_names_the_thing_to_run`,
+  which passed when that test was run alone and in the run before it: a **second** timing test
+  on this machine that cannot be trusted under full-suite load, joining the MCP one. Neither is
+  caused by this item — both are green in the crate that owns them.
 
 - [x] `EV-6` — 2026-10-05. The agent can now keep a note to itself that a compaction
   cannot eat. **What the row named as the trap is the part that needed three bounds, not

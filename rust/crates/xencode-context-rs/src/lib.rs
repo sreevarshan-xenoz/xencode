@@ -203,8 +203,8 @@ pub use trace::{
     TRACE_TAIL_CAP,
 };
 pub use trust::{
-    agents_content_is_trusted, agents_sha256, read_agents_md, trust_agents, untrust_agents,
-    UNTRUSTED_BANNER,
+    agents_content_is_trusted, agents_sha256, read_agents_md, read_scoped_agents_md, trust_agents,
+    untrust_agents, UNTRUSTED_BANNER,
 };
 pub use watcher::{
     map_kind, should_ignore, Debounce, WatchEvent, WatchKind, WatcherSession, WorkspaceWatcher,

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EV-5`: a directory's own `AGENTS.md` is read when that directory is being worked in
+
+Project instructions had one home — `AGENTS.md` at the workspace root, sent in full on
+every turn whether or not the turn was about that part of the tree. A repository with one
+rule for how `src/` handles errors and another for how `tools/` is generated had to write
+both down where both are always read, and the model had to work out which applied.
+
+Xencode now walks from each file the working tree has changed up to the root and reads the
+`AGENTS.md` sitting in those directories — at most four files, none larger than 8 KiB, the
+nearest one last so the most specific rule is read closest to the question. They arrive
+under `## Instructions For These Directories`, each block named by its path, and a file
+nobody has trusted comes in marked `[data]` behind the same banner the root file uses. Because
+`/trust` reads the workspace's own file and nothing else, a *directory's* file has no way to be
+trusted yet: in a fresh clone every block arrives as data — information about the project that
+the model is told not to obey — and the section header draws that line block by block rather
+than treating the section as instructions. Giving `/trust` a path is the missing half of this
+feature and is recorded as `QK-8`; nothing of it is built. A clean tree loads nothing, and so
+does a turn touching only files at the root: the section exists only where a directory has
+rules of its own.
+
+Where the section sits was the part that needed care. The head of every request — system
+prompt, root `AGENTS.md`, `anchor.md` — is sent byte-for-byte unchanged so a local server
+can reuse the key/value cache it built while reading it, and which directories a turn
+touches changes every turn. So the nested files are admitted directly below the marker that
+closes that head, and they carry a cap of their own — 500 tokens for the whole section
+(`SCOPED_AGENTS_CAP_TOKENS`) — rather than whatever the root file left of its 1200. Sharing
+the root file's ceiling sounded like the safer rule and was the one that broke in practice:
+the root `AGENTS.md` is the file a real project writes first and fills up, so on such a
+repository the directories nearest the work would have got the leftovers, which is to say
+nothing. Files are chosen nearest-first, so a budget that does not reach all of them runs out
+on the directory furthest from the work and the rule beside the edited file stays whole; a
+turn with no room left gets no section at all rather than a fragment, and any trim is
+reported the way an over-long root file reports itself.
+`rust/crates/xencode-context-rs/tests/scoped_agents.rs` builds a
+repository with `git init`, edits one package, and asserts both halves of the design — that
+the package's rule is in the text a model receives, and that two turns working in two
+different packages still report the identical stable-head hash.
+
 ### Added — `EV-6`: the agent can keep a note to itself that compaction cannot eat
 
 A thing the model worked out mid-task — which lock the worker holds, that retries are
