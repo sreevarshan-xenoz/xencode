@@ -2397,7 +2397,10 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
         }
         ConfigAction::Reset => {
             let config = XencodeConfig::default();
-            config.save().map_err(|e| e.to_string())?;
+            let path = XencodeConfig::config_path().map_err(|e| e.to_string())?;
+            // The one save allowed to write over an unreadable file: discarding
+            // what is there is what this command was asked to do.
+            config.force_save_to(&path).map_err(|e| e.to_string())?;
             println!("configuration reset to defaults");
             Ok(())
         }
@@ -3132,7 +3135,10 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             Ok(())
         }
         LlamacppAction::Start { model, port, exec } => {
-            let mut config = XencodeConfig::load().unwrap_or_default();
+            // Propagated, not defaulted: this branch ends in a save, and a
+            // fallback here would write a full default block over the file the
+            // person's keys are in.
+            let mut config = XencodeConfig::load().map_err(|e| e.to_string())?;
             let model_path = model
                 .clone()
                 .unwrap_or_else(|| config.llama_cpp_model_path.clone());
@@ -3402,7 +3408,7 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             Ok(())
         }
         LlamacppAction::SetPath { path } => {
-            let mut config = XencodeConfig::load().unwrap_or_default();
+            let mut config = XencodeConfig::load().map_err(|e| e.to_string())?;
             config.llama_cpp_model_path = path.clone();
             config.save().map_err(|e| e.to_string())?;
             println!("llama_cpp_model_path = {path}");
@@ -5964,6 +5970,11 @@ fn load_config() -> (xencode_config_rs::XencodeConfig, doc::ConfigRead) {
             doc::ConfigRead::Unparseable(format!(
                 "it holds a JSON {found}, where an object of settings was expected"
             ))
+        }
+        // The loader's own sentence names the file, and the doctor row prefixes
+        // it again, so this part takes the file out of what it says.
+        Err(xencode_config_rs::ConfigError::Corrupt { problem, .. }) => {
+            doc::ConfigRead::Unparseable(format!("it is not readable JSON — {problem}"))
         }
         Err(problem) => doc::ConfigRead::Unparseable(problem.to_string()),
     };

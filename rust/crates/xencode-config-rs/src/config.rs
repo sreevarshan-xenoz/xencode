@@ -33,6 +33,21 @@ fn declared_version(value: &serde_json::Value) -> u32 {
         .unwrap_or(LEGACY_CONFIG_VERSION)
 }
 
+/// What kind of JSON value is at the top level, in words a person editing the
+/// file can act on. Used by both refusals that come from a shape rather than a
+/// version, so the read path and the write path describe the same file the same
+/// way.
+fn json_shape(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "true or false",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 /// Bring a file written by version `from` up to [`CURRENT_CONFIG_VERSION`], one
 /// rung at a time.
 ///
@@ -48,6 +63,40 @@ fn migrate(value: &mut serde_json::Value, from: u32) {
     if from < 1 {
         value["config_version"] = serde_json::Value::Number(CURRENT_CONFIG_VERSION.into());
     }
+}
+
+/// Stop a save that would replace a file this binary cannot read.
+///
+/// Checks the shape only, not the version: the caller asks that separately, and
+/// the two refusals say different things. A missing file and an empty one pass —
+/// there is nothing there to destroy — while any other bytes must at least be a
+/// JSON object before they may be overwritten.
+fn refuse_to_replace_unreadable(path: &std::path::Path) -> Result<(), ConfigError> {
+    let existing = match std::fs::read(path) {
+        Ok(found) => found,
+        Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(problem) => return Err(ConfigError::Io(problem)),
+    };
+    let existing = String::from_utf8_lossy(&existing);
+    if existing.trim().is_empty() {
+        return Ok(());
+    }
+    let value: serde_json::Value = match serde_json::from_str(&existing) {
+        Ok(found) => found,
+        Err(problem) => {
+            return Err(ConfigError::Corrupt {
+                path: path.to_path_buf(),
+                problem: problem.to_string(),
+            })
+        }
+    };
+    if !value.is_object() {
+        return Err(ConfigError::NotAConfig {
+            path: path.to_path_buf(),
+            found: json_shape(&value),
+        });
+    }
+    Ok(())
 }
 
 /// Copy the file at `path` to `<name>.bak.<UTC time>` before `bytes` replaces it,
@@ -1034,6 +1083,17 @@ pub enum ConfigError {
         path: PathBuf,
         found: &'static str,
     },
+    /// The file is not readable JSON at all: truncated mid-write, hand-edited
+    /// into a broken shape, or half of a merge conflict. Unlike
+    /// [`ConfigError::Json`], this one names the file, because the read path has
+    /// to be able to say *which* file to go and fix — and because a caller that
+    /// treats this as "no config yet" would write defaults over a file holding
+    /// someone's keys.
+    Corrupt {
+        /// Which file, and where in it the parser gave up.
+        path: PathBuf,
+        problem: String,
+    },
     /// The file on disk declares a config shape newer than this binary writes.
     /// Reading it would guess at fields that do not exist yet, and writing it
     /// would delete whatever the newer xencode stored, so neither happens.
@@ -1060,6 +1120,13 @@ impl fmt::Display for ConfigError {
                  configuration and it was not read — a file like this has no settings in it, and \
                  reading it as one would quietly hand back every default. Restore the file from a \
                  backup, or write a new one with `xencode config set <key> <value>`.",
+                path.display()
+            ),
+            ConfigError::Corrupt { path, problem } => write!(
+                f,
+                "{} is not readable JSON: {problem}. Nothing was read from it and nothing was \
+                 written to it, so whatever the file held is still there. Repair it by hand or \
+                 restore a `config.json.bak.<time>` copy from beside it.",
                 path.display()
             ),
             ConfigError::NewerFile { path, found, known } => write!(
@@ -1115,24 +1182,31 @@ impl XencodeConfig {
     ///
     /// The version is checked on the raw JSON because the fields that decide it
     /// are exactly the ones the struct below cannot see. A file whose top level
-    /// is not an object is left for `from_value` to describe, rather than being
-    /// indexed as if it were one.
+    /// is not an object is refused rather than deserialised positionally, and
+    /// one that is not JSON at all is refused with the file named, because the
+    /// alternative for the caller is `unwrap_or_default()` — defaults written
+    /// back over the file on the next save.
+    ///
+    /// An empty or whitespace-only file is treated as "no settings yet", not as
+    /// damage: it is what `touch` leaves, and there is nothing in it to lose. A
+    /// file with bytes in it is a different case, and so is guarded at the write.
     fn parse(path: &std::path::Path, content: &str) -> Result<Self, ConfigError> {
-        let mut value: serde_json::Value =
-            serde_json::from_str(content).map_err(ConfigError::Json)?;
+        if content.trim().is_empty() {
+            return Ok(Self::default());
+        }
+        let mut value: serde_json::Value = match serde_json::from_str(content) {
+            Ok(found) => found,
+            Err(problem) => {
+                return Err(ConfigError::Corrupt {
+                    path: path.to_path_buf(),
+                    problem: problem.to_string(),
+                })
+            }
+        };
         if !value.is_object() {
-            // Named before the match below, because `value` is moved into it.
-            let found = match value {
-                serde_json::Value::Null => "null",
-                serde_json::Value::Bool(_) => "true or false",
-                serde_json::Value::Number(_) => "number",
-                serde_json::Value::String(_) => "string",
-                serde_json::Value::Array(_) => "array",
-                serde_json::Value::Object(_) => "object",
-            };
             return Err(ConfigError::NotAConfig {
                 path: path.to_path_buf(),
-                found,
+                found: json_shape(&value),
             });
         }
         let found = declared_version(&value);
@@ -1172,17 +1246,32 @@ impl XencodeConfig {
 
     /// Save configuration to a specific file path.
     ///
-    /// The file already there is asked its version first, and a newer one is
-    /// refused. Checking at the write rather than only at the read is what makes
-    /// the refusal hold: plenty of call sites fall back to defaults when a load
-    /// fails, and without this they would save those defaults over a config this
-    /// binary could not read.
+    /// Two things about the file already there stop the write, both for the same
+    /// reason: this config holds API keys, and a save is the moment they can be
+    /// lost. The first is version — a newer one is refused, because plenty of
+    /// call sites fall back to defaults when a load fails and without this check
+    /// they would save those defaults over a config this binary could not read.
+    /// The second is shape — a file that is not readable JSON, or not an object,
+    /// is refused too, since it is exactly as unreadable to the writer as it was
+    /// to the reader, and the fallback would silently reset every setting.
     ///
     /// What is about to be replaced is copied to a timestamped
     /// `config.json.bak.<time>` first, unless the bytes are already identical —
     /// the interface saves whenever a setting changes, and copying a file it has
     /// not changed would crowd out the copies of the ones it has.
     pub fn save_to(&self, path: impl AsRef<std::path::Path>) -> Result<(), ConfigError> {
+        let path = path.as_ref();
+        refuse_to_replace_unreadable(path)?;
+        self.force_save_to(path)
+    }
+
+    /// Save past the shape check, for the one command whose job is to discard
+    /// what the file holds: `xencode config reset`. Refusing there would be a
+    /// dead end — an unreadable config is exactly when someone reaches for reset,
+    /// and the damaged bytes still go to a timestamped backup first. The version
+    /// check is *not* skipped: a newer xencode's file is not ours to overwrite,
+    /// reset included.
+    pub fn force_save_to(&self, path: impl AsRef<std::path::Path>) -> Result<(), ConfigError> {
         let path = path.as_ref();
         if let Some(found) = Self::version_of(path) {
             if found > CURRENT_CONFIG_VERSION {
@@ -2185,6 +2274,130 @@ mod tests {
             XencodeConfig::version_of(&legacy),
             Some(CURRENT_CONFIG_VERSION)
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_that_is_not_json_names_itself_and_says_where_it_broke() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        // The damage a hand edit makes: a trailing comma, and a file that is
+        // otherwise full of the person's settings.
+        let path = dir.join("config.json");
+        let bytes = br#"{"default_model":"ollama:qwen2.5:7b","agent_approval":"ask",}"#;
+        fs::write(&path, bytes).unwrap();
+
+        let error = XencodeConfig::load_from(&path)
+            .expect_err("bytes that are not JSON must not be read as if they were a config");
+        let ConfigError::Corrupt { problem, .. } = &error else {
+            panic!("expected a corrupt-file refusal, got {error:?}");
+        };
+        let text = error.to_string();
+        assert!(text.contains("config.json"), "{text}");
+        assert!(text.contains("trailing comma"), "{text}");
+        assert!(
+            !problem.is_empty(),
+            "the parser's own words are the useful part"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn saving_refuses_to_replace_a_file_it_could_not_read() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let bytes = br#"{"default_model":"ollama:qwen2.5:7b","agent_approval":"ask",}"#;
+        fs::write(&path, bytes).unwrap();
+
+        // The whole defect this closes: the command loads, falls back to
+        // defaults because the load failed, and saves — printing success while
+        // it replaces someone's settings with the default block.
+        let error = XencodeConfig::default()
+            .save_to(&path)
+            .expect_err("an unreadable config must not be replaced by defaults");
+        assert!(
+            matches!(error, ConfigError::Corrupt { .. }),
+            "expected a corrupt-file refusal, got {error:?}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes, "the file is untouched");
+
+        // Same guard for a file that is valid JSON of the wrong kind: reading it
+        // back as a config would hand every setting the default value.
+        let array = dir.join("array.json");
+        fs::write(&array, b"[]").unwrap();
+        let error = XencodeConfig::default()
+            .save_to(&array)
+            .expect_err("a JSON array is not a config to overwrite");
+        assert!(
+            matches!(error, ConfigError::NotAConfig { found: "array", .. }),
+            "expected a not-a-config refusal, got {error:?}"
+        );
+        assert_eq!(fs::read(&array).unwrap(), b"[]");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_empty_config_is_no_settings_yet_rather_than_damage() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        // What `touch` leaves, or a create that got no bytes written. There is
+        // nothing in it to protect, so refusing to save would be a dead end.
+        for contents in ["", "   \n"] {
+            let path = dir.join("empty.json");
+            fs::write(&path, contents).unwrap();
+            let loaded = XencodeConfig::load_from(&path).expect("an empty file reads as no config");
+            assert_eq!(loaded, XencodeConfig::default());
+            XencodeConfig::default().save_to(&path).unwrap();
+            assert_eq!(
+                XencodeConfig::version_of(&path),
+                Some(CURRENT_CONFIG_VERSION),
+                "the save went through"
+            );
+            fs::remove_file(&path).unwrap();
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn resetting_still_works_on_a_file_nothing_else_can_write_over() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let bytes = br#"{"default_model":"ollama:qwen2.5:7b","agent_approval":"ask",}"#;
+        fs::write(&path, bytes).unwrap();
+
+        // `xencode config reset` is the way out of an unreadable config, so it
+        // is allowed past the shape check — and the broken bytes are kept, which
+        // is what makes repairing them by hand possible afterwards.
+        XencodeConfig::default().force_save_to(&path).unwrap();
+        let after = fs::read(&path).unwrap();
+        assert_ne!(after, bytes);
+        assert!(String::from_utf8(after)
+            .unwrap()
+            .contains("\"agent_approval\""));
+
+        let backups: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .map(|found| found.file_name().to_string_lossy().into_owned())
+            })
+            .filter(|name| name.starts_with("config.json.bak."))
+            .collect();
+        assert_eq!(backups.len(), 1, "the unreadable file was copied aside");
+        let kept = fs::read(dir.join(&backups[0])).unwrap();
+        assert_eq!(kept, bytes, "the copy holds what was there, damage and all");
+
+        // What it refuses to skip is the version: a newer xencode's file is not
+        // this one to overwrite, reset included.
+        let newer = dir.join("newer.json");
+        fs::write(&newer, br#"{"config_version":9}"#).unwrap();
+        assert!(matches!(
+            XencodeConfig::default().force_save_to(&newer),
+            Err(ConfigError::NewerFile { found: 9, .. })
+        ));
         fs::remove_dir_all(&dir).unwrap();
     }
 

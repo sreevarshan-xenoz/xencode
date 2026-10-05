@@ -2113,6 +2113,39 @@ rows: `config` (the settings are unread, so that run is on defaults) and
 a bare string — is refused the same way rather than read as "all defaults", which
 is what used to happen.
 
+A file that is not JSON at all — the trailing comma a hand edit leaves — is refused
+too, and refused **at the write** as well as the read. That second half is what
+matters: plenty of commands load the config, fall back to defaults when the load
+fails, and save. Before this, one of those succeeded and replaced the file with the
+default block, keys included:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/df1 xencode llamacpp set-path /tmp/some.gguf
+error: /tmp/df1/config.json is not readable JSON: trailing comma at line 1 column 83. Nothing was read from it and nothing was written to it, so whatever the file held is still there. Repair it by hand or restore a `config.json.bak.<time>` copy from beside it.
+```
+
+`xencode doctor` says the same in its `config` row, and its `config:version` row
+reads `absent` — there is no readable object there to ask. Repair the file by hand
+when you can read what broke. When you cannot, `xencode config reset` is the one
+command allowed to write over it, because discarding the file is what it is for —
+and it copies the unreadable bytes to a `config.json.bak.<time>` on the way, so the
+settings are still there to read out of the copy:
+
+```
+$ XCODE_CONFIG_DIR=/tmp/df1 xencode config reset
+configuration reset to defaults
+$ ls /tmp/df1
+config.json
+config.json.bak.20261005T061357.025100159Z
+```
+
+The first of those two is the readable default block; the second is what was in the
+file before, byte for byte.
+
+An empty or whitespace-only `config.json` is *not* treated as damage: it is what
+`touch` leaves, there are no bytes in it to protect, and refusing to save over it
+would be a dead end.
+
 `config set` keys (values are validated; `config show` prints the JSON):
 `mcp_servers`, `agent_hooks` and `model_profiles` are nested structures, so they are edited directly in the JSON instead, or managed in the TUI where a panel exists for them.
 

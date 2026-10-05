@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2303 tests passing, zero warnings (re-verified 2026-10-04, after RS-2)
+- [x] Workspace gates green — 16 crates, 2324 tests passing, zero warnings (re-verified 2026-10-05, after `DF-1`; 19 ignored)
 
 ## Model Catalog Honesty
 
@@ -14135,17 +14135,20 @@ not quietly reorder tiers.
 
 ### Z-6 Defects reproduced against the tree, each small enough to fix now
 
-These are broken, not missing. Each was reproduced on this machine by running the
-built binary, and each is one commit. They are listed in the order they should be
-fixed, cheapest-blast-radius last rather than first.
+These are broken, not missing — with one exception: `DF-6` is a notice that is
+missing next to damage `DF-1` already stopped, and it rests on a code read of
+`app.rs:2023` rather than on a reproduction. Each of the others was reproduced on
+this machine by running the built binary, and each is one commit. They are listed in
+the order they should be fixed, cheapest-blast-radius last rather than first.
 
 | ID | defect | observed, not inferred |
 |---|---|---|
-| **DF-1** | **A malformed `config.json` is silently replaced by defaults, losing every setting and every API key in it.** | 21 call sites read `XencodeConfig::load().unwrap_or_default()` and then `save()` — 14 in `xencode-cli/src/main.rs`, 5 in `xencode-server-rs/src/routes.rs`, and one each in `xencode-tui-rs/src/detached.rs` and `app.rs`. Reproduced: a config containing `"default_model": "llamacpp:MYMARKERMODEL"` written as deliberately broken JSON, then `xencode llamacpp set-path /tmp/some.gguf` printed `llama_cpp_model_path = /tmp/some.gguf` and rewrote the file as the full default block with `"default_model": "qwen2.5:7b"`. The command succeeded. Nothing said the file had been unreadable. This is the only defect here that can lose a user's work, and it is worse than the rest because the file it destroys holds their keys. |
+| **DF-1** | **A malformed `config.json` was silently replaced by defaults — fixed 2026-10-05.** | 21 call sites read `XencodeConfig::load().unwrap_or_default()` — 14 in `xencode-cli/src/main.rs`, 5 in `xencode-server-rs/src/routes.rs`, one each in `xencode-tui-rs/src/app.rs` and `detached.rs` — but the row first wrote that all of them then `save()`, and that is wrong: **three** can write. `xencode llamacpp start`, `xencode llamacpp set-path`, and the Settings panel (`App::new()` → `save_config()`). The five server routes only read the config, and `detached.rs` sets `persist_config = false`, so neither could destroy anything. Reproduced before the fix: a config holding `"default_model": "llamacpp:MYMARKERMODEL"` written as deliberately broken JSON, then `xencode llamacpp set-path /tmp/some.gguf` printed `llama_cpp_model_path = /tmp/some.gguf` and rewrote the file as the full default block with `"default_model": "qwen2.5:7b"`. The command succeeded and nothing said the file had been unreadable. Two things soften what was recorded on the first pass, and both are true: `save_to()` already refused a config from a *newer* xencode for exactly this reason, and `keep_backup_if_changed()` had copied the damaged bytes to `config.json.bak.<time>` first — so the settings were recoverable by hand, and the defect is a successful-looking command that reset everything without a word, not an unrecoverable loss. What landed: a `ConfigError::Corrupt` that names the file and where the parser gave up, the write-side refusal the version check already had extended to bytes that are not readable JSON or not an object (which covers all three writers, the Settings panel included, without touching its code), propagation at the two CLI sites, and `xencode config reset` allowed past the guard through `force_save_to()` — refusing there would leave no way out, and reset still keeps the broken bytes. An empty or whitespace-only file reads as "no settings yet" rather than damage: there is nothing in it to protect. |
 | **DF-2** | **`xencode analyze` panics on a non-ASCII character that straddles the line-length cap.** | `xencode-analysis-rs/src/analyzer.rs:89` slices `&line[..100.min(line.len())]` and `:270` slices `&line[..120.min(line.len())]` — byte indices, not char boundaries. Reproduced twice: a 141-byte `.py` line whose `é` occupies bytes 99–100 exited **101** with `end byte index 100 is not a char boundary; it is inside 'é' (bytes 99..101 of string)`; the same shape at byte 119 in a `.txt` file panicked at `:270` the same way. Any project with a `# -*- coding: utf-8 -*-`-style comment, an em-dash in prose, or a source file with accented identifiers makes the analysis command crash rather than report. The fix is `char_indices`/`lines()` and a floor at the previous boundary; `context.rs` already does exactly this (`while end > 0 && !content.is_char_boundary(end)`), so the correct pattern is in this workspace. |
 | **DF-3** | **A hint tells the user to run a command that does not exist.** | `xencode-cli/src/main.rs:4028` says *"use `xencode advisory check` for the offline RustSec/OSV corpus"*. The real subcommand is `xencode advisories check` — confirmed from `xencode advisories --help` (`sync`, `show`, `check`, `status`). The wrong name has propagated into `CLI_GUIDE.md:550`, `CLI_GUIDE.md:562` (where it is explained as if it were real) and `CHANGELOG.md:359`. Fix the string, then the three doc lines, in one commit. |
 | **DF-4** | **A dependency declared and never used.** | `dirs = "7"` at `xencode-cli/Cargo.toml:36`; no `dirs::` path appears anywhere in that crate's `src/` or `tests/` (the identifier `dirs` that does occur is a local `Vec`). Path handling in this workspace goes through `xencode-config-rs/src/paths.rs` and XDG since `DB-4`, so the crate has a reason to exist and this dependency does not. |
 | **DF-5** | **A bare `xencode` with no controlling terminal reports an errno instead of telling you what happened.** | Reproduced: `printf '' \| xencode` printed `error: No such device or address (os error 6)` and exited. `main.rs:1466` routes a bare invocation to the TUI, which needs a terminal; in a pipe, a cron line or a CI step the user gets a raw `ENXIO` with no mention of the terminal and no pointer to the commands that *do* work without one. Which call raises it was not traced here — the item is the message, not the mechanism. |
+| **DF-6** | **The interactive TUI still starts on defaults and says nothing about an unreadable config.** Found while fixing `DF-1`, and deliberately left out of that commit. `xencode-tui-rs/src/app.rs:2023` is `XencodeConfig::load().unwrap_or_default()` — every CLI command that writes now refuses with the file named, and `xencode doctor` reports the row, but a person who opens the TUI with a broken `config.json` sees a normal session on default settings, and the first thing they hear is `config.json unchanged: …` after they have already changed a setting. The damage is stopped; only the notice is missing. Done-when: launching the TUI against an unreadable config says so on the first frame, the way the window-layout read already does (`app.rs:2032` — "a toast on the first frame"), and says it once. Trap: it must be a notice, not a block — a session on defaults is still a usable session, and `xencode` must not refuse to open because of a file it can no longer destroy. |
 
 No item is proposed for anything the pass asserted without a run behind it. The
 pass also reported `README.md`'s test count as
@@ -14201,10 +14204,13 @@ as if they had been reproduced on this machine since:
 - **`DF-1` is fixed by refusing, not by repairing.** A config that does not parse gets
   an error naming the file and what broke, and the command stops; nothing writes a
   default block over somebody's secrets because their JSON had a trailing comma. A
-  repair tool would be a *second* feature and is not part of this item.
-- **Counting.** `LA-1`…`LA-5` and `DF-1`…`DF-5` add ten rows, taking the pool from
-  §Y-5's 310 to **320 rows over 317 unique IDs**. The frozen L/M/N/O/P/Q/S headline of
+  repair tool would be a *second* feature and is not part of this item. The one
+  command that is allowed past the refusal is `xencode config reset`, because
+  discarding the file is what it was asked to do and it is the way out of an
+  unreadable config; it still copies the damaged bytes aside first.
+- **Counting.** `LA-1`…`LA-5`, `DF-1`…`DF-6` add eleven rows, taking the pool from
+  §Y-5's 310 to **321 rows over 318 unique IDs**. The frozen L/M/N/O/P/Q/S headline of
   284 is unchanged: new work joining after §R-1 was written does not rewrite it, and
-  none of these ten re-sequences W0–W17. `DF-1`–`DF-5` are defects with no dependency
+  none of these eleven re-sequences W0–W17. `DF-1`–`DF-6` are defects with no dependency
   and may be taken in any order; `LA-2` waits on `LA-1`, and `LA-4` and `LA-5` are
   gated on their own measurements.
