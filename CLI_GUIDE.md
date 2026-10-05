@@ -547,7 +547,7 @@ named as unavailable rather than counted as clean:
 ```text
 dependency checkers
   cargo-shear (unused dependencies): 1 error(s), 0 warning(s)
-  cargo-deny (advisories, bans, licenses): cargo-deny not installed — advisories and licenses are not checked here; use `xencode advisory check` for the offline RustSec/OSV corpus
+  cargo-deny (advisories, bans, licenses): cargo-deny not installed — advisories and licenses are not checked here; use `xencode advisories check` for the offline RustSec/OSV corpus
 
 findings
   [High] unused-dependency crates/xencode-cli/Cargo.toml — unused dependency `dirs` (remove this dependency)
@@ -559,7 +559,7 @@ That is real output from this workspace: `cargo-shear` flagged `dirs` in the CLI
 manifest and the duplicate-major scan read it straight from `Cargo.lock`.
 `cargo-deny` is not installed here, so its column says so instead of pretending
 the advisory and license checks ran — the advisory side is covered offline by
-`xencode advisory check` (see above), which reads the synced corpus rather than
+`xencode advisories check` (see above), which reads the synced corpus rather than
 shelling out. Install `cargo-deny` and the same command fills that column for
 real. `--format json` emits the checkers' status and a `findings` array for a
 script to read.
