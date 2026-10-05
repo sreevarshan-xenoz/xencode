@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the command-line tool no longer carries a dependency it never used
+
+`xencode deps` had one real complaint about this workspace: the CLI crate
+declared the `dirs` crate in `rust/crates/xencode-cli/Cargo.toml` and never
+referred to it — no `dirs::` call anywhere in that crate's source or tests. Every
+path the CLI needs (configuration, cache, home directory) already comes from the
+shared configuration crate, which has resolved them through the XDG directories
+spec for a long time. The declaration is gone, `Cargo.lock` drops that one crate
+and nothing else, and the unused-dependency checker now returns
+`0 error(s), 0 warning(s)` where it returned one. The manuals that reproduced the
+old finding as sample output quote the current run instead.
+
 ### Fixed — `xencode analyze` no longer crashes on a line with an accent in it
 
 The line-length rule cut its quoted snippet at a byte index. For ASCII that is
@@ -405,10 +417,11 @@ version in `Cargo.lock`, and the delta of the current lock against the one at
 `HEAD` — the diff to read before merging a dependency change. It is report only:
 auto-fixing a dependency is how the supply chain becomes the attack, so nothing
 here edits a manifest. A checker that is not installed is named as unavailable
-rather than counted clean — `cargo-shear` runs here and flags the real unused
-`dirs` dependency in the CLI manifest, while `cargo-deny` is reported as absent
-with a pointer to the offline `xencode advisories check`. `--format json` emits
-the checker statuses and a findings array.
+rather than counted clean — `cargo-shear` runs here while `cargo-deny` is
+reported as absent with a pointer to the offline `xencode advisories check`. The
+first finding this command produced was real: an unused `dirs` dependency in the
+CLI manifest, which has since been removed. `--format json` emits the checker
+statuses and a findings array.
 
 ### Added — `SE-5`: the security scan now reads credential *content*, not just file names
 
