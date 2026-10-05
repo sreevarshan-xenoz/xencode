@@ -2,6 +2,21 @@ use crate::issues::{CodeIssue, IssueType, Severity};
 use regex::Regex;
 use std::path::Path;
 
+/// The line cut to `max` characters, or `None` when it is no longer than that.
+///
+/// Counted in characters and returned as a whole one, for two reasons. A style
+/// rule about line length is about how wide the line reads, and a byte index
+/// says something else: an `é` is two bytes, so a 100-byte cap on a line of
+/// accented text flags prose that fits on the screen. And slicing at a byte
+/// index that lands in the middle of a character does not truncate — it panics,
+/// which took the whole analysis run down with it.
+fn over_long_line(line: &str, max: usize) -> Option<&str> {
+    match line.char_indices().nth(max) {
+        Some((at, _)) => Some(&line[..at]),
+        None => None,
+    }
+}
+
 /// Language-aware code analyzer.
 pub struct CodeAnalyzer;
 
@@ -76,8 +91,8 @@ impl CodeAnalyzer {
                 ));
             }
 
-            // Check for long lines (>100 chars)
-            if line.len() > 100 {
+            // Check for long lines (>100 characters)
+            if let Some(snippet) = over_long_line(line, 100) {
                 issues.push(CodeIssue::new(
                     IssueType::StyleIssue,
                     Severity::Low,
@@ -86,7 +101,7 @@ impl CodeAnalyzer {
                     lineno,
                     100,
                     "Break line into multiple lines",
-                    &line[..100.min(line.len())],
+                    snippet,
                 ));
             }
 
@@ -258,7 +273,7 @@ impl CodeAnalyzer {
         for (i, line) in lines.iter().enumerate() {
             let lineno = (i + 1) as u32;
 
-            if line.len() > 120 {
+            if let Some(snippet) = over_long_line(line, 120) {
                 issues.push(CodeIssue::new(
                     IssueType::StyleIssue,
                     Severity::Low,
@@ -267,7 +282,7 @@ impl CodeAnalyzer {
                     lineno,
                     120,
                     "Break line into multiple lines",
-                    &line[..120.min(line.len())],
+                    snippet,
                 ));
             }
 
