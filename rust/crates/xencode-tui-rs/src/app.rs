@@ -6332,73 +6332,77 @@ impl<'a> App<'a> {
     }
 
     /// SE-3: the `AGENTS.md` trust split, from the command line. `/trust`
-    /// trusts the current bytes of the workspace file — by content hash, so a
-    /// later edit is a new question — and the decision persists in
+    /// trusts the current bytes of a file — by content hash, so a later edit is a
+    /// new question — and the decision persists in
     /// `.xencode/cache/agents_trust.json` across sessions. `/trust status`
     /// says how the file enters context right now; `/trust forget` withdraws
     /// trust for these exact bytes.
+    ///
+    /// QK-8: all three take an optional path, because since EV-5 a turn also
+    /// reads the `AGENTS.md` of the directories it works in and those files had
+    /// no way to be granted. With no path the command means the workspace's own
+    /// file, exactly as before.
     fn handle_trust_command(&mut self, prompt: &str) {
         let root = xencode_context_rs::default_root();
         let body = prompt.strip_prefix("/trust").unwrap_or("").trim();
-        match body {
-            "" => match xencode_context_rs::trust_agents(&root) {
+        // `status` and `forget` may name a file after them; anything else the
+        // person typed *is* the file, spaces included, so only a leading verb is
+        // read as one.
+        let (verb, named) = match body.split_once(char::is_whitespace) {
+            Some(("status", rest)) => ("status", rest.trim()),
+            Some(("forget", rest)) => ("forget", rest.trim()),
+            _ => ("trust", body),
+        };
+        let file = if named.is_empty() { "AGENTS.md" } else { named };
+        match verb {
+            "trust" => match xencode_context_rs::trust_agents_at(&root, file) {
                 Ok(sha) => self.system_line(&format!(
-                    "🤝 Trusted AGENTS.md (sha256 {}). Its bytes now enter the model's \
+                    "🤝 Trusted {file} (sha256 {}). Its bytes now enter the model's \
                      context as instructions. Any edit changes the hash and makes it \
-                     data again. Withdraw with /trust forget.",
+                     data again. Withdraw with /trust forget {file}.",
                     &sha[..12]
                 )),
                 Err(e) => self.system_line(&format!("Cannot trust: {e}")),
             },
             "status" => {
-                let content = std::fs::read_to_string(root.join("AGENTS.md"));
+                let content = xencode_context_rs::resolve_agents_path(&root, file)
+                    .ok()
+                    .and_then(|path| std::fs::read_to_string(path).ok());
                 match content {
-                    Ok(content) if content.trim().is_empty() => {
-                        self.system_line("AGENTS.md is empty — nothing to trust.");
+                    Some(content) if content.trim().is_empty() => {
+                        self.system_line(&format!("{file} is empty — nothing to trust."));
                     }
-                    Ok(content) => {
+                    Some(content) => {
                         let sha = xencode_context_rs::agents_sha256(&content);
+                        let head = format!("{file} (sha256 {})", &sha[..12]);
                         if xencode_context_rs::agents_content_is_trusted(&root, &content) {
                             self.system_line(&format!(
-                                "AGENTS.md (sha256 {}) is trusted: it enters context as \
-                                 instructions.",
-                                &sha[..12]
+                                "{head} is trusted: it enters context as instructions."
                             ));
                         } else {
                             self.system_line(&format!(
-                                "AGENTS.md (sha256 {}) is NOT trusted: it enters context \
-                                 marked [data], and the model is told not to follow it. \
-                                 Read it, then decide with /trust.",
-                                &sha[..12]
+                                "{head} is NOT trusted: it enters context marked [data], \
+                                 and the model is told not to follow it. Read it, then \
+                                 decide with /trust {file}."
                             ));
                         }
                     }
-                    Err(_) => self.system_line("No AGENTS.md in this workspace."),
+                    None => self.system_line(&format!(
+                        "Nothing to report for {file}: only an AGENTS.md inside this \
+                         workspace can be trusted, and it has to exist."
+                    )),
                 }
             }
-            "forget" => {
-                let sha_file = std::fs::read_to_string(root.join("AGENTS.md"))
-                    .map(|c| xencode_context_rs::agents_sha256(&c));
-                match sha_file {
-                    Ok(sha) => match xencode_context_rs::untrust_agents(&root, &sha) {
-                        Ok(true) => self.system_line(&format!(
-                            "Trust withdrawn for AGENTS.md (sha256 {}). It is data again.",
-                            &sha[..12]
-                        )),
-                        Ok(false) => {
-                            self.system_line("This AGENTS.md was not trusted, so nothing changed.")
-                        }
-                        Err(e) => {
-                            self.system_line(&format!("Could not update the trust store: {e}"))
-                        }
-                    },
-                    Err(_) => self.system_line("No AGENTS.md in this workspace."),
-                }
-            }
-            other => self.system_line(&format!(
-                "Usage: /trust (trust this AGENTS.md), /trust status, /trust forget — \
-                 not {other:?}"
-            )),
+            _ => match xencode_context_rs::untrust_agents_at(&root, file) {
+                Ok(Some(sha)) => self.system_line(&format!(
+                    "Trust withdrawn for {file} (sha256 {}). It is data again.",
+                    &sha[..12]
+                )),
+                Ok(None) => self.system_line(&format!(
+                    "{file} was not trusted under these bytes, so nothing changed."
+                )),
+                Err(e) => self.system_line(&format!("Could not update the trust store: {e}")),
+            },
         }
     }
 

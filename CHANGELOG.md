@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-8`: `/trust` can name a directory's `AGENTS.md`, so those bytes can be followed
+
+`EV-5` gave a turn the instruction files of the directories it works in, and left them
+impossible to grant. `/trust` read `<root>/AGENTS.md` and nothing else, so in a fresh clone
+every directory block arrived marked `[data]` — information the model is told to read and
+not to obey. The section then contradicted itself in one prompt: its header explained that
+where two files disagree the later one is nearer the code, while each of its blocks said it
+was not an instruction. Rules could be loaded and never applied.
+
+`/trust src/auth/AGENTS.md` grants one directory's own bytes, and `/trust status` and
+`/trust forget` take the same path and answer for that file alone. With no argument the
+command means the workspace's `AGENTS.md`, exactly as before, and the store is what it was:
+content hashes in `.xencode/cache/agents_trust.json`, so an edit to any granted file is a
+new question. Trusting one file trusts nothing else — a turn with two dirty packages can
+carry the granted rule plain while its neighbour still carries the data mark, and the
+workspace's own file is untouched by a grant that named a directory.
+
+A path is the one part of this decision that arrives as typed text, and it writes to a
+durable store, so the checks are the feature. The name has to end in `AGENTS.md`, because
+that is the only file the context reader will ever load instructions from and trusting
+anything else would grant nothing. It is resolved against the workspace root, never against
+whatever directory xencode was started in, and canonicalized before it is compared, so a
+symlink cannot carry the decision outside the project it belongs to. `.git/` and
+`.xencode/` are refused — those are git's store and this tool's own state, not directories
+of the project. A file that does not exist yet is refused rather than created by the act of
+trusting it, and no refusal writes to the store at all. `xencode-context-rs/src/trust.rs`
+covers both halves: `a_directorys_own_file_is_granted_by_path_and_withdrawn_again` asserts
+the grant and the withdrawal per block, and
+`a_trust_path_can_only_name_an_agents_md_inside_this_workspace` refuses a source file, a
+path that climbs out through `..`, an absolute path in another project, git's and xencode's
+own files, and nothing named at all. Both were watched to fail before they were believed:
+making the grant cover the whole walk put the neighbour's data mark back, and deleting the
+internal-directory check let `.git/AGENTS.md` be trusted.
+
+The command was also driven as a person types it, in a throwaway two-package repository under
+a sandboxed home: `/trust status src/auth/AGENTS.md` reported the same twelve leading hex
+characters `sha256sum` prints for that file and said it enters context marked `[data]`;
+granting it left `.xencode/cache/agents_trust.json` holding exactly that one hash while the
+neighbouring package kept its own hash and its `NOT trusted` answer; `/trust forget` emptied
+the store again; and each of `src/auth/mod.rs`, a path reaching another project, a real
+`.git/AGENTS.md` and `.xencode/cache/AGENTS.md` was refused with the reason named on screen.
+
+What did not move is the boundary that matters. Trust changes only what the model is told;
+the permission gate never reads these files, in any approval mode, and `/trust` is reachable
+only as a command a person types — the sole other caller of the trust API in the workspace is
+the existing test that proves granting a file changes no approval decision.
+
 ### Added — `EV-5`: a directory's own `AGENTS.md` is read when that directory is being worked in
 
 Project instructions had one home — `AGENTS.md` at the workspace root, sent in full on
@@ -18,14 +65,13 @@ Xencode now walks from each file the working tree has changed up to the root and
 `AGENTS.md` sitting in those directories — at most four files, none larger than 8 KiB, the
 nearest one last so the most specific rule is read closest to the question. They arrive
 under `## Instructions For These Directories`, each block named by its path, and a file
-nobody has trusted comes in marked `[data]` behind the same banner the root file uses. Because
-`/trust` reads the workspace's own file and nothing else, a *directory's* file has no way to be
-trusted yet: in a fresh clone every block arrives as data — information about the project that
-the model is told not to obey — and the section header draws that line block by block rather
-than treating the section as instructions. Giving `/trust` a path is the missing half of this
-feature and is recorded as `QK-8`; nothing of it is built. A clean tree loads nothing, and so
+nobody has trusted comes in marked `[data]` behind the same banner the root file uses, so
+the section header draws that line block by block rather than treating the section as
+instructions: a marked block is information the model is told not to obey. A clean tree
+loads nothing, and so
 does a turn touching only files at the root: the section exists only where a directory has
-rules of its own.
+rules of its own. Trusting a directory's own file needed `/trust` to accept a path, which
+landed beside it as `QK-8` below.
 
 Where the section sits was the part that needed care. The head of every request — system
 prompt, root `AGENTS.md`, `anchor.md` — is sent byte-for-byte unchanged so a local server
