@@ -2427,7 +2427,6 @@ assistant: hello";
     }
 
     #[test]
-    #[test]
     fn a_correct_citation_that_does_not_repeat_its_path_in_prose_reports_nothing() {
         // Found by running this against a real repository rather than a promoted
         // fixture: a marker glues its path to `[src:`, so the word is not a file this
