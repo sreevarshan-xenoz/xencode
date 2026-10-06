@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the manuals' command counts, and one command that never existed
+
+A check of every documented command against what the program actually offers found four
+lies of the quiet kind: `README.md` said 46 subcommands where `xencode --help` lists 47,
+the plan's own inventory was dated to a tree that had 44 and named none of `deps`, `run`
+or `runs`, and the crate tree in `README.md` counted `xencode-colab-rs` twice while never
+naming `xencode-agents-rs` — so the "16 crates" claim was one short of its own list.
+`CLI_GUIDE.md` also told a reader to type `/review` in the TUI; there is no such command,
+and the request path it was describing belongs to `xencode query`. Every count here was
+re-read from `--help` and from `crates/` on 2026-10-06, and no manual now documents a
+command or flag that does not exist — including the two that looked like inventions
+(`--flaky-result`, `--in-diff`) and turn out to be flags of `cargo nextest` and
+`cargo-mutants` that this program passes itself.
+
 ### Added — `EV-7`: a failure leaves a lesson draft, and only your words make it an instruction
 
 Two things in this program already record that the agent's work was wrong: `/rewind`, which
