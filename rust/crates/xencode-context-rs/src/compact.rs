@@ -1030,6 +1030,27 @@ pub fn believed_state(xencode_dir: &Path) -> ContextState {
     }
 }
 
+/// The durable file as it stands, checked against this repository, and written
+/// back by nothing.
+///
+/// [`drop_stale_facts`] runs on the way into every turn and says not one word: a
+/// fact the code has since contradicted simply stops arriving. That is the right
+/// behaviour for a prompt and the wrong one for a person, who promoted a line
+/// they can still read in `state.md` while the model has stopped obeying it, and
+/// has nowhere to ask why. This is that asking — the same pass, reported rather
+/// than applied.
+///
+/// It deletes nothing on purpose. A fact that is stale against this checkout is
+/// frequently true again one branch later, and a diagnostic that rewrote the
+/// human's own file would have the tool decide what they are allowed to keep.
+pub fn audit_durable_facts(xencode_dir: &Path) -> StaleFacts {
+    let root = state_root(xencode_dir);
+    match std::fs::read_to_string(xencode_dir.join("state.md")) {
+        Ok(text) => drop_stale_facts(&text, &root),
+        Err(_) => StaleFacts::default(),
+    }
+}
+
 /// Parse a hard-compaction reply into `ContextState`. The `## recent` section
 /// is *not* folded into state (it becomes the new tier-7 window instead).
 pub fn parse_hard_compact_reply(reply: &str) -> ContextState {
@@ -1555,6 +1576,68 @@ assistant: hello";
             check.text
         );
         assert_eq!(check.unverifiable, 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// QK-4: the pass that keeps a disproven fact out of the prompt is silent, and
+    /// silence is undiagnosable — a person reading their own `state.md` sees the
+    /// line and cannot find out why the model stopped obeying it. The audit asks the
+    /// same question out loud, and takes nothing away while doing it.
+    #[test]
+    fn the_audit_names_what_the_silent_pass_took_and_writes_nothing_back() {
+        let (root, dir) = git_repo("audit");
+        committed_source(&root, "src/auth.rs", "fn login() {}\n");
+        let durable = promote_lines(
+            &dir,
+            &[
+                "login lives in src/auth.rs",
+                "the crate is Rust-first and cites no file at all",
+            ],
+        );
+        // Delete the cited file and commit, so the tree is clean afterwards and the
+        // file's absence is the only thing that can be the reason.
+        std::fs::remove_file(root.join("src/auth.rs")).unwrap();
+        commit_all(&root, "the module moved");
+        assert!(durable.contains("login lives in"), "{durable}");
+
+        let check = audit_durable_facts(&dir);
+        assert_eq!(
+            check.dropped.len(),
+            1,
+            "the audit blamed the wrong lines: {:?}",
+            check.dropped
+        );
+        assert_eq!(check.dropped[0].problem, FactProblem::SourceMissing);
+        assert!(
+            check.dropped[0].line.contains("login lives in"),
+            "the report did not name the fact it dropped: {}",
+            check.dropped[0].line
+        );
+        assert!(
+            check.text.contains("Rust-first") && !check.text.contains("login lives in"),
+            "what the audit says it dropped and what it leaves for the prompt disagree:\n{}",
+            check.text
+        );
+
+        // The whole of the item's trap: a report, not a janitor. A fact stale on
+        // this checkout is often true again one branch over, and rewriting the
+        // human's own file would have the tool decide what they may keep.
+        let on_disk = std::fs::read_to_string(dir.join("state.md")).unwrap();
+        assert_eq!(
+            on_disk, durable,
+            "the audit rewrote state.md while claiming only to read it"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn auditing_a_project_that_has_never_stored_a_fact_reports_nothing() {
+        let (root, dir) = git_repo("no-state");
+        let check = audit_durable_facts(&dir);
+        assert!(
+            check.text.is_empty() && check.dropped.is_empty() && check.unverifiable == 0,
+            "a project with no state file was reported as if it had one: {check:?}"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 

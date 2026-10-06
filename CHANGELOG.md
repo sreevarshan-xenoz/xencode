@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-4`: `xencode doctor` says which stored facts the code no longer agrees with
+
+A fact about the code that has moved since it was written leaves the prompt silently. The
+check that removes it runs every time a prompt is built and says nothing: `state.md` keeps
+the line, the turn does not see it, and the difference between "this project has two stored
+facts" and "this project has two stored facts, one of which nobody believes any more" was
+invisible from outside. A person reading `state.md` had no way to find out that the file
+they were reading was not the file the model was reading.
+
+`xencode doctor` gained a `knowledge:stale` row for it, and `xencode doctor --env` the
+detail: a count of what still reaches the model, what was dropped, and what could be
+neither confirmed nor contradicted, followed by each dropped line with its reason —
+`the file it cites is gone`, or `the file it cites has changed since`. A project that has
+never stored a fact reports `ABSENT`, which is not a pass over nothing. The row is in the
+JSON of both surfaces, so an attached report and the screen cannot disagree about it.
+
+It reports rather than repairs, deliberately: the same pass that edits `state.md` when a
+prompt is built is run in read-only mode here, and a diagnostic that deleted lines would
+take the one judgement still worth making — whether the fact is wrong or the code is — off
+the person reading the output. The fix the row names is to re-read the cited file and
+promote a corrected fact. The half of this plan item that writes files into a project —
+a `AGENTS.md`, an `anchor.md`, skills, hooks, a settings template with the secrets out of
+it — is not here; that is a different surface with a different risk and is tracked on its
+own.
+
 ### Added — `QM-5`: each model's speed is kept apart, and `/cost` says how many records it rests on
 
 The rollup kept one window of recent generation and prompt rates for the whole project and
