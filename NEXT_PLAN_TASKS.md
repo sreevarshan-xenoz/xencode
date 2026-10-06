@@ -15181,19 +15181,7 @@ This plan already holds itself to a higher bar elsewhere: `xencode colab preflig
 (§K-2a) "prints a fix line per failing check and exits non-zero". `doctor` is the more
 used command and does less with its own answer.
 
-- **Item AA-2** — have `doctor`, in whichever of its three surfaces ran, exit non-zero
-  when a check in `failing` is a real failure, keeping `--format json`'s `ok` field as
-  the machine-readable half. *Done-when:* the run above exits non-zero with the same
-  output, a run with everything passing still exits 0, and the manuals state which
-  exit code means what. Effort S. Joins W11.
-- **Traps, both checked rather than assumed.** First, an exit code is an interface:
-  `grep -rn "xencode doctor" .github/workflows/` returns nothing, so no CI step here
-  depends on the current always-zero behaviour — but any user script that treats
-  `doctor` as a no-op probe will start seeing failures, which is why the change wants a
-  changelog line and not only a commit. Second, the three surfaces are not equally
-  strict and the item must not quietly raise one: a `WARN` or `ABSENT` row (no index
-  manifest yet, say) is not a failure and must not change the exit status. Only rows
-  already counted in `failing` may.
+- [x] **Item AA-2 — have `doctor`, in whichever of its three surfaces ran, exit non-zero when a check in `failing` is a real failure, keeping `--format json`'s `ok` field as the machine-readable half.** — done 2026-10-06 in `xencode-cli/src/main.rs`. `render_checks` returns `Result<(), String>` reporting failure count when `failing` is non-empty, propagated by `run_selfcheck` and `run_bug_report`; exit status is 0 on full pass / absent and 1 on check failure matching JSON `ok`; manuals (`README.md`, `CLI_GUIDE.md`) updated with exit code semantics; verified by integration tests in `tests/bootstrap_cli.rs`. *Effort: S.*
 
 ### AA-3 `xencode review` compares against a branch this repository may not have
 
