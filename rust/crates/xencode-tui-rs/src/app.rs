@@ -7226,7 +7226,7 @@ impl<'a> App<'a> {
                 blocks,
                 &recent_text,
             );
-            let stable_tokens: u64 = doc.tiers.iter().take(3).map(|t| t.tokens).sum();
+            let stable_tokens = doc.stable_tokens;
             let _ = tx.send(format!(
                 "[CTX]📦 Assembled context ≈ {} / {} tokens target — {} / {} retrieved files in — stable prefix {} tokens — prompts {}",
                 doc.total_tokens,

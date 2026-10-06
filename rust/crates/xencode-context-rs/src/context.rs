@@ -2,8 +2,12 @@
 //!
 //! Turns profile + stable layer files + retrieval candidates + recent
 //! conversation into the actual prompt for the model, applying the token
-//! budget algorithm. Tiers 1–3 form the byte-stable prefix below which the
-//! KV cache can be reused across requests; nothing dynamic may precede it.
+//! budget algorithm. The leading tiers — system, `AGENTS.md`, the human-owned
+//! sections lifted out of it, and `anchor.md` — form the byte-stable prefix
+//! below which the KV cache can be reused across requests; nothing dynamic may
+//! precede it. Their size is on the assembled document as `stable_tokens`,
+//! because a consumer that counts leading tiers by position is wrong the moment
+//! one is added.
 //!
 //! Pure/disk-free (`assemble_prompt` takes strings and pre-built fenced
 //! blocks), which keeps the budget logic unit-testable without a repository.
@@ -61,6 +65,55 @@ pub const STABLE_END_MARKER: &str = "<!-- xencode:stable-prefix-end -->";
 /// and no more.
 pub const SCOPED_AGENTS_CAP_TOKENS: u64 = 500;
 
+/// QK-2 — what the human-written tail of `AGENTS.md` may cost, on top of the
+/// file's own [`AGENTS_CAP_TOKENS`].
+///
+/// The root file is capped and the cap is a *head* cut, so the tail of a long
+/// `AGENTS.md` never reaches the model — and the tail is exactly where the
+/// product writes the lines a person approved: `/lesson approve` appends under
+/// `## Lessons` at the end of the file. Measured live before this was built, on a
+/// 9,889-character `AGENTS.md`: the head reached 4,774 characters of it and held
+/// no lesson. These two sections are lifted out and paid for separately, so the
+/// bytes a human chose are never the bytes an automatic budget discards.
+pub const PREFERENCES_CAP_TOKENS: u64 = 300;
+
+/// The level-2 headings that belong to a person rather than to a generator, in
+/// the words they are written in. Matching is on the whole heading, lowercased,
+/// so `## Lessons from the last release` is somebody's prose heading and stays
+/// where it is.
+const HUMAN_OWNED_HEADINGS: [&str; 2] = ["lessons", "preferences"];
+
+/// Split `AGENTS.md` into everything that is ordinary file text and the level-2
+/// sections a human authored, returning `(bulk, pinned)` with every byte of the
+/// original preserved in one of the two, in order.
+///
+/// A pinned section runs from its heading to the next heading of level one or
+/// two, or to the end of the file; a deeper `###` heading belongs to the section
+/// it sits under. With nothing to pin this returns the input unchanged, which is
+/// what keeps the byte-stable head stable for every project that has no such
+/// section.
+pub fn human_owned_sections(text: &str) -> (String, String) {
+    let mut bulk = String::new();
+    let mut pinned = String::new();
+    let mut in_pinned = false;
+    // Every byte of the input lands in exactly one of the two, so a file with
+    // nothing to pin comes back as it went in — a missing final newline included.
+    for line in text.split_inclusive('\n') {
+        let heading = line.trim_end_matches(['\n', '\r']).trim();
+        if let Some(name) = heading.strip_prefix("## ") {
+            in_pinned = HUMAN_OWNED_HEADINGS.contains(&name.trim().to_lowercase().as_str());
+        } else if heading.starts_with("# ") {
+            in_pinned = false;
+        }
+        if in_pinned {
+            pinned.push_str(line);
+        } else {
+            bulk.push_str(line);
+        }
+    }
+    (bulk, pinned)
+}
+
 /// A retrieved file's fenced body, ready to inject.
 #[derive(Debug, Clone)]
 pub struct RetrievedBlock {
@@ -87,8 +140,12 @@ pub struct TierDoc {
 pub struct ContextDoc {
     /// The full assembled prompt (stable prefix first).
     pub text: String,
-    /// Byte-stable head: SYSTEM + AGENTS.md + anchor.md + end marker.
+    /// Byte-stable head: SYSTEM + `AGENTS.md` (whose human-owned sections ride as
+    /// a tier of their own) + anchor.md + end marker.
     pub stable_prefix: String,
+    /// What that head costs, so a report does not have to know how many leading
+    /// tiers it is made of.
+    pub stable_tokens: u64,
     pub target_tokens: u64,
     pub total_tokens: u64,
     pub tiers: Vec<TierDoc>,
@@ -135,7 +192,9 @@ fn repo_map_tier(repo_map: &str, target: u64, remaining: u64) -> (Option<String>
     (Some(repo_map.to_string()), tokens)
 }
 
-/// Tiers 1–3 (§10): SYSTEM + AGENTS.md + anchor.md + end marker.
+/// The byte-stable head (§10): SYSTEM, then `AGENTS.md` with its human-owned
+/// sections riding on a budget of their own, then anchor.md, closed by the end
+/// marker.
 ///
 /// Shared by the `/ctx` text preview ([`assemble_prompt`]) and the live chat
 /// assembly ([`assemble_chat`]) so both emit a byte-identical head — the
@@ -145,15 +204,30 @@ struct StableHead {
     tokens: u64,
     system_tokens: u64,
     agents_tokens: u64,
+    preferences_tokens: u64,
     anchor_tokens: u64,
     truncated: bool,
 }
 
 fn stable_head(system: &str, agents_md: Option<&str>, anchor_md: Option<&str>) -> StableHead {
     let system_tokens = est_tokens(system.len(), false);
-    let (agents_head, agents_tokens) =
-        truncate_to_tokens(agents_md.unwrap_or(""), AGENTS_CAP_TOKENS, false);
-    let truncated_agents = agents_md.is_some_and(|a| a.len() > agents_head.len());
+    // QK-2: the human-written sections leave the file before its cap is applied,
+    // so cutting the bulk down can never be what drops a line someone approved.
+    let (agents_bulk, agents_pinned) = human_owned_sections(agents_md.unwrap_or(""));
+    let (preferences_head, preferences_tokens) =
+        truncate_to_tokens(&agents_pinned, PREFERENCES_CAP_TOKENS, false);
+    let truncated_preferences = agents_pinned.len() > preferences_head.len();
+    // A section longer than its own ceiling hands the rest back to the file's
+    // budget instead of losing it. Without this, a `## Lessons` opened near the
+    // top of a file and never closed would have *shrunk* the prompt: the old head
+    // cut sent the first 4800 characters of the whole file, and pinning 1200 of
+    // them would have thrown the remainder away. Pinning may only ever add.
+    let mut bulk_for_cap = agents_bulk;
+    if truncated_preferences {
+        bulk_for_cap.push_str(&agents_pinned[preferences_head.len()..]);
+    }
+    let (agents_head, agents_tokens) = truncate_to_tokens(&bulk_for_cap, AGENTS_CAP_TOKENS, false);
+    let truncated_agents = bulk_for_cap.len() > agents_head.len();
     let (anchor_head, anchor_tokens) =
         truncate_to_tokens(anchor_md.unwrap_or(""), ANCHOR_CAP_TOKENS, false);
     let truncated_anchor = anchor_md.is_some_and(|a| a.len() > anchor_head.len());
@@ -165,17 +239,25 @@ fn stable_head(system: &str, agents_md: Option<&str>, anchor_md: Option<&str>) -
     if !agents_head.is_empty() {
         parts.push(&agents_head);
     }
+    // The bulk comes first and the person's own sections after it, which is the
+    // order they sit in in the file and the cheaper one for the cached prefix: a
+    // reworded lesson then invalidates from that block onward, not from the top of
+    // the project's instructions.
+    if !preferences_head.is_empty() {
+        parts.push(&preferences_head);
+    }
     if !anchor_head.is_empty() {
         parts.push(&anchor_head);
     }
     parts.push(STABLE_END_MARKER);
     StableHead {
         prefix: parts.join("\n\n"),
-        tokens: system_tokens + agents_tokens + anchor_tokens,
+        tokens: system_tokens + agents_tokens + preferences_tokens + anchor_tokens,
         system_tokens,
         agents_tokens,
+        preferences_tokens,
         anchor_tokens,
-        truncated: truncated_agents || truncated_anchor,
+        truncated: truncated_agents || truncated_preferences || truncated_anchor,
     }
 }
 
@@ -214,7 +296,7 @@ pub fn assemble_prompt(
     let mut tiers: Vec<TierDoc> = Vec::new();
     let mut truncated = false;
 
-    // ── Tiers 1–3: stable prefix ─────────────────────────────────────────
+    // ── The stable prefix: system, agents.md, its own sections, anchor.md ──
     let stable = stable_head(system, agents_md, anchor_md);
     let agents_class = agents_md
         .map(SourceClass::of_agents_md)
@@ -229,6 +311,15 @@ pub fn assemble_prompt(
         tokens: stable.agents_tokens,
         class: agents_class,
     });
+    if stable.preferences_tokens > 0 {
+        // The same bytes, the same trust question, a budget of its own — which is
+        // the only reason this is a separate tier and not a footnote on the file.
+        tiers.push(TierDoc {
+            name: "preferences",
+            tokens: stable.preferences_tokens,
+            class: agents_class,
+        });
+    }
     tiers.push(TierDoc {
         name: "anchor.md",
         tokens: stable.anchor_tokens,
@@ -399,6 +490,7 @@ pub fn assemble_prompt(
     ContextDoc {
         text,
         stable_prefix,
+        stable_tokens: stable.tokens,
         target_tokens: target,
         total_tokens,
         tiers,
@@ -462,6 +554,9 @@ pub struct ChatInput<'a> {
 #[derive(Debug, Clone)]
 pub struct ChatAssembly {
     pub turns: Vec<ChatTurn>,
+    /// What the byte-stable head (`turns[0]`) costs, so a report does not have to
+    /// know how many leading tiers it is made of.
+    pub stable_tokens: u64,
     pub target_tokens: u64,
     pub total_tokens: u64,
     pub tiers: Vec<TierDoc>,
@@ -542,21 +637,29 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
     let mut tiers: Vec<TierDoc> = Vec::new();
     let mut truncated = false;
 
-    // ── Tiers 1–3: stable system head ────────────────────────────────────
+    // ── The stable prefix: system, agents.md, its own sections, anchor.md ──
     let stable = stable_head(input.system, input.agents_md, input.anchor_md);
     tiers.push(TierDoc {
         name: "system",
         tokens: stable.system_tokens,
         class: SourceClass::Instructions,
     });
+    let agents_class = input
+        .agents_md
+        .map(SourceClass::of_agents_md)
+        .unwrap_or(SourceClass::AgentFile { trusted: true });
     tiers.push(TierDoc {
         name: "agents.md",
         tokens: stable.agents_tokens,
-        class: input
-            .agents_md
-            .map(SourceClass::of_agents_md)
-            .unwrap_or(SourceClass::AgentFile { trusted: true }),
+        class: agents_class,
     });
+    if stable.preferences_tokens > 0 {
+        tiers.push(TierDoc {
+            name: "preferences",
+            tokens: stable.preferences_tokens,
+            class: agents_class,
+        });
+    }
     tiers.push(TierDoc {
         name: "anchor.md",
         tokens: stable.anchor_tokens,
@@ -791,6 +894,7 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
 
     ChatAssembly {
         turns,
+        stable_tokens: stable.tokens,
         target_tokens: target,
         total_tokens,
         tiers,
