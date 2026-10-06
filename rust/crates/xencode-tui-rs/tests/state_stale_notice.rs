@@ -330,6 +330,29 @@ async fn the_context_panel_names_a_durable_fact_it_had_to_drop() {
     );
     std::fs::remove_dir_all(&outside).unwrap();
 
+    // ── AB-1: aged anchor proof reports warning in /ctx kv ────────────────────
+    std::env::set_current_dir(&root).unwrap();
+    let aged_anchor_meta = xencode_context_rs::AnchorMeta {
+        proved_at_unix_s: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - (21 * 86400),
+        candidates: 2,
+        verified: 2,
+    };
+    xencode_context_rs::write_anchor_meta(&root, &aged_anchor_meta).unwrap();
+    let aged_panel = context_panel(&mut app).await;
+    let anchor_notice = aged_panel
+        .iter()
+        .find(|line| line.contains("anchor proved"))
+        .unwrap_or_else(|| panic!("aged anchor was not reported in /ctx kv: {aged_panel:#?}"));
+    assert!(
+        anchor_notice.contains("21 days ago")
+            && anchor_notice.contains("run `xencode anchor` to re-check"),
+        "anchor notice wording did not match: {anchor_notice}"
+    );
+
     std::env::set_current_dir(previous).unwrap();
     std::fs::remove_dir_all(&root).unwrap();
 }

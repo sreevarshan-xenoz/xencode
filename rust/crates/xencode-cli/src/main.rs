@@ -6565,6 +6565,9 @@ async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
     checks.push(doc::check_durable_facts(
         &root.join(xencode_context_rs::XENCODE_DIR),
     ));
+    checks.push(doc::check_anchor(
+        &root.join(xencode_context_rs::XENCODE_DIR),
+    ));
 
     render_checks("report", &checks, format);
     Ok(())
@@ -8159,6 +8162,21 @@ fn run_anchor(
             Err(e) => return Err(format!("could not write the anchor: {e}")),
         }
     };
+
+    if !dry_run {
+        let now_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let meta = anchor::AnchorMeta {
+            proved_at_unix_s: now_s,
+            candidates: found,
+            verified,
+        };
+        if let Err(e) = anchor::write_anchor_meta(&root, &meta) {
+            eprintln!("  warning: could not write anchor.meta sidecar: {e}");
+        }
+    }
 
     if matches!(format, OutputFormat::Json) {
         let report = serde_json::json!({

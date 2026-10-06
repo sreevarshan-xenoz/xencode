@@ -251,6 +251,64 @@ pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
     }
 }
 
+/// Check build and test recipe anchor freshness (`AB-1`).
+///
+/// An anchor file in `.xencode/anchor.md` provides build and test commands for the prompt.
+/// The recipes were proved to work at the time they were run, but repositories change.
+/// This check reads `.xencode/anchor.meta` to determine how long ago the anchor recipes
+/// were verified, reporting when they have aged past [`crate::anchor::ANCHOR_STALE_AGE_DAYS`].
+pub fn check_anchor(xencode_dir: &std::path::Path) -> SelfCheck {
+    let name = "knowledge:anchor".to_string();
+    let has_anchor = xencode_dir.join("anchor.md").is_file()
+        || xencode_dir.join(crate::init::XENCODE_DIR).join("anchor.md").is_file();
+    if !has_anchor {
+        return SelfCheck {
+            name,
+            state: "absent".to_string(),
+            detail: "no anchor.md — run `xencode anchor` to discover and prove build recipes".to_string(),
+            fix: Some("run `xencode anchor` to generate .xencode/anchor.md".to_string()),
+        };
+    }
+
+    let meta = crate::anchor::read_anchor_meta_from_dir(xencode_dir);
+    match meta {
+        Some(meta) => {
+            let now_s = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let days = crate::anchor::anchor_age_days(meta.proved_at_unix_s, now_s);
+            if days >= crate::anchor::ANCHOR_STALE_AGE_DAYS {
+                SelfCheck {
+                    name,
+                    state: "fail".to_string(),
+                    detail: format!("anchor proved {days} days ago; run `xencode anchor` to re-check"),
+                    fix: Some("run `xencode anchor` to re-verify build and test recipes".to_string()),
+                }
+            } else {
+                SelfCheck {
+                    name,
+                    state: "pass".to_string(),
+                    detail: format!(
+                        "anchor proved {days} day{} ago ({} candidate{}, {} verified)",
+                        if days == 1 { "" } else { "s" },
+                        meta.candidates,
+                        if meta.candidates == 1 { "" } else { "s" },
+                        meta.verified
+                    ),
+                    fix: None,
+                }
+            }
+        }
+        None => SelfCheck {
+            name,
+            state: "fail".to_string(),
+            detail: "anchor has no proof record; run `xencode anchor` to re-check".to_string(),
+            fix: Some("run `xencode anchor` to prove build recipes and record provenance".to_string()),
+        },
+    }
+}
+
 /// A fact line as the row can show it: the sentence, cut short. A durable fact is a
 /// sentence and a doctor row is not, and the markers are the tool's own file format
 /// rather than anything about the project.
@@ -1007,6 +1065,58 @@ mod tests {
             agrees.detail
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_anchor_row_reports_age_and_freshness() {
+        let unique = std::process::id();
+        let dir = std::env::temp_dir().join(format!("xencode-doctor-anchor-{unique}"));
+        let xencode = dir.join(".xencode");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&xencode).unwrap();
+
+        // 1. Without anchor.md -> absent
+        let absent = check_anchor(&xencode);
+        assert_eq!(absent.state, "absent");
+        assert!(absent.detail.contains("no anchor.md"));
+
+        // 2. With anchor.md but without anchor.meta -> fail (no proof record)
+        std::fs::write(xencode.join("anchor.md"), "# Anchor\n## Build\n- cargo build\n").unwrap();
+        let unproven = check_anchor(&xencode);
+        assert_eq!(unproven.state, "fail");
+        assert!(unproven.detail.contains("no proof record"));
+
+        // 3. With fresh anchor.meta (proved today) -> pass
+        let now_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let fresh_meta = crate::anchor::AnchorMeta {
+            proved_at_unix_s: now_s,
+            candidates: 2,
+            verified: 2,
+        };
+        crate::anchor::write_anchor_meta(&dir, &fresh_meta).unwrap();
+        let fresh = check_anchor(&xencode);
+        assert!(fresh.passed(), "{}", fresh.detail);
+        assert!(fresh.detail.contains("0 days ago"));
+
+        // 4. With aged anchor.meta (proved 20 days ago) -> fail with exact wording
+        let aged_meta = crate::anchor::AnchorMeta {
+            proved_at_unix_s: now_s - (20 * 86400),
+            candidates: 2,
+            verified: 2,
+        };
+        crate::anchor::write_anchor_meta(&dir, &aged_meta).unwrap();
+        let aged = check_anchor(&xencode);
+        assert_eq!(aged.state, "fail");
+        assert_eq!(
+            aged.detail,
+            "anchor proved 20 days ago; run `xencode anchor` to re-check"
+        );
+        assert!(aged.fix.unwrap().contains("xencode anchor"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

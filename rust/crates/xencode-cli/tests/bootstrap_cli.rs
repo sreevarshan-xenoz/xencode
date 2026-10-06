@@ -175,3 +175,34 @@ fn a_path_that_is_not_a_project_directory_is_named_and_refused() {
     assert!(!ok, "a file was accepted as a project: {printed}");
     assert!(file.exists(), "refusing a file must not have touched it");
 }
+
+#[test]
+fn anchor_prove_records_sidecar_and_doctor_reports_freshness() {
+    let root = fixture("anchor-meta");
+    let (printed, ok) = run(&root, &["anchor", ".", "--timeout", "10"]);
+    assert!(ok, "xencode anchor failed: {printed}");
+
+    // anchor.meta exists and records the proof run
+    let meta_path = root.join(".xencode").join("anchor.meta");
+    assert!(meta_path.is_file(), "anchor.meta sidecar was not written");
+    let meta_text = std::fs::read_to_string(&meta_path).unwrap();
+    assert!(meta_text.contains("proved_at_unix_s"), "meta: {meta_text}");
+
+    // xencode doctor reports anchor status
+    let (doc_out, _) = run(&root, &["doctor", "--format", "json"]);
+    assert!(doc_out.contains("knowledge:anchor"), "doctor missing anchor check: {doc_out}");
+    assert!(doc_out.contains("anchor proved 0 days ago"), "doctor detail: {doc_out}");
+
+    // If anchor.meta is aged past 14 days, doctor reports age and fix
+    let aged_meta = serde_json::json!({
+        "proved_at_unix_s": 1_000_000_000,
+        "candidates": 1,
+        "verified": 1
+    });
+    std::fs::write(&meta_path, serde_json::to_string(&aged_meta).unwrap()).unwrap();
+    let (aged_out, _) = run(&root, &["doctor"]);
+    assert!(
+        aged_out.contains("anchor proved") && aged_out.contains("run `xencode anchor` to re-check"),
+        "doctor did not flag aged anchor: {aged_out}"
+    );
+}

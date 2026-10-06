@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AB-1`: record anchor proof freshness in sidecar metadata without altering KV prefix
+
+The verification timestamp and recipe counts for `.xencode/anchor.md` are now recorded in an external sidecar file (`.xencode/anchor.meta`):
+
+- `xencode anchor` writes `.xencode/anchor.meta` atomically on recipe proof runs without adding any timestamp or byte to `anchor.md` itself, preserving llama.cpp KV cache reuse.
+- `xencode doctor` checks anchor proof age through the `knowledge:anchor` self-check, warning when proofs are older than 14 days or when no proof metadata is recorded.
+- `/ctx kv` reports `⚓ anchor proved N days ago; run `xencode anchor` to re-check` when recipes exceed the freshness threshold.
+- Verified with unit tests in `anchor.rs`, `doctor.rs`, and end-to-end tests in `bootstrap_cli.rs` and `state_stale_notice.rs`.
+
 ### Changed — `AB-2`: distinguish missing commits from unsearchable trees in durable fact checks
 
 In `xencode-context-rs` and `xencode-tui-rs`, durable memory facts that cannot be checked now report their exact reason instead of combining both causes into a single ambiguous bucket:

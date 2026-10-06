@@ -75,7 +75,9 @@ pub use advise::{
     orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
 };
 pub use anchor::{
-    discover, is_current, prove, render, write_anchor, Discovery, Kind, Provenance, Recipe, Verdict,
+    discover, is_current, prove, render, write_anchor, AnchorMeta, ANCHOR_META_FILE,
+    ANCHOR_STALE_AGE_DAYS, anchor_age_days, read_anchor_meta, read_anchor_meta_from_dir,
+    write_anchor_meta, Discovery, Kind, Provenance, Recipe, Verdict,
 };
 pub use bootstrap::{
     bootstrap, offered_files, BootstrapEntry, BootstrapKind, BootstrapReport, OfferedFile,
