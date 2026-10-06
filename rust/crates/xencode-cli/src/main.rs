@@ -6489,8 +6489,7 @@ async fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let (config, _) = load_config();
     let checks = spine_checks(&root, &config).await;
-    render_checks("selfcheck", &checks, format);
-    Ok(())
+    render_checks("selfcheck", &checks, format)
 }
 
 /// `xencode doctor` with no flag: the whole bug report. Everything the slice
@@ -6569,13 +6568,12 @@ async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
         &root.join(xencode_context_rs::XENCODE_DIR),
     ));
 
-    render_checks("report", &checks, format);
-    Ok(())
+    render_checks("report", &checks, format)
 }
 
 /// One list, two renderings. The rows are the report: `--format json` emits them
 /// as they are, and the text listing is the same list with a mark in front.
-fn render_checks(surface: &str, checks: &[doc::SelfCheck], format: OutputFormat) {
+fn render_checks(surface: &str, checks: &[doc::SelfCheck], format: OutputFormat) -> Result<(), String> {
     let failing: Vec<&str> = checks
         .iter()
         .filter(|check| check.state == "fail")
@@ -6592,7 +6590,15 @@ fn render_checks(surface: &str, checks: &[doc::SelfCheck], format: OutputFormat)
                 "checks": checks,
             })
         );
-        return;
+        if failing.is_empty() {
+            return Ok(());
+        } else {
+            return Err(format!(
+                "doctor found {} failing check{}",
+                failing.len(),
+                if failing.len() == 1 { "" } else { "s" }
+            ));
+        }
     }
     for check in checks {
         println!("  {:<6} {:<22} {}", check.mark(), check.name, check.detail);
@@ -6602,7 +6608,13 @@ fn render_checks(surface: &str, checks: &[doc::SelfCheck], format: OutputFormat)
     }
     if !failing.is_empty() {
         println!("\n  failing: {}", failing.join(", "));
+        return Err(format!(
+            "doctor found {} failing check{}",
+            failing.len(),
+            if failing.len() == 1 { "" } else { "s" }
+        ));
     }
+    Ok(())
 }
 
 fn run_session(action: SessionAction) -> Result<(), String> {

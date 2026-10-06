@@ -200,9 +200,35 @@ fn anchor_prove_records_sidecar_and_doctor_reports_freshness() {
         "verified": 1
     });
     std::fs::write(&meta_path, serde_json::to_string(&aged_meta).unwrap()).unwrap();
-    let (aged_out, _) = run(&root, &["doctor"]);
+    let (aged_out, ok) = run(&root, &["doctor"]);
+    assert!(!ok, "doctor must exit non-zero when checks fail: {aged_out}");
     assert!(
         aged_out.contains("anchor proved") && aged_out.contains("run `xencode anchor` to re-check"),
         "doctor did not flag aged anchor: {aged_out}"
     );
+
+    // --selfcheck and --format json also exit non-zero when failing
+    let (json_out, json_ok) = run(&root, &["doctor", "--selfcheck", "--format", "json"]);
+    assert_eq!(json_ok, !json_out.contains("\"ok\":false"), "JSON exit code must match ok field: {json_out}");
+}
+
+#[test]
+fn doctor_exit_code_reflects_check_verdict() {
+    let root = fixture("doc-exit");
+    let (_, anchor_ok) = run(&root, &["anchor", ".", "--timeout", "10"]);
+    assert!(anchor_ok);
+
+    let (json_out, ok) = run(&root, &["doctor", "--format", "json"]);
+    let json_line = json_out.lines().find(|l| l.starts_with('{')).expect("JSON line not found");
+    let parsed: serde_json::Value = serde_json::from_str(json_line)
+        .unwrap_or_else(|e| panic!("failed to parse json {json_line}: {e}"));
+    let is_ok = parsed["ok"].as_bool().unwrap();
+    assert_eq!(ok, is_ok, "doctor exit status ({ok}) did not match ok ({is_ok}): {json_out}");
+
+    let (self_out, self_ok) = run(&root, &["doctor", "--selfcheck", "--format", "json"]);
+    let self_json_line = self_out.lines().find(|l| l.starts_with('{')).expect("selfcheck JSON line not found");
+    let parsed_self: serde_json::Value = serde_json::from_str(self_json_line)
+        .unwrap_or_else(|e| panic!("failed to parse json {self_json_line}: {e}"));
+    let self_is_ok = parsed_self["ok"].as_bool().unwrap();
+    assert_eq!(self_ok, self_is_ok, "doctor --selfcheck exit status ({self_ok}) did not match ok ({self_is_ok}): {self_out}");
 }

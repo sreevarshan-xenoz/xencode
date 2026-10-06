@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AA-2`: exit non-zero when `xencode doctor` encounters failing self-checks
+
+`xencode doctor` and `xencode doctor --selfcheck` now exit with status code 1 when one or more checks fail:
+
+- `render_checks` now returns `Result<(), String>` indicating the failure count, which is propagated through `run_selfcheck` and `run_bug_report`.
+- When all checks pass or are absent/skipped, the exit code remains 0. When any check in the `failing` list fails, the CLI exits with status 1 matching the `"ok": false` field in JSON output.
+- Documentation in `README.md` and `CLI_GUIDE.md` updated to describe exit code semantics for scripts and automated pre-flight checks.
+- Verified with integration tests in `xencode-cli/tests/bootstrap_cli.rs`.
+
 ### Added — `AB-1`: record anchor proof freshness in sidecar metadata without altering KV prefix
 
 The verification timestamp and recipe counts for `.xencode/anchor.md` are now recorded in an external sidecar file (`.xencode/anchor.meta`):

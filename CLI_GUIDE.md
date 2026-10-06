@@ -3845,8 +3845,9 @@ $ xencode doctor --format json
  "ok":false,"version":"0.1.0"}
 ```
 
-The exit code stays zero, because a laptop with no local model server running is
-a normal laptop. The FAIL rows are the signal.
+The command exits with status 0 when every check passes or is absent, and exits 1
+when any check in `failing` fails (`ok: false` in JSON format), allowing scripts, CI
+steps, and pre-flight chains to evaluate machine readiness directly.
 
 ### `xencode doctor --selfcheck [--format text|json]`
 
