@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-6`: a fact the code contradicts is disabled, and now there is a date on it
+
+Every durable fact in `.xencode/state.md` is re-checked against the repository on the way into
+each prompt. A fact whose cited file has been deleted, or has changed since the revision the fact
+was written at, or names code that is no longer declared, or describes a call that no longer
+happens, is left out of that turn — silently, correctly, forever. The model stops being told it and
+keeps working. The person who promoted the line can still open the file and read it, and had no
+way to ask when it stopped being true or what would make it go away.
+
+`xencode memory gc` is that asking, and the first thing that acts on it. The turn that notices a
+contradiction now also stamps it into `.xencode/facts.tombstones.jsonl` — the fact, the reason in
+the same words `doctor` uses, and the date — and leaves the line in `state.md` exactly where it
+was.
+
+    $ xencode memory gc
+    Durable facts: 1 contradicted, 1 past 12 months, 0 removed
+      contradicted for 13 months — the file it cites has changed since: the login entry point is src/auth.rs
+      `--apply` retires the 1 above; a fact that stops being contradicted leaves the queue instead of ageing toward removal.
+
+The clock is deliberately unbreakable: a fact that stops being contradicted leaves the queue, and
+so does a turn where the check could not run at all, because a judgement this program cannot
+re-make today is not one it should act on a year from now. Nothing is retirable before twelve
+months of that unbroken contradiction, and even then only with `--apply`, which filters
+`state.md` line by line — the facts that stay, the `## working-on` text and everything else keep
+their exact bytes — and marks the entry retired so there is a list of what an earlier run removed.
+Re-promoting a retired fact starts a new clock rather than inheriting the old one, a credential
+quoted inside a fact is scrubbed before the queue stores it, and `AGENTS.md` is never in scope:
+the only command that writes that file is `/lesson approve`.
+
+**Proven by running it.** Eight tests over a repository this test built with `git init`, a
+committed file and a real promoted `state.md`, moving the twelve-month clock by passing a
+different instant to the same call the command makes. Each guard was watched failing first: a
+month instead of a year as the threshold, storing the fact without scrubbing it, deleting the
+turn's record call, letting a re-promoted fact inherit a retired one's clock, keeping a fixed fact
+in the queue, and retiring an entry that had already been retired. Then live, in a scratch
+repository, with the built binary: the report above, then `--apply` at thirteen months removed
+exactly one line while the second promoted fact, the `## working-on` text and `# State` survived
+untouched, `AGENTS.md` hashed the same before and after, the queue kept the retirement with its
+stamp, the next `memory gc` read `0 contradicted … 1 retired by an earlier run`, and `xencode
+doctor`'s `knowledge:stale` row went from reporting the dropped line to `1 durable fact, every one
+agreed with by the code`.
+
 ### Added — `QM-6`: refusing a change is evidence, and it waits for your reason
 
 The approval prompt already knew when you answered `n`: the model got told not to retry the call

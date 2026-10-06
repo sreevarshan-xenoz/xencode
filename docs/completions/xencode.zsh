@@ -447,6 +447,13 @@ _arguments "${_arguments_options[@]}" : \
 ':session -- Session ID:_default' \
 && ret=0
 ;;
+(gc)
+_arguments "${_arguments_options[@]}" : \
+'--apply[Remove the facts contradicted for twelve months or longer from \`.xencode/state.md\`]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__memory__subcmd__help_commands" \
@@ -464,6 +471,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(gc)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -1896,6 +1907,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(gc)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
         esac
     ;;
 esac
@@ -3170,8 +3185,14 @@ _xencode__subcmd__help__subcmd__memory_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
     )
     _describe -t commands 'xencode help memory commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__gc_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__gc_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory gc commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__list_commands] )) ||
 _xencode__subcmd__help__subcmd__memory__subcmd__list_commands() {
@@ -3708,18 +3729,30 @@ _xencode__subcmd__memory_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode memory commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__gc_commands] )) ||
+_xencode__subcmd__memory__subcmd__gc_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory gc commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory__subcmd__help_commands] )) ||
 _xencode__subcmd__memory__subcmd__help_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode memory help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__gc_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__gc_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help gc commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__memory__subcmd__help__subcmd__help_commands() {

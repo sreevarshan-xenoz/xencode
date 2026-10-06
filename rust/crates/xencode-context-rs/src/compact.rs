@@ -416,7 +416,7 @@ pub fn promote_state_candidate(
 /// A fold that arrived through a path nobody typed — a test, a different working
 /// directory — still gets an answer rather than a panic, because the marker is
 /// only ever an extra on a line that was already going to be written.
-fn state_root(xencode_dir: &Path) -> PathBuf {
+pub(crate) fn state_root(xencode_dir: &Path) -> PathBuf {
     xencode_dir
         .parent()
         .map(|parent| parent.to_path_buf())
@@ -575,7 +575,12 @@ pub struct StaleFacts {
 }
 
 /// Why a durable fact was kept out of this turn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Serializable because `QK-6` writes this word into a durable queue: the reason
+/// a fact left a turn is part of what a person reads a year later to decide
+/// whether leaving it out was right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FactProblem {
     /// The file the fact cites is no longer there.
     SourceMissing,

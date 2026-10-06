@@ -26,6 +26,7 @@ pub mod documents;
 pub mod editing;
 pub mod embed;
 pub mod eval;
+pub mod factgc;
 pub mod gitinfo;
 pub mod histdigest;
 pub mod history;
@@ -114,6 +115,10 @@ pub use eval::{
     append_eval_run, comparable_previous_eval_run, compare_shapes, default_gold, eval_log_path,
     evaluate, evaluate_with, gold_by_shape, gold_from_disk, previous_eval_run, read_eval_runs,
     EvalItem, EvalReport, EvalRun, EvalRunRecord, ShapeComparison,
+};
+pub use factgc::{
+    age_words, collect_gc, now_ms as gc_now_ms, queue_exists, read_tombstones, record_stale_facts,
+    tombstone_path, FactTombstone, GcReport, Recording, RETIRE_AFTER_MONTHS, TOMBSTONE_FILE,
 };
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,
