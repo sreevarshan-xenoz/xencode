@@ -15078,3 +15078,46 @@ unsearchable folder is not a repository yet.
 323 unique IDs to **328 rows over 325 unique IDs**. Both join W10 next to `QK-4`, which is
 the audit surface `AB-1` reports into; neither re-sequences anything, both are effort S, and
 `AB-2` is the one that fixes a sentence a person is being told right now.
+
+---
+
+## Milestone AD — the last words of a dead server can be missing from the error that quotes them (research appendix, drafted 2026-10-06)
+
+Found while running the full suite for the manuals' test count, not while building a
+feature: one test in `xencode-mcp-rs` failed in a workspace run and passed alone, and the
+same shape had already cost this machine three red runs of a provider check in
+`xencode-context-rs`. That second one was a test racing over a port it had released and
+was fixed on 2026-10-06 (commit `926742ae`, recorded here so nobody re-adds the race).
+The first is not a test bug. Read in `client.rs`, the product really can lose the evidence.
+
+**The mechanism, from the code rather than from the flake.** `open` spawns
+`collect_stderr` and **discards the task handle** (`client.rs:267`; compare the `read_loop`
+handle, which is kept at `:262-266`). When the handshake fails, `with_stderr`
+(`:489-490`) builds the reported error by reading `stderr_tail` out of the watchdog — a
+buffer some other task fills, line by line, as `BufReader::lines()` resolves
+(`:949-966`). Nothing joins that task, waits for it, or even checks that the child has
+been reaped first. On an idle machine the collector has usually run by then; on a loaded
+one it may not have, and the sentence "the stderr tail is the only clue there is, so it has
+to come along" — the comment on the assertion in `tests/stdio.rs:236` — is exactly the
+claim that fails. The test is right to insist on it; the product cannot always deliver it.
+
+- **Item AD-1** — keep the `collect_stderr` handle beside the reader's, and when a stdio
+  server is being reported as failed, await the collector (bounded, one short timeout)
+  before assembling the message, so the tail is complete or the message says the server
+  died without writing anything. *Effort: S.* *Trap:* awaiting must not become the way to
+  hang `/mcp status` on a server that is still alive and simply silent — the collector
+  ends when the pipe closes, which is only true once the child is gone, so the join needs
+  the exited-process condition, not a bare `await`. *Done-when:* a loop that starts the
+  dying fixture and asserts its line appears in the error text, green fifty times running
+  **while the workspace suite runs beside it** — the load is the point, and the current
+  code passes that loop only when the machine is otherwise idle.
+
+Not inserted into a wave table yet, so the §R-0 counts above do not include it — the drift
+that section had was caused by appendix rows that claimed a wave and never appeared in it.
+
+### Counting
+
+`AD-1` adds one row over one new ID, taking the pool from §AB's 328 rows over 325 unique
+IDs to **329 rows over 326 unique IDs**. It belongs in W0 with the other output that cannot
+be trusted, at effort S; `AA-2`, which is also W0 and also about an error path saying the
+right thing about a thing that failed, is the nearest neighbour.
