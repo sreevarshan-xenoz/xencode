@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2459 tests passing, zero warnings (re-verified 2026-10-06, after `QK-9`; 19 ignored, so 2478 in the run)
+- [x] Workspace gates green — 16 crates, 2473 tests passing, zero warnings (re-verified 2026-10-06, after `QK-2`; 19 ignored, so 2492 in the run)
 
 ## Model Catalog Honesty
 
@@ -6062,7 +6062,8 @@ persisted).
 `verified_by`, with `n` and a Wilson interval and **no cross-model transfer**
 (EVd-1; the evidence for transfer is explicitly negative). QK-2 the
 budgeted-invariant version of the preference model (AC-4 + EV-5 + EV-7 —
-"disagreement becomes a proposal to edit a human-owned file"). QK-3 one
+"disagreement becomes a proposal to edit a human-owned file"), shipped 2026-10-06
+as the `## Lessons` / `## Preferences` block lifted out of the root file's cap. QK-3 one
 `SourceClass` enum in front of SE-2, which is also the pre-split of PR-4's
 `local_terms`/`payload_text`. QK-4 staleness as a `doctor`/`memory audit` check —
 shipped 2026-10-06 without its second half: the **declarative** seed for item 63
@@ -6160,8 +6161,9 @@ human's edit (LF-6's git-bus + GH-6).
   one line with the blank reason, asks at once because a refusal is a decision and
   not a symptom, approves only through `/lesson approve`, scrubs a credential out
   of the stored argument, and adds nothing when the call was accepted — done
-  2026-10-06, see the W10 progress note. `QK-2` still owns the budgeted preference
-  block this row's candidate facts were meant to feed.
+  2026-10-06, see the W10 progress note. `QK-2` shipped on 2026-10-06 the budgeted
+  block these drafted lessons land in, so a line a person approves now reaches the
+  prompt whatever else is in the file.
 
 **Why items 68/72/95's "learning" is rejected rather than deferred.** Two
 arguments, one statistical and one from the adaptive-UI literature. The
@@ -10093,7 +10095,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 16 done
+#### W10 — Durable project knowledge — 23 items, 17 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10108,7 +10110,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts — done 2026-10-05 against `git grep`, not `xencode-analysis-rs`, see the W10 progress note |
 | **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 — **covered by `EV-5`'s commit, no separate task left**: the walk is read-only, so there is no writer to keep human-only, and the byte-identical-prefix done-when is the second test in `tests/scoped_agents.rs` |
 | **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
-| **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored |
+| **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored — done 2026-10-06 as `## Lessons` / `## Preferences` lifted out of the root file before its cap and sent on 300 tokens of their own (`PREFERENCES_CAP_TOKENS`); the overflow falls back into the file's budget so the lift can only ever add, and the block rides after the bulk so a reworded lesson costs the least cache. Live before/after on the same scratch repository: head 5,604 → 5,680 bytes, `AGENTS.md` 1,198 → 1,217 tokens, and a file with no such block byte-identical under both binaries — see the W10 progress note |
 | **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1; done 2026-10-05, see the W10 progress note |
 | **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows — the **report** half done 2026-10-06: `xencode doctor` gains a `knowledge:stale` row and `doctor --env` names each dropped fact, and neither writes to `state.md`. The **seed** half became `QK-9` (row 63), see the W10 progress note |
 | **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
@@ -10124,6 +10126,57 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QK-2` — 2026-10-06, as `## Lessons` and `## Preferences` lifted out of the root
+  `AGENTS.md` before its cap is applied and sent on `PREFERENCES_CAP_TOKENS` of their own.
+  Four things the row did not say. **(1)** "Inside AC-4's ceiling" describes a constraint the
+  code does not have: AC-4 scales *retrieval* (`ContextCaps::top_k`, `content_cap_chars`), while
+  every tier in the stable head is a fixed constant — `AGENTS_CAP_TOKENS` 1200 (`context.rs:29`),
+  `ANCHOR_CAP_TOKENS` 2000, `SCOPED_AGENTS_CAP_TOKENS` 500. Scaling this one off the measured
+  window would have made the byte-stable head depend on the profile, which is the one thing the
+  KV-reuse contract forbids, so it is a fixed cap whose cost is subtracted from the same target
+  the rest of the turn is budgeted against: the block is paid for out of the ceiling, and nothing
+  overflows because of it. **(2)** The bug is worse than "the tail is cut". The cut is a *head*
+  cut that snaps back to a newline, so what is lost is everything below ~4,800 characters — and
+  `lesson.rs:364-367` appends the approved line at the very end of the file. The two are exactly
+  colocated: a project that approved lessons into a full file approved them into bytes no prompt
+  ever read. Measured before building, in a scratch repository with a 9,889-character
+  `AGENTS.md`: the head reached 4,774 characters of it and held no lesson. **(3)** The first
+  implementation was a regression found by arithmetic rather than by a test. Markdown reads an
+  unclosed `## Lessons` as "everything below it", so on a 17,925-character file whose section
+  never closes, pinning only what fits the block's own ceiling reached 1,213 characters where the
+  old single head cut reached 4,785 — lifting the section out had made the prompt *smaller*.
+  Hence the rule that a block's overflow falls back into the file's budget, and the property the
+  tests hold: pinning may only ever add. Two early tests hard-coded the seam as rules "300." and
+  "150."; the measured budgets keep rules 0..26 in the block and 27..133 in the bulk, so those
+  indices could only ever be wrong and the assertion is now made rule by rule. **(4)** Blast
+  radius came from reading the consumers, not from the suite: `xencode-tui-rs/src/app.rs:7229`
+  printed the stable prefix's size as `doc.tiers.iter().take(3)`, which was correct only while the
+  head was exactly three tiers and would have quietly under-reported the moment it was four. The
+  count now comes from the assembler (`ContextDoc::stable_tokens`, `ChatAssembly::stable_tokens`)
+  and a test asserts it covers every leading tier; the "Tiers 1–3" banners in `context.rs` name
+  their contents instead of a count.
+  **Proven by running it.** Fourteen checks in `tests/preferences.rs`, and seven deliberately
+  broken builds watched failing first: nothing pinned, the remainder handed back to the file's cap
+  removed, the block's ceiling raised to 5,000 tokens, a level-one heading no longer closing the
+  section, the block placed before the bulk, the tier left out of the ledger, and the head's size
+  counted as three tiers again. The hand-back build is the one that fails twice over — the newest
+  check, that lessons past the block's own ceiling still ride the file's cap, and the check that
+  measures an unclosed section against what the single head cut used to keep — which is the point
+  of writing that test against the old behaviour rather than against the new code. Then live, with
+  the binary built before the change and the binary
+  built after it, in the same scratch repository: `/ctx kv` reports 5,604 bytes and sha256
+  `7f3d1c7f…` for a file with no such block under **both** binaries (a project that wrote nothing
+  human-owned keeps its exact cached prefix), 5,680 bytes under the new one with the block;
+  `/egress` reports 1,198 tokens of `AGENTS.md` and a 5,709-byte turn for the file holding the
+  lesson under the old binary against 1,217 tokens and 5,785 bytes under the new — the approved
+  line's 74 bytes and the separator — with `cross-request identical: ✅ yes` in every run.
+  Two halves deliberately not built: `xencode bootstrap` does not seed a blank `## Preferences`
+  heading (it would fit that template's style, but it rewrites a file QK-9 tested and documented
+  for a benefit that is discovery rather than function), and no new `/ctx` panel line names the
+  block (it is in the ledger `/egress` reads and in the head count `/ctx kv` prints, and a line
+  for it beside none for `agents.md` would be arbitrary). Workspace total after this item: 2,473
+  passed, 0 failed, 19 ignored over 72 result lines.
 
 - [x] `QK-9` — 2026-10-06, as `xencode bootstrap [path] [--check] [--format text|json]`. The row
   was written against code that had since moved, and three of its premises were corrected before

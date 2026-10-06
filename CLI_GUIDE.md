@@ -1240,6 +1240,71 @@ grant that named a directory. Every refusal is a case of its own: `src/main.rs`,
 under `.git/` and one under `.xencode/`, a name that climbs out of the workspace, and an
 `AGENTS.md` that does not exist yet.
 
+#### The lines a person approved are not the lines a budget drops
+
+The root `AGENTS.md` has a ceiling of its own — 1,200 tokens
+(`AGENTS_CAP_TOKENS`) — and the ceiling is applied by keeping the *front* of the
+file and stopping. So a project whose instruction file outgrew it lost the tail,
+silently, from every prompt. The tail is the worst place to lose: `/lesson
+approve` appends the sentence a person typed under `## Lessons` at the end of the
+file, and a rewind or a refused tool call drafts it there. The approval queue
+therefore kept filling a file the product's own prompts had stopped reading.
+Measured live, in a scratch repository with a 9,889-character `AGENTS.md`: the
+turn reported 1,198 tokens of `AGENTS.md` — under half the file — and `/ctx kv`
+reported a 5,604-byte head that held no lesson.
+
+Two sections are now lifted out of the file before that cut is made, and paid for
+on a separate ceiling of 300 tokens (`PREFERENCES_CAP_TOKENS`): `## Lessons`,
+which is what this product writes, and `## Preferences`, which is what a person
+writes for themselves. Nothing else qualifies. The heading must match whole and
+case-insensitively, so `## Lessons from the last release` is somebody's prose
+heading and stays where it is in the file. The lifted section runs from its
+heading to the next heading of level one or two, or to the end of the file; a
+deeper `###` belongs to the section it sits under, and a new `# Chapter` closes
+it. Every byte of the file ends up in exactly one of the two halves, so the split
+cannot lose text on its own.
+
+Three properties are what make this safe to add to the cached head:
+
+- **A block that will not fit its own ceiling loses nothing that was being
+  sent.** Past 300 tokens the remainder falls back into the file's budget rather
+  than the bin, so lifting a section out can only ever *add* to a prompt. This
+  was not free to get right: markdown reads an unclosed `## Lessons` as
+  "everything below it", so on a 17,925-character file whose section never
+  closes, one head cut alone reached 4,785 characters of it, and a pin that threw
+  its own overflow away would have reached 1,213 — 3,572 characters a model used
+  to be given and would then not get. The tests assert that rule by rule, on both
+  fixtures, rather than by a hand-picked index.
+- **The block rides after the file's bulk, not before it.** That is the order the
+  bytes sit in already, and it is the cheaper one for the KV cache: rewording one
+  lesson parts the two prompts at that line, and everything ahead of it — the
+  whole instruction file — stays inside the prefix a provider can reuse.
+- **A project with neither heading sends exactly the bytes it always sent.**
+  `/ctx kv` on the same repository without a `## Lessons` block reports the
+  identical head under the old and the new binary: 5,604 bytes and sha256
+  `7f3d1c7f…` both times. With the block, the head is 5,680 bytes and `/egress`
+  reports 1,217 tokens of `AGENTS.md` where it reported 1,198, which is the 74
+  bytes of the lesson line and the separator between them.
+
+`/ctx kv` prints the head's size and hash and whether two different turns produce
+the same one; `/egress` breaks the turn down by whose words it is made of, and the
+lifted block counts as the instruction file it came from — same bytes, same trust
+question, different budget, which is the only reason it is listed separately.
+`rust/crates/xencode-context-rs/tests/preferences.rs` is the proof: fourteen
+checks over two long files — one, 9,889 characters, whose lessons block closes the
+file, and one, 17,925, whose `## Lessons` never closes — including that an
+approved lesson at the end of a long file arrives, that no byte is sent twice,
+that an over-long block is cut at its own ceiling and the remainder still rides
+the file's, that both sections share that one ceiling and filling one does not
+empty the other, that a `#` chapter heading closes the section, and that a file
+with nothing human-owned in it produces byte-identical output and no extra line in the
+budget report.
+
+One thing this does not do: it does not change what is *allowed* to be written
+into `AGENTS.md`. `/lesson approve` is still the only command that appends a
+sentence to a file that already exists, and `xencode bootstrap` still only ever
+creates the file where there is none.
+
 #### Carrying the task forward: `/ctx fold`, `/ctx promote`, `/ctx drop`
 
 Tier 4 of the prompt is `state.md` — a few lines about the current task that

@@ -213,6 +213,17 @@ that already exists is never replaced; there is no `--force`. Afterwards run
 `xencode anchor` to replace the anchor with build and test commands it actually
 verified.
 
+### Your own lines in `AGENTS.md` survive the budget
+`AGENTS.md` reaches the model under a 1,200-token ceiling that keeps the front of
+the file, so a long one used to lose its tail on every turn — and `## Lessons`,
+where `/lesson approve` puts the sentence you wrote, *is* the tail. `## Lessons`
+and `## Preferences` are now lifted out before that cut and ride a 300-token
+budget of their own. To see what the head costs and whose words a turn is made of:
+```bash
+/ctx kv        # the head's size, its hash, and whether two turns agree on it
+/egress        # the turn broken down by whose bytes it is, in tokens
+```
+
 ### Team collaboration
 ```bash
 xencode server           # local-first: http://127.0.0.1:8765, ws://

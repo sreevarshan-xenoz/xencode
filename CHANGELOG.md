@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-2`: the instructions a person approved are the last thing a budget may drop
+
+`AGENTS.md` is sent to the model under a ceiling of its own, 1,200 tokens
+(`AGENTS_CAP_TOKENS`), and the ceiling is applied by keeping the front of the file and
+stopping. A project whose instruction file grew past it therefore lost its tail from every
+prompt, quietly, with nothing in the report to say so. The tail is the worst place in the file
+to lose: `/lesson approve` appends the sentence a person typed under `## Lessons` at the **end**
+of `AGENTS.md`. The approval queue kept filling a file the product's own prompts had stopped
+reading, which is what measuring it before building showed — in a scratch repository holding a
+9,889-character `AGENTS.md`, the prompt head reached 4,774 characters of that file and contained
+no lesson at all.
+
+`## Lessons` and `## Preferences` are now lifted out of `AGENTS.md` before its cap is applied and
+sent on a budget of their own, 300 tokens (`PREFERENCES_CAP_TOKENS`) — because the bytes a human
+chose are not the bytes an automatic budget gets to discard. Two sections and no others: the
+heading has to match whole and case-insensitively, so `## Lessons from the last release` is
+somebody's prose heading and stays where it is in the file. The lifted section runs from its
+heading to the next heading of level one or two, or to the end of the file, so a `###` subsection
+belongs to it and a new `# Chapter` closes it, and every byte of the file lands in exactly one of
+the two halves.
+
+Two rules keep the lift from becoming a worse bug than the one it fixes. A block longer than its
+own budget hands the remainder back to the file's cap instead of dropping it, so lifting a section
+out can only ever *add* to a prompt; without that rule, a `## Lessons` opened and never closed —
+which is what markdown says an unclosed section means — would have taken the 1,200 characters of
+it that fit and thrown the rest away, reaching 1,213 characters of a 17,925-character file where
+the head cut alone used to reach 4,785. And the block rides *after* the file's bulk, which is both
+the order those bytes already sit in and the cheaper one for the key/value cache: rewording a
+lesson then parts two prompts at that line and leaves the whole instruction file ahead of it
+inside the prefix a local server can reuse. A project with neither heading sends byte-for-byte what
+it sent before, and gains no line in the budget report.
+
+**Proven by running it.** Fourteen checks in
+`rust/crates/xencode-context-rs/tests/preferences.rs` over two long files — one of them the same
+9,889-character shape the scratch repository held, and one whose `## Lessons` never closes —
+asserting that an approved lesson at the end of a long file arrives, that no byte of the file is
+sent twice, that a block past 300 tokens is cut there and its remainder still rides the file's
+budget, that a `#` chapter heading closes the section, and that a file with nothing human-owned in
+it produces byte-identical output. Seven deliberately broken builds, each watched to fail at least
+one check: nothing pinned, the remainder handed back to the file's cap removed, the ceiling raised
+to 5,000 tokens, the level-one heading no longer closing a section, the block placed before the
+bulk, the tier left out of the ledger, and the head's size counted as three tiers again. Dropping
+the hand-back fails two checks at once — the newest one, that lessons past the block's ceiling ride
+the file's cap rather than fall into a bin, and the one that measures an unclosed section against
+what the old head cut used to keep. Then live, in a
+scratch repository, with the binary built before the change and the binary built after it: `/ctx
+kv` reports a 5,604-byte head and sha256 `7f3d1c7f…` for a file with no such block under **both**
+binaries, and 5,680 bytes with the block under the new one; `/egress` reports 1,198 tokens of
+`AGENTS.md` and a 5,709-byte turn for the file with the lesson under the old binary, 1,217 tokens
+and 5,785 bytes under the new — the 74 bytes of the approved line and the separator between it and
+the rest of the head, and nothing else; and `cross-request identical: ✅ yes` in every run, so the
+block did not break the prefix contract. Workspace total: 2,473 tests passed, 0 failed, 19 ignored
+across 72 result lines.
+
+**What this does not do.** It does not change who may write into `AGENTS.md`: `/lesson approve` is
+still the only command that appends a sentence to a file that already exists, and `xencode
+bootstrap` still only creates the file where there is none. It does not lift anything else out of
+the cap — a long project whose *rules* run past 1,200 tokens still loses whatever sits at the end
+of the bulk, which is the file's own budget and a decision about its length a person still makes.
+
 ### Added — `QK-9`: `xencode bootstrap` writes what a project xencode has never seen is missing
 
 A fresh clone has no `AGENTS.md`, no `.xencode/anchor.md` and no example of the settings file.
