@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `AB-2`: distinguish missing commits from unsearchable trees in durable fact checks
+
+In `xencode-context-rs` and `xencode-tui-rs`, durable memory facts that cannot be checked now report their exact reason instead of combining both causes into a single ambiguous bucket:
+
+- `StaleFacts` now tracks `no_such_commit` and `not_a_searchable_tree` independently alongside `unverifiable`.
+- When a provenance marker points to a commit that git cannot resolve locally, the tier-4 context report displays `not checkable here (no such commit locally)`.
+- When a symbol marker cannot be checked because the directory cannot be searched with git (not a git repository or git error), the tier-4 report displays `not checkable here (not a searchable tree)`.
+- Verified in `xencode-context-rs::compact` tests and `xencode-tui-rs` integration test `state_stale_notice.rs`.
+
 ### Fixed — `AA-1`: verify model availability in `xencode models health` for llama.cpp
 
 The `llamacpp:` branch of `xencode models health` now queries the server's loaded models

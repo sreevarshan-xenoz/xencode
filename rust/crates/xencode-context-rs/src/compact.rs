@@ -584,6 +584,12 @@ pub struct StaleFacts {
     /// resolve, or code it cannot search. They stay: an answer nobody can check is
     /// not an answer that is wrong.
     pub unverifiable: usize,
+    /// Facts that could not be verified because the commit cited in the marker
+    /// cannot be resolved by git locally.
+    pub no_such_commit: usize,
+    /// Facts that could not be verified because the working directory cannot be
+    /// searched (no git repository, no git binary, or search error).
+    pub not_a_searchable_tree: usize,
     /// The fact lines this pass reached an answer on and the answer was that
     /// nothing contradicted them. Not the same as "still in the state": a line with
     /// no marker at all is in the state and is not here, because nothing was
@@ -1118,7 +1124,8 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
         let lines = std::mem::take(list);
         for line in &lines {
             let mut problem: Option<FactProblem> = None;
-            let mut unchecked = false;
+            let mut unchecked_no_commit = false;
+            let mut unchecked_unsearchable = false;
             if let Some((path, commit)) = fact_source(line) {
                 if !root.join(path).is_file() {
                     problem = Some(FactProblem::SourceMissing);
@@ -1142,7 +1149,7 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                     match verdict {
                         Some(true) => problem = Some(FactProblem::SourceChanged),
                         Some(false) => {}
-                        None => unchecked = true,
+                        None => unchecked_no_commit = true,
                     }
                 }
             }
@@ -1155,7 +1162,7 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                         .get_or_insert_with(|| declared_symbols(root))
                         .as_ref()
                     else {
-                        unchecked = true;
+                        unchecked_unsearchable = true;
                         continue;
                     };
                     match verify_check(&claim, table, root) {
@@ -1174,7 +1181,7 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                             });
                             break;
                         }
-                        Err(()) => unchecked = true,
+                        Err(()) => unchecked_unsearchable = true,
                     }
                 }
             }
@@ -1184,8 +1191,14 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                     problem,
                 }),
                 None => {
-                    if unchecked {
+                    if unchecked_no_commit || unchecked_unsearchable {
                         check.unverifiable += 1;
+                        if unchecked_no_commit {
+                            check.no_such_commit += 1;
+                        }
+                        if unchecked_unsearchable {
+                            check.not_a_searchable_tree += 1;
+                        }
                     } else if line.contains(SRC_OPEN) || line.contains(CHK_OPEN) {
                         // Only a line that asked for something can be evidence that
                         // nothing contradicts it. An unmarked line was not checked
@@ -1899,6 +1912,14 @@ assistant: hello";
             check.unverifiable, 1,
             "the kept fact was not reported as unverifiable: {check:?}"
         );
+        assert_eq!(
+            check.no_such_commit, 1,
+            "the missing commit was not reported under no_such_commit: {check:?}"
+        );
+        assert_eq!(
+            check.not_a_searchable_tree, 0,
+            "a missing commit was counted as an unsearchable tree: {check:?}"
+        );
         std::fs::remove_dir_all(&root).unwrap();
         let _ = dir;
     }
@@ -2281,6 +2302,33 @@ assistant: hello";
             check.unverifiable, 1,
             "the check that could not run was not counted: {check:?}"
         );
+        assert_eq!(
+            check.not_a_searchable_tree, 1,
+            "the unsearchable tree was not counted under not_a_searchable_tree: {check:?}"
+        );
+        assert_eq!(
+            check.no_such_commit, 0,
+            "an unsearchable tree was attributed to a missing commit: {check:?}"
+        );
+        std::fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
+    fn unverifiable_facts_distinguish_missing_commit_from_unsearchable_tree() {
+        // Outside a git repository, a marker with an unresolvable commit cannot check
+        // the commit, and a symbol check cannot search the tree. Both are kept, and
+        // the counters distinguish the two causes.
+        let outside = no_repo("distinguish");
+        std::fs::create_dir_all(outside.join("src")).unwrap();
+        std::fs::write(outside.join("src/auth.rs"), "fn login() {}\n").unwrap();
+        let marked = format!(
+            "# State\n\n## decisions\n- login in auth.rs {SRC_OPEN}src/auth.rs@deadbeef]\n- validate_token rejects empty {CHK_OPEN}validate_token]\n"
+        );
+        let check = drop_stale_facts(&marked, &outside);
+        assert!(check.dropped.is_empty(), "facts were dropped instead of kept unverifiable: {check:?}");
+        assert_eq!(check.unverifiable, 2);
+        assert_eq!(check.no_such_commit, 1);
+        assert_eq!(check.not_a_searchable_tree, 1);
         std::fs::remove_dir_all(&outside).unwrap();
     }
 

@@ -184,7 +184,7 @@ async fn the_context_panel_names_a_durable_fact_it_had_to_drop() {
             panic!("a fact no local commit can be found for was not reported: {uncheckable:#?}")
         });
     assert!(
-        row.contains("1 not checkable here"),
+        row.contains("1 not checkable here (no such commit locally)"),
         "the panel says a set of facts could not be checked when only one could not: {row}"
     );
     assert!(
@@ -299,6 +299,36 @@ async fn the_context_panel_names_a_durable_fact_it_had_to_drop() {
             .contains("validate_token rejects an empty token"),
         "a stale fact was deleted from state.md instead of kept out of one prompt"
     );
+
+    // ── AB-2: a symbol check in a non-git tree reports unsearchable tree ───────
+    let outside = std::env::temp_dir().join(format!(
+        "xencode-unsearchable-notice-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let outside_xencode = outside.join(XENCODE_DIR);
+    std::fs::create_dir_all(&outside_xencode).unwrap();
+    std::fs::write(
+        outside_xencode.join("state.md"),
+        "# State\n\n## decisions\n- validate_token rejects an empty token [chk:validate_token]\n",
+    )
+    .unwrap();
+    std::env::set_current_dir(&outside).unwrap();
+    let unsearchable = context_panel(&mut app).await;
+    let unsearchable_row = unsearchable
+        .iter()
+        .find(|line| line.contains("not checkable here"))
+        .unwrap_or_else(|| {
+            panic!("a fact in an unsearchable tree was not reported: {unsearchable:#?}")
+        });
+    assert!(
+        unsearchable_row.contains("1 not checkable here (not a searchable tree)"),
+        "the panel blamed a missing commit on an unsearchable tree: {unsearchable_row}"
+    );
+    std::fs::remove_dir_all(&outside).unwrap();
 
     std::env::set_current_dir(previous).unwrap();
     std::fs::remove_dir_all(&root).unwrap();

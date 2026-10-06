@@ -1382,8 +1382,8 @@ catches a change that was committed on a clean tree, and a rename, whose old pat
 longer exists. Dropping is per-turn: nothing is deleted from `state.md`, and the fact
 comes back on its own if the file is reverted. If the repository cannot resolve the
 recorded commit at all — a shallow clone, or history that has been pruned — the line is
-kept and the same row says `· 1 not checkable here (the check could not run on this
-repository)`, because an unreadable past is not a disproven one and a tier going in
+kept and the same row says `· 1 not checkable here (no such commit
+locally)`, because an unreadable past is not a disproven one and a tier going in
 unverified should not look like a tier that passed.
 
 `/ctx kv` says which lines it left out:
@@ -1441,7 +1441,7 @@ The panel says which of the two checks failed:
 That is the same test as above, taken on after promoting the line, renaming the function
 and committing it. And when there is no repository to search at all — a folder copied out
 of a project, a machine without `git` — the line is kept and reported as `not checkable
-here`, because a tree that cannot be read is not a tree that said otherwise.
+here (not a searchable tree)`, because a tree that cannot be read is not a tree that said otherwise.
 
 `/ctx fold` and `/ctx archive` read this filtered tier too. The fold rewrites `state.md`,
 so handing it a fact the code has disproved would let the model re-derive it as a fresh
