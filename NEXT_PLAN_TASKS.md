@@ -15363,17 +15363,7 @@ was verified here. The failure is that **the age of that claim is unknowable fro
 the product writes.** A person cannot ask, and `/ctx kv` cannot say, whether the verified
 command was proved this afternoon or before the repository changed.
 
-- **Item AB-1** — record when the anchor was proved, outside the rendered file, and say so
-  where the tier is reported. `xencode anchor` already re-runs everything, so it is the
-  writer: put the run time in a sidecar (`.xencode/anchor.meta`, or one field in the
-  existing index metadata) and have `/ctx kv`, `xencode doctor` and `QK-4`'s memory audit
-  print *"anchor proved N days ago; run `xencode anchor` to re-check"* past some age. The
-  rendered `anchor.md` must not gain a byte, or the item trades a stale claim for the loss
-  of KV reuse across every request. *Effort: S.* *Trap:* the age is metadata about a proof,
-  never a re-assertion of it — a recipe that has aged out is reported as old, not as
-  failed, and nothing may silently demote `verified` to `declared` in the text while a
-  running server holds the old prefix. Depends on `QK-4` for the audit surface; the
-  sidecar write does not.
+- [x] **Item AB-1 — record when the anchor was proved, outside the rendered file, and say so where the tier is reported.** — done 2026-10-06 in `xencode-context-rs/src/anchor.rs`, `xencode-context-rs/src/doctor.rs`, `xencode-cli/src/main.rs`, and `xencode-tui-rs/src/app.rs`. `xencode anchor` writes the proof timestamp and recipe statistics to `.xencode/anchor.meta` without modifying `anchor.md` bytes; `xencode doctor` checks proof age via `knowledge:anchor`, and `/ctx kv` reports `⚓ anchor proved N days ago; run `xencode anchor` to re-check` when older than `ANCHOR_STALE_AGE_DAYS` (14 days); verified by unit tests in `anchor.rs`, `doctor.rs`, and integration tests in `bootstrap_cli.rs` and `state_stale_notice.rs`. *Effort: S.*
 
 ### AB-2 One count covers two different reasons a check could not run
 

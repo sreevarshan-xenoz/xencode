@@ -5217,6 +5217,19 @@ impl<'a> App<'a> {
                         "❌ NO — KV reuse is broken"
                     }
                 ));
+                // AB-1: report anchor recipe age if past the freshness threshold.
+                if let Some(anchor_meta) = xencode_context_rs::read_anchor_meta(&root) {
+                    let now_s = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let days = xencode_context_rs::anchor_age_days(anchor_meta.proved_at_unix_s, now_s);
+                    if days >= xencode_context_rs::ANCHOR_STALE_AGE_DAYS {
+                        let _ = tx.send(format!(
+                            "[CTX]⚓ anchor proved {days} days ago; run `xencode anchor` to re-check"
+                        ));
+                    }
+                }
                 // QM-1: tier 4 reported on its own. The budget and the text were
                 // computed for state.md on every turn while nothing in the
                 // product could write the file, so an empty tier was

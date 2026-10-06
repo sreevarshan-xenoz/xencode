@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use crate::init::{ContextError, XENCODE_DIR};
 
 /// What a discovered command is for.
@@ -780,6 +782,80 @@ pub fn is_current(root: &Path, text: &str) -> bool {
     std::fs::read_to_string(root.join(XENCODE_DIR).join("anchor.md")).is_ok_and(|a| a == text)
 }
 
+/// Sidecar metadata recording anchor proof provenance and timestamp (`AB-1`).
+///
+/// Written to `.xencode/anchor.meta` when recipes are proven by `xencode anchor`.
+/// Kept outside `anchor.md` so that recording verification timestamps does not
+/// alter the rendered markdown bytes or break llama.cpp KV prefix caching.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnchorMeta {
+    /// Timestamp (seconds since UNIX epoch) when recipes were verified.
+    pub proved_at_unix_s: u64,
+    /// Number of recipe candidates discovered.
+    pub candidates: usize,
+    /// Number of recipe candidates that exited 0 when run.
+    pub verified: usize,
+}
+
+/// The filename for the anchor metadata sidecar.
+pub const ANCHOR_META_FILE: &str = "anchor.meta";
+
+/// Freshness threshold in days after which an anchor proof is considered aged.
+pub const ANCHOR_STALE_AGE_DAYS: u64 = 14;
+
+/// Calculate the age of an anchor proof in whole days.
+pub fn anchor_age_days(proved_at_unix_s: u64, now_unix_s: u64) -> u64 {
+    now_unix_s.saturating_sub(proved_at_unix_s) / 86400
+}
+
+/// Atomically write the anchor proof metadata sidecar into `.xencode/anchor.meta`.
+pub fn write_anchor_meta(root: &Path, meta: &AnchorMeta) -> Result<PathBuf, ContextError> {
+    let dir = if root.ends_with(XENCODE_DIR) {
+        root.to_path_buf()
+    } else {
+        root.join(XENCODE_DIR)
+    };
+    std::fs::create_dir_all(&dir).map_err(|source| ContextError::Io {
+        path: dir.clone(),
+        source,
+    })?;
+    let target = dir.join(ANCHOR_META_FILE);
+    let temp = dir.join(format!("{ANCHOR_META_FILE}.tmp"));
+    let json = serde_json::to_string_pretty(meta).map_err(|e| ContextError::Io {
+        path: temp.clone(),
+        source: std::io::Error::other(e.to_string()),
+    })?;
+    std::fs::write(&temp, json).map_err(|source| ContextError::Io {
+        path: temp.clone(),
+        source,
+    })?;
+    std::fs::rename(&temp, &target).map_err(|source| ContextError::Io {
+        path: target.clone(),
+        source,
+    })?;
+    Ok(target)
+}
+
+/// Read the anchor metadata sidecar from a project root or `.xencode` directory.
+pub fn read_anchor_meta(root: &Path) -> Option<AnchorMeta> {
+    read_anchor_meta_from_dir(root)
+}
+
+/// Read the anchor metadata sidecar from either the project root or `.xencode` directory.
+pub fn read_anchor_meta_from_dir(dir: &Path) -> Option<AnchorMeta> {
+    let candidate1 = dir.join(XENCODE_DIR).join(ANCHOR_META_FILE);
+    let candidate2 = dir.join(ANCHOR_META_FILE);
+    let target = if candidate1.is_file() {
+        candidate1
+    } else if candidate2.is_file() {
+        candidate2
+    } else {
+        return None;
+    };
+    let text = std::fs::read_to_string(target).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1106,5 +1182,43 @@ mod tests {
         let second = discover(tree.path());
         assert_eq!(first.recipes, second.recipes);
         assert_eq!(first.probed, second.probed);
+    }
+
+    #[test]
+    fn anchor_metadata_sidecar_round_trips_and_leaves_anchor_md_untouched() {
+        let tree = Tree::new("meta");
+        let d = discover(tree.path());
+        let text = render(&d);
+        let anchor_file = write_anchor(tree.path(), &text).unwrap();
+
+        // Writing anchor.md creates no sidecar file automatically.
+        assert!(!tree.path().join(XENCODE_DIR).join(ANCHOR_META_FILE).exists());
+        assert_eq!(read_anchor_meta(tree.path()), None);
+
+        let meta = AnchorMeta {
+            proved_at_unix_s: 1_700_000_000,
+            candidates: 4,
+            verified: 3,
+        };
+        let meta_path = write_anchor_meta(tree.path(), &meta).unwrap();
+        assert!(meta_path.ends_with("anchor.meta"));
+
+        // anchor.md was not touched or modified by the sidecar write.
+        assert_eq!(std::fs::read_to_string(&anchor_file).unwrap(), text);
+
+        let read_back = read_anchor_meta(tree.path()).expect("anchor.meta must parse");
+        assert_eq!(read_back, meta);
+
+        // Reading directly from .xencode dir also works.
+        let from_dir = read_anchor_meta_from_dir(&tree.path().join(XENCODE_DIR)).unwrap();
+        assert_eq!(from_dir, meta);
+
+        // Age calculation in days.
+        assert_eq!(anchor_age_days(1_700_000_000, 1_700_000_000), 0);
+        assert_eq!(anchor_age_days(1_700_000_000, 1_700_086_400), 1);
+        assert_eq!(anchor_age_days(1_700_000_000, 1_700_086_399), 0);
+        assert_eq!(anchor_age_days(1_700_000_000, 1_701_209_600), 14);
+        // Clock skew / past timestamp saturates at 0 instead of panicking.
+        assert_eq!(anchor_age_days(1_700_000_000, 1_699_000_000), 0);
     }
 }
