@@ -50,7 +50,7 @@ pub fn write_artifact(
     let dir = artifact_dir(xencode_dir, session)?;
     let kept = tail_bytes(content, ARTIFACT_BYTES_CAP);
     let path = dir.join(safe_name(name));
-    std::fs::write(&path, kept)?;
+    xencode_core_rs::write_atomic(&path, kept.as_bytes())?;
     Ok(path)
 }
 
