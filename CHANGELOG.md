@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QM-6`: refusing a change is evidence, and it waits for your reason
+
+The approval prompt already knew when you answered `n`: the model got told not to retry the call
+unchanged, and the run's own history recorded the denial. Nothing durable came of it. A refused
+change is the clearest signal in this program that the agent misjudged something, and until now
+it vanished with the turn — while the rewind that follows it, or the build that stays red, each
+left a lesson draft behind.
+
+A refusal now joins those two in the same draft at `.xencode/lesson.candidate.md`, stored as the
+line the prompt was showing you and the kind of thing the call would have done:
+
+    - denied: write_file (file change) — write_file src/auth.rs
+
+The argument is scrubbed of anything shaped like a credential before it is stored, because that
+line came from the model and the draft file is read and indexed like any other. Unlike a failing
+check, a refusal asks for a lesson straight away rather than at a streak of three: it is a
+decision, not a symptom. What it still does not carry is the reason — you did not give one, and
+writing one in here would be the program guessing at your motive. `/lesson` prints what has
+piled up; `/lesson approve` remains the only thing that appends to `AGENTS.md`. Answering `y`
+drafts nothing: accepting a change is not evidence that it was wrong.
+
+**Proven by running it.** Two tests, one per side of the seam. The executor test refuses a
+`write_file` in ask mode through the real approval channel and reads the draft off disk: the
+source is `denied`, the detail is `write_file (file change) — write_file src/keep.rs`, the lesson
+line is blank, asking-for-words is true on the first one, no `AGENTS.md` exists and the file was
+not written — then it approves a second call and asserts the draft still holds one event. Both
+guards were watched failing before being believed: moving the draft out of the denial branch made
+the approved call add a second line (`left: 2, right: 1`), and removing the scrub put the key
+itself in the stored line. `cargo test -p xencode-context-rs -p xencode-tui-rs --lib` after the
+change: 630 passed and 645 passed, 0 failed. Not driven through a live TUI session, because the
+test exercises the same executor path the `n` key reaches; what the tests do not cover is the
+keybinding that sends that answer, which was already covered by the keymap tests.
+
 ### Fixed — the manuals' command counts, and one command that never existed
 
 A check of every documented command against what the program actually offers found four

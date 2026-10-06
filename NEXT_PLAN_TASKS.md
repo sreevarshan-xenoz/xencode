@@ -2,7 +2,7 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
-> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates were last verified 2026-09-29.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates were last verified 2026-10-06.
 
 ## Rust Migration — Complete ✅
 
@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs` — and clap's
   built-in `help`, 48 entries in the list)
-- [x] Workspace gates green — 16 crates, 2428 tests passing, zero warnings (re-verified 2026-10-06, after `EV-7`; 19 ignored, so 2447 in the run)
+- [x] Workspace gates green — 16 crates, 2430 tests passing, zero warnings (re-verified 2026-10-06, after `QM-6`; 19 ignored, so 2449 in the run)
 
 ## Model Catalog Honesty
 
@@ -6141,6 +6141,24 @@ human's edit (LF-6's git-bus + GH-6).
   recorded reason, and Copilot's measured acceptance is ~33% of suggestions /
   ~20% of lines against ~72% stated satisfaction — two-thirds of declines are
   silent and satisfaction is decoupled from acceptance.
+  **Correction, 2026-10-06, before implementing rather than after:** three of the
+  row's specifics do not survive contact with what `EV-7` already shipped, and the
+  row itself names that gate as the one this drafts *under*. (1) A second candidate
+  file plus a second approval command would rebuild `EV-7`'s human gate twice — and
+  `EV-7`'s own note says `state.candidate.md`, `learned.candidate.md` and a
+  promotion step must "not be built twice". A refusal is therefore a third
+  **evidence source** on the existing gate, beside a rewind and a failing check.
+  (2) `.xencode/memory/` is not a convention: every candidate sits flat in
+  `.xencode/` (`state.candidate.md`, `lesson.candidate.md`, `notes.md`), so the
+  planned path would have invented the directory. (3) The `/rewind` half of the row
+  was already shipped by `EV-7` on 2026-10-06; the unshipped half was the rejected
+  *change*, which turns out to be the approval prompt answered `n` — a signal that
+  already existed and recorded nothing durable. Done-when became: a refusal drafts
+  one line with the blank reason, asks at once because a refusal is a decision and
+  not a symptom, approves only through `/lesson approve`, scrubs a credential out
+  of the stored argument, and adds nothing when the call was accepted — done
+  2026-10-06, see the W10 progress note. `QK-2` still owns the budgeted preference
+  block this row's candidate facts were meant to feed.
 
 **Why items 68/72/95's "learning" is rejected rather than deferred.** Two
 arguments, one statistical and one from the adaptive-UI literature. The
@@ -10072,7 +10090,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 13 done
+#### W10 — Durable project knowledge — 23 items, 14 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10099,10 +10117,34 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
 | **QM-4** | report disagreement, never resolve | capability | disagreement reported, never resolved — done 2026-10-06 as a `## Sources disagree` notice riding with the facts, plus the same set on `doctor`; see the W10 progress note |
 | **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed — the row's premise was stale (see the correction above); done 2026-10-06 as per-model rate windows plus `n` in `/cost`, see the W10 progress note |
-| **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
+| **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate — done 2026-10-06 as a third trigger on that gate, not a second one; the row's separate `learned.candidate.md` is `EV-7`'s file and its `/rewind` half was already shipped, see the W10 progress note |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QM-6` — 2026-10-06, and it shipped as a third evidence source rather than a
+  second gate. A call refused at the approval prompt now leaves the same draft a
+  rewind and a red `/verify` run leave: the source is `denied`, the detail is the
+  tool, the class of thing it would have done and the one line the overlay was
+  showing (`- denied: write_file (file change) — write_file src/auth.rs`), and the
+  reason stays blank because the person never gave one. A refusal asks at once, not
+  at a streak of three — `asks_for_words` treats it like a rewind, because it is a
+  decision rather than a symptom, and a person pressing `n` twelve times in a
+  session has made twelve decisions the program then forgot. Two things the row did
+  not say and the code forced: the stored argument goes through `redact_secrets`
+  before it is written down, because a summary is model-chosen text and the draft
+  file is read and indexed like any other; and an accepted call drafts nothing, so
+  the queue cannot fill up with work that was fine. Not built: `.xencode/memory/` and
+  a `learned.candidate.md` with its own promote command, which would have been
+  `EV-7`'s gate twice over — see the correction on the row. **Counted:** the two
+  crates moved 630 and 645 passing, 0 failed, and the whole workspace run green behind
+  this commit reads 2430 passing, 0 failed, 19 ignored over 68 result lines — two more
+  than the 2428 recorded for `EV-7`, which is exactly the two new tests, one per crate.
+  Both new guards watched failing — hoisting
+  the draft out of the denial branch made an approved call add a second line
+  (`left: 2, right: 1`), and dropping the scrub put the key itself in the stored line.
+  Not driven through a live TUI, because the executor test rides the same path the `n`
+  key reaches; the keybinding itself is already covered by the keymap tests.
 
 - [x] `EV-7` — 2026-10-06, and the gate is the feature. A failure now leaves
   `.xencode/lesson.candidate.md`: the event with its exit codes, and a lesson line that ships

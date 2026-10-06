@@ -74,8 +74,9 @@ layers),
 `/rewind` (undo the agent's file changes for this session; it refuses to
 overwrite a file you edited by hand after the agent wrote it, and
 `/rewind [turns] --force` overrides that),
-`/lesson` (what a rewind, or a run of failing `/verify` checks, drafted as a
-lesson: `/lesson status` prints it, `/lesson set <words>` writes your sentence
+`/lesson` (what a rewind, a run of failing `/verify` checks, or a call you answered
+`n` to at the approval prompt drafted as a lesson: `/lesson status` prints it,
+`/lesson set <words>` writes your sentence
 into it, `/lesson approve` appends that one line to `AGENTS.md` and clears the
 draft, `/lesson drop` clears it without writing anything. The draft's lesson line
 starts empty and an empty line cannot be approved — the program records what

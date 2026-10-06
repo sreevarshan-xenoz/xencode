@@ -3984,6 +3984,9 @@ pub async fn execute_tool_call_approved(
                 preview: approval_preview(root, call),
             };
             let (responder, answer) = oneshot::channel();
+            // Built here because `request` moves into the prompt, and the
+            // draft is only wanted once the person has answered.
+            let refusal_event = denied_event(&request);
             if ctx.prompts.send((request, responder)).is_err() {
                 // Nothing is listening — no TUI attached. The strictest
                 // possible answer is the only honest one, and it is an answer:
@@ -4004,6 +4007,9 @@ pub async fn execute_tool_call_approved(
                         answer
                     };
                     ctx.record_approval(&call.name, class, answer);
+                    if answer == ApprovalAnswer::Denied {
+                        draft_denied_call(root, refusal_event);
+                    }
                     answer
                 }
                 // A dropped responder means the prompt vanished with the app.
@@ -4022,6 +4028,29 @@ pub async fn execute_tool_call_approved(
             }
         }
     }
+}
+
+/// What a refused call is recorded as: the tool, the class of thing it would have
+/// done, and the one line the overlay was showing (`/lesson` prints that line as
+/// the evidence). A secret in the argument is scrubbed the same way the tool
+/// result scrubs it, because the draft file is read by a person and indexed by
+/// the project memory.
+fn denied_event(request: &ApprovalRequest) -> xencode_context_rs::Evidence {
+    xencode_context_rs::denied_call(
+        &request.tool,
+        request.class.overlay_label(),
+        &request.summary,
+    )
+}
+
+/// A person answering `n` is a decision about this repository, so it leaves the
+/// same kind of draft a rewind does (`EV-7`'s gate, `QM-6`'s trigger). The reason
+/// stays blank, because they did not give one and inventing it is the drift the
+/// blank exists to prevent. A draft that cannot be written is not worth failing a
+/// tool over — the refusal has already happened, and the call is not run either way.
+fn draft_denied_call(root: &Path, event: xencode_context_rs::Evidence) {
+    let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+    let _ = xencode_context_rs::draft_lesson(&event, &xencode);
 }
 
 // ── Checkpoints (I2-01) ───────────────────────────────────────────────
@@ -7897,6 +7926,79 @@ patched = ["{fixed}"]
             "a denied call must not record a snapshot either"
         );
         assert!(!root.join("never.txt").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A person answering `n` is the third event EV-7's gate records, beside a
+    /// rewind and a run of failing checks. What is recorded is the line the
+    /// overlay was showing them, and nothing about why they refused it.
+    #[tokio::test]
+    async fn a_refused_call_drafts_the_line_the_person_was_shown() {
+        let root = temp_root("lesson-denied");
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("src/keep.rs", "no\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert!(result.starts_with("error: the user denied"), "{result}");
+        assert!(
+            !root.join("src/keep.rs").exists(),
+            "a refused write stays refused"
+        );
+
+        let draft = xencode_context_rs::read_lesson(&xencode).expect("a refusal drafts a lesson");
+        assert_eq!(draft.evidence.len(), 1);
+        assert_eq!(draft.evidence[0].source, xencode_context_rs::DENIED_SOURCE);
+        assert!(
+            draft.evidence[0].detail.contains("write_file src/keep.rs"),
+            "the evidence is the line the overlay showed: {}",
+            draft.evidence[0].detail
+        );
+        assert!(
+            draft.evidence[0].detail.contains("file change"),
+            "{}",
+            draft.evidence[0].detail
+        );
+        assert!(draft.lesson.is_none(), "the reason is not ours to write");
+        assert!(xencode_context_rs::asks_for_words(
+            &draft,
+            &draft.evidence[0]
+        ));
+        assert!(
+            xencode_context_rs::render_lesson(&draft)
+                .contains("- denied: write_file (file change) — write_file src/keep.rs"),
+            "{}",
+            xencode_context_rs::render_lesson(&draft)
+        );
+        assert!(!root.join("AGENTS.md").exists());
+
+        // The other half of the rule: accepting a call says nothing went wrong,
+        // so it must not join the queue as if it did.
+        gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("src/added.rs", "yes\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Approved,
+        )
+        .await;
+        assert!(root.join("src/added.rs").exists());
+        assert_eq!(
+            xencode_context_rs::read_lesson(&xencode)
+                .unwrap()
+                .evidence
+                .len(),
+            1,
+            "an approved call adds no evidence"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
