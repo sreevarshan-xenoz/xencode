@@ -5235,12 +5235,16 @@ impl<'a> App<'a> {
                     .as_ref()
                     .map(|check| check.dropped.clone())
                     .unwrap_or_default();
-                let unverifiable = state_check
+                let no_such_commit = state_check
                     .as_ref()
-                    .map(|check| check.unverifiable)
+                    .map(|check| check.no_such_commit)
+                    .unwrap_or(0);
+                let not_a_searchable_tree = state_check
+                    .as_ref()
+                    .map(|check| check.not_a_searchable_tree)
                     .unwrap_or(0);
                 let _ = tx.send(format!(
-                    "[CTX]🧾 Tier 4 state.md — {} tokens in the prompt · {} fact line(s) on disk{}{}{}{}",
+                    "[CTX]🧾 Tier 4 state.md — {} tokens in the prompt · {} fact line(s) on disk{}{}{}{}{}",
                     tier4.map(|tier| tier.tokens).unwrap_or(0),
                     promoted.completed.len() + promoted.decisions.len() + promoted.unresolved.len(),
                     if tier4.is_none() && promoted.present() {
@@ -5262,17 +5266,23 @@ impl<'a> App<'a> {
                     },
                     // Not a complaint about the facts: a report that the check
                     // itself could not run here, so the person knows the tier is
-                    // going in unverified rather than verified and good. Worded for
-                    // both causes — a commit this repository cannot resolve, and code
-                    // it cannot search — because naming only the first would blame a
-                    // missing commit for a folder that has no git in it at all.
-                    if unverifiable == 0 {
+                    // going in unverified rather than verified and good. We report
+                    // whichever cause is non-zero so the person knows whether
+                    // a commit is missing locally or the directory is unsearchable.
+                    if no_such_commit == 0 {
                         String::new()
                     } else {
                         format!(
-                            " · {} not checkable here (the check could not run on this \
-                             repository)",
-                            unverifiable
+                            " · {} not checkable here (no such commit locally)",
+                            no_such_commit
+                        )
+                    },
+                    if not_a_searchable_tree == 0 {
+                        String::new()
+                    } else {
+                        format!(
+                            " · {} not checkable here (not a searchable tree)",
+                            not_a_searchable_tree
                         )
                     }
                 ));

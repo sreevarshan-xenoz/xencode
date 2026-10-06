@@ -15391,13 +15391,7 @@ the lie but keeps the ambiguity: the number still cannot tell a person which of 
 went wrong, and the two have different remedies — a shallow clone is fetched, an
 unsearchable folder is not a repository yet.
 
-- **Item AB-2** — split the bucket into `no_such_commit` and `not_a_searchable_tree`, carry
-  both in `StaleFacts`, and print whichever is non-zero. Three short lines in
-  `compact.rs`, one in `app.rs`'s tier-4 row, and the two existing test phases in
-  `state_stale_notice.rs` already pin each cause separately, so the wording is checked
-  rather than asserted. *Effort: S.* *Trap:* do not merge these into `dropped` — an
-  unreadable check is not a disproven fact, which is the rule both `QM-2` and `MEM-3` are
-  built on.
+- [x] **Item AB-2 — split the bucket into `no_such_commit` and `not_a_searchable_tree`, carry both in `StaleFacts`, and print whichever is non-zero.** — done 2026-10-06 in `xencode-context-rs/src/compact.rs` and `xencode-tui-rs/src/app.rs`. `StaleFacts` tracks `no_such_commit` and `not_a_searchable_tree` independently alongside `unverifiable`; `/ctx kv` tier 4 reports `· N not checkable here (no such commit locally)` and `· N not checkable here (not a searchable tree)` for the non-zero buckets; verified by unit tests in `compact.rs` and live panel assertions in `tests/state_stale_notice.rs`. *Effort: S.*
 
 ### Counting
 
