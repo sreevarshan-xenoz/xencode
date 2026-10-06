@@ -3471,20 +3471,29 @@ and making `config.json` world-readable turned the secret row over:
                                 fix: chmod 600 /home/sree/.xencode/config.json
 ```
 
-The `knowledge:stale` row is the last one, and it was watched in both states in a
+The `knowledge:stale` row is the last one, and it was watched in three states in a
 throwaway repository — a stored fact citing `src/auth.rs`, then that file moved
-out from under it:
+out from under it, then a fact whose citation points at a file that never held the
+name it was written against:
 
 ```
   PASS   knowledge:stale        2 durable facts, every one agreed with by the code
-  FAIL   knowledge:stale        1 believed, 1 dropped, 0 could not be checked — login lives in src/auth.rs [src:src/auth.rs@32206062]: the file it cites is gone
+  FAIL   knowledge:stale        0 believed, 1 dropped, 0 could not be checked — login lives in src/gone.rs: the file it cites is gone
                                 fix: re-read the file each dropped line cites and promote a corrected fact; the lines stay in state.md until you say otherwise
+  FAIL   knowledge:stale        1 believed, 0 dropped, 0 could not be checked, 1 places a name in a file that does not declare it (validate_token rejects an empty token before src/session.rs… names validate_token but cites src/session.rs)
+                                fix: re-read the cited file and the files that do declare the name, then correct the citation in state.md; the fact itself was not dropped for this
 ```
+
+The third row is not a contradiction. The file the fact cites has not moved and
+`validate_token` is still declared — the tree just declares it in `src/auth.rs`,
+which the fact never mentions. Nothing is taken out of the turn for it: which of
+the two files the fact meant is a question for whoever wrote it, so the row says so
+and leaves the line where it is.
 
 A project that has never stored a fact reports `ABSENT`, not a pass over nothing.
 The row reads `.xencode/state.md` and writes nothing back; the lines it names stay
 where they are, because whether a contradicted fact is wrong or the code is was a
-person's call. The same audit with each dropped line spelled out is
+person's call. The same audit with each finding spelled out is
 `xencode doctor --env`, and `--format json` carries both.
 
 `--format json` prints the same rows plus three summary keys:
@@ -3639,22 +3648,29 @@ It also prints what the project's durable knowledge looks like from here, which 
 the part that answers a question the screen cannot otherwise:
 
 ```
-  durable facts: 1 reaching the model, 1 dropped, 0 that could not be checked
-    dropped — the file it cites is gone: login lives in src/auth.rs [src:src/auth.rs@32206062]
+  durable facts: 1 reaching the model, 1 dropped, 0 that could not be checked, 1 that the code places in another file
+    dropped — the file it cites is gone: login lives in src/gone.rs
+    disagrees — validate_token rejects an empty token before src/session.rs runs names validate_token, declared in src/auth.rs rather than the cited src/session.rs
 ```
 
-The three numbers are not a sum of one thing. *Reaching the model* is what a turn
+The four numbers are not a sum of one thing. *Reaching the model* is what a turn
 will actually be told; *dropped* is what was left out of that, with the line and
 the reason under it; *could not be checked* is a fact the code has neither
-confirmed nor contradicted, which is not the same as either. `--format json` puts
-the same under a `durable_facts` key as `believed`, `unverifiable` and a `dropped`
-list of `{line, reason}`. Restoring the file changed the reason rather than
-clearing the row — `the file it cites has changed since` — because the comparison
-is against what the project looks like now, not against the commit the fact cites.
+confirmed nor contradicted, which is not the same as either; and *places in another
+file* is a fact the code has not disproven either — its file has not moved and its
+name is still declared, just somewhere the fact does not mention. `--format json`
+puts the same under a `durable_facts` key as `believed`, `unverifiable`, a `dropped`
+list of `{line, reason}` and a `disagreeing` list of `{line, name, cited,
+declared_in}`. Restoring the file changed the reason rather than clearing the row —
+`the file it cites has changed since` — because the comparison is against what the
+project looks like now, not against the commit the fact cites.
 
-Read-only, on purpose. The same pass runs silently when a prompt is built, and it
-edits `state.md`; a report that edited it too would mean a diagnostic deleted
-something. `xencode memory` is where a fact is changed.
+Read-only, on purpose. The same audit runs when a prompt is built, and what it
+concludes there is written into the turn and not into `state.md`: the dropped facts
+are withheld for that turn, the misplaced ones arrive with a `## Sources disagree`
+note beside them, and the file a person promoted keeps every byte of them. A
+diagnostic that edited memory would be deciding what a person may keep. `xencode
+memory` is where a fact is changed.
 
 ### `xencode session <name|resolve|export>`
 

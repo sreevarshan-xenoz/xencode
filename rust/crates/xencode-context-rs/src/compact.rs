@@ -490,13 +490,14 @@ fn fact_source(line: &str) -> Option<(&str, &str)> {
     (!path.is_empty() && !commit.is_empty()).then_some((path, commit))
 }
 
-/// The first word in a fact that names a file this workspace actually holds.
+/// The words in a fact that are paths this workspace actually holds, in the order
+/// they appear.
 ///
-/// Only a stat-able path is cited. A fact about `src/auth.rs` in a project that
-/// has no such file gets no marker, because there would be nothing to check it
-/// against later — and a marker that can never be verified reads like a
-/// guarantee.
-fn cited_path(line: &str, root: &Path) -> Option<String> {
+/// Only a stat-able path counts. A fact about `src/auth.rs` in a project that has
+/// no such file yields nothing, because there would be nothing to check it against
+/// later — and a marker that can never be verified reads like a guarantee.
+fn file_words(line: &str, root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
     for word in line.split_whitespace() {
         let word = word.trim_end_matches(|c: char| ".;:!?)]}\"'`".contains(c));
         if word.is_empty() || word.starts_with('-') || word.contains("://") {
@@ -507,10 +508,15 @@ fn cited_path(line: &str, root: &Path) -> Option<String> {
             continue;
         }
         if root.join(&candidate).is_file() {
-            return Some(candidate);
+            found.push(candidate);
         }
     }
-    None
+    found
+}
+
+/// The first word in a fact that names a file this workspace actually holds.
+fn cited_path(line: &str, root: &Path) -> Option<String> {
+    file_words(line, root).into_iter().next()
 }
 
 /// Mark every fact that cites a real file with that file and the revision it had
@@ -563,6 +569,9 @@ pub struct StaleFacts {
     /// resolve, or code it cannot search. They stay: an answer nobody can check is
     /// not an answer that is wrong.
     pub unverifiable: usize,
+    /// Facts that two sources place in different files. They stay too, and the
+    /// prompt is told about them — see [`disagreement_note`].
+    pub disagreeing: Vec<FactDisagreement>,
 }
 
 /// Why a durable fact was kept out of this turn.
@@ -596,6 +605,145 @@ impl FactProblem {
 pub struct DroppedFact {
     pub line: String,
     pub problem: FactProblem,
+}
+
+/// Two sources that both answered and did not say the same thing.
+///
+/// The distinction this holds is the whole of `QM-4`: a dropped fact is the code
+/// overruling a memory, which is a decision the silent pass is allowed to make
+/// only because the memory's own source file demonstrably moved. This is not that.
+/// Here the cited file is unchanged and the name still exists — the two answers
+/// simply point at different files, and which one is wrong (the note, or the
+/// assumption that the note's file is where that name lives) needs someone who
+/// knows what the fact was meant to say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactDisagreement {
+    /// The fact, as it stands in `state.md`. It stays in the prompt.
+    pub line: String,
+    /// The name the fact was recorded against.
+    pub name: String,
+    /// The file the fact cites.
+    pub cited: String,
+    /// Where this tree declares that name, sorted so one turn's notice reads the
+    /// same as the next.
+    pub declared_in: Vec<String>,
+}
+
+/// How many of these a single turn's notice prints before counting the rest.
+/// The notice is prompt bytes out of the same tier 4 budget as the facts.
+pub const DISAGREEMENT_LINES_SHOWN: usize = 3;
+
+/// How many of a disagreement's declaring files the notice names before counting.
+const DISAGREEMENT_FILES_SHOWN: usize = 3;
+
+/// A fact line with its provenance and check markers cut off, for display.
+///
+/// Every surface that quotes a durable fact to a person wants the sentence, not the
+/// markers: a row truncated at 60 characters otherwise ends in the middle of a
+/// commit hash and reads like a tool dump.
+pub fn fact_prose(line: &str) -> &str {
+    let cut = [SRC_OPEN, CHK_OPEN]
+        .into_iter()
+        .filter_map(|marker| line.find(marker))
+        .min();
+    match cut {
+        Some(at) => line[..at].trim_end(),
+        None => line,
+    }
+}
+
+/// A fact that cites a Rust file which does not declare the name it was written
+/// against, while other files in this tree do. `None` when the two sources agree,
+/// when the fact already mentions a declaring file, or when there is no citation to
+/// disagree with.
+///
+/// Called only after `verify_check` said the name still exists, so this can never
+/// be the reason a fact left the turn.
+fn placement_disagreement(
+    line: &str,
+    name: &str,
+    declared: &std::collections::HashMap<String, Vec<String>>,
+    root: &Path,
+) -> Option<FactDisagreement> {
+    let (cited, _) = fact_source(line)?;
+    // The declaration list comes from a `git grep` over `*.rs`, so a fact citing any
+    // other file has no answer here to disagree with — only a missing one.
+    if !cited.ends_with(".rs") {
+        return None;
+    }
+    let files = declared.get(name)?;
+    // The plain case, and the one a hand-written tier reaches for: the cited file
+    // declares the name, so the two sources say the same thing and there is nothing
+    // to report. This needs its own check rather than falling out of the one below,
+    // because a marker glues its path to `[src:` and that word is not a file this
+    // workspace holds — a fact whose prose never repeats the path mentions nothing.
+    if files.iter().any(|file| file == cited) {
+        return None;
+    }
+    // A fact whose prose names one of the declaring files is describing two files,
+    // not misplacing a name in one. Almost every fold line about a call across
+    // modules looks like this, and none of them is wrong.
+    let mentioned = file_words(line, root);
+    if files.iter().any(|file| mentioned.contains(file)) {
+        return None;
+    }
+    let mut declared_in = files.clone();
+    declared_in.sort();
+    declared_in.dedup();
+    Some(FactDisagreement {
+        line: line.to_string(),
+        name: name.to_string(),
+        cited: cited.to_string(),
+        declared_in,
+    })
+}
+
+/// Name the files a thing is declared in, shortest first, so the likeliest home
+/// reads first and a long tail costs one clause instead of three.
+fn listed(files: &[String]) -> String {
+    let mut files = files.to_vec();
+    files.sort_by_key(|file| (file.len(), file.clone()));
+    let shown = files
+        .iter()
+        .take(DISAGREEMENT_FILES_SHOWN)
+        .map(|file| format!("`{file}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match files.len().checked_sub(DISAGREEMENT_FILES_SHOWN) {
+        Some(rest) => format!("{shown} and {rest} more"),
+        None => shown,
+    }
+}
+
+/// The notice that rides with the durable tier when sources disagree about where a
+/// name lives, empty when they do not.
+///
+/// Its heading is one `ContextState::from_markdown` does not know, which is the
+/// point: `from_markdown` drops unknown sections, so if this text ever came back
+/// through the parser it would lose the notice rather than promote it into
+/// `state.md` as a fact of its own. Nothing here edits the file on disk — the
+/// disagreement is reported to the model and left for a person, because the two
+/// answers cannot both be settled from here.
+pub fn disagreement_note(disagreeing: &[FactDisagreement]) -> String {
+    if disagreeing.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "\n\n## Sources disagree\n\nEach line below stays because nothing here proves it wrong, but the file it cites does not declare the name it was recorded against:\n",
+    );
+    for odds in disagreeing.iter().take(DISAGREEMENT_LINES_SHOWN) {
+        out.push_str(&format!(
+            "- `{}` names `{}`, which this tree declares in {} — not in the cited `{}`. Check which file the fact meant.\n",
+            fact_prose(&odds.line),
+            odds.name,
+            listed(&odds.declared_in),
+            odds.cited,
+        ));
+    }
+    if let Some(rest) = disagreeing.len().checked_sub(DISAGREEMENT_LINES_SHOWN) {
+        out.push_str(&format!("- and {rest} more stated the same way.\n"));
+    }
+    out
 }
 
 /// How many claims one fact line may carry. A line about six symbols is a line
@@ -973,14 +1121,27 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                     }
                 }
             }
+            let mut odds: Option<FactDisagreement> = None;
             if problem.is_none() {
                 for claim in line_checks(line) {
-                    let answers = declared
+                    // The tree is searched at most once per fact, and only because
+                    // a fact asked. No answer there is not a "no".
+                    let Some(table) = declared
                         .get_or_insert_with(|| declared_symbols(root))
                         .as_ref()
-                        .ok_or(());
-                    match answers.and_then(|map| verify_check(&claim, map, root)) {
-                        Ok(true) => {}
+                    else {
+                        unchecked = true;
+                        continue;
+                    };
+                    match verify_check(&claim, table, root) {
+                        Ok(true) => {
+                            // The name is declared and the cited file is untouched —
+                            // two answers that do not have to agree. See
+                            // [`FactDisagreement`].
+                            if let (None, Check::Symbol(name)) = (&odds, &claim) {
+                                odds = placement_disagreement(line, name, table, root);
+                            }
+                        }
                         Ok(false) => {
                             problem = Some(match claim {
                                 Check::Symbol(_) => FactProblem::SymbolGone,
@@ -1000,6 +1161,9 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                 None => {
                     if unchecked {
                         check.unverifiable += 1;
+                    }
+                    if let Some(odds) = odds {
+                        check.disagreeing.push(odds);
                     }
                     list.push(line.clone());
                 }
@@ -2178,6 +2342,175 @@ assistant: hello";
         assert!(
             call_claims("validate_token is called by reject_request").is_empty(),
             "a passive sentence was read as a call in the wrong direction"
+        );
+    }
+
+    /// A tree where one name lives in one file and a second file exists to be
+    /// wrongly cited as its home.
+    fn two_source_repo(label: &str) -> (PathBuf, std::path::PathBuf) {
+        let (root, dir) = git_repo(label);
+        committed_source(&root, "src/auth.rs", "pub fn validate_token() {}\n");
+        committed_source(&root, "src/session.rs", "pub fn refresh_session() {}\n");
+        (root, dir)
+    }
+
+    #[test]
+    fn a_fact_naming_a_file_that_does_not_declare_its_name_is_reported_and_kept() {
+        let (root, dir) = two_source_repo("odds");
+        let durable = promote_lines(
+            &dir,
+            &["validate_token rejects an empty token before src/session.rs runs"],
+        );
+        let check = drop_stale_facts(&durable, &root);
+
+        // The thing this item exists to not do: the cited file never moved and the
+        // name is still declared, so nothing here proves the fact wrong, and a
+        // silent pass that dropped it would be guessing.
+        assert!(
+            check.dropped.is_empty(),
+            "a fact was dropped for a citation nobody contradicted: {:?}",
+            check.dropped
+        );
+        assert!(
+            check.text.contains("validate_token"),
+            "the surviving fact did not reach the prompt:\n{}",
+            check.text
+        );
+        assert_eq!(
+            check.disagreeing.len(),
+            1,
+            "the disagreement was not recorded: {:?}",
+            check.disagreeing
+        );
+        let odds = &check.disagreeing[0];
+        assert_eq!(odds.name, "validate_token");
+        assert_eq!(odds.cited, "src/session.rs");
+        assert_eq!(odds.declared_in, vec!["src/auth.rs".to_string()]);
+        assert!(
+            odds.line.contains(SRC_OPEN) && odds.line.contains(CHK_OPEN),
+            "the report lost the fact as it stands in the file: {}",
+            odds.line
+        );
+
+        let note = disagreement_note(&check.disagreeing);
+        assert!(note.contains("## Sources disagree"), "{note}");
+        assert!(note.contains("`validate_token`"), "{note}");
+        assert!(note.contains("`src/auth.rs`"), "{note}");
+        assert!(note.contains("`src/session.rs`"), "{note}");
+        // The markers are plumbing. A sentence about them in the prompt would read
+        // as if the tool were quoting its own file format at the model.
+        assert!(
+            !note.contains(SRC_OPEN) && !note.contains(CHK_OPEN),
+            "the notice pasted the fact's markers into the prompt:\n{note}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_fact_citing_the_file_that_really_declares_the_name_reports_nothing() {
+        // The guard against a notice on every line. Two answers agree here, and a
+        // prompt that said "sources disagree" about agreeing sources would teach the
+        // model to ignore the notice.
+        let (root, dir) = two_source_repo("agrees");
+        let durable = promote_lines(
+            &dir,
+            &["validate_token rejects an empty token in src/auth.rs"],
+        );
+        let check = drop_stale_facts(&durable, &root);
+        assert!(
+            check.disagreeing.is_empty(),
+            "a correct citation was reported as a disagreement: {:?}",
+            check.disagreeing
+        );
+        assert_eq!(disagreement_note(&check.disagreeing), "");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    #[test]
+    fn a_correct_citation_that_does_not_repeat_its_path_in_prose_reports_nothing() {
+        // Found by running this against a real repository rather than a promoted
+        // fixture: a marker glues its path to `[src:`, so the word is not a file this
+        // workspace holds and the prose mentions nothing. Without the citation check
+        // the tier says the file is in the wrong place when it is in the right one.
+        let (root, _dir) = two_source_repo("glued");
+        let head = head_short(&root);
+        let durable = format!(
+            "# State\n\n## decisions\n- refresh_session keeps a session warm {SRC_OPEN}src/session.rs@{head}] {CHK_OPEN}refresh_session]\n"
+        );
+        let check = drop_stale_facts(&durable, &root);
+        assert!(
+            check.disagreeing.is_empty(),
+            "a correct citation was reported as a disagreement because the fact does \
+             not repeat its own path: {:?}",
+            check.disagreeing
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_fact_that_names_the_file_holding_the_name_in_its_own_words_reports_nothing() {
+        // The common shape of a fold about a call across two modules: it cites one
+        // file for provenance and mentions the other because the sentence is about
+        // both. Nothing is misplaced there.
+        let (root, dir) = two_source_repo("both");
+        let durable = promote_lines(
+            &dir,
+            &["validate_token rejects an empty token, and src/session.rs runs after src/auth.rs"],
+        );
+        let check = drop_stale_facts(&durable, &root);
+        assert!(
+            check.disagreeing.is_empty(),
+            "a fact that mentions the declaring file was still called a disagreement: {:?}",
+            check.disagreeing
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_notice_prints_three_and_counts_the_rest() {
+        assert_eq!(disagreement_note(&[]), "");
+        let odds = (0..DISAGREEMENT_LINES_SHOWN + 2)
+            .map(|n| FactDisagreement {
+                line: format!(
+                    "validate_token rejects an empty token {n} {SRC_OPEN}src/session.rs@deadbeef] {CHK_OPEN}validate_token]"
+                ),
+                name: "validate_token".to_string(),
+                cited: "src/session.rs".to_string(),
+                declared_in: vec!["src/auth.rs".to_string()],
+            })
+            .collect::<Vec<_>>();
+        let note = disagreement_note(&odds);
+        let bullets = note.lines().filter(|line| line.starts_with("- ")).count();
+        assert_eq!(
+            bullets,
+            DISAGREEMENT_LINES_SHOWN + 1,
+            "the notice ran to {} lines; the tier it rides in is budgeted:\n{note}",
+            bullets
+        );
+        assert!(
+            note.contains(&format!(
+                "and {} more",
+                odds.len() - DISAGREEMENT_LINES_SHOWN
+            )),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn a_name_declared_in_many_files_is_counted_not_dumped() {
+        let odds = vec![FactDisagreement {
+            line: "validate_token rejects an empty token".to_string(),
+            name: "validate_token".to_string(),
+            cited: "src/session.rs".to_string(),
+            declared_in: (0..5)
+                .map(|n| format!("src/auth{n}.rs"))
+                .collect::<Vec<_>>(),
+        }];
+        let note = disagreement_note(&odds);
+        assert!(
+            note.contains(" and 2 more"),
+            "five declaring files were not counted:\n{note}"
         );
     }
 }

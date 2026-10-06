@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2408 tests passing, zero warnings (re-verified 2026-10-06, after `QK-4`; 19 ignored, so 2427 in the run)
+- [x] Workspace gates green — 16 crates, 2418 tests passing, zero warnings (re-verified 2026-10-06, after `QM-4`; 19 ignored, so 2437 in the run)
 
 ## Model Catalog Honesty
 
@@ -6096,6 +6096,16 @@ human's edit (LF-6's git-bus + GH-6).
   Prose contradictions need NLI (or multi-agent debate — up to +11.40% EM on
   AmbigDocs, which is a 4B-hostile design); say so in the report rather than
   shipping a judge. *Done-when:* a seeded scratch repo produces the line.
+  **Correction, 2026-10-06, before implementing rather than after:** "against the index"
+  does not exist for this question. `RetrievalIndex` keys its symbols by file
+  (`symbols: BTreeMap<String, PerFileSymbols>`, `retrieve.rs:151`) and has no
+  symbol→files query, so the name→files answer comes from the same one `git grep`
+  pass `MEM-3` already pays for once per turn — no new index, no new subprocess.
+  "One line" became a short section rather than staying one line, because two
+  disagreeing facts are two different sentences and naming only the first would
+  make the notice unreadable; it is capped at three with the rest counted, and it
+  is given room inside the tier's own 800 tokens instead of being appended past the
+  cut. Done 2026-10-06, see the W10 progress note.
 - **QM-5 — per-model aggregates with `n` printed.** *Effort: S,* = CX-2 +
   EVd-1. `RequestMetrics` already carries `generation_tok_s`, `prompt_tok_s`,
   `context_usage` and `retrieved_files`; it has **no `model` and no
@@ -10037,7 +10047,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 9 done
+#### W10 — Durable project knowledge — 23 items, 10 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10062,12 +10072,44 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-9** | A declarative seed for a project xencode has never seen | capability | split out of `QK-4` on 2026-10-06, which shipped only its read-only report half. The seed writes: `AGENTS.md`, an `anchor.md`, a project `skills/` entry, the pre/post hooks key (`config.rs:698`, empty by default) and a settings template with the secrets taken out of it — for a clone with none of them. No `xencode init` exists today (the `Commands` enum has no such subcommand), so this is a new surface, not a flag on one. Trap: an LLM inventing a project's CI config is exactly how 9,371 lines of plausible fiction got deleted once already, so every seeded byte is either copied from what the code demonstrably does or left as a commented question — and a file that already exists is never overwritten, because `AGENTS.md` is a human's, `QK-6` says so for the lines of it a machine disagrees with |
 | **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
-| **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
+| **QM-4** | report disagreement, never resolve | capability | disagreement reported, never resolved — done 2026-10-06 as a `## Sources disagree` notice riding with the facts, plus the same set on `doctor`; see the W10 progress note |
 | **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed — the row's premise was stale (see the correction above); done 2026-10-06 as per-model rate windows plus `n` in `/cost`, see the W10 progress note |
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QM-4` — 2026-10-06, and it is the item that a live run corrected. Two sources can
+  both answer and still disagree: the cited file has not moved, the `[chk:]` name is still
+  declared, and the file declaring it is not the file the fact cites. Neither side is
+  disproven, so nothing leaves the turn. `placement_disagreement` records it,
+  `disagreement_note` writes a `## Sources disagree` section into the prompt copy only, and
+  that heading is one `ContextState::from_markdown` does not know — so if the text ever came
+  back through the parser the notice would be dropped rather than promoted into memory as a
+  fact. Room is made for it inside the tier's own 800 tokens because tier 4 truncates from
+  the head: a notice appended after the facts is the first thing a full state cuts, which is
+  exactly when a state has most chances to disagree. `doctor`'s `knowledge:stale` row,
+  `--env` and its JSON report the same set, since a row reading "every one agreed with by the
+  code" beside a prompt carrying a notice is worse than no row at all. Only the code-shaped
+  half is compared, which is all the row asked for: no judge was shipped for prose
+  contradictions, and nothing in the notice claims a fact is wrong.
+  **Watched, not inferred.** Seven tests. The quiet ones carry the risk, because the failure
+  this item can produce is a notice on every line: removing the check that a fact's prose
+  already names a declaring file makes `a_fact_citing_the_file_that_really_declares_the_name_reports_nothing`
+  and `a_fact_that_names_the_file_holding_the_name_in_its_own_words_reports_nothing` fail
+  together. What the fixtures could not catch, the binary did: the first version treated a
+  citation as correct only when the fact repeated its own path in prose, so
+  `refresh_session keeps a session warm [src:src/session.rs@…]` — where the marker glues the
+  path to `[src:` and the word therefore is not a file this workspace holds — was reported as
+  misplaced while being perfectly right. `a_correct_citation_that_does_not_repeat_its_path_in_prose_reports_nothing`
+  and the doctor's second case both fail with that check removed, and the live `doctor` run in
+  a scratch repository now shows all three states: `PASS … every one agreed`, `FAIL … 1 places
+  a name in a file that does not declare it`, and `--env`'s `disagrees — … declared in
+  src/auth.rs rather than the cited src/session.rs`, with `state.md` byte-identical after.
+  **Counted:** 2418 passing, 0 failed, 19 ignored across 16 crates on 2026-10-06 (ten new
+  tests since `QK-4`: seven in `compact.rs`, one in `doctor.rs`, two in
+  `tests/state_staleness.rs`), with `cargo fmt --all` clean and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean.
 
 - [x] `QK-4` — 2026-10-06, the report half. A durable fact the code has contradicted already
   leaves the prompt in silence: `drop_stale_facts` runs on every prompt build and edits

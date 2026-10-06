@@ -874,10 +874,25 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     let state_check = std::fs::read_to_string(xencode.join("state.md"))
         .ok()
         .map(|text| crate::compact::drop_stale_facts(&text, root));
-    let state_md = state_check
-        .as_ref()
-        .map(|check| check.text.clone())
-        .filter(|text| !text.trim().is_empty());
+    let state_md = state_check.as_ref().and_then(|check| {
+        if check.text.trim().is_empty() {
+            return None;
+        }
+        let note = crate::compact::disagreement_note(&check.disagreeing);
+        if note.is_empty() {
+            return Some(check.text.clone());
+        }
+        // Tier 4 truncates this from the head, so a notice sitting after the facts
+        // is the first thing cut — and the state is biggest exactly when it has
+        // most chances to disagree. Make room for it here instead of hoping.
+        let room = crate::budget::est_tokens(note.len(), false);
+        let (facts, _) = crate::budget::truncate_to_tokens(
+            &check.text,
+            STATE_CAP_TOKENS.saturating_sub(room),
+            false,
+        );
+        Some(facts + &note)
+    });
     let git_summary = git_summary_text(root).unwrap_or_default();
     let notes_md = crate::notes::read_notes(&xencode);
     // Working-tree paths, read once: they seed retrieval and they decide which

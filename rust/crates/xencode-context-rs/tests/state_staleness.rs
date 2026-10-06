@@ -176,6 +176,149 @@ fn a_tier_written_by_hand_is_sent_exactly_as_its_author_wrote_it() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// A repository with `validate_token` in one file and a second file to be wrongly
+/// cited as its home, plus the fact that cites the wrong one.
+fn disagreeing_repo(label: &str) -> (PathBuf, Vec<String>) {
+    let root = scratch(label);
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "user.email", "test@xencode.local"]);
+    git(&root, &["config", "user.name", "Xencode Test"]);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/auth.rs"), "pub fn validate_token() {}\n").unwrap();
+    std::fs::write(root.join("src/session.rs"), "pub fn refresh_session() {}\n").unwrap();
+    git(&root, &["add", "-A"]);
+    git(
+        &root,
+        &["commit", "-q", "-m", "the token check and the session"],
+    );
+    (
+        root,
+        vec!["validate_token rejects an empty token before src/session.rs runs".to_string()],
+    )
+}
+
+#[test]
+fn a_fact_pointing_at_the_wrong_file_arrives_beside_a_notice_in_the_prompt() {
+    // QM-4 where the model reads it. The fact is not disproven — its file has not
+    // moved and its name is still declared — so it stays, and the turn is told that
+    // two sources place the name in different files.
+    let (root, decisions) = disagreeing_repo("notice");
+    let xencode = root.join(".xencode");
+    xencode_context_rs::write_state_candidate(
+        &xencode_context_rs::ContextState {
+            working_on: "answer what validates a token".to_string(),
+            completed: vec![],
+            decisions,
+            unresolved: vec![],
+        },
+        &xencode,
+    )
+    .unwrap();
+    xencode_context_rs::promote_state_candidate(&xencode).unwrap();
+
+    let live = collect(&root);
+    assert!(
+        live.stale_state_facts.is_empty(),
+        "a disagreement was handled as a disproven fact: {:?}",
+        live.stale_state_facts
+    );
+    let text = prompt(&root, "what validates a token?");
+    assert!(
+        text.contains("validate_token rejects an empty token"),
+        "the fact itself did not reach the turn:\n{text}"
+    );
+    assert!(
+        text.contains("## Sources disagree"),
+        "the turn was not told the sources disagree:\n{text}"
+    );
+    let notice = text
+        .split("## Sources disagree")
+        .nth(1)
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        notice.contains("`src/auth.rs`") && notice.contains("`src/session.rs`"),
+        "the notice did not name both files: {notice}"
+    );
+    assert!(
+        notice.contains("Check which file the fact meant"),
+        "the notice reported the disagreement without saying what to do about it: \
+         {notice}"
+    );
+
+    // Reported, not rewritten. The person's file keeps the bytes they promoted.
+    let on_disk = std::fs::read_to_string(xencode.join("state.md")).unwrap();
+    assert!(
+        !on_disk.contains("Sources disagree"),
+        "the notice was written into state.md as if it were a fact:\n{on_disk}"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_full_durable_tier_loses_a_fact_to_the_cap_before_it_loses_the_notice() {
+    // Tier 4 truncates from the head, so a notice appended after the facts is the
+    // first thing a full state cuts — which is exactly when a state has most chances
+    // to disagree. Room is made for it instead, and a fact pays for it.
+    let (root, mut decisions) = disagreeing_repo("cap");
+    // Long enough that the promoted file cannot also carry the notice inside 800
+    // tokens, and the disagreeing line is already first so the cap's trimming
+    // leaves it alone.
+    for n in 0..14 {
+        decisions.push(format!(
+            "decision {n}: the retry ladder in src/session.rs waits one second per attempt, \
+             gives up after four, records the failure in the ledger, and review asked that the \
+             next reader not shorten this sentence by accident"
+        ));
+    }
+    let xencode = root.join(".xencode");
+    xencode_context_rs::write_state_candidate(
+        &xencode_context_rs::ContextState {
+            working_on: "answer what validates a token".to_string(),
+            completed: vec![],
+            decisions,
+            unresolved: vec![],
+        },
+        &xencode,
+    )
+    .unwrap();
+    xencode_context_rs::promote_state_candidate(&xencode).unwrap();
+    let on_disk = std::fs::read_to_string(xencode.join("state.md")).unwrap();
+    assert!(
+        on_disk.len() > 3_000,
+        "this fixture is not a full durable tier, so it cannot test the cap: {} bytes of a \
+         3200-byte bar",
+        on_disk.len()
+    );
+
+    let live = collect(&root);
+    let sent = live.state_md.as_deref().unwrap_or_default().to_string();
+    assert!(
+        sent.contains("## Sources disagree"),
+        "the notice was truncated away and the turn silently lost it:\n{sent}"
+    );
+    assert!(
+        sent.contains("validate_token rejects an empty token"),
+        "the notice survived but the fact it describes did not:\n{sent}"
+    );
+    // The room came out of the tier, not out of thin air: one of the fifteen facts
+    // pays for the notice, and the cap is what says which.
+    assert!(
+        sent.len() < on_disk.len(),
+        "a full tier plus a notice was sent whole, over the budget it is capped to: {} bytes \
+         sent against {} on disk",
+        sent.len(),
+        on_disk.len()
+    );
+    assert!(
+        xencode_context_rs::budget::est_tokens(sent.len(), false)
+            <= xencode_context_rs::context::STATE_CAP_TOKENS,
+        "making room pushed the tier over its own budget: {}",
+        xencode_context_rs::budget::est_tokens(sent.len(), false)
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 /// The prompt text one turn would actually send, so a claim about "dropped at
 /// inject time" is checked where the model receives it.
 fn prompt(root: &Path, ask: &str) -> String {

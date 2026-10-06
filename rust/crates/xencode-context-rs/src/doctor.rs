@@ -177,7 +177,7 @@ pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
     let check = crate::compact::audit_durable_facts(xencode_dir);
     let kept = crate::state::ContextState::from_markdown(&check.text);
     let believed = kept.completed.len() + kept.decisions.len() + kept.unresolved.len();
-    if check.dropped.is_empty() && check.unverifiable == 0 {
+    if check.dropped.is_empty() && check.unverifiable == 0 && check.disagreeing.is_empty() {
         return SelfCheck {
             name,
             state: "pass".to_string(),
@@ -205,22 +205,57 @@ pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
     if !reasons.is_empty() {
         detail.push_str(&format!(" — {}", reasons.join("; ")));
     }
+    // A row that says every stored fact agreed with the code while the prompt
+    // carries a notice saying otherwise is worse than no row, so the two surfaces
+    // report the same set. Nothing here drops a fact for it.
+    if !check.disagreeing.is_empty() {
+        let odds = check
+            .disagreeing
+            .iter()
+            .take(2)
+            .map(|odds| {
+                format!(
+                    "{} names {} but cites {}",
+                    short_fact(&odds.line),
+                    odds.name,
+                    odds.cited
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        detail.push_str(&format!(
+            ", {} place{} a name in a file that does not declare it ({})",
+            check.disagreeing.len(),
+            if check.disagreeing.len() == 1 {
+                "s"
+            } else {
+                ""
+            },
+            odds
+        ));
+    }
+    let fix = if check.dropped.is_empty() {
+        "re-read the cited file and the files that do declare the name, then correct the \
+         citation in state.md; the fact itself was not dropped for this"
+            .to_string()
+    } else {
+        "re-read the file each dropped line cites and promote a corrected fact; \
+         the lines stay in state.md until you say otherwise"
+            .to_string()
+    };
     SelfCheck {
         name,
         state: "fail".to_string(),
         detail,
-        fix: Some(
-            "re-read the file each dropped line cites and promote a corrected fact; \
-             the lines stay in state.md until you say otherwise"
-                .to_string(),
-        ),
+        fix: Some(fix),
     }
 }
 
-/// A fact line as the row can show it: the front of it, because a durable fact is
-/// a sentence and a doctor row is not.
+/// A fact line as the row can show it: the sentence, cut short. A durable fact is a
+/// sentence and a doctor row is not, and the markers are the tool's own file format
+/// rather than anything about the project.
 fn short_fact(line: &str) -> String {
-    let one_line = line.trim();
+    let one_line = crate::compact::fact_prose(line).trim();
     match one_line.char_indices().nth(60) {
         Some((at, _)) => format!("{}…", one_line[..at].trim_end()),
         None => one_line.to_string(),
@@ -882,6 +917,96 @@ mod tests {
             "a failing row has to say what to do about it"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_disagreement_keeps_the_row_from_claiming_everything_agreed() {
+        // The two surfaces must say the same thing. A prompt carrying a notice and a
+        // doctor row reading "every fact agreed with the code" is worse than the row
+        // not existing.
+        let unique = std::process::id();
+        let root = std::env::temp_dir().join(format!("xencode-doctor-odds-{unique}"));
+        let xencode = root.join(".xencode");
+        std::fs::create_dir_all(&xencode).unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .expect("git should be on PATH");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        for args in [
+            &["init", "-q"][..],
+            &["config", "user.email", "test@xencode.local"][..],
+            &["config", "user.name", "Xencode Test"][..],
+        ] {
+            run(args);
+        }
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/auth.rs"), "pub fn validate_token() {}\n").unwrap();
+        std::fs::write(root.join("src/session.rs"), "pub fn refresh_session() {}\n").unwrap();
+        for args in [&["add", "-A"][..], &["commit", "-q", "-m", "seed"][..]] {
+            run(args);
+        }
+        let head = String::from_utf8(run(&["rev-parse", "--short=8", "HEAD"]).stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+
+        std::fs::write(
+            xencode.join("state.md"),
+            format!(
+                "# State\n\n## decisions\n- validate_token rejects an empty token before src/session.rs runs [src:src/session.rs@{head}] [chk:validate_token]\n"
+            ),
+        )
+        .unwrap();
+        let row = check_durable_facts(&xencode);
+        assert!(
+            !row.passed(),
+            "the row certified a fact the prompt says is misplaced: {}",
+            row.detail
+        );
+        assert!(
+            row.detail
+                .contains("1 places a name in a file that does not declare it"),
+            "the row did not say what kind of trouble this is: {}",
+            row.detail
+        );
+        assert!(
+            row.detail.contains("0 dropped"),
+            "a disagreement was counted as a dropped fact: {}",
+            row.detail
+        );
+        assert!(
+            row.fix
+                .as_deref()
+                .is_some_and(|fix| fix.contains("was not dropped")),
+            "the row told the reader to re-promote a fact nothing removed: {:?}",
+            row.fix
+        );
+
+        // The same tier with the citation pointing at the file that really declares
+        // the name: nothing left to say, and no row that reads as an alarm.
+        std::fs::write(
+            xencode.join("state.md"),
+            format!(
+                "# State\n\n## decisions\n- validate_token rejects an empty token [src:src/auth.rs@{head}] [chk:validate_token]\n"
+            ),
+        )
+        .unwrap();
+        let agrees = check_durable_facts(&xencode);
+        assert!(
+            agrees.passed(),
+            "a correct citation was still reported: {}",
+            agrees.detail
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

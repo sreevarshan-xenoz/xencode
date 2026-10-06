@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QM-4`: a stored fact the code places elsewhere is said out loud, not dropped
+
+A durable fact carries two claims about the code — the file it cites, and the name checked
+against that file — and both can be true while pointing at different places. The cited file
+has not changed since the fact was written, the name is still declared somewhere in this
+tree, and the file that declares it is not the file the fact cites. Which of the two is
+wrong is not a question a program can answer: the note may have meant the file it names, or
+it may have meant the symbol and drifted when that symbol moved.
+
+The fact now stays in the turn, and the turn says so beside it. The durable tier carries a
+`## Sources disagree` section naming the fact, the name, the files that really declare it,
+and the one it cites, up to three of them before the rest are counted. It is written into
+the prompt copy and never into `state.md`, which keeps every byte a person promoted, and it
+is budgeted: a tier already full to its 800-token cap gives up a fact of its own rather
+than losing the notice, because a notice truncated away is a disagreement silently un-told.
+The heading is deliberately one the state parser does not know, so if this text ever came
+back through it the notice would be dropped rather than promoted into memory as a fact.
+
+`xencode doctor` reports the same set, because a row reading "2 durable facts, every one
+agreed with by the code" beside a prompt carrying a notice is worse than no row at all. The
+`knowledge:stale` row names each disagreement and what to do about it, `--env` spells them
+out, and the JSON carries a `disagreeing` list of `{line, name, cited, declared_in}`.
+Nothing was dropped to produce any of this, and nothing is dropped by it later: the two
+answers are reported and left alone.
+
 ### Added — `QK-4`: `xencode doctor` says which stored facts the code no longer agrees with
 
 A fact about the code that has moved since it was written leaves the prompt silently. The
@@ -23,10 +48,10 @@ neither confirmed nor contradicted, followed by each dropped line with its reaso
 never stored a fact reports `ABSENT`, which is not a pass over nothing. The row is in the
 JSON of both surfaces, so an attached report and the screen cannot disagree about it.
 
-It reports rather than repairs, deliberately: the same pass that edits `state.md` when a
-prompt is built is run in read-only mode here, and a diagnostic that deleted lines would
-take the one judgement still worth making — whether the fact is wrong or the code is — off
-the person reading the output. The fix the row names is to re-read the cited file and
+It reports rather than repairs, deliberately: the same audit that runs when a prompt is
+built is run here, and neither one writes to `state.md` — a diagnostic that deleted lines
+would take the one judgement still worth making (whether the fact is wrong or the code is)
+off the person reading the output. The fix the row names is to re-read the cited file and
 promote a corrected fact. The half of this plan item that writes files into a project —
 a `AGENTS.md`, an `anchor.md`, skills, hooks, a settings template with the secrets out of
 it — is not here; that is a different surface with a different risk and is tracked on its
