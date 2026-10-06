@@ -9124,8 +9124,24 @@ fn cost_report_lines(
             _ => cost.unknown_because.clone().unwrap_or_default(),
         };
         out.push(format!(
-            "  {label} — {} prompted · {} generated · {detail}",
-            cost.tokens.prompt_tokens, cost.tokens.completion_tokens
+            "  {label} — {} records · {} prompted · {} generated · {detail}{}",
+            cost.tokens.requests,
+            cost.tokens.prompt_tokens,
+            cost.tokens.completion_tokens,
+            rollup
+                .by_model_rates
+                .get(&cost.model)
+                .and_then(|rates| rates.generation_percentiles())
+                // The count rides with the rate: a median over three records
+                // is not a property of a model, and printing it without the
+                // number of what it covers invites exactly that reading.
+                .map(|speed| {
+                    format!(
+                        " · p50 {:.1} tok/s ({} records that reported one)",
+                        speed.p50, speed.samples
+                    )
+                })
+                .unwrap_or_default()
         ));
     }
     if models.len() > COST_MODEL_ROWS {
@@ -15571,6 +15587,69 @@ mod tests {
             "{report}"
         );
         assert!(report.contains("llama_cpp_seed"), "{report}");
+    }
+
+    /// The per-model rows are where someone decides which model to ask for next,
+    /// so each has to carry what its numbers are measured over: the model's own
+    /// records, counted, and a median drawn from that model alone. Pooled across
+    /// two models the same six turns say ten tokens a second about neither.
+    #[test]
+    fn each_model_in_the_cost_report_carries_its_own_speed_and_its_own_count() {
+        let dir = cost_project("per-model");
+        let turn = |model: &str, tok_s: f32| {
+            let mut row = xencode_context_rs::RequestMetrics::from_timings(
+                "BALANCED", 8192, 100, 100, 10, tok_s, 0.0, 4,
+            );
+            row.session_id = Some("session_a".to_string());
+            row.model = Some(model.to_string());
+            row
+        };
+        record_turns(
+            &dir.join(".xencode"),
+            &[
+                turn("qwen2.5:7b", 2.0),
+                turn("llamacpp:qwen3-4b", 10.0),
+                turn("qwen2.5:7b", 4.0),
+                turn("llamacpp:qwen3-4b", 20.0),
+                turn("qwen2.5:7b", 6.0),
+                turn("llamacpp:qwen3-4b", 30.0),
+            ],
+        );
+        let report = cost_report_at(&dir);
+        let row_for = |name: &str| -> String {
+            report
+                .lines()
+                .find(|line| line.contains(name))
+                .unwrap_or_else(|| panic!("no {name} row in:\n{report}"))
+                .to_string()
+        };
+
+        let slow = row_for("qwen2.5:7b —");
+        assert!(
+            slow.contains("3 records · 300 prompted · 30 generated"),
+            "the count of what the row describes is missing or wrong:\n{slow}"
+        );
+        assert!(
+            slow.contains("p50 4.0 tok/s (3 records that reported one)"),
+            "the slow model's median is not its own middle value:\n{slow}"
+        );
+
+        let fast = row_for("llamacpp:qwen3-4b —");
+        assert!(
+            fast.contains("p50 20.0 tok/s (3 records that reported one)"),
+            "the fast model's median is not its own middle value:\n{fast}"
+        );
+        assert!(
+            !fast.contains("4.0 tok/s") && !slow.contains("20.0 tok/s"),
+            "one model's speed was printed beside the other:\nslow: {slow}\nfast: {fast}"
+        );
+
+        // The pooled figure is still there and still neither model's: over all
+        // six samples the middle is 10.0.
+        assert!(
+            report.contains("generation p50 10.0 tok/s"),
+            "the pooled line changed shape:\n{report}"
+        );
     }
 
     #[test]

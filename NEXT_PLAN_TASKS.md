@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2401 tests passing, zero warnings (re-verified 2026-10-05, after `QK-8`; 19 ignored, so 2420 in the run)
+- [x] Workspace gates green — 16 crates, 2405 tests passing, zero warnings (re-verified 2026-10-06, after `QM-5`; 19 ignored, so 2424 in the run)
 
 ## Model Catalog Honesty
 
@@ -6099,6 +6099,15 @@ human's edit (LF-6's git-bus + GH-6).
   `context_usage` and `retrieved_files`; it has **no `model` and no
   `session_id`**, so per-model latency profiling is 80% built and merely
   unkeyed. *Trap:* never let the table drive routing.
+  **Correction, 2026-10-06, before implementing rather than after:** the row's
+  premise is stale on both counts — `model`, `session_id`, `provider` and
+  `source` have been on the record since the sessions work, and the rollup has
+  grouped tokens by all three. What was genuinely missing was the *speed*
+  samples: one window for the whole project, so a model's median was an average
+  of whichever models shared it, and no line naming how many records any figure
+  rested on. Done-when therefore moved from "key the table by model" to "key the
+  rate windows by model and print `n` beside every rate" — done 2026-10-06,
+  see the W10 progress note.
 - **QM-6 — rejection drafting under EV-7's human gate.** *Effort: S.* On
   `/rewind` or a rejected diff, draft into `.xencode/memory/learned.candidate.md`
   with the reason **left blank for the human**. Inferring motive from silence is
@@ -10026,7 +10035,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 22 items, 7 done
+#### W10 — Durable project knowledge — 22 items, 8 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10051,11 +10060,55 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
 | **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
-| **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed |
+| **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed — the row's premise was stale (see the correction above); done 2026-10-06 as per-model rate windows plus `n` in `/cost`, see the W10 progress note |
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QM-5` — 2026-10-06. Each model's rate samples are kept in their own window and
+  `/cost` prints the number of records every figure rests on. **The row's own premise was
+  stale and was corrected before implementing** — see the note on the row: `model`,
+  `session_id`, `provider` and `source` have been on `RequestMetrics` for a while, and the
+  rollup already grouped *tokens* by all of them, so "merely unkeyed" described work already
+  done. The open half was speed: one window of the newest 512 samples for the whole project,
+  so a model's median was an average over whichever models shared the machine with it, and the
+  `Per model:` lines printed prompt and completion counts with no rate and no record count.
+  **What moved.** `MetricsRollup::by_model_rates` keys `ModelRates` by the model the record
+  names, each holding the newest `MODEL_RATE_SAMPLE_WINDOW` (64) generation and prompt samples
+  beside the global 512; `rollup.rs::fold` is still the only fold path, and `/cost` now renders
+  `llamacpp:qwen3-4b — 3 records · 300 prompted · 30 generated · … · p50 20.0 tok/s (3 records
+  that reported one)`. The pooled line stays because it answers a different question — how fast
+  this machine is, usually — and the two are printed apart rather than one replacing the other.
+  `TokenTotals` derives `Eq`, which a float window cannot, hence the separate struct rather
+  than a fifth field. `ROLLUP_VERSION` went 3 → 4: a version-3 file has no per-model rates and
+  every field defaults, so reading one back answered "this model never reported a speed" about
+  records that did — a wrong answer wearing the clothes of a missing one. The project's own
+  sidecar on disk is a v2 file, so the rebuild path is not hypothetical here.
+  **The trap, held.** Nothing routes on this table. Reading it is `/cost` and the status row,
+  and both only format what they are handed: searching the workspace for callers of
+  `generation_percentiles` returns those two display sites and the tests. `ModelRates` says in
+  its own doc what may not be decided from it, because a turn that ran slowly while something
+  else was busy is not evidence about the model. No selection code reads a measured rate at
+  all, so there is no branch to test — the guard is the absence of a caller, checked rather than
+  assumed.
+  **Watched failing first:** keying the window by nothing (one shared bucket) failed
+  `a_models_speed_is_not_the_average_of_the_models_it_shares_a_window_with` at the two-groups
+  assertion; folding the entries but never pushing their samples failed the same test at the
+  median, and the bounded-window test at its count; and printing `rollup.rows` where the row
+  names `cost.tokens.requests` failed
+  `each_model_in_the_cost_report_carries_its_own_speed_and_its_own_count` — the pooled count on
+  a per-model line, which is the exact mistake the item exists to stop.
+  **Not driven live, deliberately.** The `/cost` text is produced by `cost_report_lines`
+  through the same `App::report_cost_at` the command calls, over records appended to a real
+  `metrics.jsonl`, so the string in the test is the string on screen; a tmux drive would have
+  re-read that same path through a flakier keyboard. The CLI_GUIDE sample transcript at the
+  pricing section predates this change and shows the old line shape.
+  **Counted:** 2405 passing, 0 failed, 19 ignored across 16 crates on 2026-10-06 (four new
+  tests since `QK-8`: three in `rollup.rs`, one in `/cost`), with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. The run before this one failed
+  on `a_server_that_exits_during_handshake_reports_its_own_words` — the load-sensitive
+  `xencode-mcp-rs` case named in `QK-8`'s note — and it passed here.
 
 - [x] `QK-8` — 2026-10-05. `/trust` takes a path, so a directory's `AGENTS.md` can be
   granted and not only read. **The gap was found while writing the `EV-5` manuals — one
