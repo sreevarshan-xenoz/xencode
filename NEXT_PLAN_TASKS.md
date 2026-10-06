@@ -14,12 +14,12 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-03: it lists 44 subcommands — the
+  (verified against `xencode --help` on 2026-10-06: it lists 47 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
-  `paths`, `migrate` — and clap's
-  built-in `help`, 45 entries in the list)
+  `paths`, `migrate`, `deps`, `run`, `runs` — and clap's
+  built-in `help`, 48 entries in the list)
 - [x] Workspace gates green — 16 crates, 2428 tests passing, zero warnings (re-verified 2026-10-06, after `EV-7`; 19 ignored, so 2447 in the run)
 
 ## Model Catalog Honesty
@@ -6610,6 +6610,17 @@ graph, plus V-11 which §V-3 declines on the adaptive-UI evidence), and QN-5
 sitting inside W10 as conditional. The two tables share no ID,
 verified.
 
+**Re-counted the same way on 2026-10-06: 313 rows in W0…W17 over 310 unique IDs,
+plus the same 10 not scheduled — 323 rows and 320 IDs across the two tables, which
+still share no ID.** Fourteen rows have been placed since the count above and the
+summary tables had not been re-summed for any of them: they read 301 rows and 310
+bucket slots against their own 323, `W14` said 66 where its table holds 77 and `W10`
+said 22 where it holds 23, and `capability` and `ecology` were 3 and 10 short. Which
+waves those fourteen landed in is not recoverable from cells that were already wrong,
+so it is not claimed here — every per-wave table and its own heading was re-read, and
+those agree. Still exactly three IDs hold two rows — `U-3`, `U-6`, `V-10` — and `park`
+is still 11: the ten in the not-scheduled table plus `QN-5`, parked inside W10.
+
 **Reconciled 2026-09-28.** The headline total used to read 280 while the tables
 held 276 rows and 8 declined — 284. The per-wave counts were all correct; only the
 total was not, so nothing in the ordering depended on it. Corrected here as U-11
@@ -6630,11 +6641,11 @@ and the two sums must agree.
 | W7 | Trust architecture | 19 |
 | W8 | Outward research capability | 6 |
 | W9 | Project DNA and architecture intelligence | 21 |
-| W10 | Durable project knowledge | 22 |
+| W10 | Durable project knowledge | 23 |
 | W11 | Self-diagnosis, cost and operations | 20 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
-| W14 | Product surface and ecosystem | 66 |
+| W14 | Product surface and ecosystem | 77 |
 | W15 | Measure the other agents before planning on them (new, from S) | 3 |
 | W16 | One worker at a time, then brokered (new, from S) | 14 |
 | W17 | Many workers at once (new, from S) | 14 |
@@ -6643,8 +6654,8 @@ and the two sums must agree.
 | bucket | count | what it means |
 |---|---|---|
 | core substrate | 80 | other items depend on it; skipping one is a deferral, not a speed-up |
-| capability | 158 | makes the agent better at the work; nearly all of it waits on the substrate |
-| ecology | 61 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
+| capability | 161 | makes the agent better at the work; nearly all of it waits on the substrate |
+| ecology | 71 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
 | park | 11 | declined, conditional, or contested (§R-3) |
 
 ### R-1 The waves
@@ -10061,7 +10072,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 11 done
+#### W10 — Durable project knowledge — 23 items, 13 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 

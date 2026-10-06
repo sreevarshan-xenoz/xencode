@@ -152,7 +152,7 @@ than believed, with a credential-shaped value taken out of what does get written
 - **xencode as an MCP server** — `xencode mcp serve` puts the same six tools an agent uses here (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command`) behind the official Rust MCP SDK on standard input and output, so an editor, a script or another agent can drive xencode's real executor instead of reimplementing it. A caller on a pipe has no approval prompt to answer, so the server starts **read-only**: the three reads run, and a file-changing or shell tool is refused with the one flag that would have permitted that tool (`--allow write_file`). Permitting one tool does not permit its class, and a `path` or `cwd` that leaves `--workspace` — or enters `.git` or your xencode config directory — is refused even for a tool you allowed, by the same boundary check the interactive gate uses. What that check cannot see is the text inside a command the caller was allowed to run, so `--allow run_command` hands over a shell, and the launch says so.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
 - Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
-- CLI with 46 subcommands, among them: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `runs`, `run`, `eval`, `plugin`, `mcp`, `llamacpp`, `hw`, `history`, `perf`, `prices`, `release-notes`, `test`, `tui`.
+- CLI with 47 subcommands, among them: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `runs`, `run`, `deps`, `eval`, `plugin`, `mcp`, `llamacpp`, `hw`, `history`, `perf`, `prices`, `release-notes`, `test`, `tui`.
 
 ### Reliability + Ops
 - Two-tier cache (memory + disk) with LRU eviction.
@@ -783,7 +783,7 @@ xencode/
 │       ├── xencode-colab-rs     # Google Colab bridge: preflight + VM lifecycle
 │       ├── xencode-server-rs    # Axum HTTP/WebSocket collaboration server
 │       ├── xencode-analysis-rs  # Code analysis + pattern scanner + image intake
-│       └── ...              # core, config, cache, memory, models, colab, collaboration, plugin
+│       └── ...              # agents, core, config, cache, memory, models, collaboration, plugin
 ├── docs/                    # User manual, install manual, server API, long-term roadmap
 ├── scripts/                 # Shell/PowerShell build + smoke-test helpers
 ├── images/                  # Screenshots

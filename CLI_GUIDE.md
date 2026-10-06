@@ -829,7 +829,7 @@ shape above is what it is:
   loaded at `-c 8192` by xencode, one plain `/api/chat` with no options logged
   `msg="unload completed"` and `starting llama-server … -c 4096`. So the window is
   decided once per session and carried by every request the session makes — chat
-  turns, a one-off ask from the TUI, `/review`, and the eval judge — rather than
+  turns, a one-off `xencode query` ask, and the eval judge — rather than
   being left to the server. That default is sized by free VRAM here
   (`total_vram="1.9 GiB" default_num_ctx=4096`), not by the model.
 - **`think: true` is a hard failure when the model cannot do it.** Answering 400 with
