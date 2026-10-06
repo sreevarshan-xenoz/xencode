@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs` — and clap's
   built-in `help`, 48 entries in the list)
-- [x] Workspace gates green — 16 crates, 2430 tests passing, zero warnings (re-verified 2026-10-06, after `QM-6`; 19 ignored, so 2449 in the run)
+- [x] Workspace gates green — 16 crates, 2438 tests passing, zero warnings (re-verified 2026-10-06, after `QK-6`; 19 ignored, so 2457 in the run)
 
 ## Model Catalog Honesty
 
@@ -5419,7 +5419,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 75 | Context Contradiction Detection | narrowed | QM-4 — one `sources disagree:` line for code-shaped facts checked against the index, with QK-3's source classes as its substrate. No semantic NLI, and multi-agent debate (+11.40% EM on AmbigDocs) is a 4B-hostile token bill |
 | 76 | Knowledge Confidence | narrowed | QK-1 — a `provenance + last_verified_by + verdict` triple, never a scalar. A single number on three contradictory facts is worse than the contradiction |
 | 77 | Stale Knowledge Detection | planned | GH-1's digest + MEM-3 verify-on-read (QK-4). Zep's `invalid_at` semantics, not deletion |
-| 78 | Knowledge Garbage Collection | new | QK-6 — invalidate-don't-delete sweep on `ref + sha256`, 12-month tombstone queue, report-only unless `SE-1`'s file permissions are the thing being swept |
+| 78 | Knowledge Garbage Collection | new | QK-6 — invalidate-don't-delete sweep on `ref + sha256`, 12-month tombstone queue, report-only unless `SE-1`'s file permissions are the thing being swept — shipped 2026-10-06 with two readings corrected. Not `ref + sha256`: a fact's identity has to be the line a person can read, and the revision it was judged at is already inside its own `[src:path@commit]` marker, so a hash key would be a second, unreadable name for something the row already names. Not "report-only unless SE-1's permissions are the thing swept" either — `SE-1` made `chmod` a *check*, and a queue of world-readable config files is a diagnosis, not a garbage pile with an age on it; the row's own "invalidate, don't delete" is what governs, so removal is `--apply`, is twelve months of unbroken contradiction, and touches `state.md` alone. `AGENTS.md` is never in scope |
 | 79 | Project Knowledge Versioning | planned | git as the bus (MEM-2, LF-6); QK-7's `anchor.md`-style co-commit invariant |
 | 80 | Agent Memory Branches | reject | EVd-5 and DB-5 already state the rule: concurrency and mutable state belong in git where merge conflicts are honest |
 | 81 | Synthetic Repository Testing | planned | EV-1 local task-eval harness (QA-5 = its schema-driven generator, no LLM in the loop) |
@@ -6070,7 +6070,10 @@ shipped 2026-10-06 without its second half: the **declarative** seed for item 63
 into a project versus a read-only report) and now has its own ID, `QK-9`. QK-5 a value/cost proxy
 from `retrieved_files`+`prompt_tokens`+`cached_tokens`, **gated on AC-5's real
 tokenizer**. QK-6 invalidate-don't-delete GC with a 12-month tombstone queue and
-no auto-delete of a human's AGENTS.md lines. QK-7 versioned checkpoints as
+no auto-delete of a human's AGENTS.md lines — shipped 2026-10-06, and the queue
+turned out to be a record of a decision the prompt had already made:
+`drop_stale_facts` excludes a contradicted fact from every future turn and writes
+nothing back, so the tombstone file is the only place that date exists. QK-7 versioned checkpoints as
 `anchor.md`-style co-commits with the invariant that a checkpoint never reverts a
 human's edit (LF-6's git-bus + GH-6).
 
@@ -10090,7 +10093,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 14 done
+#### W10 — Durable project knowledge — 23 items, 15 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10109,7 +10112,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1; done 2026-10-05, see the W10 progress note |
 | **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows — the **report** half done 2026-10-06: `xencode doctor` gains a `knowledge:stale` row and `doctor --env` names each dropped fact, and neither writes to `state.md`. The **seed** half became `QK-9` (row 63), see the W10 progress note |
 | **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
-| **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
+| **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling — done 2026-10-06 as `.xencode/facts.tombstones.jsonl` plus `xencode memory gc [--apply]`: the turn that contradicts a fact stamps the date, nothing is retirable before twelve unbroken months, and `--apply` filters `state.md` line by line. `AGENTS.md` is never in scope. Two deviations, both forced by reading the code first — see the W10 progress note |
 | **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
 | **QK-8** | `/trust` a directory's own `AGENTS.md` | capability | the missing half of `EV-5`, found while shipping it: `/trust` read only `<root>/AGENTS.md`, so a nested file had no way to be trusted and every block arrived marked `[data]` — read, not obeyed. Done-when: `/trust src/auth/AGENTS.md` trusts those bytes, `/trust status` and `/trust forget` take the same path and answer for that file alone, a path that resolves outside the workspace or under `.git/`/`.xencode/` is refused, a name whose last segment is not `AGENTS.md` is refused, and the same turn still shows an untrusted sibling marked as data. The decision stays a person's: no tool the model can call reaches this command. Trap: the argument is user text reaching a durable store, so it is resolved against the workspace root, never against the current directory — done 2026-10-05, all four refusals and the sibling case watched failing first, see the W10 progress note |
 | **QK-9** | A declarative seed for a project xencode has never seen | capability | split out of `QK-4` on 2026-10-06, which shipped only its read-only report half. The seed writes: `AGENTS.md`, an `anchor.md`, a project `skills/` entry, the pre/post hooks key (`config.rs:698`, empty by default) and a settings template with the secrets taken out of it — for a clone with none of them. No `xencode init` exists today (the `Commands` enum has no such subcommand), so this is a new surface, not a flag on one. Trap: an LLM inventing a project's CI config is exactly how 9,371 lines of plausible fiction got deleted once already, so every seeded byte is either copied from what the code demonstrably does or left as a commented question — and a file that already exists is never overwritten, because `AGENTS.md` is a human's, `QK-6` says so for the lines of it a machine disagrees with |
@@ -10121,6 +10124,53 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QK-6` — 2026-10-06, and the finding that shaped it is that this was never a deletion
+  feature. `drop_stale_facts` is pure: `context.rs` reads `state.md`, filters it on the way into
+  every turn and writes nothing back, so a contradicted fact leaves *silently and forever*, the
+  file keeps the line, and the date it stopped being true existed in no file at all. `QK-4`'s
+  doctor row answers what is excluded right now; only this item could answer for how long. So the
+  new half is a record — `.xencode/facts.tombstones.jsonl`, stamped by the turn that first
+  notices — and one deliberate step, `xencode memory gc [--apply]`.
+  Two properties the code had to be written around rather than after. The age gate cannot be
+  trusted on its own, so `collect_gc` reconciles the queue against a fresh check *in the same
+  call* and anything not contradicted now is gone from it: an unverifiable fact — no git, an
+  unresolvable revision — leaves the queue instead of ageing, which is what makes a year-old
+  record unable to retire a line the current code is happy with. And `state.md` is filtered line
+  by line, never parsed and re-rendered, because `ContextState::from_markdown` drops sections it
+  does not recognise: re-writing the file through the renderer would delete a hand-added section
+  while pretending to remove one bullet.
+  Three things the row did not say. `redact_secrets` runs before the *comparison* and not only
+  before the write: a record stored scrubbed could otherwise never match the unscrubbed line it
+  records, and matching is how an entry survives a turn or leaves one. `FactProblem` gained serde
+  so the queue holds the same word `doctor` prints — `source_changed`, not a second vocabulary
+  invented for the same four reasons. And there is no `--older-than`: the row's twelve months is
+  the policy, and a flag that sets it makes the only durable claim in the feature a suggestion.
+  Not built, on purpose: any write to `AGENTS.md` (the file is theirs, and `/lesson approve` is
+  still the product's only writer), and a `sha256` key for a fact whose own `[src:path@commit]`
+  marker already carries the revision — see the correction on row 78.
+  The new subcommand was caught by a guard nobody had to write for it:
+  `tests::the_committed_completions_are_generated_never_hand_written` in `xencode-cli` compares
+  `docs/completions/xencode.{bash,zsh,fish}` and `docs/man/xencode.1` against what clap emits
+  today, and it failed the first full run with `completions/xencode.fish drifted from what clap
+  generates — regenerate it, do not edit it`. Regenerated through `xencode generate`, which is the
+  only sanctioned way those four files change.
+  **Counted:** 2438 passing, 0 failed, 19 ignored over 69 result lines across 16 crates on
+  2026-10-06. Eight of them new in `tests/fact_gc.rs` — the run was at 2430 before this item — and
+  the 69th line is that file's own binary, which is why the count of lines moved from 68.
+  Six guards watched failing before being believed — a month
+  instead of a year as the threshold, storing the fact without the scrub, deleting the turn's
+  record call, letting a re-promoted fact inherit a retired one's clock, keeping a fixed fact in
+  the queue, and retiring an already-retired entry twice. Then driven live in a scratch repository
+  with the built binary, and the quoted output in `CLI_GUIDE.md` is that run's: report at thirteen
+  months, `--apply` removing exactly one line while the second fact, the `## working-on` text and
+  `# State` kept their bytes, `AGENTS.md` hashing the same before and after, the next run reading
+  `0 contradicted … 1 retired by an earlier run`, and `doctor`'s `knowledge:stale` row moving to
+  `PASS … 1 durable fact, every one agreed with by the code`. One wording fix came after the
+  first live drive: an age under a month read `contradicted since this turn`, which the function
+  cannot know — it is handed a month count, not a provenance — so it now reads
+  `contradicted for under a month`. The record is what `QK-9` needs before it can seed a project
+  that has none of this.
 
 - [x] `QM-6` — 2026-10-06, and it shipped as a third evidence source rather than a
   second gate. A call refused at the approval prompt now leaves the same draft a

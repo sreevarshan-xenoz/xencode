@@ -874,6 +874,21 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     let state_check = std::fs::read_to_string(xencode.join("state.md"))
         .ok()
         .map(|text| crate::compact::drop_stale_facts(&text, root));
+    // QK-6: the pass above says nothing and writes nothing, so a fact the code
+    // contradicted simply stops arriving and no one keeps the date. The record of
+    // *when* is kept here instead, best effort — a queue this turn cannot write
+    // must not break the turn — and at the cost of one metadata call in a
+    // repository with nothing contradicted, which is nearly every repository
+    // nearly every time.
+    if let Some(check) = state_check.as_ref() {
+        if !check.dropped.is_empty() || crate::factgc::queue_exists(&xencode) {
+            let _ = crate::factgc::record_stale_facts(
+                &xencode,
+                &check.dropped,
+                crate::factgc::now_ms(),
+            );
+        }
+    }
     let state_md = state_check.as_ref().and_then(|check| {
         if check.text.trim().is_empty() {
             return None;

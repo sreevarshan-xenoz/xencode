@@ -1299,6 +1299,14 @@ enum MemoryAction {
         /// Session ID
         session: String,
     },
+    /// List the durable facts this repository contradicts, with how long each
+    /// has been contradicted for. `--apply` retires the ones past a year.
+    Gc {
+        /// Remove the facts contradicted for twelve months or longer from
+        /// `.xencode/state.md`
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4832,6 +4840,62 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
                 }
             } else {
                 println!("Session not found: {}", session);
+            }
+            Ok(())
+        }
+        MemoryAction::Gc { apply } => {
+            let xencode = xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
+            let now = xencode_context_rs::gc_now_ms();
+            let report =
+                xencode_context_rs::collect_gc(&xencode, now, apply).map_err(|e| e.to_string())?;
+            println!(
+                "Durable facts: {} contradicted, {} past {} months, {} removed",
+                report.pending.len(),
+                report.aged.len(),
+                xencode_context_rs::RETIRE_AFTER_MONTHS,
+                report.removed.len()
+            );
+            for entry in report.pending.iter().take(20) {
+                println!(
+                    "  {} — {}: {}",
+                    xencode_context_rs::age_words(entry.months(now)),
+                    entry.problem.reason(),
+                    xencode_context_rs::fact_prose(&entry.fact)
+                );
+            }
+            if report.pending.len() > 20 {
+                println!("  … and {} more", report.pending.len() - 20);
+            }
+            // The queue is what makes retirement a decision rather than a hunch,
+            // so a run that cannot offer any has to say why: twelve months of
+            // unbroken contradiction start counting the first time this looked.
+            if report.removed.is_empty() && !report.aged.is_empty() {
+                println!(
+                    "  `--apply` retires the {} above; a fact that stops being contradicted leaves the queue instead of ageing toward removal.",
+                    report.aged.len()
+                );
+            }
+            if !report.retired.is_empty() {
+                println!("  {} retired by an earlier run.", report.retired.len());
+            }
+            if report.unverifiable > 0 {
+                println!(
+                    "  {} stayed in the prompt because this repository could not check them.",
+                    report.unverifiable
+                );
+            }
+            if report.disagreeing > 0 {
+                println!(
+                    "  {} that the code places in another file. Those are disagreement, not staleness: `xencode doctor` names them and no sweep removes them.",
+                    report.disagreeing
+                );
+            }
+            if report.pending.is_empty()
+                && report.retired.is_empty()
+                && report.unverifiable == 0
+                && report.disagreeing == 0
+            {
+                println!("  Nothing to collect: this repository agrees with every durable fact it can check.");
             }
             Ok(())
         }

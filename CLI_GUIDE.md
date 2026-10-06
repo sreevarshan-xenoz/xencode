@@ -3011,12 +3011,55 @@ here stops a model from reading them, and the diff check is what notices.
 
 ### `xencode memory <action>`
 Conversation memory (kept as `conversation_memory.json` in the state directory):
-`list`, `show <session>`.
+`list`, `show <session>`. `gc` works on a different file — the project's own
+`.xencode/state.md` — and is described below.
 
 ```bash
 xencode memory list
 xencode memory show <session-id>
+xencode memory gc [--apply]
 ```
+
+#### `xencode memory gc`
+Every durable fact is checked against the repository on the way into a prompt. A
+fact whose cited file has been deleted, or changed since the revision the fact was
+written at, or that names a symbol the code no longer declares, or that describes a
+call that no longer happens, is left out of that turn. The model simply stops being
+told it. The line stays in `state.md`, where whoever promoted it can still read it.
+
+This command is the record of that exclusion, and the only way to act on it. The
+queue is `.xencode/facts.tombstones.jsonl`, written by the ordinary turn path — a
+fact is stamped the first time the code contradicts it, and leaves the queue the
+moment it no longer does, including on a turn where the check could not run at all
+(no git, an unresolvable revision). So the clock measures *unbroken* contradiction.
+
+```text
+$ xencode memory gc
+Durable facts: 1 contradicted, 1 past 12 months, 0 removed
+  contradicted for 13 months — the file it cites has changed since: the login entry point is src/auth.rs
+  `--apply` retires the 1 above; a fact that stops being contradicted leaves the queue instead of ageing toward removal.
+```
+
+| Invocation | Behavior |
+|---|---|
+| `xencode memory gc` | Report: what is queued, how long each has been contradicted, and how many of those are past twelve months. Writes only the queue, never `state.md`. |
+| `xencode memory gc --apply` | Additionally remove the twelve-month-or-older facts from `.xencode/state.md`, and keep them in the queue marked retired so there is a list of what earlier runs removed. |
+
+Three boundaries hold in every mode:
+
+- Nothing is retirable before twelve months of unbroken contradiction, and a
+  report is the default. A year of records is what makes removal a decision rather
+  than a hunch about a diff.
+- `state.md` is edited line by line, not parsed and re-written, so the facts that
+  stay, the `## working-on` text and any section a person typed in by hand come
+  out with the same bytes they went in with.
+- `AGENTS.md` is never in scope. Those are a human's instructions; the product
+  writes there at one step only, `/lesson approve`. A fact the code places in a
+  different file than the one it cites is disagreement, not staleness — `xencode
+  doctor` names those, and removing them is never this command's call.
+
+A fact retired by `--apply` and later promoted again starts a new clock; it does
+not inherit the retired one's.
 
 ### `xencode tasks <action>`
 File-backed background tasks. State lives in `.xencode/tasks/` under the
