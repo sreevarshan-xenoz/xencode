@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AE-3`: persist red-to-green reproduction evidence across process sessions
+
+Reproduction evidence proving bug fixes now persists across sessions and is backed by real artifact files on disk:
+
+- Updated `write_artifact` in `xencode-context-rs::artifacts` to write atomically via `write_atomic` with owner-only permissions.
+- Added persistent reproduction history in `.xencode/cache/repro.jsonl` using `ReproRecord` with secret scrubbing and torn-line tolerance.
+- Updated `reproduce_bug` in `xencode-tui-rs::reprogate` to log failing (red) and passing (green) runs into artifact files and append ledger entries with exit codes and artifact references.
+- `read_repro_history` filters entries based on real artifact file presence on disk, ensuring history entries vanish if their logs are removed.
+- Updated the `/gate` status view in `xencode-tui-rs::app` to display process exit codes for both red and green runs and print historical reproductions.
+
 ### Fixed — `AE-2`: join session verification checks to run history and record interactive loop proofs
 
 Verification checklist runs in interactive and CLI sessions are now recorded under their active conversation session so run history reports actual verification outcomes:

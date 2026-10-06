@@ -3357,6 +3357,7 @@ pub async fn execute_tool_call_timed(
         None,
         &crate::sandbox::Sandbox::disabled(),
         None,
+        None,
     )
     .await
 }
@@ -3377,6 +3378,7 @@ async fn execute_tool_call_plan(
     skills: Option<&xencode_plugin_rs::SkillRuntime>,
     sandbox: &crate::sandbox::Sandbox,
     repro: Option<&crate::reprogate::ReproGate>,
+    session_id: Option<&str>,
 ) -> String {
     let args = call.arguments_object();
     // Server tools are addressed by their visible `mcp__<server>__<tool>` name;
@@ -3415,7 +3417,15 @@ async fn execute_tool_call_plan(
         // it; outside the chat loop there is no gate to write into.
         "reproduce_bug" => match repro {
             Some(gate) => {
-                crate::reprogate::reproduce_bug(gate, root, &args, command_timeout, sandbox).await
+                crate::reprogate::reproduce_bug(
+                    gate,
+                    root,
+                    &args,
+                    command_timeout,
+                    sandbox,
+                    session_id,
+                )
+                .await
             }
             None => err("reproduce_bug is only available in the chat loop"),
         },
@@ -3874,6 +3884,7 @@ async fn run_and_checkpoint(
         Some(&ctx.skills),
         &ctx.sandbox,
         Some(&ctx.repro),
+        ctx.session_id.as_deref(),
     )
     .await;
     if let Some(note) = note {

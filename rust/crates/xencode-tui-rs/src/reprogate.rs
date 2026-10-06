@@ -28,6 +28,7 @@
 //! to satisfy, and a failure landing outside the reported bug's neighbourhood is
 //! flagged rather than accepted.
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -74,7 +75,7 @@ impl Phase {
 }
 
 /// One observed test failure, as the evidence records it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Failure {
     /// The file the assertion lives in, workspace-relative when we can say so.
     pub location: String,
@@ -98,7 +99,7 @@ impl Failure {
 }
 
 /// What the gate holds about the bug fix it is supervising.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Evidence {
     /// The single file this fix was allowed to write while awaiting its red.
     pub repro: String,
@@ -108,10 +109,83 @@ pub struct Evidence {
     pub scope: Vec<String>,
     pub red: Option<Failure>,
     pub red_exit: Option<i32>,
+    pub red_artifact: Option<String>,
     pub green_exit: Option<i32>,
+    pub green_artifact: Option<String>,
     /// Exit code of the surrounding suite, if one was run and recorded.
     pub suite_exit: Option<i32>,
     pub suite_command: Option<String>,
+}
+
+/// A persistent record of a completed red-to-green reproduction measurement (AE-3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReproRecord {
+    pub session: Option<String>,
+    pub repro: String,
+    pub command: String,
+    pub scope: Vec<String>,
+    pub red_exit: Option<i32>,
+    pub red_artifact: Option<String>,
+    pub red_failure: Option<Failure>,
+    pub green_exit: Option<i32>,
+    pub green_artifact: Option<String>,
+    pub suite_exit: Option<i32>,
+    pub suite_command: Option<String>,
+    pub ts_unix_ms: u64,
+}
+
+pub fn repro_history_path(xencode_dir: &Path) -> std::path::PathBuf {
+    xencode_dir.join("cache").join("repro.jsonl")
+}
+
+pub fn append_repro_record(xencode_dir: &Path, record: &ReproRecord) -> std::io::Result<()> {
+    let path = repro_history_path(xencode_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut rows = xencode_core_rs::read_jsonl_tolerant::<ReproRecord>(&path).rows;
+    rows.push(record.clone());
+    let mut text = String::new();
+    for row in &rows {
+        let mut json = serde_json::to_string(row)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        json = xencode_context_rs::trace::redact_secrets(&json);
+        text.push_str(&json);
+        text.push('\n');
+    }
+    xencode_core_rs::write_atomic(&path, text.as_bytes())
+}
+
+pub fn read_repro_history(root: &Path, xencode_dir: &Path) -> Vec<ReproRecord> {
+    let path = repro_history_path(xencode_dir);
+    let rows = xencode_core_rs::read_jsonl_tolerant::<ReproRecord>(&path).rows;
+    rows.into_iter()
+        .filter(|row| {
+            let red_exists = match &row.red_artifact {
+                Some(p) => {
+                    root.join(p).is_file()
+                        || xencode_dir.join(p).is_file()
+                        || Path::new(p).is_file()
+                }
+                None => false,
+            };
+            let green_exists = match &row.green_artifact {
+                Some(p) => {
+                    root.join(p).is_file()
+                        || xencode_dir.join(p).is_file()
+                        || Path::new(p).is_file()
+                }
+                None => false,
+            };
+            red_exists && green_exists
+        })
+        .collect()
+}
+
+pub fn display_relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(|r| r.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.display().to_string())
 }
 
 /// The outcome of judging one run.
@@ -592,8 +666,13 @@ impl ReproGate {
     }
 
     /// The failure has been seen. Unlock production edits and record the
-    /// assertion as the evidence.
-    pub fn record_red(&self, failure: Failure, exit: Option<i32>) {
+    /// assertion and optional artifact path as the evidence.
+    pub fn record_red_with_artifact(
+        &self,
+        failure: Failure,
+        exit: Option<i32>,
+        artifact: Option<String>,
+    ) {
         let mut state = self.lock();
         let repro = state.repro.clone().unwrap_or_default();
         let command = state.command.clone().unwrap_or_default();
@@ -605,19 +684,30 @@ impl ReproGate {
             scope,
             red: Some(failure),
             red_exit: exit,
+            red_artifact: artifact,
             green_exit: None,
+            green_artifact: None,
             suite_exit: None,
             suite_command: None,
         });
     }
 
+    pub fn record_red(&self, failure: Failure, exit: Option<i32>) {
+        self.record_red_with_artifact(failure, exit, None);
+    }
+
     /// The same command now passes. The measurement is complete.
-    pub fn record_green(&self, exit: Option<i32>) {
+    pub fn record_green_with_artifact(&self, exit: Option<i32>, artifact: Option<String>) {
         let mut state = self.lock();
         state.phase = Phase::Verified;
         if let Some(evidence) = state.evidence.as_mut() {
             evidence.green_exit = exit;
+            evidence.green_artifact = artifact;
         }
+    }
+
+    pub fn record_green(&self, exit: Option<i32>) {
+        self.record_green_with_artifact(exit, None);
     }
 
     /// Record the surrounding suite's exit code, run against the fixed tree.
@@ -690,6 +780,7 @@ pub async fn reproduce_bug(
     args: &serde_json::Map<String, serde_json::Value>,
     timeout_secs: u64,
     sandbox: &crate::sandbox::Sandbox,
+    session: Option<&str>,
 ) -> String {
     let Some(raw_path) = args.get("path").and_then(|v| v.as_str()) else {
         return "error: reproduce_bug needs a string \"path\" — the reproduction test's file"
@@ -749,7 +840,7 @@ pub async fn reproduce_bug(
             if recorded != display {
                 return format!(
                     "error: this fix's reproduction is recorded as {recorded}, not {display}. \
-                     Re-run the one that failed."
+                      Re-run the one that failed."
                 );
             }
         }
@@ -762,13 +853,46 @@ pub async fn reproduce_bug(
     }
     let declared_scope = gate.scope();
     let timeout = timeout_secs.max(REPRO_MIN_TIMEOUT_SECS);
+    let xencode_dir = root.join(".xencode");
+    let session_tag = args
+        .get("session")
+        .and_then(|v| v.as_str())
+        .or(session)
+        .unwrap_or("chat");
 
     if gate.phase() == Phase::AwaitingRed {
         let run = witness(root, command, timeout, sandbox).await;
         return match run.verdict(Some(&display), &declared_scope) {
             Verdict::Red { failure } => {
                 let exit = run.exit;
-                gate.record_red(failure.clone(), exit);
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let redacted = xencode_context_rs::trace::redact_secrets(&run.output);
+                let art_path = xencode_context_rs::artifacts::write_artifact(
+                    &xencode_dir,
+                    session_tag,
+                    &format!("repro-red-{now_ms}.log"),
+                    &redacted,
+                )
+                .ok();
+                let art_rel = art_path.as_ref().map(|p| display_relative(root, p));
+                if let Some(ref rel) = art_rel {
+                    let _ = xencode_context_rs::ledger::append_ledger(
+                        &xencode_dir,
+                        &xencode_context_rs::ledger::LedgerEntry {
+                            ts_unix_ms: now_ms,
+                            session: Some(session_tag.to_string()),
+                            run_class: xencode_context_rs::ledger::RunClass::Test,
+                            exit_code: exit.unwrap_or(1),
+                            subjects: vec![xencode_context_rs::ledger::digest_hex(command)],
+                            log_ref: rel.clone(),
+                            note: format!("repro red: {}", failure.short()),
+                        },
+                    );
+                }
+                gate.record_red_with_artifact(failure.clone(), exit, art_rel);
                 let scope_note = if declared_scope.is_empty() {
                     "\nNo neighbourhood was declared for this bug, so the failure's location \nwent unchecked: it is recorded, and that is the weaker form of this measurement."
                 } else {
@@ -826,13 +950,42 @@ pub async fn reproduce_bug(
     };
     match run.verdict(Some(&display), &declared_scope) {
         Verdict::Passed => {
-            gate.record_green(run.exit);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let redacted = xencode_context_rs::trace::redact_secrets(&run.output);
+            let art_path = xencode_context_rs::artifacts::write_artifact(
+                &xencode_dir,
+                session_tag,
+                &format!("repro-green-{now_ms}.log"),
+                &redacted,
+            )
+            .ok();
+            let art_rel = art_path.as_ref().map(|p| display_relative(root, p));
+            if let Some(ref rel) = art_rel {
+                let _ = xencode_context_rs::ledger::append_ledger(
+                    &xencode_dir,
+                    &xencode_context_rs::ledger::LedgerEntry {
+                        ts_unix_ms: now_ms,
+                        session: Some(session_tag.to_string()),
+                        run_class: xencode_context_rs::ledger::RunClass::Test,
+                        exit_code: run.exit.unwrap_or(0),
+                        subjects: vec![xencode_context_rs::ledger::digest_hex(command)],
+                        log_ref: rel.clone(),
+                        note: "repro green passed".to_string(),
+                    },
+                );
+            }
+            gate.record_green_with_artifact(run.exit, art_rel);
             let mut reply = format!(
                 "red to green. {display} failed on the unmodified tree and passes on this one. \
                  {evidence_note}\nThe fix is evidenced for this reproduction."
             );
+            let mut suite_exit = None;
             if let Some(suite) = suite {
                 let suite_run = witness(root, &suite, timeout, sandbox).await;
+                suite_exit = suite_run.exit;
                 gate.record_suite(&suite, suite_run.exit);
                 reply.push_str(&match suite_run.exit {
                     Some(0) => format!("\nSuite `{suite}` passed."),
@@ -853,6 +1006,23 @@ pub async fn reproduce_bug(
                     "\nThe surrounding suite has not been run, so nothing here says the rest of \
                      the tree still works. Run it before calling this fixed.",
                 );
+            }
+            if let Some(ev) = gate.evidence() {
+                let record = ReproRecord {
+                    session: Some(session_tag.to_string()),
+                    repro: ev.repro.clone(),
+                    command: ev.command.clone(),
+                    scope: ev.scope.clone(),
+                    red_exit: ev.red_exit,
+                    red_artifact: ev.red_artifact.clone(),
+                    red_failure: ev.red.clone(),
+                    green_exit: ev.green_exit,
+                    green_artifact: ev.green_artifact.clone(),
+                    suite_exit: ev.suite_exit.or(suite_exit),
+                    suite_command: ev.suite_command.clone(),
+                    ts_unix_ms: now_ms,
+                };
+                let _ = append_repro_record(&xencode_dir, &record);
             }
             reply
         }
@@ -1314,6 +1484,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            Some("session-ae3"),
         )
         .await;
         assert!(red.starts_with("red witnessed."), "{red}");
@@ -1341,6 +1512,7 @@ mod tests {
             ),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            Some("session-ae3"),
         )
         .await;
         assert!(green.starts_with("red to green."), "{green}");
@@ -1357,6 +1529,20 @@ mod tests {
         assert_eq!(evidence.repro, "tests/repro.rs");
         assert_eq!(evidence.command, REPRO_COMMAND);
         assert_eq!(evidence.scope, vec!["src".to_string()]);
+        assert!(evidence.red_artifact.is_some());
+        assert!(evidence.green_artifact.is_some());
+
+        // AE-3: Evidence outlives the process. A second session sees that history.
+        let xencode_dir = root.join(".xencode");
+        let history = read_repro_history(&root, &xencode_dir);
+        assert_eq!(history.len(), 1);
+        let rec = &history[0];
+        assert_eq!(rec.command, REPRO_COMMAND);
+        assert_eq!(rec.red_exit, Some(101));
+        assert_eq!(rec.green_exit, Some(0));
+        assert_eq!(rec.session.as_deref(), Some("session-ae3"));
+        assert!(rec.red_artifact.is_some());
+        assert!(rec.green_artifact.is_some());
 
         // 5. A second test cannot claim this fix's green, and a different command
         //    cannot measure it.
@@ -1367,6 +1553,7 @@ mod tests {
             &tool_args("tests/other.rs", REPRO_COMMAND, &["src"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            Some("session-ae3"),
         )
         .await;
         assert!(
@@ -1379,12 +1566,23 @@ mod tests {
             &tool_args("tests/repro.rs", "echo all good", &["src"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            Some("session-ae3"),
         )
         .await;
         assert!(
             wrong_command.contains("already recorded as"),
             "{wrong_command}"
         );
+
+        // Deleting either artifact removes the item from reproduction history.
+        let red_art = rec.red_artifact.as_ref().unwrap();
+        std::fs::remove_file(root.join(red_art)).unwrap();
+        let history_after_delete = read_repro_history(&root, &xencode_dir);
+        assert!(
+            history_after_delete.is_empty(),
+            "history must vanish if artifact is deleted"
+        );
+
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -1404,6 +1602,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            None,
         )
         .await;
         assert!(refused.starts_with("error: rejected"), "{refused}");
@@ -1435,6 +1634,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src/billing.rs"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            None,
         )
         .await;
         assert!(suspect.contains("suspect reproduction"), "{suspect}");
@@ -1471,6 +1671,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            None,
         )
         .await;
         assert!(refused.starts_with("error: rejected"), "{refused}");
@@ -1494,6 +1695,7 @@ mod tests {
             &tool_args("src/lib.rs", REPRO_COMMAND, &["src"], None),
             1,
             &sandbox,
+            None,
         )
         .await;
         assert!(not_a_test.starts_with("error:"), "{not_a_test}");
@@ -1506,6 +1708,7 @@ mod tests {
             &tool_args("tests/not_written.rs", REPRO_COMMAND, &["src"], None),
             1,
             &sandbox,
+            None,
         )
         .await;
         assert!(missing.contains("does not exist"), "{missing}");
@@ -1517,6 +1720,7 @@ mod tests {
             &tool_args("../../etc/passwd", "cat", &[], None),
             1,
             &sandbox,
+            None,
         )
         .await;
         assert!(outside.starts_with("error:"), "{outside}");
@@ -1528,6 +1732,7 @@ mod tests {
             &tool_args("", REPRO_COMMAND, &[], None),
             1,
             &sandbox,
+            None,
         )
         .await;
         assert!(no_path.starts_with("error:"), "{no_path}");
@@ -1548,6 +1753,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src"], None),
             1,
             &crate::sandbox::Sandbox::disabled(),
+            None,
         )
         .await;
         assert!(red.starts_with("red witnessed."), "{red}");
@@ -1576,6 +1782,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src"], None),
             1,
             &sandbox,
+            None,
         )
         .await;
         assert!(red.starts_with("red witnessed."), "{red}");
@@ -1587,6 +1794,7 @@ mod tests {
             &tool_args("tests/repro.rs", REPRO_COMMAND, &["src"], None),
             1,
             &sandbox,
+            None,
         )
         .await;
         assert!(again.starts_with("not green:"), "{again}");

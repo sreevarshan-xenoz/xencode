@@ -5657,19 +5657,23 @@ impl<'a> App<'a> {
                     // not the first one has happened yet: "waiting for a failing
                     // test" and "no failure yet" are the same state, and a user
                     // reading the status needs to see the second one spelled out.
-                    self.system_line(&format!(
-                        "   red: {} · green: {}",
-                        evidence
-                            .as_ref()
-                            .and_then(|e| e.red.as_ref())
-                            .map(|red| red.short())
-                            .unwrap_or_else(|| "not witnessed".to_string()),
-                        match evidence.as_ref().and_then(|e| e.green_exit) {
-                            Some(0) => "recorded".to_string(),
-                            Some(code) => format!("not yet (last run exit {code})"),
-                            None => "not yet".to_string(),
+                    let red_desc = match evidence.as_ref().and_then(|e| e.red.as_ref()) {
+                        Some(red) => {
+                            let code = evidence
+                                .as_ref()
+                                .and_then(|e| e.red_exit)
+                                .map(|c| format!(" (exit {c})"))
+                                .unwrap_or_default();
+                            format!("{}{code}", red.short())
                         }
-                    ));
+                        None => "not witnessed".to_string(),
+                    };
+                    let green_desc = match evidence.as_ref().and_then(|e| e.green_exit) {
+                        Some(0) => "recorded (exit 0)".to_string(),
+                        Some(code) => format!("not yet (last run exit {code})"),
+                        None => "not yet".to_string(),
+                    };
+                    self.system_line(&format!("   red: {red_desc} · green: {green_desc}"));
                     self.system_line(&format!(
                         "   suite: {}",
                         match evidence.as_ref().and_then(|e| e.suite_exit) {
@@ -5690,6 +5694,28 @@ impl<'a> App<'a> {
                             None => "not run by the gate".to_string(),
                         }
                     ));
+                }
+                let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let xencode_dir = root.join(".xencode");
+                let history = crate::reprogate::read_repro_history(&root, &xencode_dir);
+                if !history.is_empty() {
+                    self.system_line(&format!("   reproduction history ({} fixed):", history.len()));
+                    for item in history.iter().rev().take(5) {
+                        let red_exit_str = item
+                            .red_exit
+                            .map(|c| format!("exit {c}"))
+                            .unwrap_or_else(|| "fail".to_string());
+                        let green_exit_str = item
+                            .green_exit
+                            .map(|c| format!("exit {c}"))
+                            .unwrap_or_else(|| "pass".to_string());
+                        let red_art = item.red_artifact.as_deref().unwrap_or("?");
+                        let green_art = item.green_artifact.as_deref().unwrap_or("?");
+                        self.system_line(&format!(
+                            "   • `{}` · red: {red_exit_str} ({red_art}) · green: {green_exit_str} ({green_art})",
+                            item.command
+                        ));
+                    }
                 }
             }
             "bugfix" | "fix" => {
