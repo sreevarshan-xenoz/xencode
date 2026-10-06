@@ -1717,6 +1717,15 @@ esac
     ;;
 esac
 ;;
+(bootstrap)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'--check[Report what would be written and create nothing]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::path -- The project to write into (defaults to the current directory):_files' \
+&& ret=0
+;;
 (tui)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -2383,6 +2392,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(bootstrap)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (tui)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2449,6 +2462,7 @@ _xencode_commands() {
 'llamacpp:llama.cpp server management (status/start/stop/load/unload)' \
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
+'bootstrap:Write the files a project xencode has never seen is missing' \
 'tui:Launch the Terminal User Interface' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -2571,6 +2585,11 @@ _xencode__subcmd__audit__subcmd__help__subcmd__verify_commands() {
 _xencode__subcmd__audit__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'xencode audit verify commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__bootstrap_commands] )) ||
+_xencode__subcmd__bootstrap_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode bootstrap commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__cache_commands] )) ||
 _xencode__subcmd__cache_commands() {
@@ -2871,6 +2890,7 @@ _xencode__subcmd__help_commands() {
 'llamacpp:llama.cpp server management (status/start/stop/load/unload)' \
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
+'bootstrap:Write the files a project xencode has never seen is missing' \
 'tui:Launch the Terminal User Interface' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -2937,6 +2957,11 @@ _xencode__subcmd__help__subcmd__audit_commands() {
 _xencode__subcmd__help__subcmd__audit__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help audit verify commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__bootstrap_commands] )) ||
+_xencode__subcmd__help__subcmd__bootstrap_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help bootstrap commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__cache_commands] )) ||
 _xencode__subcmd__help__subcmd__cache_commands() {

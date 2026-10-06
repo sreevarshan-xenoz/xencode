@@ -81,8 +81,10 @@ into it, `/lesson approve` appends that one line to `AGENTS.md` and clears the
 draft, `/lesson drop` clears it without writing anything. The draft's lesson line
 starts empty and an empty line cannot be approved — the program records what
 happened and leaves the reason to you. `AGENTS.md` keeps every byte it had; this
-is the only command in the product that writes that file, and only when you typed
-it. Because trust is keyed on content, the append makes the file untrusted again
+is the only command in the product that writes *into an `AGENTS.md` that already
+exists*, and only when you typed it — `xencode bootstrap` creates that file on a
+project that has none, and never edits one. Because trust is keyed on content, the
+append makes the file untrusted again
 until `/trust` covers the new bytes, and the command says so rather than
 re-trusting them itself.),
 `/gate` (read the reproduction gate's state — phase, the neighbourhood it was
@@ -3444,6 +3446,97 @@ The `cd rust &&` prefix is the interesting part. CI runs these from `rust/`, and
 that key is written *after* the `run:` it applies to. Dropping it would produce a
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
+
+### `xencode bootstrap [path] [--check] [--format text|json]`
+
+Write the three files a project xencode has never seen is missing, from what is on
+its disk and nothing else.
+
+A fresh clone has no `AGENTS.md`, no `.xencode/anchor.md` and no example of the
+settings file. This product reads all three — the first two go into the head of
+every prompt — so on an unseen project the model is handed an empty instruction
+sheet and no idea what the repository contains. `xencode bootstrap` fills that in.
+
+It is **declarative, and that is the whole design.** Every byte it writes is a
+name, a number, or a blank question. No build ran, no test ran, no model was asked,
+so the file cannot claim a command this project does not use. That is deliberate: a
+model inventing a project's CI config is how 9,371 lines of plausible fiction ended
+up in this repository once already, and were deleted.
+
+```
+Project: /tmp/demo
+  git branch main at 2b2724bc, 5 files
+  write        AGENTS.md               questions only: nothing ran, so no command is guessed
+  write        .xencode/anchor.md      what was read off this disk, with no build or model in it
+  write        .xencode.example.json   every key this binary reads, at its default, credentials absent
+
+3 files written. Nothing that already existed was touched.
+```
+
+**A file that exists is never written, and there is no flag to make it happen.**
+There is no `--force`, because `AGENTS.md` is a person's file: the second run reports
+
+```
+  keep         AGENTS.md               already here, and this command does not replace a person's file
+```
+
+and the bytes are identical before and after (`md5sum` of all three files, taken
+after the second run and again after a third, prints the same three hashes both
+times). `--check` reports and creates nothing — not
+even the `.xencode/` directory — so you can see what it would say about your own
+repository first. Here is what it says about xencode's own, which is the case worth
+seeing because all three files are already answered here:
+
+```
+$ xencode bootstrap . --check
+Project: /home/sree/Projects/xencode
+  git branch main at e62b2beb, 309 files
+  keep         AGENTS.md               already here, and this command does not replace a person's file
+  keep         .xencode/anchor.md      already here, and this command does not replace a person's file
+  keep         .xencode.example.json   already here, and this command does not replace a person's file
+
+Report only: 0 would be written, 3 already in place. Nothing created.
+```
+
+What each file is:
+
+- `AGENTS.md` — the headings a project's instructions need, each followed by an
+  HTML comment asking the one question that can only be answered by someone who
+  knows. It names no command. `/lesson approve` remains the only thing that writes
+  a *sentence* into a file that is already there; this one only creates the file.
+- `.xencode/anchor.md` — what git reports: branch, revision, the file count, the
+  names at the repository root, and extensions by count. It carries no clock and no
+  absolute path, because the anchor is inside the byte-stable prompt head and a
+  timestamp there makes every request re-send the whole thing. It is written by
+  `xencode anchor`'s own writer, so the prompt reads it from the one path it knows.
+- `.xencode.example.json` — the settings template, generated from the same struct
+  this binary loads and saves rather than typed out, so a key listed there exists
+  and a key missing was added after this binary was built. All nine credential
+  fields are `null` and both hook maps are empty: nothing that authenticates as
+  anything is written into somebody's repository.
+
+Two things this command deliberately does **not** seed:
+
+- **Skills.** A `SKILL.md` with only frontmatter is rejected by the loader with
+  *"has no instructions after its frontmatter"*, so a stub skill is not a skill —
+  it is a parse error in the project's way.
+- **Hooks.** There is no project-local config loader; `agent_hooks` is read from
+  `~/.config/xencode/config.json`, so seeding hooks would edit settings that apply
+  to every project on this machine and make them run `sh -c` on every approved tool
+  call. The generated template shows the two empty hook maps and leaves them empty.
+
+A name read off disk (a file called `prod-openai-api-key.txt`, say) is written into
+the anchor only after `redact_secrets` has had it, because that text is copied into
+a file that goes into a prompt and may go to a model. The settings template is
+excluded from that scrub on purpose: `redact_secrets` replaces the *value* beside
+anything that looks like a credential key, and running it over the template turned
+`"openai_api_key": null` into `"openai_api_key": "[redacted]"` — watched happening,
+and the reason the scrub is applied per file rather than to everything.
+
+The relation to `xencode anchor` is one direction only: `bootstrap` creates an
+anchor that says *nothing was verified*, and `xencode anchor` is the command that
+replaces it with commands it actually ran. On a new project, run `bootstrap`, then
+`anchor`.
 
 ### `xencode doctor [--format text|json]`
 
