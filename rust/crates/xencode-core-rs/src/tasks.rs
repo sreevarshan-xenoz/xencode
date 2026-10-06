@@ -492,6 +492,22 @@ mod tests {
         TaskRecord::new(id, "test".into(), "true".into())
     }
 
+    /// Whether a pid can still run code. A killed child that has not yet been
+    /// collected reads as `Z`, and Linux has a second transient before that —
+    /// `X`, exit-dead — between a thread exiting and its parent noticing. Both
+    /// are terminal; `R` and `S` are not, and a process in either of those was
+    /// not killed.
+    fn state_is_dead(state: Option<&str>) -> bool {
+        matches!(state, Some("Z") | Some("X"))
+    }
+
+    fn pid_is_dead(pid: i32) -> bool {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Err(_) => true,
+            Ok(contents) => state_is_dead(contents.split_whitespace().nth(2)),
+        }
+    }
+
     /// Poll until the task leaves Running. Output readers run on their own
     /// task, so lines can land one poll after the exit is reaped.
     async fn await_exit(m: &mut TaskManager, id: u64) -> TaskRecord {
@@ -660,13 +676,25 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(140)).await;
         // The watchdog must enforce the limit without depending on another
         // poll call to notice that the deadline has passed.
-        if let Ok(contents) = std::fs::read_to_string(format!("/proc/{child_pid}/stat")) {
-            assert_eq!(contents.split_whitespace().nth(2), Some("Z"));
-        }
+        assert!(
+            pid_is_dead(child_pid),
+            "the time limit left the descendant runnable"
+        );
         let rec = m.poll(id).await.unwrap();
         assert_eq!(rec.status, TaskStatus::TimedOut);
         assert!(rec.finished_at.is_some());
         m.remove(id).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_dead_and_zombie_are_the_states_that_mean_a_child_is_done() {
+        assert!(state_is_dead(Some("Z")));
+        assert!(state_is_dead(Some("X")));
+        assert!(!state_is_dead(Some("R")));
+        assert!(!state_is_dead(Some("S")));
+        assert!(!state_is_dead(Some("D")));
+        assert!(!state_is_dead(None));
     }
 
     #[cfg(unix)]
@@ -687,19 +715,16 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
         m.stop(id).await.unwrap();
-        // A killed child can briefly remain as a zombie until its reaper
-        // collects it; it must never remain executable.
         for _ in 0..100 {
-            let stat = std::fs::read_to_string(format!("/proc/{child_pid}/stat"));
-            match stat {
-                Err(_) => break,
-                Ok(contents) if contents.split_whitespace().nth(2) == Some("Z") => break,
-                Ok(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            if pid_is_dead(child_pid) {
+                break;
             }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        if let Ok(contents) = std::fs::read_to_string(format!("/proc/{child_pid}/stat")) {
-            assert_eq!(contents.split_whitespace().nth(2), Some("Z"));
-        }
+        assert!(
+            pid_is_dead(child_pid),
+            "descendant {child_pid} was still runnable after its process group was killed"
+        );
     }
 
     #[tokio::test]
