@@ -1089,22 +1089,26 @@ mod tests {
         );
         assert_eq!(up.name, "provider:ollama");
         assert!(up.passed(), "{}: {}", up.state, up.detail);
-        drop(listener);
 
-        // The same port with nothing behind it: the check says what to do, not
-        // just that something refused.
+        // A port nothing on this machine can answer on. The port this test just
+        // released cannot be reused for the assertion below: another test in this
+        // same binary binds ephemeral ports, and whichever one takes it first makes
+        // the check honestly report a provider that is up. Measured failing that way
+        // in three workspace runs while passing alone. Port 1 is privileged, so
+        // nothing here can be listening.
+        drop(listener);
         let down = check_provider(
             "ollama",
             "127.0.0.1",
-            port,
+            1,
             std::time::Duration::from_secs(2),
             Some("ollama serve"),
         );
         assert_eq!(down.state, "fail");
         assert!(down.detail.contains("ollama serve"), "{}", down.detail);
 
-        // An address with no local server to start says so without inventing a
-        // command. Port 1 is privileged, so nothing here can be listening.
+        // The same refused port with no local server to start says so without
+        // inventing a command.
         let cloud = check_provider(
             "cloud:openai",
             "127.0.0.1",
