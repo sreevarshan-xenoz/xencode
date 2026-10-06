@@ -2500,7 +2500,7 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
 async fn run_models(action: ModelAction) -> Result<(), String> {
     let config = XencodeConfig::load().unwrap_or_default();
     let mut client = OllamaClient::new(&config.ollama_url, config.response_timeout);
-    let llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
+    let mut llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
 
     match action {
         ModelAction::List => {
@@ -2534,11 +2534,19 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
                 || model.starts_with("llama.cpp:")
                 || model.starts_with("llama:")
             {
-                match llama_client.ping().await {
-                    Ok(resp_time) => {
+                let raw_model = model
+                    .strip_prefix("llamacpp:")
+                    .or_else(|| model.strip_prefix("llama.cpp:"))
+                    .or_else(|| model.strip_prefix("llama:"))
+                    .unwrap_or(&model);
+                match llama_client.check_health(raw_model).await {
+                    Ok(health) => {
                         println!("  Provider:      llama.cpp ({})", config.llama_cpp_url);
-                        println!("  Status:        healthy");
-                        println!("  Response time: {:.3}s", resp_time);
+                        println!("  Status:        {}", health.status);
+                        println!("  Response time: {:.3}s", health.response_time);
+                        if let Some(ref err) = health.error_message {
+                            println!("  Error:         {err}");
+                        }
                     }
                     Err(e) => {
                         println!("  Provider:      llama.cpp ({})", config.llama_cpp_url);
