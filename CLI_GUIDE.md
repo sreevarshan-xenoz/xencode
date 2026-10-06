@@ -3400,7 +3400,8 @@ it, is there room on the volume the
 state lives on, how much disk the response cache has taken, the project's own
 index/git/metrics/cache rows, every endpoint the config would dial, whether the
 server behind the default model actually knows that model by name, each declared
-MCP server, and the Colab bridge.
+MCP server, the Colab bridge, and whether the project's stored facts still agree
+with the code beside them.
 
 The rows are the same structure in both formats. `--format json` serialises
 `SelfCheck { name, state, detail, fix }` as it is, and the text listing prints
@@ -3469,6 +3470,22 @@ and making `config.json` world-readable turned the secret row over:
   FAIL   permissions:config     644 — readable beyond the owner, and it holds secrets
                                 fix: chmod 600 /home/sree/.xencode/config.json
 ```
+
+The `knowledge:stale` row is the last one, and it was watched in both states in a
+throwaway repository — a stored fact citing `src/auth.rs`, then that file moved
+out from under it:
+
+```
+  PASS   knowledge:stale        2 durable facts, every one agreed with by the code
+  FAIL   knowledge:stale        1 believed, 1 dropped, 0 could not be checked — login lives in src/auth.rs [src:src/auth.rs@32206062]: the file it cites is gone
+                                fix: re-read the file each dropped line cites and promote a corrected fact; the lines stay in state.md until you say otherwise
+```
+
+A project that has never stored a fact reports `ABSENT`, not a pass over nothing.
+The row reads `.xencode/state.md` and writes nothing back; the lines it names stay
+where they are, because whether a contradicted fact is wrong or the code is was a
+person's call. The same audit with each dropped line spelled out is
+`xencode doctor --env`, and `--format json` carries both.
 
 `--format json` prints the same rows plus three summary keys:
 
@@ -3617,6 +3634,27 @@ Probe and display this machine: cores, memory, PSI, cgroup limit, GPUs,
 journalctl and dmesg readability, colab route presence — plus the
 configuration-drift row. Best-effort throughout: what cannot be read is
 reported absent, never an error.
+
+It also prints what the project's durable knowledge looks like from here, which is
+the part that answers a question the screen cannot otherwise:
+
+```
+  durable facts: 1 reaching the model, 1 dropped, 0 that could not be checked
+    dropped — the file it cites is gone: login lives in src/auth.rs [src:src/auth.rs@32206062]
+```
+
+The three numbers are not a sum of one thing. *Reaching the model* is what a turn
+will actually be told; *dropped* is what was left out of that, with the line and
+the reason under it; *could not be checked* is a fact the code has neither
+confirmed nor contradicted, which is not the same as either. `--format json` puts
+the same under a `durable_facts` key as `believed`, `unverifiable` and a `dropped`
+list of `{line, reason}`. Restoring the file changed the reason rather than
+clearing the row — `the file it cites has changed since` — because the comparison
+is against what the project looks like now, not against the commit the fact cites.
+
+Read-only, on purpose. The same pass runs silently when a prompt is built, and it
+edits `state.md`; a report that edited it too would mean a diagnostic deleted
+something. `xencode memory` is where a fact is changed.
 
 ### `xencode session <name|resolve|export>`
 

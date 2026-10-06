@@ -5463,6 +5463,15 @@ async fn run_doctor(
     let templates = xencode_analysis_rs::envdrift::read_templates(&root);
     let drift = xencode_analysis_rs::envdrift::compare(&refs, &templates);
 
+    // QK-4: a durable fact the code has contradicted leaves the prompt without a
+    // word, which is the right thing for a model and nothing but confusion for the
+    // person who wrote it. The same pass, reported. It rewrites nothing — a fact
+    // stale on this checkout is often true again one branch over.
+    let stale =
+        xencode_context_rs::audit_durable_facts(&root.join(xencode_context_rs::XENCODE_DIR));
+    let believed = xencode_context_rs::ContextState::from_markdown(&stale.text);
+    let believed = believed.completed.len() + believed.decisions.len() + believed.unresolved.len();
+
     if matches!(format, OutputFormat::Json) {
         println!(
             "{}",
@@ -5475,6 +5484,14 @@ async fn run_doctor(
                     "unreferenced": drift.unreferenced,
                     "os_provided": drift.os_provided.len(),
                     "panicking": drift.panicking.len(),
+                },
+                "durable_facts": {
+                    "believed": believed,
+                    "unverifiable": stale.unverifiable,
+                    "dropped": stale.dropped.iter().map(|fact| serde_json::json!({
+                        "line": fact.line,
+                        "reason": fact.problem.reason(),
+                    })).collect::<Vec<_>>(),
                 },
             })
         );
@@ -5524,6 +5541,20 @@ async fn run_doctor(
             drift.os_provided.len(),
             drift.panicking.len(),
         );
+        println!(
+            "\n  durable facts: {} reaching the model, {} dropped, {} that could not be checked",
+            believed,
+            stale.dropped.len(),
+            stale.unverifiable
+        );
+        // The reasons are the item: a count alone would say something was taken and
+        // leave the person hunting for which line and why.
+        for fact in stale.dropped.iter().take(10) {
+            println!("    dropped — {}: {}", fact.problem.reason(), fact.line);
+        }
+        if stale.dropped.len() > 10 {
+            println!("    … and {} more", stale.dropped.len() - 10);
+        }
     }
     Ok(())
 }
@@ -6080,6 +6111,11 @@ async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
     }
     checks.extend(spine_checks(&root, &config).await);
     checks.extend(colab_checks().await);
+    // QK-4: a durable fact the code has contradicted leaves the prompt without a
+    // word. The row says which lines went, and why, in the report a person pastes.
+    checks.push(doc::check_durable_facts(
+        &root.join(xencode_context_rs::XENCODE_DIR),
+    ));
 
     render_checks("report", &checks, format);
     Ok(())

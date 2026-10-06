@@ -156,6 +156,77 @@ impl SelfCheck {
     }
 }
 
+/// Whether this project's durable facts still agree with its code, as one row.
+///
+/// The pass that keeps a contradicted fact out of the prompt is silent by design:
+/// `state.md` goes on showing the line while the model stops obeying it, which is
+/// right for a turn and undiagnosable for the person who wrote it. This says what
+/// was taken out and why, and rewrites nothing — a fact stale against this
+/// checkout is frequently true again one branch over, and a doctor that cleaned up
+/// the human's own file would have the tool decide what they are allowed to keep.
+pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
+    let name = "knowledge:stale".to_string();
+    if !xencode_dir.join("state.md").is_file() {
+        return SelfCheck {
+            name,
+            state: "absent".to_string(),
+            detail: "no state.md — nothing has been promoted to durable memory".to_string(),
+            fix: None,
+        };
+    }
+    let check = crate::compact::audit_durable_facts(xencode_dir);
+    let kept = crate::state::ContextState::from_markdown(&check.text);
+    let believed = kept.completed.len() + kept.decisions.len() + kept.unresolved.len();
+    if check.dropped.is_empty() && check.unverifiable == 0 {
+        return SelfCheck {
+            name,
+            state: "pass".to_string(),
+            detail: format!(
+                "{believed} durable fact{}, every one agreed with by the code",
+                if believed == 1 { "" } else { "s" }
+            ),
+            fix: None,
+        };
+    }
+    let mut reasons: Vec<String> = check
+        .dropped
+        .iter()
+        .take(3)
+        .map(|fact| format!("{}: {}", short_fact(&fact.line), fact.problem.reason()))
+        .collect();
+    if check.dropped.len() > 3 {
+        reasons.push(format!("{} more", check.dropped.len() - 3));
+    }
+    let mut detail = format!(
+        "{believed} believed, {} dropped, {} could not be checked",
+        check.dropped.len(),
+        check.unverifiable
+    );
+    if !reasons.is_empty() {
+        detail.push_str(&format!(" — {}", reasons.join("; ")));
+    }
+    SelfCheck {
+        name,
+        state: "fail".to_string(),
+        detail,
+        fix: Some(
+            "re-read the file each dropped line cites and promote a corrected fact; \
+             the lines stay in state.md until you say otherwise"
+                .to_string(),
+        ),
+    }
+}
+
+/// A fact line as the row can show it: the front of it, because a durable fact is
+/// a sentence and a doctor row is not.
+fn short_fact(line: &str) -> String {
+    let one_line = line.trim();
+    match one_line.char_indices().nth(60) {
+        Some((at, _)) => format!("{}…", one_line[..at].trim_end()),
+        None => one_line.to_string(),
+    }
+}
+
 /// A byte count in the unit a person reads, so a report says `412 MiB` and not
 /// `432012288`. Binary units: this is a filesystem, not a network adapter.
 pub fn format_bytes(bytes: u64) -> String {
@@ -755,6 +826,62 @@ mod tests {
             "{}",
             portable.detail
         );
+    }
+
+    /// QK-4: the row that answers "why did the model stop obeying the note I
+    /// promoted" — the pass itself is silent, so the report is the only place a
+    /// person can find out, and it has to name the line and the reason rather than
+    /// a count.
+    #[test]
+    fn the_durable_row_names_the_facts_the_code_no_longer_agrees_with() {
+        let unique = std::process::id();
+        let dir = std::env::temp_dir().join(format!("xencode-doctor-durable-{unique}"));
+        let xencode = dir.join(".xencode");
+        std::fs::create_dir_all(&xencode).unwrap();
+
+        let absent = check_durable_facts(&xencode);
+        assert_eq!(absent.state, "absent", "{}", absent.detail);
+        assert!(
+            absent.detail.contains("no state.md"),
+            "an absent row must say what is absent: {}",
+            absent.detail
+        );
+
+        std::fs::write(
+            xencode.join("state.md"),
+            "# State\n\n## completed\n- the crate is Rust-first and cites no file\n",
+        )
+        .unwrap();
+        let clean = check_durable_facts(&xencode);
+        assert!(clean.passed(), "{}", clean.detail);
+        assert!(
+            clean.detail.contains("1 durable fact,"),
+            "one fact must not read as several: {}",
+            clean.detail
+        );
+
+        std::fs::write(
+            xencode.join("state.md"),
+            "# State\n\n## completed\n- login lives in src/auth.rs [src:src/auth.rs@11111111]\n",
+        )
+        .unwrap();
+        let stale = check_durable_facts(&xencode);
+        assert_eq!(stale.state, "fail", "{}", stale.detail);
+        assert!(
+            stale.detail.contains("login lives in src/auth.rs"),
+            "the row dropped the line it is complaining about: {}",
+            stale.detail
+        );
+        assert!(
+            stale.detail.contains("the file it cites is gone"),
+            "the row gives no reason: {}",
+            stale.detail
+        );
+        assert!(
+            stale.fix.is_some(),
+            "a failing row has to say what to do about it"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

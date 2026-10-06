@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2405 tests passing, zero warnings (re-verified 2026-10-06, after `QM-5`; 19 ignored, so 2424 in the run)
+- [x] Workspace gates green — 16 crates, 2408 tests passing, zero warnings (re-verified 2026-10-06, after `QK-4`; 19 ignored, so 2427 in the run)
 
 ## Model Catalog Honesty
 
@@ -5390,7 +5390,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 60 | Release Notes From Reality | narrowed | QO-6 — `git log <prev>..HEAD` + CHANGELOG. Conventional-commit parsing buys nothing here: the 760 messages are already descriptive prose |
 | 61 | Upgrade Intelligence | narrowed | Inside QO-1: `cargo update --dry-run` (measured 12.7 s) + `cargo tree -i` (0.34 s) + `cargo check` is the whole investigation |
 | 62 | Repository Cloning Intelligence | narrowed | QK-4 + GH-1, bounded by AC-5. No `xencode clone` and no `xencode explain` exist today; "five minutes and it knows the project" is a prefill claim nobody has measured on a 4B |
-| 63 | Project Bootstrap Intelligence | new | QK-4 — declarative seed (AGENTS.md + anchor.md + skills + hooks + a redacted settings template). An LLM inventing CI config is where the 9,371 lines of deleted fiction start |
+| 63 | Project Bootstrap Intelligence | new | QK-9 — declarative seed (AGENTS.md + anchor.md + skills + hooks + a redacted settings template), split out of QK-4 when that row shipped only its report half. An LLM inventing CI config is where the 9,371 lines of deleted fiction start |
 | 64 | Agent-to-Agent Protocol | reject | The space consolidated: ACP carries exactly this content and M-7 speaks it. A2A is a networked-fleet protocol |
 | 65 | Xencode Protocol / `.xcp` | reject | A dialect of `.xencode/` + plugin manifests that nobody speaks, with a spec-maintenance tax a solo project cannot pay |
 | 66 | Agent Interoperability Layer | partly shipped | M-5 (`xencode mcp serve`) **shipped**; M-6 (finish the client) and M-7 (`xencode acp`) still planned — see Q-13 |
@@ -6050,8 +6050,10 @@ persisted).
 budgeted-invariant version of the preference model (AC-4 + EV-5 + EV-7 —
 "disagreement becomes a proposal to edit a human-owned file"). QK-3 one
 `SourceClass` enum in front of SE-2, which is also the pre-split of PR-4's
-`local_terms`/`payload_text`. QK-4 staleness as a `doctor`/`memory audit` check
-plus a **declarative** seed for item 63 (GH-1 + EV-1). QK-5 a value/cost proxy
+`local_terms`/`payload_text`. QK-4 staleness as a `doctor`/`memory audit` check —
+shipped 2026-10-06 without its second half: the **declarative** seed for item 63
+(GH-1 + EV-1) is a separate capability with a different surface (files written
+into a project versus a read-only report) and now has its own ID, `QK-9`. QK-5 a value/cost proxy
 from `retrieved_files`+`prompt_tokens`+`cached_tokens`, **gated on AC-5's real
 tokenizer**. QK-6 invalidate-don't-delete GC with a 12-month tombstone queue and
 no auto-delete of a human's AGENTS.md lines. QK-7 versioned checkpoints as
@@ -10035,7 +10037,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 22 items, 8 done
+#### W10 — Durable project knowledge — 23 items, 9 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10052,11 +10054,12 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
 | **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored |
 | **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1; done 2026-10-05, see the W10 progress note |
-| **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows |
+| **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows — the **report** half done 2026-10-06: `xencode doctor` gains a `knowledge:stale` row and `doctor --env` names each dropped fact, and neither writes to `state.md`. The **seed** half became `QK-9` (row 63), see the W10 progress note |
 | **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
 | **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
 | **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
 | **QK-8** | `/trust` a directory's own `AGENTS.md` | capability | the missing half of `EV-5`, found while shipping it: `/trust` read only `<root>/AGENTS.md`, so a nested file had no way to be trusted and every block arrived marked `[data]` — read, not obeyed. Done-when: `/trust src/auth/AGENTS.md` trusts those bytes, `/trust status` and `/trust forget` take the same path and answer for that file alone, a path that resolves outside the workspace or under `.git/`/`.xencode/` is refused, a name whose last segment is not `AGENTS.md` is refused, and the same turn still shows an untrusted sibling marked as data. The decision stays a person's: no tool the model can call reaches this command. Trap: the argument is user text reaching a durable store, so it is resolved against the workspace root, never against the current directory — done 2026-10-05, all four refusals and the sibling case watched failing first, see the W10 progress note |
+| **QK-9** | A declarative seed for a project xencode has never seen | capability | split out of `QK-4` on 2026-10-06, which shipped only its read-only report half. The seed writes: `AGENTS.md`, an `anchor.md`, a project `skills/` entry, the pre/post hooks key (`config.rs:698`, empty by default) and a settings template with the secrets taken out of it — for a clone with none of them. No `xencode init` exists today (the `Commands` enum has no such subcommand), so this is a new surface, not a flag on one. Trap: an LLM inventing a project's CI config is exactly how 9,371 lines of plausible fiction got deleted once already, so every seeded byte is either copied from what the code demonstrably does or left as a commented question — and a file that already exists is never overwritten, because `AGENTS.md` is a human's, `QK-6` says so for the lines of it a machine disagrees with |
 | **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
 | **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
@@ -10065,6 +10068,37 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QK-4` — 2026-10-06, the report half. A durable fact the code has contradicted already
+  leaves the prompt in silence: `drop_stale_facts` runs on every prompt build and edits
+  `state.md`, so the difference between "two stored facts" and "two stored facts, one of which
+  nobody believes any more" could not be seen from outside — and the person reading `state.md`
+  had no way to know it was not what the model read. `audit_durable_facts(xencode_dir)` runs the
+  same pass and deletes nothing; `doctor::check_durable_facts` turns it into a
+  `knowledge:stale` row on the bug report (`ABSENT` with no `state.md`, `pass` when every fact is
+  agreed with, `fail` naming the believed/dropped/unverifiable counts and the first three drops
+  with their reasons and a `fix`), and `doctor --env` prints each dropped line under its reason
+  and carries `durable_facts` in JSON.
+  **Watched, not inferred.** Three tests, and the read-only claim is one of them:
+  `the_audit_names_what_the_silent_pass_took_and_writes_nothing_back` re-reads `state.md` from
+  disk and compares it byte for byte with what it was, so an audit that repaired the file it
+  claimed only to read fails there. The live binary ran both states in a scratch repository —
+  `PASS … 2 durable facts, every one agreed with by the code`, then the cited file moved out to
+  get `FAIL … 1 believed, 1 dropped, 0 could not be checked — login lives in src/auth.rs
+  [src:src/auth.rs@32206062]: the file it cites is gone`, with `knowledge:stale` in the JSON
+  `failing` list. Restoring the file changed the reason to `the file it cites has changed since`
+  rather than clearing the row, because the comparison is against the working tree's `HEAD`.
+  `.xencode/state.md` was unchanged in md5 after every one of those runs.
+  **Counted:** 2408 passing, 0 failed, 19 ignored across 16 crates on 2026-10-06 (three new
+  tests since `QM-5`: two in `compact.rs`, one in `doctor.rs`), with `cargo fmt --all` clean and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. The first run of this batch
+  aborted on `a_server_that_exits_during_handshake_reports_its_own_words` — the load-sensitive
+  `xencode-mcp-rs` case named in `QK-8`'s note — and `--no-fail-fast` ran the rest green; the
+  case passes alone in 0.02 s.
+  **The other half is not here.** The row also asked for a declarative project seed —
+  `AGENTS.md`, `anchor.md`, skills, hooks, a settings template with the secrets out of it. That
+  writes files into somebody's repository, which is a different surface and a different risk
+  from reading one, so it keeps its own ID (`QK-9`) rather than being called done.
 
 - [x] `QM-5` — 2026-10-06. Each model's rate samples are kept in their own window and
   `/cost` prints the number of records every figure rests on. **The row's own premise was
@@ -10776,6 +10810,7 @@ proposed an accessibility mode the shipped `UX-12` already covers.
 | **V-7** | Pane-boundary mouse: drag to resize, click to target | capability | from V — the half UX-9 does not own; UX-9 keeps text selection |
 | **V-10** | Worker-event to window bridge over normalized worker events | capability | from V — waits for AR-1/AR-4/AR-5/AR-9; reads state, never moves a pane by itself (V-11 is the parked half) |
 | **UX-24** | Layout drift checked against ratatui's own solver | capability | from V — six files build `Rect`s by hand (`src/layout.rs`, `src/arrangement.rs`, `src/templates.rs`, `src/keymap.rs`, `src/ui.rs`, `src/app.rs`: 22 `Rect::new` in total) beside `Layout::split`, which in ratatui 0.29 is a cassowary solve cached per layout (`ratatui-0.29.0/src/layout/layout.rs:654-731`) and rounds by whatever the solver settles on — invisible from here when hand-rolled arithmetic disagrees with it at an odd width, and a 40-column resize is where it would. Done-when: a table-driven test that feeds each hand-computed split the same constraints to `Layout::split` and asserts equal rects at every width and height from 20 to 300, plus the tiling invariant (chunks sum to the parent, none zero-area). **The premise this row started from named `rect_iter` and an integer ratio path; neither exists in 0.29 — corrected 2026-10-06 against the crate source this build compiles, where a vendored copy of upstream's `split` was also rejected as the oracle because it would be the same code, not an independent one.** Trap: `Layout::split` caches, so a test that mutates a `Layout` between assertions can read a cached answer; build a fresh layout per case. Numbered in the UX run because every `V-` number from V-12 up is already a section heading of this file (§V-12 wave placement, §V-13, §V-14), which is how the plan tells an item from a section |
+
 #### W15 progress
 
 - [ ] **`AR-1` — harness built; the measurement itself is still open.** `xencode
