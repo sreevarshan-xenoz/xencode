@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `AA-5`: replace internal implementation jargon and leaked transport routes with plain prose
+
+CLI diagnostic and query outputs now report status in clear language without internal scoring references or leaked HTTP routes:
+
+- In `xencode query`, removed the parenthetical retrieval budgeting text (`(character arithmetic, not measured)`) from logged output.
+- In `xencode-context-rs::shape`, replaced internal weight adjustments explanation with `"no word for broken code in the prompt, so standard retrieval is used"`.
+- In `xencode-models-rs::ollama`, added `sanitize_not_running` and `OllamaError::raw_message()` to convert connection failures into readable messages (such as `connection refused: nothing is listening on http://localhost:11434`) instead of exposing internal REST paths such as `/api/show`, `/api/generate`, or `/api/version`.
+- In `xencode doctor`, added `raw` field to `SelfCheck` struct with optional serialization, allowing `xencode doctor --format json` to retain full underlying system error messages for diagnostic reports while terminal prose remains clear and route-free.
+- Verified with unit tests in `doctor.rs`, `ollama.rs`, and the CLI test suite.
+
 ### Fixed — `AA-4`: defer conversation memory persistence until messages exist and filter empty sessions
 
 `ConversationMemory` and `xencode memory` no longer write or display sessions with zero messages:

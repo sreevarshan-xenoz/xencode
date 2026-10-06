@@ -15261,13 +15261,7 @@ The pattern is one place where a user-facing sentence is assembled out of a tran
 error's `Display`. `ollama serve` is the advice that helps; `/api/show` is noise that
 sounds like a clue.
 
-- **Item AA-5** — each of the four says what happened in terms a person can act on, and
-  the internal detail moves to where an already-broken install can be reported: keep
-  `xencode doctor --format json`'s raw field, drop the route name from the sentence.
-  *Done-when:* the `doctor` and `models health` rows for a stopped Ollama read as
-  prose, `xencode query` prints no line defending an unmeasured heuristic, and the JSON
-  surface still carries the original error text for anyone filing an issue. Effort S.
-  Joins W11.
+- [x] **Item AA-5 — replace internal implementation jargon and leaked transport routes with plain prose across CLI and doctor outputs.** — done 2026-10-06 in `xencode-cli/src/main.rs`, `xencode-context-rs/src/shape.rs`, `xencode-context-rs/src/doctor.rs`, and `xencode-models-rs/src/ollama.rs`. Removed the heuristic budgeting parenthetical from `xencode query` retrieval logging; updated general-case shape explanation to state standard retrieval is used; added `raw` field to `SelfCheck` so `xencode doctor --format json` preserves original transport errors while text output reads as prose; added `sanitize_not_running` and `OllamaError::raw_message()` to sanitize connection errors to plain descriptions without exposing internal REST endpoints (`/api/show`, `/api/generate`, `/api/version`); verified with unit tests in `doctor.rs`, `ollama.rs`, and CLI suite. *Effort: S.*
 - **Trap.** This is a wording item with a truth test attached, not a logging item: the
   honest fix keeps the *fact* ("the model was not found", "nothing is listening on
   11434") and drops the *mechanism*. Replacing a leaky detail with a vague sentence

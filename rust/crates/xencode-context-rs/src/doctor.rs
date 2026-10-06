@@ -137,9 +137,19 @@ pub struct SelfCheck {
     /// remedy belongs to the provider rather than to this machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fix: Option<String>,
+    /// Raw unredacted transport/system error for automated issue filing,
+    /// kept out of human prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<String>,
 }
 
 impl SelfCheck {
+    /// Attach the original unredacted error to this check result.
+    pub fn with_raw(mut self, raw: impl Into<String>) -> Self {
+        self.raw = Some(raw.into());
+        self
+    }
+
     /// `true` only for an explicit pass. Absent is not failed — a machine that
     /// never recorded metrics is not a broken machine.
     pub fn passed(&self) -> bool {
@@ -171,7 +181,7 @@ pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
             name,
             state: "absent".to_string(),
             detail: "no state.md — nothing has been promoted to durable memory".to_string(),
-            fix: None,
+            fix: None, raw: None,
         };
     }
     let check = crate::compact::audit_durable_facts(xencode_dir);
@@ -185,7 +195,7 @@ pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
                 "{believed} durable fact{}, every one agreed with by the code",
                 if believed == 1 { "" } else { "s" }
             ),
-            fix: None,
+            fix: None, raw: None,
         };
     }
     let mut reasons: Vec<String> = check
@@ -247,7 +257,7 @@ pub fn check_durable_facts(xencode_dir: &std::path::Path) -> SelfCheck {
         name,
         state: "fail".to_string(),
         detail,
-        fix: Some(fix),
+        raw: None, fix: Some(fix),
     }
 }
 
@@ -266,7 +276,7 @@ pub fn check_anchor(xencode_dir: &std::path::Path) -> SelfCheck {
             name,
             state: "absent".to_string(),
             detail: "no anchor.md — run `xencode anchor` to discover and prove build recipes".to_string(),
-            fix: Some("run `xencode anchor` to generate .xencode/anchor.md".to_string()),
+            raw: None, fix: Some("run `xencode anchor` to generate .xencode/anchor.md".to_string()),
         };
     }
 
@@ -283,7 +293,7 @@ pub fn check_anchor(xencode_dir: &std::path::Path) -> SelfCheck {
                     name,
                     state: "fail".to_string(),
                     detail: format!("anchor proved {days} days ago; run `xencode anchor` to re-check"),
-                    fix: Some("run `xencode anchor` to re-verify build and test recipes".to_string()),
+                    raw: None, fix: Some("run `xencode anchor` to re-verify build and test recipes".to_string()),
                 }
             } else {
                 SelfCheck {
@@ -296,7 +306,7 @@ pub fn check_anchor(xencode_dir: &std::path::Path) -> SelfCheck {
                         if meta.candidates == 1 { "" } else { "s" },
                         meta.verified
                     ),
-                    fix: None,
+                    fix: None, raw: None,
                 }
             }
         }
@@ -304,7 +314,7 @@ pub fn check_anchor(xencode_dir: &std::path::Path) -> SelfCheck {
             name,
             state: "fail".to_string(),
             detail: "anchor has no proof record; run `xencode anchor` to re-check".to_string(),
-            fix: Some("run `xencode anchor` to prove build recipes and record provenance".to_string()),
+            raw: None, fix: Some("run `xencode anchor` to prove build recipes and record provenance".to_string()),
         },
     }
 }
@@ -454,6 +464,7 @@ pub fn check_config(path: &std::path::Path, read: ConfigRead) -> SelfCheck {
         state: state.to_string(),
         detail,
         fix,
+        raw: None,
     }
 }
 
@@ -477,7 +488,7 @@ pub fn check_config_version(
             name,
             state: "absent".to_string(),
             detail: format!("no configuration at {} to ask", path.display()),
-            fix: None,
+            fix: None, raw: None,
         },
         Some(found) if found > current => SelfCheck {
             name,
@@ -487,7 +498,7 @@ pub fn check_config_version(
                  neither reads nor overwrites the file",
                 path = path.display()
             ),
-            fix: Some(
+            raw: None, fix: Some(
                 "run the xencode that wrote this file, or point XCODE_CONFIG_DIR at a config this \
                  one can read"
                     .to_string(),
@@ -497,7 +508,7 @@ pub fn check_config_version(
             name,
             state: "pass".to_string(),
             detail: format!("version {found} — the shape this xencode writes"),
-            fix: None,
+            fix: None, raw: None,
         },
         Some(0) => SelfCheck {
             name,
@@ -506,7 +517,7 @@ pub fn check_config_version(
                 "no version key — written before versions existed, so it is migrated on read and \
                  stamped {current} on the next save"
             ),
-            fix: None,
+            fix: None, raw: None,
         },
         Some(found) => SelfCheck {
             name,
@@ -515,7 +526,7 @@ pub fn check_config_version(
                 "version {found} — older than the {current} this xencode writes, so it is migrated \
                  on read"
             ),
-            fix: None,
+            fix: None, raw: None,
         },
     }
 }
@@ -530,7 +541,7 @@ pub fn check_permissions(label: &str, path: &std::path::Path, mode: Option<u32>)
             name,
             state: "absent".to_string(),
             detail: format!("{} is not there to check", path.display()),
-            fix: None,
+            fix: None, raw: None,
         };
     };
     let private = mode & 0o077 == 0;
@@ -546,6 +557,7 @@ pub fn check_permissions(label: &str, path: &std::path::Path, mode: Option<u32>)
             )
         },
         fix: (!private).then(|| format!("chmod 600 {}", path.display())),
+        raw: None,
     }
 }
 
@@ -571,7 +583,7 @@ pub fn check_layout(still_old: &[String], override_root: Option<&std::path::Path
                 "every kind is read from {0}, as $XCODE_CONFIG_DIR asks",
                 root.display()
             ),
-            fix: None,
+            fix: None, raw: None,
         };
     }
     if still_old.is_empty() {
@@ -580,7 +592,7 @@ pub fn check_layout(still_old: &[String], override_root: Option<&std::path::Path
             state: "pass".to_string(),
             detail: "settings, records, cache and downloaded models are in their own directories"
                 .to_string(),
-            fix: None,
+            fix: None, raw: None,
         };
     }
     SelfCheck {
@@ -591,7 +603,7 @@ pub fn check_layout(still_old: &[String], override_root: Option<&std::path::Path
              without risking the others",
             still_old.join(", ")
         ),
-        fix: Some(
+        raw: None, fix: Some(
             "run `xencode paths` to see the directories, then `xencode migrate --dry-run`"
                 .to_string(),
         ),
@@ -609,13 +621,13 @@ pub fn check_free_disk(label: &str, dir: &std::path::Path, free: Option<u64>) ->
             name,
             state: "absent".to_string(),
             detail: format!("{} would not report its free space", dir.display()),
-            fix: None,
+            fix: None, raw: None,
         },
         Some(bytes) if bytes >= FLOOR => SelfCheck {
             name,
             state: "pass".to_string(),
             detail: format!("{} has {} free", dir.display(), format_bytes(bytes)),
-            fix: None,
+            fix: None, raw: None,
         },
         Some(bytes) => SelfCheck {
             name,
@@ -626,7 +638,7 @@ pub fn check_free_disk(label: &str, dir: &std::path::Path, free: Option<u64>) ->
                 format_bytes(bytes),
                 format_bytes(FLOOR)
             ),
-            fix: Some(format!(
+            raw: None, fix: Some(format!(
                 "free space on the volume holding {}, or set XCODE_CONFIG_DIR to a larger one",
                 dir.display()
             )),
@@ -644,7 +656,7 @@ pub fn check_dir_size(label: &str, dir: &std::path::Path) -> SelfCheck {
             name,
             state: "absent".to_string(),
             detail: format!("{} does not exist", dir.display()),
-            fix: None,
+            fix: None, raw: None,
         };
     }
     match dir_usage(dir) {
@@ -657,13 +669,13 @@ pub fn check_dir_size(label: &str, dir: &std::path::Path) -> SelfCheck {
                 files,
                 format_bytes(bytes)
             ),
-            fix: None,
+            fix: None, raw: None,
         },
         None => SelfCheck {
             name,
             state: "fail".to_string(),
             detail: format!("{} cannot be listed", dir.display()),
-            fix: Some(format!(
+            raw: None, fix: Some(format!(
                 "check the permissions on {}, or remove it and let xencode create it again",
                 dir.display()
             )),
@@ -680,6 +692,7 @@ pub fn check_model(known: bool, detail: impl Into<String>, fix: Option<String>) 
         state: if known { "pass" } else { "fail" }.to_string(),
         detail: detail.into(),
         fix: if known { None } else { fix },
+        raw: None,
     }
 }
 
@@ -725,20 +738,20 @@ pub fn check_index(xencode_dir: &std::path::Path) -> SelfCheck {
             name: "index".to_string(),
             state: "absent".to_string(),
             detail: "no index manifest; run /init for project-aware answers".to_string(),
-            fix: Some("run /init in the TUI to build the project index".to_string()),
+            raw: None, fix: Some("run /init in the TUI to build the project index".to_string()),
         },
         Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
             Ok(_) => SelfCheck {
                 name: "index".to_string(),
                 state: "pass".to_string(),
                 detail: path.display().to_string(),
-                fix: None,
+                fix: None, raw: None,
             },
             Err(e) => SelfCheck {
                 name: "index".to_string(),
                 state: "fail".to_string(),
                 detail: format!("{} does not parse: {e}", path.display()),
-                fix: Some(format!(
+                raw: None, fix: Some(format!(
                     "run /init again, or delete {} and rebuild it",
                     path.display()
                 )),
@@ -758,13 +771,13 @@ pub fn check_git(dir: &std::path::Path) -> SelfCheck {
             name: "git".to_string(),
             state: "pass".to_string(),
             detail: String::from_utf8_lossy(&output.stdout).trim().to_string(),
-            fix: None,
+            fix: None, raw: None,
         },
         _ => SelfCheck {
             name: "git".to_string(),
             state: "fail".to_string(),
             detail: "not inside a git repository".to_string(),
-            fix: Some(format!(
+            raw: None, fix: Some(format!(
                 "run `git init` in {}, or start xencode inside a repository",
                 dir.display()
             )),
@@ -781,7 +794,7 @@ pub fn check_metrics(xencode_dir: &std::path::Path) -> SelfCheck {
             name: "metrics".to_string(),
             state: "absent".to_string(),
             detail: "no metrics recorded yet".to_string(),
-            fix: None,
+            fix: None, raw: None,
         };
     }
     let rows = crate::read_metrics(xencode_dir);
@@ -795,7 +808,7 @@ pub fn check_metrics(xencode_dir: &std::path::Path) -> SelfCheck {
             size.as_deref()
                 .unwrap_or("a file that would not say its size")
         ),
-        fix: None,
+        fix: None, raw: None,
     }
 }
 
@@ -837,6 +850,7 @@ pub fn check_provider(
         state: state.to_string(),
         detail,
         fix,
+        raw: None,
     }
 }
 
@@ -854,6 +868,7 @@ pub fn check_mcp(
         state: if reached { "pass" } else { "fail" }.to_string(),
         detail: detail.into(),
         fix: if reached { None } else { fix },
+        raw: None,
     }
 }
 
@@ -865,7 +880,7 @@ pub fn check_cache_writable(xencode_dir: &std::path::Path) -> SelfCheck {
             name: "cache".to_string(),
             state: "fail".to_string(),
             detail: format!("cannot create {}", dir.display()),
-            fix: Some(format!(
+            raw: None, fix: Some(format!(
                 "make {} writable, or remove it and let xencode create it again",
                 dir.display()
             )),
@@ -879,14 +894,14 @@ pub fn check_cache_writable(xencode_dir: &std::path::Path) -> SelfCheck {
                 name: "cache".to_string(),
                 state: "pass".to_string(),
                 detail: dir.display().to_string(),
-                fix: None,
+                fix: None, raw: None,
             }
         }
         Err(e) => SelfCheck {
             name: "cache".to_string(),
             state: "fail".to_string(),
             detail: format!("{} is not writable: {e}", dir.display()),
-            fix: Some(format!("chmod u+w {}", dir.display())),
+            raw: None, fix: Some(format!("chmod u+w {}", dir.display())),
         },
     }
 }
@@ -1444,5 +1459,16 @@ mod tests {
         // `true` defies testing on an open machine, but the shape is pinned:
         // missing binary reads as absent, never as denied.
         assert!(!command_denied("xencode-no-such-binary-xyz", &[]));
+    }
+
+    #[test]
+    fn check_model_raw_field_serialization() {
+        let check_without_raw = check_model(false, "detail", Some("fix".to_string()));
+        let json1 = serde_json::to_value(&check_without_raw).unwrap();
+        assert!(json1.get("raw").is_none());
+
+        let check_with_raw = check_without_raw.with_raw("original transport error");
+        let json2 = serde_json::to_value(&check_with_raw).unwrap();
+        assert_eq!(json2["raw"], "original transport error");
     }
 }
