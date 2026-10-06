@@ -238,6 +238,31 @@ async fn a_server_that_exits_during_handshake_reports_its_own_words() {
 }
 
 #[tokio::test]
+async fn a_server_that_exits_during_handshake_reliably_reports_stderr_under_repetition() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = fixture(
+        dir.path(),
+        "dying-loop",
+        "#!/bin/sh\necho \"dying server explanation line\" >&2\nexit 1\n",
+    );
+    for i in 0..50 {
+        let error = McpClient::start(&spec, Duration::from_secs(5))
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("iteration {i}: expected handshake failure"));
+        let text = error.to_string();
+        assert!(
+            text.contains("dying-loop"),
+            "iteration {i}: missing server name in {text}"
+        );
+        assert!(
+            text.contains("dying server explanation line"),
+            "iteration {i}: missing stderr line in {text}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn an_unstartable_command_is_reported_not_panicked() {
     let spec = ServerSpec::new("missing", "/nonexistent/xencode-mcp-server");
     match McpClient::start(&spec, Duration::from_secs(2))

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AD-1`: wait for dead MCP server stderr before assembling handshake failure error
+
+A stdio server that exits during handshake now boundedly drains its stderr stream before
+the client formats its error message:
+
+- In `xencode-mcp-rs::client`, `McpClient` stores the `collect_stderr` task join handle beside the
+  reader task handle rather than dropping it.
+- When `initialize` fails and the stdio child process has exited (`try_wait` or brief wait on closed
+  connection), `with_stderr` boundedly awaits the collector task (up to 500ms) before inspecting the
+  watchdog's stderr buffer.
+- Verified under repetition with a 50-iteration handshake exit test in `tests/stdio.rs`.
+
 ### Changed — `T-2`: complete the ten agent-fabric research investigations across W01–W04
 
 The ten initial research questions across agent interoperability, identity, observability,
