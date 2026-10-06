@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate` — and clap's
   built-in `help`, 45 entries in the list)
-- [x] Workspace gates green — 16 crates, 2418 tests passing, zero warnings (re-verified 2026-10-06, after `QM-4`; 19 ignored, so 2437 in the run)
+- [x] Workspace gates green — 16 crates, 2428 tests passing, zero warnings (re-verified 2026-10-06, after `EV-7`; 19 ignored, so 2447 in the run)
 
 ## Model Catalog Honesty
 
@@ -2436,6 +2436,20 @@ never is.
   `/rewind`, the agent *drafts* a lesson and the user approves it into
   `AGENTS.md`. S (3-4 d). Trap: auto-commit is drift, not learning.
   Done-when: the draft cannot land without explicit approval.
+  **Done 2026-10-06 — and the row's "the agent drafts a lesson" is narrower than it
+  reads.** What gets drafted is the *evidence*: which command reported the failure, what
+  went back, which check failed with what exit code. The lesson line ships empty and
+  `/lesson approve` refuses while it stays empty, because the reason a person undid work is
+  not observable from here — QM-6's own finding (most rejections carry no recorded reason,
+  and stated satisfaction runs far ahead of acceptance) is the argument for leaving the blank
+  rather than filling it. A model-written sentence was available — `/ctx fold` already makes
+  the call — and was declined: wording the person's conclusion for them is the drift this row
+  names as its trap. The other half of the row needed a fact that does not exist: there is no
+  per-round failure counter anywhere in the loop to read `N` from (grepped: no streak,
+  round-failure or consecutive-failure counter in any crate), so "N failed rounds" is
+  implemented against the machine-checkable signal that *is* recorded — a `/verify` checklist
+  whose checks exited non-zero — at a streak of three.
+  See the W10 progress note.
 - **EV-8 playback regression below the HTTP boundary** — recorded *real* provider
   responses replayed through real tool execution in seeded temp repos. M (~1 wk).
   Trap: house-rule optics — the fixtures must be documented as captures of real
@@ -10047,7 +10061,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 10 done
+#### W10 — Durable project knowledge — 23 items, 11 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10056,7 +10070,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — deliberately after W7 |
 | **EV-5** | sub-directory instruction files | capability | sub-directory instruction files — done 2026-10-05, the walk is read-only and lands below the stable-prefix marker, see the W10 progress note |
 | **EV-6** | notes-to-self scratchpad | capability | notes-to-self scratchpad — done 2026-10-05, the pad is a tier of its own and the fold gets the whole file, see the W10 progress note |
-| **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson |
+| **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson — done 2026-10-06: a rewind or a third identical failing check drafts `.xencode/lesson.candidate.md` with an empty lesson line, and `/lesson approve` is the product's only writer for `AGENTS.md`; see the W10 progress note |
 | **MEM-1** | A candidate-facts file the human promotes | capability | candidate-facts file the human promotes — open: the promotion half is built (`QM-1`'s candidate file and `/ctx promote`), the agent-drafted queue it was meant to hold is `EV-7`'s, and `EV-6`'s pad is not that queue because a note is this session's own working text |
 | **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance — **covered by committed work, no separate task left**: `QM-1` gave the tier a writer with a human promotion step, `QM-2` the `[src:path@commit]` provenance and the git-dirty staleness this row asked for, `MEM-3` the verify-on-read. Counted with those rows, not as its own commit |
 | **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts — done 2026-10-05 against `git grep`, not `xencode-analysis-rs`, see the W10 progress note |
@@ -10078,6 +10092,25 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `EV-7` — 2026-10-06, and the gate is the feature. A failure now leaves
+  `.xencode/lesson.candidate.md`: the event with its exit codes, and a lesson line that ships
+  empty because the reason something was undone is not observable from inside the thing that did
+  it. `/lesson approve` appends a person's own sentence to `AGENTS.md` and refuses outright while
+  the line is blank — watched failing, by handing it an invented lesson and seeing the test go red.
+  That command is the product's only writer for `AGENTS.md`; one line under `## Lessons`, the rest
+  byte for byte, and because trust keys on content, the approval says the file is data again until
+  `/trust` covers it instead of re-granting itself. Triggers: a `/rewind` (a decision, asks at once)
+  and a third `/verify` failure running together (a symptom, so it counts). Unblocks both rows that
+  named this one as their precondition: `QM-6`, which drafts under this gate and specifies the blank
+  reason this item already ships, and `MEM-1`, whose agent-drafted queue is now a real file — though
+  note that what exists writes to `AGENTS.md`, while `MEM-1` asks for promotion into `state.md`, which
+  `QM-1`'s `state.candidate.md` already does; the two must not be built twice. **Counted:** 2428 passing,
+  0 failed, 19 ignored across 16 crates on 2026-10-06 — eleven new tests in `lesson.rs`, one of them the
+  streak, and the two rewind tests in `app.rs` now find their line rather than assuming it is last. The
+  total moves by ten, not eleven: a `#[test]` written twice on one `QM-4` case made rustc register that
+  case twice, and removing the duplicate took the run back by one — the doubled name appears twice in
+  the `QM-4` log and once in this one, which is the whole of the difference.
 
 - [x] `QM-4` — 2026-10-06, and it is the item that a live run corrected. Two sources can
   both answer and still disagree: the cited file has not moved, the `[chk:]` name is still
@@ -10109,7 +10142,10 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   **Counted:** 2418 passing, 0 failed, 19 ignored across 16 crates on 2026-10-06 (ten new
   tests since `QK-4`: seven in `compact.rs`, one in `doctor.rs`, two in
   `tests/state_staleness.rs`), with `cargo fmt --all` clean and
-  `cargo clippy --workspace --all-targets -- -D warnings` clean.
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Corrected the same day: that
+  figure counts one of the seven in `compact.rs` twice, because it was written with two
+  `#[test]` attributes and rustc registered the case both ways — `cargo test` never noticed, and
+  only `cargo clippy --all-targets -D warnings` rejected it. Ten functions were added, eleven runs.
 
 - [x] `QK-4` — 2026-10-06, the report half. A durable fact the code has contradicted already
   leaves the prompt in silence: `drop_stale_facts` runs on every prompt build and edits

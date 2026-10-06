@@ -101,6 +101,11 @@ const COMMANDS: &[Binding] = &[
         "undo the agent's file changes (session-only), refusing files edited by hand",
     ),
     (
+        "/lesson [status|set <words>|approve|drop]",
+        "the lesson a rewind or a run of failing checks drafted — blank until you write it, \
+         and only your approval puts it in AGENTS.md",
+    ),
+    (
         "/gate [bugfix [paths] | off]",
         "refuse production edits until a reproduction test has been seen failing",
     ),

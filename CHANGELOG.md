@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EV-7`: a failure leaves a lesson draft, and only your words make it an instruction
+
+Two things in this program already record that the agent's work was wrong: `/rewind`, which
+puts files back because a person did not want what was done, and `/verify`, whose checklist
+fails with an exit code behind it. Neither used to leave anything durable. The work got undone,
+the check went red, and the reason — the only part that could stop it happening again — was
+nowhere written down, because the thing that made the mistake is not the thing that knows why
+it was a mistake.
+
+A failure now drafts. The event goes into `.xencode/lesson.candidate.md` as evidence: which
+command reported it, what went back, which check failed with what exit. Repeating the same
+failing check keeps one line with a count on it rather than four, and a run of three asks out
+loud. The lesson itself is an empty line, and `/lesson approve` refuses while it stays empty —
+a reason written by the thing that was rejected is a guess about someone else's motive, and a
+guess in the file that tells every later turn what to do is worse than no lesson.
+
+`/lesson set <words>` puts a person's sentence into the draft, `/lesson status` prints the whole
+thing, `/lesson approve` appends that one line to `AGENTS.md`, and `/lesson drop` clears it with
+nothing written anywhere. `AGENTS.md` keeps every byte it already had: one line is added under a
+`## Lessons` heading, and the file is created only when there was none. This is the product's
+only writer for that file, and it is reachable only from a command a person typed.
+
+One consequence worth stating before it surprises anyone: trust in `AGENTS.md` is keyed on the
+file's content, so appending a line takes the whole file back to being data. The approval says
+so and points at `/trust` rather than re-granting the new bytes itself — a machine that trusts
+its own edit is exactly the thing the trust split exists to prevent.
+
+**Proven by running it.** Eleven tests in the new module, plus the rewind path driven through
+the real command, and a live TUI session in a scratch project: a genuinely failing checklist
+wrote `- /verify: FAILED: fmt exit 1, test exit 1`, four runs of that same failure held one
+line counting to `(4 times)` and printed the nudge at three, `/lesson approve` on the empty line
+answered `would be an invention, not a lesson` with `AGENTS.md` at the same checksum as before
+and no token spent, and after `/lesson set` the approval put exactly that sentence under
+`## Lessons` and cleared the draft. The live run is also what fixed the streak: identical
+failures were stored as a single event, so the third one of the same broken build could never
+have asked — one line with a count now advances it, and a test hammers the same check three
+times to prove that.
+
+
 ### Added — `QM-4`: a stored fact the code places elsewhere is said out loud, not dropped
 
 A durable fact carries two claims about the code — the file it cites, and the name checked
