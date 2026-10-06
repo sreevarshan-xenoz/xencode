@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2491 tests passing, zero warnings (re-verified 2026-10-06, after `QK-1`; 19 ignored, so 2510 in the run)
+- [x] Workspace gates green — 16 crates, 2503 tests passing, zero warnings (re-verified 2026-10-06, after `EV-4`; 19 ignored, so 2522 in the run)
 
 ## Model Catalog Honesty
 
@@ -2422,6 +2422,8 @@ never is.
   through the existing `retrieve()` signals. M (~1 wk). Trap: stale facts poison
   context; needs expiry and review. Done-when: an eval-style test shows the right
   fact injected within budget.
+  **Done 2026-10-06 — the row's trap was already covered, and the row's own premise
+  was the thing in the way.** See the W10 progress note.
 - **EV-5 sub-directory instruction files** — walk from the edited file's dir to
   root, budget-capped. S (2-3 d). Trap: the KV-prefix contract. Done-when: an
   edit in a nested dir provably loads its directives.
@@ -6082,7 +6084,9 @@ human's edit (LF-6's git-bus + GH-6).
 
 - **QM-1 — give `state.md` a writer before giving it features.** *Effort: S.*
   Persist the hard-compaction summary atomically via `state.rs:83`, gated on
-  schema validation and a fact-count cap (~15 lines at 800 tokens). This is
+  schema validation and a fact-count cap (~15 lines at 800 tokens — one turn's budget,
+  which `EV-4` later re-scoped: the file holds 60 lines / 4,000 tokens and the 800 is
+  what a single turn sends). This is
   MEM-2's first step, and it fixes a paid-for tier that renders empty (fact
   Q-1.19). *Done-when:* tiers 1–3 are byte-identical across two turns (KV reuse
   preserved) **and** `/ctx`'s tier-4 report shows non-zero after a hard
@@ -10095,13 +10099,13 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 18 done
+#### W10 — Durable project knowledge — 23 items, 19 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
-| **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — deliberately after W7 |
+| **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — done 2026-10-06: the store got its own two ceilings (`STATE_FILE_FACT_CAP` 60 lines, `STATE_FILE_CAP_TOKENS` 4,000) so a fact promoted in March still exists, and `factrank` now chooses which of them the *turn* pays 800 tokens for, on retrieval's own signals; the eval-style done-when is `tests/state_relevance.rs`, see the W10 progress note |
 | **EV-5** | sub-directory instruction files | capability | sub-directory instruction files — done 2026-10-05, the walk is read-only and lands below the stable-prefix marker, see the W10 progress note |
 | **EV-6** | notes-to-self scratchpad | capability | notes-to-self scratchpad — done 2026-10-05, the pad is a tier of its own and the fold gets the whole file, see the W10 progress note |
 | **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson — done 2026-10-06: a rewind or a third identical failing check drafts `.xencode/lesson.candidate.md` with an empty lesson line, and `/lesson approve` is the product's only writer for `AGENTS.md`; see the W10 progress note |
@@ -10126,6 +10130,62 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `EV-4` — 2026-10-06, as `rust/crates/xencode-context-rs/src/factrank.rs`, called from
+  `collect_live_context` on the way into tier 4, and as `STATE_FILE_FACT_CAP` /
+  `STATE_FILE_CAP_TOKENS` in `compact.rs`. **The row's trap was already covered by other
+  rows — `QM-2` and `MEM-3` drop a fact the code contradicts before ranking, and `QK-6`
+  dates it — and the row's own premise was what was in the way.** It asked for facts
+  "scored through the existing `retrieve()` signals" against a tier that promotion had
+  already cut to 15 lines and 800 tokens, which is one turn's budget applied to a durable
+  file. So the first thing shipped is a number, not an algorithm: `state.md` may reach 60
+  fact lines and 4,000 tokens — the store's own two ceilings — while a turn still pays
+  800, and `factrank::select_state` decides every turn which 800 of them that is. Five
+  things worth writing down. **(1)** Ranking had to be line-based on the file's own text,
+  not a `ContextState::from_markdown` round-trip: parsing drops any section whose heading
+  it does not recognise, so a hand-written `state.md` would have been quietly rewritten by
+  the thing meant to choose from it. A store that fits the turn is returned as its own
+  bytes for the same reason. **(2)** Truth is still decided upstream. `drop_stale_facts`
+  runs first and its removals are reported by name as `dropped as stale`; `left_out` counts
+  only facts that are still true and simply were not what this turn asked about. Conflating
+  the two would make a healthy store look like a contradicted one. **(3)** Three rules the
+  row does not state and a model notices: the `## working-on` line is never ranked and
+  never dropped, a section that keeps no fact keeps no heading (an empty `## unresolved`
+  reads as an open question that was answered weeks ago), and ties keep the order the file
+  writes them in, so the same question twice sends the same bytes — which the cache needs
+  and a person reading `/ctx kv` needs more. **(4)** Signals are retrieval's at retrieval's
+  weights — a path the question names (6), a directory along it (5), a file the working
+  tree has changed (4) — with the symbol arm becoming word overlap, capped at two distinct
+  words and therefore worth less than one path hit, because a fact's prose echoes almost
+  any noun a question contains and an echo is not a claim about the file. **(5)** Nothing
+  here reaches the server's cache: tier 4 already sits below the stable-prefix marker, and
+  `factrank` does no git and no disk reads — it scores lines the turn has in memory, so a
+  60-line store costs no more per turn than a 15-line one did.
+  The done-when is `rust/crates/xencode-context-rs/tests/state_relevance.rs`, on a real
+  `git init` repository with a committed source tree and a promoted `state.md`: 41 facts,
+  the one about `src/csv_export.rs` written last, asked about by name. It arrives, the fact
+  next to it does not, the tier is inside 800 tokens, and the same test asserts that a cut
+  from the front at that budget — what shipped this morning — does *not* contain it, so the
+  pass proves a choice was made and not a lucky size. Two turns over the one store get two
+  different tiers, and the file on disk keeps both facts. Twelve new tests; every guard was
+  watched red under a deliberate break — ranking turned off, ties reversed, the task line
+  left unforced, the budget never checked, empty headings kept, the word ceiling removed,
+  the dirty-file signal zeroed, the `[src:` marker unread, the count of what stayed behind
+  pinned to nought, and three at the call site (no budget applied, no question passed, the
+  remainder unreported). One break survived its first try — a store that "fits the turn"
+  still came back byte-identical after the shortcut was deleted, because the test's fixture
+  had a trailing newline and the renderer writes one; the fixture was rewritten to the shape
+  `ContextState::to_markdown` actually leaves on disk, and the guard then failed as asked.
+  Live, on this machine, in a scratch repository with 45 fact lines (8,014 bytes) in
+  `.xencode/state.md`, driving `/ctx kv` in the real binary under a sandboxed `HOME`:
+  `Tier 4 state.md — 775 tokens in the prompt · 45 fact line(s) on disk` and the new line
+  `28 of those 45 fact line(s) are more than one turn can hold — which ones arrive is
+  chosen by what you ask, and the rest stay in the file until a question reaches them.`
+  The panel ranks against no question of its own, so that count is the floor: a turn with a
+  matching question carries fewer lines and different ones. Workspace after: 16 crates,
+  2,503 passed, 0 failed, 19 ignored across 75 result lines, matching 75 binary headers and
+  no other run in `target/debug/deps`; `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean.
 
 - [x] `QK-1` — 2026-10-06, as `.xencode/facts.evidence.jsonl`, written by the turn path
   that already re-checks every durable fact, and `xencode memory evidence`, which reads it.
@@ -10711,10 +10771,13 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   folds becomes durable until a human moves it. The fold therefore *drops* a line
   carrying any data banner — the set is derived from `SourceClass::ALL`, so a
   fourteenth class cannot slip past the guard — replaces credential-shaped text with
-  `[redacted]` through `trace::redact_secrets`, and holds to the two caps tier 4 is
-  already budgeted for: `STATE_FOLD_FACT_CAP` 15 lines, trimmed across completed /
+  `[redacted]` through `trace::redact_secrets`, and holds to the two ceilings the store
+  is allowed to reach: `STATE_FILE_FACT_CAP` 60 lines, trimmed across completed /
   decisions / unresolved in turn so no section is starved, and
-  `context::STATE_CAP_TOKENS` 800 of rendered text. `/ctx promote` re-runs the same
+  `STATE_FILE_CAP_TOKENS` 4,000 of rendered text. Both were 15 lines and 800 tokens —
+  one turn's budget applied to the whole file — until `EV-4` separated the store from
+  the prompt; `context::STATE_CAP_TOKENS` 800 remains what a *turn* sends.
+  `/ctx promote` re-runs the same
   validation, because a hand edit made in between can break the shape or paste a
   fetched block back in; a fold whose every line was quoted data is refused outright.
   **Done-when, measured on this machine** against the running `llama-server` build
@@ -10751,9 +10814,9 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   ending in `.rs` are not — and the commit is read from this repository's head through
   the git primitives the tracker already uses (`current_git_info`, `revision`).
   `## working-on` is never stamped: that section is the task, not a claim about the
-  code. Markers are bytes, so `STATE_FOLD_FACT_CAP` and `STATE_CAP_TOKENS` are applied
+  code. Markers are bytes, so `STATE_FILE_FACT_CAP` and `STATE_FILE_CAP_TOKENS` are applied
   a second time *after* stamping, trimming from the tail of each section in turn —
-  without that, a fold measured to exactly 800 tokens loses its last line's marker
+  without that, a fold measured to exactly the store's cap loses its last line's marker
   mid-word, and a marker cut in half is worse than no marker because it reads like a
   citation.
   **Invalidation is the read, not a janitor.** `drop_stale_facts` runs on the way into

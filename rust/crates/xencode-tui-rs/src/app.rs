@@ -2041,8 +2041,8 @@ fn fold_lines(report: &xencode_context_rs::FoldReport) -> Vec<String> {
         lines.push(format!(
             "[CTX]   {} line(s) were past what state.md may hold ({} lines, {} tokens) and dropped — the model's own first items were kept.",
             report.over_cap_dropped,
-            xencode_context_rs::STATE_FOLD_FACT_CAP,
-            xencode_context_rs::context::STATE_CAP_TOKENS
+            xencode_context_rs::STATE_FILE_FACT_CAP,
+            xencode_context_rs::STATE_FILE_CAP_TOKENS
         ));
     }
     lines
@@ -5285,6 +5285,26 @@ impl<'a> App<'a> {
                         fact.line,
                         fact.problem.reason()
                     ));
+                }
+                // EV-4: `state.md` is a store and a turn is a budget, so a project
+                // that keeps promoting stops sending all of it. Which facts a turn
+                // gets depends on the question, and this report has none — ranked
+                // against nothing it shows how many lines no single turn could carry,
+                // instead of leaving the token count looking like the file's size.
+                if let Some(check) = state_check.as_ref() {
+                    let pick = xencode_context_rs::factrank::select_state(
+                        &check.text,
+                        "",
+                        &std::collections::HashSet::new(),
+                        xencode_context_rs::context::STATE_CAP_TOKENS,
+                    );
+                    if pick.left_out > 0 {
+                        let _ = tx.send(format!(
+                            "[CTX]   {} of those {} fact line(s) are more than one turn can hold — which ones arrive is chosen by what you ask, and the rest stay in the file until a question reaches them.",
+                            pick.left_out,
+                            pick.sent + pick.left_out
+                        ));
+                    }
                 }
 
                 // The newest record per profile, from the rollup rather than by

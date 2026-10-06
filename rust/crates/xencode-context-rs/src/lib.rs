@@ -28,6 +28,7 @@ pub mod editing;
 pub mod embed;
 pub mod eval;
 pub mod factgc;
+pub mod factrank;
 pub mod factverify;
 pub mod gitinfo;
 pub mod histdigest;
@@ -96,7 +97,7 @@ pub use compact::{
     read_state_candidate, record_checks, should_compact, soft_compact, stamp_provenance,
     state_candidate_path, write_state_candidate, CompactReport, CompactionKind, DroppedFact,
     FactDisagreement, FactProblem, FoldRefusal, FoldReport, PromoteRefusal, StaleFacts,
-    DISAGREEMENT_LINES_SHOWN, STATE_CANDIDATE_FILE, STATE_FOLD_FACT_CAP,
+    DISAGREEMENT_LINES_SHOWN, STATE_CANDIDATE_FILE, STATE_FILE_CAP_TOKENS, STATE_FILE_FACT_CAP,
 };
 pub use context::{
     assemble_chat, assemble_prompt, collect_live_context, git_summary_text, read_retrieved_bodies,

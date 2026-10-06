@@ -947,6 +947,12 @@ pub struct LiveContext {
     /// MEM-3). Each one carries its reason, and the interface names them instead of
     /// letting the tier quietly shrink.
     pub stale_state_facts: Vec<crate::compact::DroppedFact>,
+    /// EV-4: how many of the durable facts this turn's ranking sent, and how many
+    /// stayed in the file for a later question. Both zero when the store fits a turn
+    /// whole, because then nothing was chosen between. A tier that shrank is
+    /// reported as shrunk rather than leaving the person to notice.
+    pub state_facts_sent: usize,
+    pub state_facts_left_out: usize,
 }
 
 /// SE-2: what a repository-derived section says about itself. The system
@@ -971,6 +977,13 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     // `AGENTS.md` reaches the live turn marked as data, never as instructions.
     let agents_md = crate::trust::read_agents_md(root);
     let anchor_md = std::fs::read_to_string(xencode.join("anchor.md")).ok();
+    // Working-tree paths, read once: they seed retrieval, they decide which
+    // directories this turn is actually in, and EV-4 ranks the durable facts with
+    // them — a fact about a file that is already dirty is a fact about what this
+    // turn is doing. `dirty_paths` returns them sorted, and the order is what makes
+    // the scoped tier byte-stable across turns.
+    let changed_paths = dirty_paths(root);
+    let changed: HashSet<String> = changed_paths.iter().cloned().collect();
     // QM-2: the durable tier is checked against the files it describes on the way
     // in. A fact about `src/auth.rs` written three weeks ago is a claim about a
     // file that may not say that any more, and the model has no way to tell which
@@ -997,32 +1010,41 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         // nothing marked pays one string scan here and no disk write at all.
         let _ = crate::factverify::record_evidence(&xencode, stored, check, now);
     }
+    // EV-4: the store on disk may hold months of promoted facts; a turn pays for
+    // `STATE_CAP_TOKENS` of them. Which ones is decided by what this turn asks, not
+    // by what was written first — see [`crate::factrank`].
+    let mut state_facts_sent = 0;
+    let mut state_facts_left_out = 0;
     let state_md = state_check.as_ref().and_then(|check| {
         if check.text.trim().is_empty() {
             return None;
         }
         let note = crate::compact::disagreement_note(&check.disagreeing);
-        if note.is_empty() {
-            return Some(check.text.clone());
-        }
-        // Tier 4 truncates this from the head, so a notice sitting after the facts
-        // is the first thing cut — and the state is biggest exactly when it has
-        // most chances to disagree. Make room for it here instead of hoping.
+        // The notice rides after the facts out of the same budget, so its cost is
+        // taken off the facts here — the state is biggest exactly when it has the
+        // most chances to disagree, and a notice nobody paid for is a notice that
+        // silently replaced a fact.
         let room = crate::budget::est_tokens(note.len(), false);
-        let (facts, _) = crate::budget::truncate_to_tokens(
+        let pick = crate::factrank::select_state(
             &check.text,
+            query,
+            &changed,
             STATE_CAP_TOKENS.saturating_sub(room),
-            false,
         );
-        Some(facts + &note)
+        state_facts_sent = pick.sent;
+        state_facts_left_out = pick.left_out;
+        if note.is_empty() {
+            return Some(pick.text);
+        }
+        let mut text = pick.text;
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&note);
+        Some(text)
     });
     let git_summary = git_summary_text(root).unwrap_or_default();
     let notes_md = crate::notes::read_notes(&xencode);
-    // Working-tree paths, read once: they seed retrieval and they decide which
-    // directories this turn is actually in. `dirty_paths` returns them sorted,
-    // and the order is what makes the scoped tier byte-stable across turns.
-    let changed_paths = dirty_paths(root);
-    let changed: HashSet<String> = changed_paths.iter().cloned().collect();
     // EV-5: an `AGENTS.md` sitting in a directory being edited is that
     // directory's own directive, and the root file says nothing about it. It
     // joins as a dynamic tier, so the cached stable head is untouched.
@@ -1060,6 +1082,8 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         retrieved_total,
         shape,
         stale_state_facts: state_check.map(|check| check.dropped).unwrap_or_default(),
+        state_facts_sent,
+        state_facts_left_out,
     }
 }
 

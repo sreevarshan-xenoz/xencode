@@ -129,13 +129,27 @@ fn transcript_tail(transcript: &Transcript) -> String {
         .join("\n")
 }
 
-/// QM-1 — the durable-tier bar a fold is held to.
+/// QM-1 — the durable-tier bar a fold is held to, and EV-4 — what that bar is a bar *on*.
 ///
-/// `state.md` is tier 4: it re-enters the head of *every* later turn, so a fold
-/// is capped at the two things that tier is already budgeted for — this many
-/// fact lines, and [`crate::STATE_CAP_TOKENS`] of rendered text (800). Roughly
-/// one line per fact at that size, which is what MEM-2's "~15 facts" bar means.
-pub const STATE_FOLD_FACT_CAP: usize = 15;
+/// `state.md` re-enters every later turn, so a fold has to be held to something. The
+/// something it was held to was the *prompt's* budget — [`crate::STATE_CAP_TOKENS`],
+/// 800 tokens, "roughly one line per fact", which is why this count was 15 — and so
+/// promotion deleted the facts a project had approved last in order to keep one turn
+/// small. That is the wrong number to limit a durable file with: a store is asked to
+/// outlast the turn that wrote it, and fifteen facts is one afternoon of a working
+/// project.
+///
+/// The store now has its own two ceilings, this many lines and
+/// [`STATE_FILE_CAP_TOKENS`] of rendered text, and [`crate::factrank`] decides every
+/// turn which of the lines inside them the request is actually about. Five turns'
+/// worth of budget and four times the facts, so the file can outgrow a prompt without
+/// a person watching approved facts disappear at promotion.
+pub const STATE_FILE_FACT_CAP: usize = 60;
+
+/// The rendered size the store may reach. Lines and bytes are both ceilings on the
+/// file, and the byte one binds first where a project's facts are long — which is the
+/// shape the old single cap mistook for "too many facts".
+pub const STATE_FILE_CAP_TOKENS: u64 = 4_000;
 
 /// The file a fold waits in.
 ///
@@ -304,17 +318,17 @@ pub fn fold_state_from_reply(reply: &str) -> Result<(ContextState, FoldReport), 
             }
         }
     }
-    if ordered.len() > STATE_FOLD_FACT_CAP {
-        report.over_cap_dropped = ordered.len() - STATE_FOLD_FACT_CAP;
-        ordered.truncate(STATE_FOLD_FACT_CAP);
+    if ordered.len() > STATE_FILE_FACT_CAP {
+        report.over_cap_dropped = ordered.len() - STATE_FILE_FACT_CAP;
+        ordered.truncate(STATE_FILE_FACT_CAP);
     }
-    // The token cap is checked on the rendered file, because that is what tier 4
-    // truncates: a wide line counts against 800 tokens the same way a long one
-    // does, and the state must be admitted whole or not at all.
+    // The token cap is checked on the rendered file, because a wide line costs the
+    // store the same as a long one, and a fact is admitted whole or not at all. What
+    // it is *not* checked against is one turn's budget: `state.md` is the store, and
+    // [`crate::factrank`] decides per turn which of these lines a request pays for.
     let mut state = with_lines(&working_on, &ordered);
     while state.present()
-        && crate::context::STATE_CAP_TOKENS
-            < crate::budget::est_tokens(state.to_markdown().len(), false)
+        && STATE_FILE_CAP_TOKENS < crate::budget::est_tokens(state.to_markdown().len(), false)
     {
         ordered.pop();
         report.over_cap_dropped += 1;
@@ -395,8 +409,8 @@ pub fn promote_state_candidate(
     // between gets the same treatment as one that was never touched.
     record_checks(&mut state, &state_root(xencode_dir));
     // Stamping and checking are what make the tier honest, and they are also
-    // bytes: the two caps are re-checked on the marked-up file, because that is
-    // the text tier 4 will truncate. A fold trimmed to exactly 800 tokens and then
+    // bytes: the two caps are re-checked on the marked-up file, because a marker is
+    // part of the line it cites. A fold trimmed to exactly the store's cap and then
     // stamped would otherwise send a fact's `[src:…]` marker past the cut.
     enforce_state_caps(&mut state, &mut report);
     // Counted from the file that is about to be written, not from what the two
@@ -423,15 +437,17 @@ pub(crate) fn state_root(xencode_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| xencode_dir.to_path_buf())
 }
 
-/// Re-apply the line and token caps to a state whose lines have grown markers.
+/// Re-apply the store's line and token caps to a state whose lines have grown markers.
 ///
 /// Trimming happens from the end of each list in turn, the same order
 /// [`fold_state_from_reply`] used before the stamp: the facts the model ranked
-/// first are the ones kept.
+/// first are the ones kept. Both caps are the *file's* ([`STATE_FILE_FACT_CAP`] and
+/// [`STATE_FILE_CAP_TOKENS`]) — a `[src:…]` marker is bytes in the store, and what a
+/// marker costs the turn is [`crate::factrank`]'s problem, not this one's.
 fn enforce_state_caps(state: &mut ContextState, report: &mut FoldReport) {
     let count = state.completed.len() + state.decisions.len() + state.unresolved.len();
-    if count > STATE_FOLD_FACT_CAP {
-        let mut over = count - STATE_FOLD_FACT_CAP;
+    if count > STATE_FILE_FACT_CAP {
+        let mut over = count - STATE_FILE_FACT_CAP;
         for list in [
             &mut state.completed,
             &mut state.decisions,
@@ -446,8 +462,7 @@ fn enforce_state_caps(state: &mut ContextState, report: &mut FoldReport) {
     }
     loop {
         if !state.present()
-            || crate::budget::est_tokens(state.to_markdown().len(), false)
-                <= crate::context::STATE_CAP_TOKENS
+            || crate::budget::est_tokens(state.to_markdown().len(), false) <= STATE_FILE_CAP_TOKENS
         {
             break;
         }
@@ -1484,39 +1499,46 @@ assistant: hello";
     #[test]
     fn the_cap_keeps_what_the_model_ranked_first_in_each_list() {
         let mut reply = String::from("## completed\n");
-        for i in 0..20 {
+        for i in 0..50 {
             reply.push_str(&format!("- done {i}\n"));
         }
         reply.push_str("\n## decisions\n");
-        for i in 0..20 {
+        for i in 0..50 {
             reply.push_str(&format!("- chose {i} [d]\n"));
         }
         let (state, report) = fold_state_from_reply(&reply).unwrap();
-        assert_eq!(report.kept_facts, STATE_FOLD_FACT_CAP);
-        assert_eq!(report.over_cap_dropped, 25);
+        assert_eq!(report.kept_facts, STATE_FILE_FACT_CAP);
+        assert_eq!(report.over_cap_dropped, 2 * 50 - STATE_FILE_FACT_CAP);
         // Trimmed across both lists instead of starving whichever renders last,
         // because each list is the model's own ranking.
-        assert_eq!(state.completed.len(), 8);
-        assert_eq!(state.decisions.len(), 7);
+        assert_eq!(state.completed.len(), STATE_FILE_FACT_CAP / 2);
+        assert_eq!(state.decisions.len(), STATE_FILE_FACT_CAP / 2);
         assert_eq!(state.completed[0], "done 0");
         assert_eq!(state.decisions[0], "chose 0 [d]");
         assert!(state.unresolved.is_empty());
     }
 
     #[test]
-    fn a_wide_fold_is_trimmed_to_what_tier_4_can_hold() {
+    fn a_wide_fold_is_trimmed_to_what_the_store_can_hold_and_outgrows_a_turn() {
         let wide = "x".repeat(400);
         let mut reply = String::from("## completed\n");
-        for i in 0..STATE_FOLD_FACT_CAP {
+        for i in 0..STATE_FILE_FACT_CAP {
             reply.push_str(&format!("- fact {i} {wide}\n"));
         }
         let (state, report) = fold_state_from_reply(&reply).unwrap();
         assert!(report.over_cap_dropped > 0, "a wide fold was not trimmed");
-        assert!(state.completed.len() < STATE_FOLD_FACT_CAP);
+        assert!(state.completed.len() < STATE_FILE_FACT_CAP);
+        assert!(
+            crate::budget::est_tokens(state.to_markdown().len(), false) <= STATE_FILE_CAP_TOKENS,
+            "the written store is bigger than the file that has to hold it"
+        );
+        // EV-4: the store is allowed to be larger than one prompt's budget, which is
+        // the whole reason there is a selector. A file trimmed to fit 800 tokens
+        // could never need ranking, and the ranking would be a courtesy.
         assert!(
             crate::budget::est_tokens(state.to_markdown().len(), false)
-                <= crate::context::STATE_CAP_TOKENS,
-            "the written state is bigger than the tier that has to hold it"
+                > crate::context::STATE_CAP_TOKENS,
+            "a trimmed store still fits every turn that reads it, so nothing is choosing"
         );
     }
 
@@ -1933,15 +1955,15 @@ assistant: hello";
     }
 
     #[test]
-    fn stamping_that_pushes_the_tier_past_its_cap_trims_the_tail_not_the_head() {
-        // Markers are bytes. A fold trimmed to exactly 800 tokens and then stamped
-        // overruns the tier it was just fitted to, so promotion re-applies the cap
-        // — and the trim keeps the model's own ranking: the first facts stay, the
+    fn stamping_that_pushes_the_store_past_its_cap_trims_the_tail_not_the_head() {
+        // Markers are bytes. A fold trimmed to exactly the store's ceiling and then
+        // stamped overruns the file it was just fitted to, so promotion re-applies the
+        // cap — and the trim keeps the model's own ranking: the first facts stay, the
         // tail goes, and every line it removed is counted where the person can see
         // the fold lost something.
         let mut state = ContextState {
             working_on: "wiring provenance in".to_string(),
-            completed: (0..STATE_FOLD_FACT_CAP + 5)
+            completed: (0..STATE_FILE_FACT_CAP + 5)
                 .map(|i| format!("fact {i} cites src/auth.rs"))
                 .collect(),
             decisions: vec![],
@@ -1951,7 +1973,7 @@ assistant: hello";
         enforce_state_caps(&mut state, &mut report);
         let kept = state.completed.len() + state.decisions.len() + state.unresolved.len();
         assert!(
-            kept <= STATE_FOLD_FACT_CAP,
+            kept <= STATE_FILE_FACT_CAP,
             "the line cap was not re-applied after stamping: {kept} lines"
         );
         assert_eq!(
@@ -1964,10 +1986,10 @@ assistant: hello";
     }
 
     #[test]
-    fn a_tier_too_wide_for_its_token_budget_is_trimmed_to_fit_and_never_half_cut() {
+    fn a_store_too_wide_for_its_token_cap_is_trimmed_to_fit_and_never_half_cut() {
         let mut state = ContextState {
             working_on: "the task".to_string(),
-            completed: vec!["x".repeat(4000); 3],
+            completed: vec!["x".repeat(6000); 4],
             decisions: vec![],
             unresolved: vec![],
         };
@@ -1976,8 +1998,8 @@ assistant: hello";
         assert!(
             !state.present()
                 || crate::budget::est_tokens(state.to_markdown().len(), false)
-                    <= crate::context::STATE_CAP_TOKENS,
-            "the re-cap left a file tier 4 would still truncate mid-line"
+                    <= STATE_FILE_CAP_TOKENS,
+            "the re-cap left a file bigger than the store that has to hold it"
         );
         assert!(report.over_cap_dropped >= 1);
         // Only the task sentence left and still over budget: the person's own
