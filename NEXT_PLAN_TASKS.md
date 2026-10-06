@@ -15163,3 +15163,366 @@ that section had was caused by appendix rows that claimed a wave and never appea
 IDs to **329 rows over 326 unique IDs**. It belongs in W0 with the other output that cannot
 be trusted, at effort S; `AA-2`, which is also W0 and also about an error path saying the
 right thing about a thing that failed, is the nearest neighbour.
+
+## Milestone AE — the owner's product brief of 2026-10-06: proof over prompting, and a screen that hides what you do not need (owner directive, 2026-10-06)
+
+Five briefs arrived on 2026-10-06, all about what Xencode should *be*: that it should not be
+another coding agent's terminal but the thing above several agents that can say whether their
+work is right; that its moat is evidence rather than prompt quality; that a first screen must
+not be a cockpit; that the panels should be reclassified rather than deleted; and that the
+centre of gravity is a work buddy that happens to have a workstation attached. The owner's
+instruction was to research the claims and put them in the plan.
+
+The first finding is the one the plan has already made twice about this family of proposal: the
+direction is not new, the wording is. §W-0 records a fourth arrival as "the same proposal as
+Milestone S with a different diagram", and S's header is the owner's own sentence. So the
+disposition below is the deliverable for most of it, and the rows are only for the parts the
+tree cannot do today — each of which was checked against the code on 2026-10-06, not against
+the brief.
+
+### The disposition
+
+| the brief asks for | already recorded as | state |
+|---|---|---|
+| An evidence package a reviewer can check ("show me why") | `EVd-1`…`EVd-8`, `QA-1`, `OR-16` | the shape exists and nothing produces or reads it → **AE-1** |
+| The implementer never declares itself correct | `MA-1` clean-context reviewer, `MA-2` pipeline, `L-7` exit-code done-gate | open, as planned |
+| Agents become disposable, with continuity | `AR-7`, `OR-7`; deterministic replay rejected in the P-10 register ("Temporal-style deterministic replay for goals — `GL-3` re-verification is the cheaper honest equivalent") | open |
+| Engine over TUI — one engine, many surfaces | fact `Q-1.15`, `WF-1`, `LF-4`, `M-5`/`M-7`; the VS Code extension declined at `:2694` | no public entry to the loop → **AE-7** |
+| A Project Truth Graph linking claims to evidence | `EVd-8`; a standalone persisted code-knowledge graph is in the P-10 register (`CI-2` + `LSP-2` produce the same edges on demand) | edges stay derived, not a product layer |
+| Missions: goal → controlled job → report | `GL-1`…`GL-7`, `MA-2`, `MM-8`, `OR-1`/`OR-2` | open |
+| Open a repo and see its health, counts, risky areas | `QB-4`, `QB-6`, `QO-1`, `SE-6`, `U-5`, `DB-6` | open; the **percentage** half is refused below |
+| "Why is this code here?" | `GH-2`, `QT-1`…`QT-4` | open; causal-story prose and ADR-mining both rejected earlier on measured grounds |
+| Change impact / blast radius | `CI-6` (done), `QD-1`, `QD-2` | open; no edge for a CLI command or a manual → **AE-4** |
+| Hide complexity until needed; four levels, never mixed | `UX-7` first-run coach, Milestone `V`, `X-2`'s two modes over one shared state | the levels exist as intentions, not as data → **AE-5**. Checked: `UX-12`'s `--simple` is a **screen-reader** mode — a plain appending transcript with no alternate screen — not a novice tier, so nothing today defers a destination for a newcomer |
+| Ctrl+K command palette replacing the feature navigator | `UX-6` | open — verified there is no palette: `Ctrl+F` toggles the navigator (`keymap.rs:500`) and no binding for `Ctrl+K` exists |
+| Stop putting emojis everywhere; reclassify the panels | `UX-4` | open — verified `FEATURE_LIST` has 19 emoji-prefixed entries (`focus.rs:407-427`) over 26 `FocusArea` variants (`focus.rs:52-83`), so `UX-4`'s own text ("an audit of all 25 focus areas", `:3881`) is one destination short of the tree |
+| Chat as the centre; Buddy/Project/Work/Review/Inspect/Settings | `UX-4`'s audit of every focus area | open, as planned |
+| A multimodal buddy: screenshots, PDF, audio | **shipped** — images ride as message parts, shrunk and recompressed, and PDF/DOCX parse to text (`QUICK_START.md:64`); a Voice Interface panel exists | no new row |
+| Proactive observations ("the same dependency has failed 3 runs") | `OR-2` (scheduler, done), `U-4` (run counts and a class, never a probability), `EVd-6` | nothing turns advice into a goal yet → **AE-6** |
+| Orchestrate Claude/Codex/Gemini on the person's own subscription | §S-4 note 4 "Provider terms … Nobody has read those terms for this use; recorded as an open check in `AR-1`" | see the constraint below |
+
+### Refusals this brief re-raises, and why they stay refused
+
+**Health 86% / Coverage 71% / Confidence 94%.** The plan has refused a scalar of this shape
+five separate times, and the reasons are independent of each other, so one new panel does not
+outweigh them: "Scalar knowledge-confidence numbers — a single number over contradictory
+sources is worse than the contradiction" and "Model-assigned scalar confidence on a fact —
+verbalized confidence is systematically overconfident and weakly calibrated" (`:6430`, `:6434`),
+"An uncalibrated flake or failure probability — a percentage implies a distribution this
+workspace has never measured; `EVd-6` is how a number would eventually be earned" (`:12871`),
+"92% vs 84% success needs ≈258 runs per arm for significance" (`:6433`), and the shipped design
+law in `covdiff.rs:11` — "**Lines, not percentages.** A coverage percentage is a number nobody
+can act on". What the brief wants instead is available and already planned: counts, the last
+real run of each check, and the disagreement printed rather than averaged (`QM-4`).
+
+**The simulation mock's `confidence 78% / +23% performance / +31% maintenance`.** Same refusal,
+one level sharper: those four numbers describe a future that has not happened, and this product's
+own rule is that a verdict carries `{ran, skipped, failed, evidence-ref}` and never the word
+"verified" (P-10 register). An arm of a study can honestly print what its run did. It cannot
+print what the arm would do next year.
+
+**Constraint, recorded because the brief leans on it.** The control-plane pitch assumes Xencode
+can carry the person's existing Claude subscription across to workers it launches. Anthropic's
+published legal page states that third-party developers may not offer Claude.ai login into their
+own applications or route requests through Free, Pro or Max plan credentials
+(`code.claude.com/docs/en/legal-and-compliance`). That page could **not** be fetched in full on
+2026-10-06 — the fetch tool was unavailable and this sentence came from search-result text, so
+re-read it before any row's done-when depends on it. Two things soften it and neither removes it:
+routing to a different model with the person's own API key is not the prohibited shape, and the
+prohibition binds the *credential path*, not the orchestration. `AR-1`'s open terms check is the
+row that owns this, and it stays open.
+
+### Items
+
+Every item below was found by reading the tree, not by re-wording the brief. None is inserted
+into a wave table yet, for the reason §AD gives: appendix rows that claim a wave and never
+appear in it are how the §R-0 counts went wrong.
+
+- **AE-1 — produce the result envelope, and let a reviewer read it.** *Effort: M.*
+  `xencode-core-rs/src/result_envelope.rs` holds `ResultEnvelope`, `ReviewerView`,
+  `evidence_quotable`, `FinishStatus{Completed,Failed,Blocked}` and `RanCommand{command,
+  exit_code, evidence_ref}`, and `grep -rn ResultEnvelope crates/` returns only that module and
+  its re-export in `core-rs/src/lib.rs:3,13`. It has no producer and no consumer, while `OR-16`'s
+  own progress note describes it as "a library capability the reviewer and control room consume"
+  — `control_room.rs` and `worker_bridge.rs` reference only each other and `lib.rs`. *Trap:* the
+  tempting shortcut is to fill `evidence_ref` with a plausible string, which is exactly the
+  fiction this type exists to prevent; a reference must resolve to a ledger row that was written
+  by a run that happened. *Done-when:* `/review` renders a `ReviewerView` whose every exit code
+  matches a `ledger.jsonl` row for the same run, and a run that executed no check prints
+  `Blocked` or `Failed` rather than `Completed`, watched by handing it a session with no checks.
+
+- **AE-2 — join a run to the checks it ran, and have the interactive loop file them.**
+  *Effort: S.* `runledger.rs:218` joins `RunRecord.session` to `ledger_for_session`, and that
+  join can only ever miss: both ledger writers hard-code `session: Some("cli")`
+  (`xencode-analysis-rs/src/toolchain.rs:419`, `xencode-cli/src/main.rs:7643,7650`) while the TUI
+  files its run under the trace's session id (`app.rs:10279`), and `xencode-tui-rs` contains zero
+  `append_ledger` or `write_artifact` calls. So `xencode runs show` reports no checks for the
+  runs a person actually does their work in. *Trap:* do not simply change the `"cli"` literal —
+  rows already on disk use it, so the reader must accept both the old constant and a real session
+  id, or history disappears. *Done-when:* a TUI session that ran `xencode verify` prints those
+  checks under `xencode runs show <id>`, a session that ran none says so in words, and one
+  join in one place produces both answers.
+
+- **AE-3 — let the red-to-green reproduction evidence outlive the process.** *Effort: S.*
+  `reprogate.rs` keeps its proof as an `Arc<Mutex<GateState>>` in memory, so the most valuable
+  evidence this product can hold — the check that failed before the fix and passed after — dies
+  with the session, while `artifacts.rs:44` and `ledger.rs` already know how to write and read
+  it. *Trap:* a saved claim needs the command, the exit code and the artifact path together;
+  "was red" with no bytes behind it is a mood. The file goes through `DB-1`'s atomic write,
+  `SE-1`'s `0600`, `SE-5`'s secret scan and `DB-5`'s torn-line discard like every other
+  `.xencode/` artifact. *Done-when:* after one session reproduces a bug and fixes it, `/gate`
+  prints both runs with their exit codes, a second session sees that history, and the earlier
+  one is gone if the artifact file is deleted rather than summarised from memory.
+
+- **AE-4 — impact edges for a CLI command and for a manual that names it.** *Effort: M.*
+  `QD-1`/`QD-2` reach cargo dependencies, file dependents and churn, so `xencode impact` answers
+  "what breaks if I change this function" and is silent on "what breaks if I rename this
+  subcommand" — where the things that break are the clap `Commands` enum (`main.rs:532` for
+  `Agents`; 47 variants in total), `--help` output, and the manuals that document the flag.
+  *Trap:* matching words in markdown produces false hits, since a sentence *talking about*
+  `replay` is not a reference to it; anchor on backticked names, the command tables, and the
+  `Commands` variant identifiers. *Done-when:* `xencode impact` on `main.rs` reports the clap
+  variant and the manual lines that name it, and a renamed variant makes the corresponding docs
+  row appear as stale rather than as absent.
+
+- **AE-5 — a disclosure level per destination, enforced rather than decorative.** *Effort: M.*
+  26 `FocusArea` variants (`focus.rs:52-83`) and a 19-entry emoji `FEATURE_LIST`
+  (`focus.rs:407-427`) are reachable through one flat navigator on `Ctrl+F`
+  (`keymap.rs:500`). `UX-4`, `UX-6` and `UX-7` each want a different slice of "hide it until it
+  is needed" and none of them owns the tier, so three items would each invent their own
+  ordering; `UX-12`'s `--simple` looks like the missing piece and is not one — it is the
+  screen-reader transcript, and a novice tier has no owner anywhere in this file. *Trap:* a
+  level nothing reads is a second navigation that lies. Deferring must not become removing:
+  the rule to copy is `OR-14`'s own done-when — "turning it off leaves plain xencode exactly as
+  it was found" — applied to a destination rather than a mode. Adding a `FocusArea` must not be
+  possible without choosing its level. *Done-when:* one table in `focus.rs` is the only source
+  for both the palette and the first-run screen, a test fails the build when a variant has no
+  level, and a scripted beginner drive — the headless tmux recipe in memory — reaches a
+  committed change seeing no level-4 destination at all, with every deferred destination still
+  reachable by name.
+- **AE-6 — advice that becomes a proposed goal.** *Effort: S.* `advise.rs` produces repo
+  insights and `/plan` pins a model-authored todo list, but nothing converts one into the other:
+  the plan's own output is prose in the transcript, and the file-backed task list
+  (`tasks_file.rs:24-203`) is filled by hand. This is the "Suggested Missions" half of the brief
+  and the "your build has failed on the same dependency three runs" half — `U-4` already computes
+  the run counts and the class, and says nothing about them. *Trap:* a suggestion that starts
+  work is the always-on autonomous thing `O-8` rejected and `P-10` re-rejected; the row lands as
+  a question, and declining it writes nothing. *Done-when:* one failing-check observation offers
+  exactly one task, accepting it puts that task in `tasks_file` with the observation as its
+  source, and declining leaves the repository byte-identical.
+
+- **AE-7 — a public entry to the agent loop.** *Effort: M.* `agent_rounds` is
+  `pub(crate)` (`app.rs:9722`) and `run_app` is the only public path in the crate, which is fact
+  `Q-1.15` still unfixed — quoted whole, because it names what the missing entry has been
+  costing: "there is no headless entry point, so items 36, 62, 81, 82, 91, and both
+  detached-work clusters (P's GL-*, Q's QA-*) are the same prerequisite counted five times"
+  (`:6501`). The cost is already being paid: `xencode run --detach` cannot call the loop, so it
+  re-executes this same binary with a hidden
+  `--detached-worker` flag (`main.rs:835`, "forked by `run --detach`, never typed") and runs a
+  child process. *Trap:* an entry point without an approval path is the lethal trifecta `P-10`
+  names for parallel writers (conflicts, duplicated retrieval, blanket allow); the new signature
+  must take the approval mode (`agent_tools.rs:31`) and `HeadlessPolicy` (`agent_tools.rs:452`)
+  rather than defaulting to allow, and must refuse to start when neither is supplied.
+  *Done-when:* a test outside `xencode-tui-rs` drives one round as a library call and asserts
+  both the diff it produced and the ledger rows it wrote, and the detached worker becomes that
+  call instead of a re-executed process.
+
+### Counting
+
+`AE-1`…`AE-7` add seven rows over seven new IDs, taking the pool from §AD's 329 rows over 326
+unique IDs to **336 rows over 333 unique IDs**. Six of the seven are W10-adjacent in cost but
+none is in W10's subject: `AE-1`, `AE-2` and `AE-3` are the evidence half of `EVd-*` finally
+being wired, `AE-4` and `AE-6` sit with `QD-*` and `GL-*`, `AE-5` belongs with `UX-4`/`UX-6` in
+the interface wave, and `AE-7` is the same shape as `WF-1`. The dispositions above create no
+new ID, which is the point of writing them.
+
+## Milestone AF — three reference architectures, taken as primitives and not as dependencies (owner directive, 2026-10-06)
+
+The owner followed with two more briefs naming three upstream projects and asking for their
+strongest primitives to become native to Xencode: **MiroFish** for a simulation and
+competing-hypothesis layer, **OpenDots** for persistent coworkers with their own computers,
+and — his own amendment, arriving after the first — **DeepSeek Harness** as the architectural
+reference, "everything is a plugin", with the UI rework sitting on top of it rather than before
+it.
+
+All three repositories were checked upstream on 2026-10-06 with the GitHub API and the raw
+files, because a plan row that cites somebody else's code has to be right about their code:
+
+- `666ghj/MiroFish` — **AGPL-3.0**, 76.5k stars, last pushed 2026-10-01. Its workflow is exactly
+  as described: extract seed information, build a "parallel digital world", entity-relationship
+  extraction plus persona generation plus agent configuration injection, dual-platform
+  simulation, a `ReportAgent`, then chat with any agent in the world.
+- `CopilotKit/OpenDots` — **MIT**, pushed 2026-10-05. Specialist Dots with name, role,
+  instructions and permitted tools; per-Dot computers through **OpenBot** (also MIT — a browser
+  profile, files, shell, human takeover, per-Dot permissions, action records); review before
+  saving via a human-in-the-loop card; scheduled background turns in the original conversation.
+- `deepseek-ai/deepseek-harness` — **MIT**, pushed 2026-10-03. Verified in
+  `docs/architecture.md:11`: plugins contribute "services, typed events, and reversible effects
+  to a shared context", and "every part of the product is a plugin, including the model adapter,
+  the tool registry, the session log, and the agent loop itself". Verified in
+  `docs/capability-seams.md`: 90-plus `ctx.*` seams including `ctx.agentLoop`, `ctx.approval`,
+  `ctx.authorization`, `ctx.permissionPresets`, `ctx.sandbox`, `ctx.schedule`, `ctx.goals`,
+  `ctx.subagents`, `ctx.agentTeams`, `ctx.ssh`, `ctx.computerUse`. Verified in
+  `packages/core/session/README.md`: an append-only event-sourced log that consumers "inspect,
+  replay, fork, and flush … while preserving historical events", where "compaction hides
+  superseded entries from the active conversation without deleting them", and
+  `fork(source, boundary?)` copies an exact inclusive event prefix into a child session.
+  Profiles and bundles are real and shipped as `web`, `headless`, `sdk`, `sdk-minimal`, `acp`.
+
+Three corrections the brief did not carry, each of which changes what should be copied:
+
+1. **MiroFish's simulation engine is not MiroFish's.** Its README credits
+   **OASIS** (`camel-ai/oasis`, **Apache-2.0**, "social interaction simulations with one million
+   agents") for the simulation itself, so the AGPL attaches to the Python/Node application
+   around it — the orchestration, the web UI, the glue. The concept the owner wants is on a
+   permissive licence; the code he was warned about is the wrapper, and the warning stands.
+   It is also Python (`≥3.11, ≤3.12`) with `uv`, which `AGENTS.md` will not let in the door.
+2. **MIT is not the same as free to run.** OpenDots' durable conversations require **CopilotKit
+   Intelligence**: hosted, a local Docker evaluation, or a licensed self-hosted deployment, and
+   "installing or renewing local Intelligence still requires CopilotKit sign-in and internet
+   access"; it "has no standalone SQLite conversation store" (SQLite holds pages and metadata,
+   not the threads). Its public-web research sends queries and selected URLs to Parallel by
+   default. That is the opposite of this project's local-first posture
+   (`PR-2`, `LF-8`), so the *shape* is worth taking and the *dependency* is not.
+3. **OpenDots says its own limits, and they are the two the owner most wants.** "This is a
+   single-owner starting point… Schedules are recurring instructions, not a complete goal or
+   event-trigger system. Specialist Dots have separate roles and conversations; multi-Dot group
+   conversations and automatic delegation are further work." It is "a template, not a hosted
+   product… in early development", and Slack plus spoken compute delegation "still need
+   connected-service verification". Its per-Dot computer is a container service, not a local
+   process, which is the part Xencode can do better on one person's machine.
+
+### The disposition
+
+| the brief asks for | already recorded as | state |
+|---|---|---|
+| A `Coworker` object with role, prompt, model policy, tool policy, memory scope, permissions | **rejected as written** in the P-10 register ("six named agent roles, each with own context/tools/model/worktree — the review's framing, not a measured need") and "`[agent.role]` policy tables — CAP-3: no role exists today that can act without the human"; `14 per-agent permission profiles` narrowed to `CAP-1`; recipes as data at `OR-9`; memory scope at `OR-8` | the role is a prompt and a policy, not a new type; only the **computer binding** and the **schedule** are missing → **AF-4** |
+| Persistent conversations, background work, activity history | Milestone `D`, `tasks_file.rs`, `run --detach`, `OR-2` (done), `AR-4`, `Session` naming/resume (`main.rs:487`) | shipped or planned as-is |
+| Human takeover of an agent's session | S item 29 → `OR-10`, narrowed on measured grounds: one ratatui surface cannot host a rival TUI in-process, so take-over means suspend ours and hand the terminal over | planned |
+| Review before saving | the approval prompt shows the tool and its argument; `Checkpoints` at `agent_tools.rs:3643` is record-**after**-approval | the resulting diff is never shown before the write → **AF-6** |
+| Per-agent budgets, fallback, health | `CX-7`/`CX-5`/`CX-4`, `OR-7`, `AR-8` | planned |
+| A knowledge graph built from the repo | P-10 register: a standalone persisted code-knowledge graph is declined because `CI-2` + `LSP-2` produce the same edges on demand | stays derived |
+| Personas, simulation, trajectories, competing scenarios | S item 33 "simulation mode" narrowed into `OR-10`; `QD-5` is the code-graph simulator; the README "ensemble reasoning" claim was deleted at `I4-02` for having no substance; agent voting is `QM-4` (report, never resolve) | nothing runs several candidate *implementations* and compares them → **AF-5** |
+| Two first-class modes over one shared state, with a global toggle | `X-2` — the owner's own directive of 2026-10-02, delivered, with one caveat recorded in X-2's own note: "the mode currently changes only the badge and the field it is read from", and the projection that consumes it is `X-3` | done as state, not yet as a screen — which is **AF-2**'s render half and `AE-5`'s tier, not a new ID |
+| A capability bus where every subsystem is replaceable from configuration | S item 38 → `S-11`, which declined "Xencode Agent Runtime (XAR)"; P-10 register declines the "Xencode 2.0 crate restructure as written — a rewrite of a working tree to satisfy a diagram" | a **discipline at existing seams**, not a rewrite → **AF-3** |
+| Typed events the UI subscribes to instead of panels poking state | S item `I3` → `AR-4` + `AR-9`, and `AR-9` is genuinely good work: six vendor vocabularies normalised by *shape*, with `Origin::{Observed,Synthesised}` so a construction is never mistaken for a measurement | `X-3` built the projection half and disclaimed the render half; no in-process publisher exists → **AF-2** |
+| An append-only, event-sourced session log that can be forked and compacted without deleting | `EVd-1` run ledger, `DB-5` tolerant JSONL, `AR-5` "task record, not session mirror" | the conversation store **deletes** its own history → **AF-1** |
+| Profiles and bundles (`minimal`, `coding`, `autonomous`, `research`) | S item 25 → `MI-7` (shipped as task-shaped model profiles) + `CAP-1`; the do-not-build line "any new DSL" and "Milestone M's do-not-invent-a-dialect rule" | names over `CAP-1`, not a fourth config format |
+| A plugin ecosystem of vendor integrations | `xencode-plugin-rs` (`manifest`, `registry`, `runtime`, `host`, `skills`); "marketplace (any of plugins, skills, capabilities)" is in the do-not-build register on supply-chain grounds | the manifest half is real; see the trap on **AF-3** |
+
+### Items
+
+- **AF-1 — make the durable conversation an append-only event log that history is derived
+  from.** *Effort: L.* `xencode-memory-rs` stores `ConversationSession { messages: Vec<Message> }`
+  and `add_message` does `session.messages.drain(0..overflow)` once the cap is passed
+  (`lib.rs:155-178`) — the record deletes its own oldest content to stay small, which is the exact
+  inverse of the reference architecture's rule ("compaction hides superseded entries… without
+  deleting them"), and it means there is nothing to fork from and nothing to audit after the
+  fact. *Trap:* two things must not be conflated. The context **fold** already keeps a
+  pre-rewrite snapshot (`compact.rs:35`), so this is not the same problem as `EV-6`'s
+  scratchpad; and `AR-5` deliberately refuses to mirror *vendor* session stores, so the new log
+  is ours alone. Whatever is appended carries model-chosen text and therefore inherits `SE-5`'s
+  secret scan and `DB-5`'s torn-line discard, and a derived projection must be rebuildable from
+  the log rather than trusted from memory — that is the discipline `DB-5` exists for.
+  *Done-when:* a session over the cap still prints its first message on demand, `fork` produces a
+  child holding an exact prefix of the parent's events and nothing after it, and the fork's own
+  entries are distinguishable from the inherited ones — the `Origin` distinction already settled
+  for the vendor case, applied to ours.
+
+- **AF-2 — our own engine publishes the typed events, and the UI becomes a reducer over them.**
+  *Effort: L.* The vocabulary and one pure consumer already exist and this row does not pretend
+  otherwise: `AR-9`'s `AgentEvent` normalises six vendor streams by shape with
+  `Origin::{Observed,Synthesised}`, and `X-3` built the control room as a projection that takes
+  events as arguments — its own note is explicit that it delivered "the projection layer itself,
+  **not yet** the per-frame render that would drop it into the layout tree". What is verified
+  absent is everything between the two: `grep -rn "EventBus|event_bus|broadcast::channel|subscribe"
+  crates/*/src crates/*/tests` returns nothing, so no code inside this process emits an
+  `AgentEvent` for work *our* engine did, and each panel reads agent state where it lives.
+  *Trap:* the failure mode is a second source of truth disagreeing with the first — a UI redrawn
+  from events beside an engine still mutating state directly. Migrate one event kind end to end
+  before adding the next, keep `X-3`'s grep-enforced rule that the view layer imports only the
+  protocol, and let anything the engine did not witness carry `Origin::Synthesised` rather than
+  arrive as an observation. Do not route all 26 destinations at once; start with the two `AE-5`
+  puts in front of a newcomer. *Done-when:* `PermissionDenied` reaches the transcript through the
+  stream rather than through a direct call, the chat and the status line render from that one
+  event, `control_room.rs` is reached from the layout tree rather than only from its own tests,
+  and the existing keymap and approval tests pass unchanged — proof the seam moved plumbing and
+  not behaviour.
+
+- **AF-3 — compose the engine from statically-linked implementations chosen by configuration.**
+  *Effort: M.* This is the honest Rust half of "everything is a plugin", and the dishonest half
+  must be named first: `manifest.rs:34` says plainly in the source that "this build cannot load
+  executable plugin code — there is no dynamic linking here", and `KNOWN_PERMISSIONS` is exactly
+  `["prompt", "hooks"]`. A `XencodeContext` god-object of registries, in a tree where
+  `agent_rounds` is `pub(crate)` and the plugin manifest cannot even add a tool, is a year of
+  rewriting to satisfy a diagram — `P-10` declined precisely that and `S-11` declined the name.
+  What dsh actually does is a *composition discipline*: its plugins are modules compiled into
+  the tree, selected by a profile and ordered patch files. The equivalent here is to give the
+  seams that already exist a mount point and a config-selected implementation, starting where
+  a trait already has exactly one implementation — `AF-4`'s `Backend`, and `M-5`'s worker adapter —
+  and leaving every other subsystem's wiring alone until a second implementation actually needs it. *Trap:* a manifest permission that is never checked is worse than no manifest, and
+  the current rule — a manifest naming anything outside `KNOWN_PERMISSIONS` is refused rather
+  than ignored — is the good part of the design and must survive every addition. A profile is a
+  name over `CAP-1`'s existing vocabulary, not a new DSL (do-not-build: "any new DSL — schema
+  rot plus KV-instability of user-authored config"). *Done-when:* one subsystem is selected
+  entirely from config with no `match` on its identity in the loop, a manifest that asks for a
+  permission it does not have still refuses the load, and `xencode --dump-config`-equivalent
+  prints the resulting composition so a person can diff it.
+
+- **AF-4 — a computer registry, and an agent bound to one.** *Effort: M.* `xencode-colab-rs`
+  already has the right shape: a `Backend` trait with provision, `forward_command` and
+  `exec_command` (`backend.rs:36-59`) and exactly one implementation, `ColabBackend`
+  (`colab.rs:49`). `L-1` is done, `L-2` (BYO-SSH: `xencode remote add|list|use|up|status|down`)
+  is open, and Docker and VM arms exist nowhere in the plan or the tree. Nothing today can answer
+  "which machines are there, and is this worker on one of them". *Trap:* this box has `docker`
+  and neither `podman` nor `virsh` (checked 2026-10-06), so a Docker arm is live-verifiable here
+  and a VM arm is not — leave it unchecked rather than claiming it. Every new arm inherits
+  `L-13`'s transport rules and `SE-7`'s boundary, and a computer holding credentials must not be
+  selectable by a model-authored name. *Done-when:* `xencode computers` lists the registered
+  backends with what each is (colab / ssh / docker), one run records which computer it used, and
+  the two-arm registry is proved by a job that cannot reach a machine answering honestly that it
+  cannot.
+
+- **AF-5 — competing arms: run two or three candidate implementations and print what each one
+  did.** *Effort: L.* This is the MiroFish primitive, shrunk to a size this machine can pay for.
+  It is not the rejected things: not six named roles, not parallel *writers* on one working tree
+  (the lethal trifecta — conflicts, duplicated retrieval, blanket allow), not an ensemble the
+  README claimed without building, and not a vote — `QM-4` settles that a disagreement is
+  reported, never resolved. The parts that make it real already ship: `/spawn` runs a subagent in
+  its own git worktree (`app.rs:2905-2955`, `worktree.rs`), `WF-10` compares stacked diffs, and
+  `verify` plus the ledger produce exit codes. *Trap:* cost and scale. MiroFish's own setup calls
+  for thousands of agents, warns "high consumption, try simulations with fewer than 40 rounds
+  first", and requires a hosted graph service (`ZEP_API_KEY`) for agent memory — none of which
+  fits a machine with `--parallel 1`, no GPU and a 4B planner at about 24 tok/s, and a hosted
+  memory graph contradicts `LF-8`. So: two or three arms, one shared context package, no
+  long-term agent memory, no swarm. Second trap: the arms must be compared by what ran, because
+  an aggregate score would be the refused percentage in a new coat (`:6430`, `:12871`).
+  *Done-when:* a question with two defensible answers produces two branches, each with its own
+  verification rows, printed as a table of `{ran, skipped, failed, evidence-ref}` per arm with
+  **no** composite score, and picking an arm is a person's action that leaves the other branch
+  and its evidence on disk.
+
+- **AF-6 — show the resulting diff before the write, not after.** *Effort: M.* The approval
+  prompt currently shows the tool, its class and the argument
+  (`agent_tools.rs`, `approval_summary` truncated at 90 characters); the thing a person is
+  actually deciding on — what the file will look like — arrives only in `Checkpoints`'
+  record-after-approval (`agent_tools.rs:3643`). The reference product's card shows a draft and
+  offers Approve & save or Decline, and a changed draft needs a new review. *Trap:* rendering a
+  candidate diff means running the model's edit into a buffer before anyone agreed to it, which
+  must not touch the working tree and must not become a second approval channel — `O-8` rejected
+  exactly that. A large file cannot be reviewed as a diff in a terminal pane, so the honest
+  answer for it is a summary plus the option to see it as a file, and a refusal must leave
+  nothing behind at all. *Done-when:* on one small change the overlay shows the real diff and
+  declining writes nothing anywhere — watched by checking the file's checksum before and after —
+  and the review is invalidated when the draft changes, so an approval cannot be spent on a
+  different edit than the one shown.
+
+### Counting
+
+`AF-1`…`AF-6` add six rows over six new IDs, taking the pool from §AE's 336 rows over 333
+unique IDs to **342 rows over 339 unique IDs**. `AF-3` and `AF-2` are the expensive ones and
+both are deliberately narrow, because the plan already paid for the wide version once. §AF's
+disposition table carries twelve groups of this brief's proposals onto IDs that already exist, and the
+six rows here are what was left when each of them was checked against the tree. `AF-4` belongs in the same wave as `L-2`, which it extends;
+`AF-5` has no wave yet and should not get one before `CX-7`'s acting budgets exist, because
+fan-out that cannot be cost-limited is the third thing §S-4 says stops being free.
