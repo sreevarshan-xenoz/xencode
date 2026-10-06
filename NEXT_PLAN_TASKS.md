@@ -15424,10 +15424,12 @@ one it may not have, and the sentence "the stderr tail is the only clue there is
 to come along" — the comment on the assertion in `tests/stdio.rs:236` — is exactly the
 claim that fails. The test is right to insist on it; the product cannot always deliver it.
 
-- **Item AD-1** — keep the `collect_stderr` handle beside the reader's, and when a stdio
+- [x] **Item AD-1 — keep the `collect_stderr` handle beside the reader's, and when a stdio
   server is being reported as failed, await the collector (bounded, one short timeout)
   before assembling the message, so the tail is complete or the message says the server
-  died without writing anything. *Effort: S.* *Trap:* awaiting must not become the way to
+  died without writing anything.** — done 2026-10-06 in `rust/crates/xencode-mcp-rs/src/client.rs`.
+  `stderr_collector` join handle stored beside `reader`, boundedly awaited when the stdio child
+  process has exited. Verified by 50-repetition test in `tests/stdio.rs`. *Effort: S.* *Trap:* awaiting must not become the way to
   hang `/mcp status` on a server that is still alive and simply silent — the collector
   ends when the pipe closes, which is only true once the child is gone, so the join needs
   the exited-process condition, not a bare `await`. *Done-when:* a loop that starts the

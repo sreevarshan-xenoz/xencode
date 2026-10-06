@@ -207,6 +207,7 @@ pub struct McpClient {
     /// The method sets this server said it has, from the handshake.
     capabilities: protocol::ServerCapabilities,
     reader: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    stderr_collector: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl McpClient {
@@ -230,7 +231,7 @@ impl McpClient {
                 client.record_revision(&offered);
             }
             Err(e) => {
-                let failure = client.with_stderr(e);
+                let failure = client.with_stderr(e).await;
                 client.shutdown().await;
                 return Err(failure);
             }
@@ -242,7 +243,7 @@ impl McpClient {
             ))
             .await
         {
-            let failure = client.with_stderr(e);
+            let failure = client.with_stderr(e).await;
             client.shutdown().await;
             return Err(failure);
         }
@@ -255,7 +256,7 @@ impl McpClient {
     fn open(spec: &ServerSpec, request_timeout: Duration) -> Result<Self, McpError> {
         let watchdog = Arc::new(Watchdog::default());
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let (connection, reader) = match &spec.transport {
+        let (connection, reader, stderr_collector) = match &spec.transport {
             Transport::Stdio { command, args, env } => {
                 let (stdin, stdout, stderr, child) = spawn(command, args, env, &spec.name)?;
                 let reader = tokio::spawn(read_loop(
@@ -264,13 +265,14 @@ impl McpClient {
                     Arc::clone(&pending),
                     Arc::clone(&watchdog),
                 ));
-                tokio::spawn(collect_stderr(stderr, Arc::clone(&watchdog)));
+                let stderr_collector = tokio::spawn(collect_stderr(stderr, Arc::clone(&watchdog)));
                 (
                     Connection::Stdio {
                         stdin: Arc::new(AsyncMutex::new(stdin)),
                         child: AsyncMutex::new(child),
                     },
                     Some(reader),
+                    Some(stderr_collector),
                 )
             }
             Transport::Http { url, headers } => (
@@ -284,6 +286,7 @@ impl McpClient {
                     },
                 },
                 None,
+                None,
             ),
         };
         Ok(McpClient {
@@ -296,6 +299,7 @@ impl McpClient {
             watchdog,
             capabilities: protocol::ServerCapabilities::default(),
             reader: Mutex::new(reader),
+            stderr_collector: Mutex::new(stderr_collector),
         })
     }
 
@@ -481,12 +485,47 @@ impl McpClient {
                 handle.abort();
             }
         }
+        if let Ok(mut slot) = self.stderr_collector.lock() {
+            if let Some(handle) = slot.take() {
+                handle.abort();
+            }
+        }
     }
 
     /// Append the server's own words to an error, when it had any. A handshake
     /// failure that says only "closed the connection" is half the story: the
-    /// server almost always explained itself on stderr first.
-    fn with_stderr(&self, error: McpError) -> McpError {
+    /// server almost always explained itself on stderr first. When a stdio
+    /// server exited, we boundedly await the collector task so buffered lines
+    /// are drained into the watchdog before reading the tail.
+    async fn with_stderr(&self, error: McpError) -> McpError {
+        if let Connection::Stdio { child, .. } = &self.connection {
+            let mut child = child.lock().await;
+            let exited = match child.try_wait() {
+                Ok(Some(_status)) => true,
+                Ok(None) => {
+                    if matches!(error, McpError::Closed { .. }) {
+                        tokio::time::timeout(Duration::from_millis(100), child.wait())
+                            .await
+                            .ok()
+                            .is_some()
+                    } else {
+                        false
+                    }
+                }
+                Err(_) => false,
+            };
+            if exited {
+                drop(child);
+                let handle = self
+                    .stderr_collector
+                    .lock()
+                    .ok()
+                    .and_then(|mut slot| slot.take());
+                if let Some(handle) = handle {
+                    let _ = tokio::time::timeout(Duration::from_millis(500), handle).await;
+                }
+            }
+        }
         let tail = self.stderr_tail();
         if tail.trim().is_empty() {
             return error;
