@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-9`: `xencode bootstrap` writes what a project xencode has never seen is missing
+
+A fresh clone has no `AGENTS.md`, no `.xencode/anchor.md` and no example of the settings file.
+The first two are read into the head of every prompt, so on a project nobody has run xencode on
+before, the model is handed no instructions and no idea what the repository contains — and the
+obvious fix, asking a model to fill that in, is how 9,371 lines of plausible fiction ended up in
+this repository once already and had to be deleted.
+
+`xencode bootstrap` writes the three files from what is on disk and nothing else. No build, no
+test, no model call, no network: every byte is a name, a number, or a blank question.
+
+    $ xencode bootstrap .
+    Project: /tmp/demo
+      git branch main at 2b2724bc, 5 files
+      write        AGENTS.md               questions only: nothing ran, so no command is guessed
+      write        .xencode/anchor.md      what was read off this disk, with no build or model in it
+      write        .xencode.example.json   every key this binary reads, at its default, credentials absent
+
+    3 files written. Nothing that already existed was touched.
+
+Where a build command would normally go, the file asks instead:
+*"One command, that an agent can run and be told the answer by. A check that is not written here
+is a check that never happens."* The anchor says what it does not know in the same breath as what
+it does — `Recognising a file name is not a claim about it. That Cargo.toml is here means the file
+is here, not that cargo is how this project is checked.`
+
+**A file that exists is never written, and there is no flag to ask for it.** No `--force`, because
+`AGENTS.md` is a person's file: the second run reports `keep` for all three, and `md5sum` over the
+three files prints the same hashes after a third run as it did after the second. `--check` prints
+the report and creates nothing, not even the `.xencode/` directory.
+
+The anchor is written through `xencode anchor`'s own writer, at the one path the prompt reads, and
+carries no clock and no absolute path — it sits inside the byte-stable prompt head, where a
+timestamp would make every request re-send everything. The settings template is generated from the
+struct this binary loads and saves rather than typed out, so a key listed there exists; all nine
+credential fields are `null` and both hook maps are empty. A file name read off disk is scrubbed
+before it enters the anchor, because that text goes into a prompt — but deliberately **not** the
+template, because the scrubber replaces the value beside any key that looks like a credential and
+turned `"openai_api_key": null` into `"openai_api_key": "[redacted]"`. That corruption was watched
+happening, and is now asserted against, so the exception stays a decision rather than an oversight.
+
+Two parts of this are deliberately not shipped, and the reason for each is a fact about the code:
+a `SKILL.md` holding only frontmatter is rejected by the loader as having no instructions, so a
+stub skill is a parse error and not a skill; and there is no project-local settings file to put
+hooks in — `agent_hooks` is read from your user config, so seeding it would install a shell
+command that runs on every approved tool call in every project on this machine.
+
+**Proven by running it.** Twenty-one new tests: eight in the module, nine over a real `git init`
+repository with five committed files, and four driving the built binary end to end. Each guard was
+watched failing first — the scrub applied to the settings template, an existing `AGENTS.md`
+silently replaced, the no-commit-yet case left to read as a real revision, the final newline
+dropped, the extension ranking tie-break reversed, the file list no longer cut short, the anchor
+written to a path the prompt never reads, the credential scrub skipped, a command named in the
+instructions, and an absolute path pushed into the byte-stable head. Then live: the run above, the
+second and third runs reporting `keep` with identical hashes, `--check` leaving no `AGENTS.md`
+behind, `--format json`, a non-repository directory, and a path that is a file refused by name.
+
 ### Added — `QK-6`: a fact the code contradicts is disabled, and now there is a date on it
 
 Every durable fact in `.xencode/state.md` is re-checked against the repository on the way into
@@ -34,7 +91,7 @@ months of that unbroken contradiction, and even then only with `--apply`, which 
 their exact bytes — and marks the entry retired so there is a list of what an earlier run removed.
 Re-promoting a retired fact starts a new clock rather than inheriting the old one, a credential
 quoted inside a fact is scrubbed before the queue stores it, and `AGENTS.md` is never in scope:
-the only command that writes that file is `/lesson approve`.
+the only command that writes into an `AGENTS.md` that already exists is `/lesson approve`.
 
 **Proven by running it.** Eight tests over a repository this test built with `git init`, a
 committed file and a real promoted `state.md`, moving the twelve-month clock by passing a
@@ -116,7 +173,9 @@ guess in the file that tells every later turn what to do is worse than no lesson
 thing, `/lesson approve` appends that one line to `AGENTS.md`, and `/lesson drop` clears it with
 nothing written anywhere. `AGENTS.md` keeps every byte it already had: one line is added under a
 `## Lessons` heading, and the file is created only when there was none. This is the product's
-only writer for that file, and it is reachable only from a command a person typed.
+only writer *into* an `AGENTS.md` that already exists, and it is reachable only from a command a
+person typed. (`xencode bootstrap`, added the same week, creates that file on a project that has
+none — and never edits one.)
 
 One consequence worth stating before it surprises anyone: trust in `AGENTS.md` is keyed on the
 file's content, so appending a line takes the whole file back to being data. The approval says

@@ -15,6 +15,7 @@
 pub mod advise;
 pub mod anchor;
 pub mod artifacts;
+pub mod bootstrap;
 pub mod budget;
 pub mod cochange;
 pub mod compact;
@@ -73,6 +74,10 @@ pub use advise::{
 };
 pub use anchor::{
     discover, is_current, prove, render, write_anchor, Discovery, Kind, Provenance, Recipe, Verdict,
+};
+pub use bootstrap::{
+    bootstrap, offered_files, BootstrapEntry, BootstrapKind, BootstrapReport, OfferedFile,
+    ProjectFacts,
 };
 pub use budget::{
     est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, BudgetBreach,

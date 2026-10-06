@@ -34,6 +34,9 @@ _xencode() {
             xencode,audit)
                 cmd="xencode__subcmd__audit"
                 ;;
+            xencode,bootstrap)
+                cmd="xencode__subcmd__bootstrap"
+                ;;
             xencode,cache)
                 cmd="xencode__subcmd__cache"
                 ;;
@@ -315,6 +318,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,audit)
                 cmd="xencode__subcmd__help__subcmd__audit"
+                ;;
+            xencode__subcmd__help,bootstrap)
+                cmd="xencode__subcmd__help__subcmd__bootstrap"
                 ;;
             xencode__subcmd__help,cache)
                 cmd="xencode__subcmd__help__subcmd__cache"
@@ -956,7 +962,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories deps query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories deps query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1286,6 +1292,24 @@ _xencode() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__bootstrap)
+            opts="-h --check --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -2002,7 +2026,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories deps query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history tui help"
+            opts="scan config models cache audit advisories deps query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2158,6 +2182,20 @@ _xencode() {
         xencode__subcmd__help__subcmd__audit__subcmd__verify)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__bootstrap)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi

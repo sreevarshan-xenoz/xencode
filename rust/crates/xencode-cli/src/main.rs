@@ -879,6 +879,21 @@ enum Commands {
         action: HistoryAction,
     },
 
+    /// Write the files a project xencode has never seen is missing
+    Bootstrap {
+        /// The project to write into (defaults to the current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Report what would be written and create nothing
+        #[arg(long)]
+        check: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Launch the Terminal User Interface
     Tui,
 }
@@ -1701,6 +1716,11 @@ async fn main() {
         Commands::Hw { action } => run_hw(action),
         Commands::History { action } => run_history(action),
         Commands::Colab { action } => run_colab(action).await,
+        Commands::Bootstrap {
+            path,
+            check,
+            format,
+        } => run_bootstrap(&path, check, format),
         Commands::Tui => run_tui().await,
     };
 
@@ -3497,6 +3517,101 @@ fn colab_up_config_preview(current: &XencodeConfig, runtime: &str, local_port: u
         lines.push("config.json would not change".to_string());
     }
     lines
+}
+
+/// Write, or only report, the three files a project that has never run xencode
+/// is usually missing. See `xencode_context_rs::bootstrap` for why every byte of
+/// them is a fact or a blank, and never a guessed command.
+fn run_bootstrap(path: &std::path::Path, check: bool, format: OutputFormat) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err(format!("not a directory: {}", path.display()));
+    }
+    // Every key the loader reads, at the value it ships with, from the same
+    // struct this binary saves and reads: a template written by hand would drift
+    // from the config the day a field is added, and a field added by hand would
+    // teach a person a key that does not exist. The nine credential fields are
+    // `None`, which serialises to `null`, so nothing but the shape of a real
+    // settings file is written into somebody's repository.
+    let template = serde_json::to_value(XencodeConfig::default())
+        .map(|mut value| {
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "_comment".to_string(),
+                    serde_json::json!("Every key xencode reads, at the value this binary ships with. Copy the keys you want into `config.json` in the settings directory (`$XCODE_CONFIG_DIR`, or `~/.config/xencode`) — this file is an example, not a live setting, and the loader ignores a key it does not know. A credential is best left null here and supplied by `xencode config set <KEY> command:<program> <args>`, which stores the reference and not the secret, or by the provider's own environment variable. Nothing in this file was typed out by hand: it is generated from the struct the loader reads, so a key here exists and a key that is missing was added after this binary was built."),
+                );
+            }
+            value
+        })
+        .and_then(|value| serde_json::to_string_pretty(&value))
+        .map_err(|e| format!("could not render the settings template: {e}"))?;
+    let report =
+        xencode_context_rs::bootstrap(path, &template, check).map_err(|e| format!("{e}"))?;
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "root": report.root,
+                "git": report.facts.is_git,
+                "branch": report.facts.branch,
+                "revision": report.facts.revision,
+                "files": report.facts.files,
+                "scrubbed": report.scrubbed,
+                "check": report.check_only,
+                "entries": report.entries,
+            })
+        );
+        return Ok(());
+    }
+
+    println!("Project: {}", report.root);
+    let where_from = if !report.facts.is_git {
+        "not a git repository".to_string()
+    } else {
+        let revision = report.facts.revision.as_deref().unwrap_or("(no revision)");
+        let files = report
+            .facts
+            .files
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "file count unknown".to_string());
+        match report.facts.branch.as_deref() {
+            Some(branch) => format!("git branch {branch} at {revision}, {files} files"),
+            None => format!("git detached head at {revision}, {files} files"),
+        }
+    };
+    println!("  {where_from}");
+    for entry in &report.entries {
+        println!(
+            "  {:<12} {:<23} {}",
+            if report.check_only && entry.action == "write" {
+                "would write"
+            } else {
+                entry.action
+            },
+            entry.path,
+            entry.reason
+        );
+    }
+    let writing = report.writing().count();
+    let keeping = report.keeping().count();
+    if report.check_only {
+        println!(
+            "\nReport only: {writing} would be written, {keeping} already in place. Nothing created."
+        );
+    } else if writing == 0 {
+        println!("\nNothing to write: all {keeping} files are already there.");
+    } else {
+        println!(
+            "\n{writing} file{} written. Nothing that already existed was touched.",
+            if writing == 1 { "" } else { "s" }
+        );
+    }
+    if report.scrubbed {
+        println!(
+            "A name on this disk held something credential-shaped, and was written as [redacted]."
+        );
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to colab up flags; a struct would just rename them

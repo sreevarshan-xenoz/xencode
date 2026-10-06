@@ -14,13 +14,13 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-06: it lists 47 subcommands — the
+  (verified against `xencode --help` on 2026-10-06, after `QK-9`: it lists 48 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
-  `paths`, `migrate`, `deps`, `run`, `runs` — and clap's
-  built-in `help`, 48 entries in the list)
-- [x] Workspace gates green — 16 crates, 2438 tests passing, zero warnings (re-verified 2026-10-06, after `QK-6`; 19 ignored, so 2457 in the run)
+  `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
+  built-in `help`, 49 entries in the list)
+- [x] Workspace gates green — 16 crates, 2459 tests passing, zero warnings (re-verified 2026-10-06, after `QK-9`; 19 ignored, so 2478 in the run)
 
 ## Model Catalog Honesty
 
@@ -5404,7 +5404,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 60 | Release Notes From Reality | narrowed | QO-6 — `git log <prev>..HEAD` + CHANGELOG. Conventional-commit parsing buys nothing here: the 760 messages are already descriptive prose |
 | 61 | Upgrade Intelligence | narrowed | Inside QO-1: `cargo update --dry-run` (measured 12.7 s) + `cargo tree -i` (0.34 s) + `cargo check` is the whole investigation |
 | 62 | Repository Cloning Intelligence | narrowed | QK-4 + GH-1, bounded by AC-5. No `xencode clone` and no `xencode explain` exist today; "five minutes and it knows the project" is a prefill claim nobody has measured on a 4B |
-| 63 | Project Bootstrap Intelligence | new | QK-9 — declarative seed (AGENTS.md + anchor.md + skills + hooks + a redacted settings template), split out of QK-4 when that row shipped only its report half. An LLM inventing CI config is where the 9,371 lines of deleted fiction start |
+| 63 | Project Bootstrap Intelligence | new | QK-9 — declarative seed (AGENTS.md + anchor.md + skills + hooks + a redacted settings template), split out of QK-4 when that row shipped only its report half. An LLM inventing CI config is where the 9,371 lines of deleted fiction start. **Shipped 2026-10-06 as `xencode bootstrap`, minus two of the five named things**: a `skills/` entry is refused by the loader when the body is only frontmatter, so a seeded stub is a parse error rather than a skill, and hooks have no project-local file to live in — `agent_hooks` is read from the user's settings, so seeding it would run `sh -c` on every approved tool call in every project on the machine. Do not re-propose either half from this row |
 | 64 | Agent-to-Agent Protocol | reject | The space consolidated: ACP carries exactly this content and M-7 speaks it. A2A is a networked-fleet protocol |
 | 65 | Xencode Protocol / `.xcp` | reject | A dialect of `.xencode/` + plugin manifests that nobody speaks, with a spec-maintenance tax a solo project cannot pay |
 | 66 | Agent Interoperability Layer | partly shipped | M-5 (`xencode mcp serve`) **shipped**; M-6 (finish the client) and M-7 (`xencode acp`) still planned — see Q-13 |
@@ -10093,7 +10093,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 15 done
+#### W10 — Durable project knowledge — 23 items, 16 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10115,7 +10115,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling — done 2026-10-06 as `.xencode/facts.tombstones.jsonl` plus `xencode memory gc [--apply]`: the turn that contradicts a fact stamps the date, nothing is retirable before twelve unbroken months, and `--apply` filters `state.md` line by line. `AGENTS.md` is never in scope. Two deviations, both forced by reading the code first — see the W10 progress note |
 | **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
 | **QK-8** | `/trust` a directory's own `AGENTS.md` | capability | the missing half of `EV-5`, found while shipping it: `/trust` read only `<root>/AGENTS.md`, so a nested file had no way to be trusted and every block arrived marked `[data]` — read, not obeyed. Done-when: `/trust src/auth/AGENTS.md` trusts those bytes, `/trust status` and `/trust forget` take the same path and answer for that file alone, a path that resolves outside the workspace or under `.git/`/`.xencode/` is refused, a name whose last segment is not `AGENTS.md` is refused, and the same turn still shows an untrusted sibling marked as data. The decision stays a person's: no tool the model can call reaches this command. Trap: the argument is user text reaching a durable store, so it is resolved against the workspace root, never against the current directory — done 2026-10-05, all four refusals and the sibling case watched failing first, see the W10 progress note |
-| **QK-9** | A declarative seed for a project xencode has never seen | capability | split out of `QK-4` on 2026-10-06, which shipped only its read-only report half. The seed writes: `AGENTS.md`, an `anchor.md`, a project `skills/` entry, the pre/post hooks key (`config.rs:698`, empty by default) and a settings template with the secrets taken out of it — for a clone with none of them. No `xencode init` exists today (the `Commands` enum has no such subcommand), so this is a new surface, not a flag on one. Trap: an LLM inventing a project's CI config is exactly how 9,371 lines of plausible fiction got deleted once already, so every seeded byte is either copied from what the code demonstrably does or left as a commented question — and a file that already exists is never overwritten, because `AGENTS.md` is a human's, `QK-6` says so for the lines of it a machine disagrees with |
+| **QK-9** | A declarative seed for a project xencode has never seen | capability | split out of `QK-4` on 2026-10-06, which shipped only its read-only report half. The seed writes: `AGENTS.md`, an `anchor.md`, a project `skills/` entry, the pre/post hooks key (`config.rs:698`, empty by default) and a settings template with the secrets taken out of it — for a clone with none of them. No `xencode init` exists today (the `Commands` enum has no such subcommand), so this is a new surface, not a flag on one. Trap: an LLM inventing a project's CI config is exactly how 9,371 lines of plausible fiction got deleted once already, so every seeded byte is either copied from what the code demonstrably does or left as a commented question — and a file that already exists is never overwritten, because `AGENTS.md` is a human's, `QK-6` says so for the lines of it a machine disagrees with — done 2026-10-06 as `xencode bootstrap [path] [--check]`: three files written from git and the directory alone, no model call, no `--force` at all. Four deviations, all forced by reading the code first, and two of them are halves of this row that did not ship — see the W10 progress note |
 | **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction; done 2026-10-05 through a candidate the human promotes, see the W10 progress note |
 | **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker — done 2026-10-05, see the W10 progress note |
 | **QM-4** | report disagreement, never resolve | capability | disagreement reported, never resolved — done 2026-10-06 as a `## Sources disagree` notice riding with the facts, plus the same set on `doctor`; see the W10 progress note |
@@ -10124,6 +10124,48 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
 #### W10 progress
+
+- [x] `QK-9` — 2026-10-06, as `xencode bootstrap [path] [--check] [--format text|json]`. The row
+  was written against code that had since moved, and three of its premises were corrected before
+  anything was implemented. **(1)** It asked for "an `anchor.md`" — there is exactly one path that
+  file is read from, `root/.xencode/anchor.md` (`context.rs:869`), and `anchor.rs:758` already
+  owns a writer for it, so the seed calls `write_anchor` rather than creating a second one;
+  `is_current` (the product's own *"is this the anchor"*) is what the test asserts through, so the
+  attestation comes from the reader, not from the writer's opinion. **(2)** It assumed a home for
+  the seed on a generate-style command — `Generate` (`main.rs:585`) streams to stdout and has
+  neither `--out` nor `--force`; the refuse-an-existing-file pattern this copies is
+  `ReleaseNotes`'s (`releasenotes.rs:417`). **(3)** There is no `xencode init`, and the obvious
+  names were all taken by something else: `seeds` is the graded defect repositories (`QA-5`),
+  `bootstrap.rs` is the script pushed to a Colab VM, and `/init` already means *index this
+  project*. The capability is a top-level `bootstrap` because the word is what it does to a clone.
+  **Two halves of this row did not ship, and each is refused by the code rather than deferred.**
+  No `skills/` entry: a `SKILL.md` with only frontmatter is rejected as having *no instructions
+  after its frontmatter* (`plugin-rs/src/skills.rs:292`), so a stub is a parse error in the
+  project's way, not a skill. No hooks written: `config_dir()`/`config_path()` resolve to
+  `~/.config/xencode/config.json` and there is **no project-local config loader**, so seeding
+  `agent_hooks` would edit settings that apply to every project on the machine and make each one
+  run `sh -c` on every approved tool call. The template carries the two empty hook maps and that
+  is the honest extent of it.
+  **Declarative is the whole design, and it is enforced by a test rather than by intent:**
+  `the_written_instructions_guess_no_command` fails if the generated `AGENTS.md` contains
+  `cargo test`, `npm run`, `pytest`, `go test` or six more, and the anchor is asserted to hold no
+  clock and no absolute path because it sits inside the byte-stable head. `--force` does not exist
+  in any form; a file that exists is reported `keep`, and `md5sum` over the three files prints the
+  same three hashes after a third run as after the second. `--check` canonicalises the
+  directory and creates nothing, `.xencode/` included.
+  **The finding worth keeping** is that the credential scrub had to be made per-file. Names read
+  off disk go into the anchor, and a file called `prod-openai-api-key.txt` is somebody else's
+  string reaching a prompt, so `redact_secrets` runs over those bodies — but applied to the
+  settings template as well it rewrote eight of the nine credential fields, because the scrubber
+  replaces the *value* beside any key that looks like a credential and turned
+  `"openai_api_key": null` into `"openai_api_key": "[redacted]"`. That corruption is now asserted
+  for, so if the scrubber's definition of a credential key changes, the exception has to be
+  re-decided instead of silently rotting.
+  **Counted:** 2459 passing, 0 failed, 19 ignored over 71 result lines across 16 crates on
+  2026-10-06 — the 21 new tests are eight in the module, nine in `tests/bootstrap.rs`, four in
+  `tests/bootstrap_cli.rs` driving the built binary — with `cargo fmt --all --check` clean and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean, and the whole run green at first
+  attempt with no load-sensitive case failing.
 
 - [x] `QK-6` — 2026-10-06, and the finding that shaped it is that this was never a deletion
   feature. `drop_stale_facts` is pure: `context.rs` reads `state.md`, filters it on the way into
@@ -10279,7 +10321,8 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   **The other half is not here.** The row also asked for a declarative project seed —
   `AGENTS.md`, `anchor.md`, skills, hooks, a settings template with the secrets out of it. That
   writes files into somebody's repository, which is a different surface and a different risk
-  from reading one, so it keeps its own ID (`QK-9`) rather than being called done.
+  from reading one, so it keeps its own ID (`QK-9`) rather than being called done. *(It was
+  shipped six items later the same day, minus the skills and hooks halves — see `QK-9`'s note.)*
 
 - [x] `QM-5` — 2026-10-06. Each model's rate samples are kept in their own window and
   `/cost` prints the number of records every figure rests on. **The row's own premise was

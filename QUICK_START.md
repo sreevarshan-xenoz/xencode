@@ -200,6 +200,19 @@ xencode advise src/auth --json
 Broken imports, import cycles, hub files and orphans, read straight from
 the `.xencode` index.
 
+### A project you have just cloned
+```bash
+xencode bootstrap --check   # report what is missing, create nothing
+xencode bootstrap           # write it
+```
+A fresh clone has no `AGENTS.md`, no `.xencode/anchor.md` and no example settings
+file, and the first two are read into every prompt. `bootstrap` writes all three
+from what git and the directory itself report — no build, no test, no model call —
+so it names no command and leaves the one blank a person has to fill in. A file
+that already exists is never replaced; there is no `--force`. Afterwards run
+`xencode anchor` to replace the anchor with build and test commands it actually
+verified.
+
 ### Team collaboration
 ```bash
 xencode server           # local-first: http://127.0.0.1:8765, ws://
