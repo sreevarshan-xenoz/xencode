@@ -11051,7 +11051,7 @@ a catalogue. What is **not** built is any consent to redistribute: the cache is 
 private copy on your disk that nothing sends anywhere, which is the only answer to
 the listing's unclear terms that this project can give without a lawyer.
 
-#### W12 — Long-running autonomy — 15 items
+#### W12 — Long-running autonomy — 15 items, 2 done (`L-1`, `LF-4`)
 
 Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal order is settled in the plan: LF-4 → LF-2 → GL-3/GL-5.
 
@@ -11066,7 +11066,7 @@ Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal or
 | **GL-5** | A machine-turn gate: idle (PSI + no foreground generation) | capability | machine-turn gate (PSI + no foreground generation) |
 | **GL-6** | Findings land in AM-6's persisted inbox, never an interrupt | capability | findings into AM-6's inbox |
 | **GL-7** | A systemd `.path`/user timer as the wake trigger only | capability | systemd .path/timer as wake trigger |
-| **L-1** | extract a `Backend` trait from `xencode-colab-rs` | core | Backend trait out of xencode-colab-rs |
+| **L-1** | extract a `Backend` trait from `xencode-colab-rs` | core | Backend trait out of xencode-colab-rs — **done 2026-10-01 in `79533429`, and the row here had never been ticked**: `xencode-colab-rs/src/backend.rs` is the seam (`provision` / `list_sessions` / `deprovision`, `forward_command` / `exec_command`, `reap_hint`, `id`, `is_transient`), the generic sequencing moved out of `lifecycle.rs` onto it, and Colab is impl #1 in `colab.rs`. Checked off against the code, not by eye |
 | **L-2** | `xencode remote add\|list\|use\|up\|status\|down`, the BYO-SSH backend | capability | xencode remote add\|list\|use\|up\|status\|down |
 | **L-3** | remote capability probe | capability | remote capability probe on the box |
 | **L-4** | SSH hardening: TOFU pinning + connection reuse | capability | SSH TOFU pinning + reuse |
