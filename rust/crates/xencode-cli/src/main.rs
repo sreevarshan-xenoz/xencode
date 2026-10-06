@@ -5492,6 +5492,12 @@ async fn run_doctor(
                         "line": fact.line,
                         "reason": fact.problem.reason(),
                     })).collect::<Vec<_>>(),
+                    "disagreeing": stale.disagreeing.iter().map(|odds| serde_json::json!({
+                        "line": odds.line,
+                        "name": odds.name,
+                        "cited": odds.cited,
+                        "declared_in": odds.declared_in,
+                    })).collect::<Vec<_>>(),
                 },
             })
         );
@@ -5542,18 +5548,38 @@ async fn run_doctor(
             drift.panicking.len(),
         );
         println!(
-            "\n  durable facts: {} reaching the model, {} dropped, {} that could not be checked",
+            "\n  durable facts: {} reaching the model, {} dropped, {} that could not be checked, {} that the code places in another file",
             believed,
             stale.dropped.len(),
-            stale.unverifiable
+            stale.unverifiable,
+            stale.disagreeing.len()
         );
         // The reasons are the item: a count alone would say something was taken and
         // leave the person hunting for which line and why.
         for fact in stale.dropped.iter().take(10) {
-            println!("    dropped — {}: {}", fact.problem.reason(), fact.line);
+            println!(
+                "    dropped — {}: {}",
+                fact.problem.reason(),
+                xencode_context_rs::fact_prose(&fact.line)
+            );
         }
         if stale.dropped.len() > 10 {
             println!("    … and {} more", stale.dropped.len() - 10);
+        }
+        // Not dropped, and not resolved either: the file the fact cites is untouched
+        // and the name it was written against is still declared, in some other file.
+        // Which one the fact meant is a question for whoever wrote it.
+        for odds in stale.disagreeing.iter().take(10) {
+            println!(
+                "    disagrees — {} names {}, declared in {} rather than the cited {}",
+                xencode_context_rs::fact_prose(&odds.line),
+                odds.name,
+                odds.declared_in.join(", "),
+                odds.cited
+            );
+        }
+        if stale.disagreeing.len() > 10 {
+            println!("    … and {} more", stale.disagreeing.len() - 10);
         }
     }
     Ok(())
