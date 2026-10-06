@@ -99,6 +99,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/spawn",
     "/plan",
     "/rewind",
+    "/lesson",
     "/gate",
     "/mcp",
     "/plugin",
@@ -3250,6 +3251,13 @@ impl<'a> App<'a> {
             return;
         }
 
+        // The lesson a failure drafted, and the person's decision about it
+        // (/lesson, /lesson set <words>, /lesson approve)
+        if prompt == "/lesson" || prompt.starts_with("/lesson ") {
+            self.handle_lesson_command(&prompt);
+            return;
+        }
+
         // The red-to-green reproduction gate (/gate)
         if prompt == "/gate" || prompt.starts_with("/gate ") {
             self.handle_gate_command(&prompt);
@@ -5853,6 +5861,44 @@ impl<'a> App<'a> {
             crate::toast::ToastKind::Info,
             format!("rewound {} file(s)", report.files.len()),
         );
+        // EV-7: a person undoing the agent's work is the clearest evidence in
+        // this product that something went wrong, and it is recorded as evidence
+        // only. Nothing here touches AGENTS.md — the lesson line stays blank
+        // until a person writes it and approves it.
+        if report.turns > 0 {
+            let detail = format!(
+                "{} turn(s) undone: {}",
+                report.turns,
+                if report.files.len() > 4 {
+                    format!(
+                        "{}, …",
+                        report
+                            .files
+                            .iter()
+                            .take(4)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                } else {
+                    report.files.join(", ")
+                }
+            );
+            let event = xencode_context_rs::Evidence::new("/rewind", detail);
+            let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+            match xencode_context_rs::draft_lesson(&event, &xencode) {
+                Ok((draft, _)) if xencode_context_rs::asks_for_words(&draft, &event) => {
+                    self.system_line(
+                        "[LESSON] A rewind is a decision, so a lesson draft is waiting: \
+                         /lesson to read it, /lesson set <words> to write yours.",
+                    );
+                }
+                Ok(_) => {}
+                Err(problem) => {
+                    self.system_line(&format!("[LESSON]⚠️ Nothing was drafted: {problem}"))
+                }
+            }
+        }
     }
 
     /// `/plan` toggles the agent's todo strip between its compact form (the
@@ -6244,6 +6290,7 @@ impl<'a> App<'a> {
         }
         self.system_line("Running machine verification checklist (fmt, lint, test)...");
         let root = xencode_context_rs::default_root();
+        let lesson_root = root.clone();
         tokio::spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
                 xencode_analysis_rs::toolchain::run_checklist(&root, &skip, 180)
@@ -6275,6 +6322,38 @@ impl<'a> App<'a> {
                         let _ = tx.send(format!(
                             "[VERIFY]❌ Verification checklist FAILED: {failed}"
                         ));
+                        // EV-7 again, and the signal is a real exit code rather
+                        // than anyone's opinion. One red check is the next
+                        // command's business; a run of them is asked about.
+                        let red = checklist
+                            .checks
+                            .iter()
+                            .filter(|check| check.ran && !check.passed())
+                            .map(|check| {
+                                format!(
+                                    "{} exit {}",
+                                    check.name,
+                                    check
+                                        .exit_code
+                                        .map_or("-".to_string(), |code| code.to_string())
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let event =
+                            xencode_context_rs::Evidence::new("/verify", format!("FAILED: {red}"));
+                        let xencode = lesson_root.join(xencode_context_rs::XENCODE_DIR);
+                        let drafted = xencode_context_rs::draft_lesson(&event, &xencode);
+                        if let Ok((draft, _)) = drafted {
+                            if xencode_context_rs::asks_for_words(&draft, &event) {
+                                let _ = tx.send(
+                                    "[VERIFY]ℹ️ A run of failing checks — a lesson draft is waiting. \
+                                     The reason is yours, not the program's: /lesson set <what to do \
+                                     differently>, then /lesson approve."
+                                        .to_string(),
+                                );
+                            }
+                        }
                     }
                 }
                 Ok(Err(err)) => {
@@ -6285,6 +6364,104 @@ impl<'a> App<'a> {
                 }
             }
         });
+    }
+
+    /// `/lesson …` — what a failure drafted, and the only route by which it
+    /// becomes an instruction. Bare `/lesson` and `/lesson status` print the
+    /// draft, `/lesson set <words>` puts a person's sentence into it,
+    /// `/lesson approve` appends that sentence to `AGENTS.md` and clears the
+    /// draft, `/lesson drop` clears it without writing anywhere.
+    ///
+    /// The program's half is the evidence and nothing more: a draft whose lesson
+    /// line is still blank is refused at the write, because a reason written by
+    /// the thing that was rejected is a guess about someone else's motive. This
+    /// is also the only command in the product that writes `AGENTS.md`, and only
+    /// when a person typed it.
+    fn handle_lesson_command(&mut self, prompt: &str) {
+        self.handle_lesson_at(prompt, &xencode_context_rs::default_root());
+    }
+
+    /// The same, with the repository to read and write passed in — the shape
+    /// every command that touches the workspace uses, so this can be driven
+    /// against a scratch directory rather than the real one.
+    fn handle_lesson_at(&mut self, prompt: &str, root: &std::path::Path) {
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let rest = prompt.strip_prefix("/lesson").unwrap_or("").trim();
+        let mut parts = rest.split_whitespace();
+        match parts.next() {
+            None | Some("status") => {
+                let Some(draft) = xencode_context_rs::read_lesson(&xencode) else {
+                    self.system_line(
+                        "No lesson is waiting. A /rewind, or a /verify whose checklist went red, \
+                         drafts one — and only you write the lesson into it.",
+                    );
+                    return;
+                };
+                self.system_line(&xencode_context_rs::render_lesson(&draft));
+                if draft.lesson.is_none() {
+                    self.system_line(&format!(
+                        "The lesson line is blank, as it should be until you write it: \
+                         /lesson set <what to do differently next time>. {} event(s) recorded.",
+                        draft.evidence.len()
+                    ));
+                } else {
+                    self.system_line(
+                        "/lesson approve appends your line to AGENTS.md and clears this draft; \
+                         /lesson drop clears it without writing anything.",
+                    );
+                }
+            }
+            Some("set") => {
+                let words = rest.strip_prefix("set").unwrap_or("").trim();
+                match xencode_context_rs::set_lesson(words, &xencode) {
+                    Ok(draft) => {
+                        self.system_line(&format!(
+                            "[LESSON]✅ Your words are in the draft ({} event(s) beside them). \
+                             Nothing is durable yet: /lesson approve writes AGENTS.md, \
+                             /lesson status shows it.",
+                            draft.evidence.len()
+                        ));
+                        if let Some(lesson) = &draft.lesson {
+                            self.system_line(&format!("[LESSON]  lesson: {lesson}"));
+                        }
+                    }
+                    Err(refused) => self.system_line(&format!("[LESSON]❌ {refused}")),
+                }
+            }
+            Some("approve") => match xencode_context_rs::approve_lesson(&xencode) {
+                Ok(done) => {
+                    let where_it_went = if done.agents_created {
+                        "AGENTS.md did not exist, so it was created for this line"
+                    } else {
+                        "AGENTS.md keeps every byte it had; this line was added under Lessons"
+                    };
+                    self.system_line(&format!(
+                        "[LESSON]✅ Lesson durable: - {} — {where_it_went} (drawn from {} \
+                             event(s)). The draft is cleared.",
+                        done.lesson, done.evidence_count
+                    ));
+                    if done.awaiting_trust {
+                        self.system_line(
+                            "[LESSON]⚠️ AGENTS.md no longer holds the bytes you trusted, so it \
+                                 reaches the model as data until /trust gives the new content \
+                                 your approval.",
+                        );
+                    }
+                }
+                Err(refused) => self.system_line(&format!("[LESSON]❌ {refused}")),
+            },
+            Some("drop") => match xencode_context_rs::drop_lesson(&xencode) {
+                Ok(draft) => self.system_line(&format!(
+                    "[LESSON]🗑 Draft cleared, {} event(s) discarded, AGENTS.md untouched.",
+                    draft.evidence.len()
+                )),
+                Err(refused) => self.system_line(&format!("[LESSON]❌ {refused}")),
+            },
+            Some(other) => self.system_line(&format!(
+                "usage: /lesson — show the draft · /lesson set <words> · /lesson approve · \
+                 /lesson drop. Unknown subcommand: {other}"
+            )),
+        }
     }
 
     /// `/hotspots [limit]`: rank files by commit churn times working tree size
@@ -11400,7 +11577,14 @@ mod tests {
             std::fs::read_to_string(dir.join("keep.txt")).unwrap(),
             "mine\n"
         );
-        let line = app.messages.last().unwrap();
+        // The rewind line is found rather than assumed to be last: a rewind also
+        // leaves a lesson draft behind it, and that is the point of EV-7.
+        let line = app
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.content.contains("Rewound"))
+            .expect("no rewind line was printed");
         assert_eq!(line.role, "system");
         assert!(
             line.content.contains("Rewound 1 agent turn") && line.content.contains("keep.txt"),
@@ -11412,6 +11596,59 @@ mod tests {
                 && line.content.contains("not a git repository"),
             "outside a repository the rewind must say it did not check: {:?}",
             line.content
+        );
+
+        // EV-7, end to end: the rewind left evidence behind and nothing else.
+        // AGENTS.md is not a file an undo writes into.
+        let draft_path =
+            xencode_context_rs::lesson_candidate_path(&dir.join(xencode_context_rs::XENCODE_DIR));
+        assert!(draft_path.exists(), "a rewind drafted no lesson");
+        let drafted = xencode_context_rs::read_lesson(&dir.join(xencode_context_rs::XENCODE_DIR))
+            .expect("the draft is not readable back");
+        assert_eq!(drafted.evidence[0].source, "/rewind");
+        assert!(drafted.evidence[0].detail.contains("keep.txt"));
+        assert!(drafted.lesson.is_none(), "the program wrote a lesson");
+        assert!(!dir.join("AGENTS.md").exists());
+        assert!(
+            app.messages
+                .iter()
+                .any(|message| message.content.contains("[LESSON]")),
+            "a draft nobody was told about is a file, not a feature"
+        );
+
+        // Approving an empty lesson is refused, and the refusal writes nothing.
+        app.handle_lesson_at("/lesson approve", &dir);
+        assert!(
+            app.messages
+                .iter()
+                .rev()
+                .any(|message| message.content.contains("an invention, not a lesson")),
+            "the blank lesson was not refused in its own words"
+        );
+        assert!(
+            !dir.join("AGENTS.md").exists(),
+            "a refused approval wrote AGENTS.md"
+        );
+
+        // The person's words, then their keystroke — and it is the only thing
+        // that ever reaches AGENTS.md.
+        app.handle_lesson_at(
+            "/lesson set run the test before editing the file it covers",
+            &dir,
+        );
+        app.handle_lesson_at("/lesson approve", &dir);
+        let agents = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+        assert!(agents.contains("- run the test before editing the file it covers"));
+        assert!(agents.contains("## Lessons"));
+        assert!(
+            !draft_path.exists(),
+            "the draft outlived the approval it was meant to end in"
+        );
+        assert!(
+            app.messages.iter().rev().any(|message| message
+                .content
+                .contains("no longer holds the bytes you trusted")),
+            "appending to AGENTS.md changes its hash, and the screen must say so"
         );
 
         // Honest about having nothing left, rather than pretending to undo.
@@ -11572,7 +11809,12 @@ mod tests {
             "yours\n",
             "--force restores what the agent changed"
         );
-        assert!(app.messages.last().unwrap().content.contains("forced"));
+        assert!(
+            app.messages
+                .iter()
+                .any(|message| message.content.contains("forced")),
+            "the forced rewind did not say so"
+        );
 
         // A file nobody touched since the checkpoint is restored without a word
         // about hand edits — the guard is a refusal, not a tax on every rewind.
@@ -11592,7 +11834,13 @@ mod tests {
             "yours\n",
             "the file goes back to what it was before the agent wrote it"
         );
-        let line = &app.messages.last().unwrap().content;
+        let line = app
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.content.contains("Rewound"))
+            .map(|message| message.content.clone())
+            .expect("no rewind line was printed");
         assert!(line.contains("Rewound 1 agent turn"), "{line:?}");
         assert!(
             !line.contains("not checked") && !line.contains("forced"),

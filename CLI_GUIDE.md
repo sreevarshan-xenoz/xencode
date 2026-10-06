@@ -74,6 +74,16 @@ layers),
 `/rewind` (undo the agent's file changes for this session; it refuses to
 overwrite a file you edited by hand after the agent wrote it, and
 `/rewind [turns] --force` overrides that),
+`/lesson` (what a rewind, or a run of failing `/verify` checks, drafted as a
+lesson: `/lesson status` prints it, `/lesson set <words>` writes your sentence
+into it, `/lesson approve` appends that one line to `AGENTS.md` and clears the
+draft, `/lesson drop` clears it without writing anything. The draft's lesson line
+starts empty and an empty line cannot be approved — the program records what
+happened and leaves the reason to you. `AGENTS.md` keeps every byte it had; this
+is the only command in the product that writes that file, and only when you typed
+it. Because trust is keyed on content, the append makes the file untrusted again
+until `/trust` covers the new bytes, and the command says so rather than
+re-trusting them itself.),
 `/gate` (read the reproduction gate's state — phase, the neighbourhood it was
 given, the command, and the recorded red and green),
 `/gate bugfix [paths…]` (supervise one bug fix: until the agent has run a

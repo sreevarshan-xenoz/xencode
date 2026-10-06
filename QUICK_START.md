@@ -64,7 +64,7 @@ images ride as message parts the model actually sees, shrunk first to a
 1568-pixel long edge and recompressed to JPEG when they have no transparency,
 PDFs/DOCXs parse to
 text), `/ctx` retrieval,
-`/advise` repo insights, `/impact <file>` blast-radius fan-out panel, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/gate bugfix` to hold the agent off a production file until it has reproduced the bug, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/skills` to see which `SKILL.md` skills loaded and what they cost the prompt, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
+`/advise` repo insights, `/impact <file>` blast-radius fan-out panel, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/lesson` to read the lesson a rewind or a run of failing checks drafted and approve your own words into `AGENTS.md`, `/gate bugfix` to hold the agent off a production file until it has reproduced the bug, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/skills` to see which `SKILL.md` skills loaded and what they cost the prompt, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
 turns add up to in tokens and money — naming which document each rate was read out
 of, since `.xencode/pricing.json` is yours and a price `xencode prices fetch`
 looked up is somebody else's list with a date on it — and, for an answer from a local model, a `⚡` line saying what the turn drew at the wall in watt-hours and what that costs at your own `$/kWh`, today's usage against any daily caps you set, model picker, and more. Ask about a library
@@ -246,6 +246,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
 /rewind [turns] [--force] - Undo the agent's file changes for this session (refuses files you edited by hand, unless --force)
+/lesson [status|set <words>|approve|drop] - The lesson a rewind or three failing checks drafted; the lesson line stays blank until you write it, and `/lesson approve` is the only thing that appends to AGENTS.md
 /gate [bugfix [paths] | off] - Read, open or close the reproduction gate: with it open on a bug, the agent cannot touch a production file until `reproduce_bug` has been seen failing on unchanged code
 /mcp [status|stop]    - Connect all MCP servers declared in config, or ask about/stop them (read a listed resource with `/mcp read <server> <uri>`, ask for a prompt with `/mcp prompt <server> <name>`)
 /spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status)
