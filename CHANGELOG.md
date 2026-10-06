@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AE-2`: join session verification checks to run history and record interactive loop proofs
+
+Verification checklist runs in interactive and CLI sessions are now recorded under their active conversation session so run history reports actual verification outcomes:
+
+- Added `run_checklist_for_session` to `xencode-analysis-rs::toolchain` allowing verification runs to record ledger entries and evidence artifacts under a specific session while preserving the default `'cli'` fallback for backwards compatibility.
+- Updated the TUI `/verify` command handler in `xencode-tui-rs::app` to pass the active session ID, storing verification logs in `artifacts/<session_id>/` and tagging ledger rows with the session identifier.
+- Added `--session` flag to `xencode verify` and `xencode test` in the CLI to allow associating runs with a conversation session, defaulting to the current memory session if available.
+- `xencode runs show <run_id>` now accurately displays the verification checks performed during that session, or clearly states `checks: none — nothing verified this run` when none were executed.
+- Added unit tests in `toolchain.rs` and an end-to-end integration test in `tests/runs_cli.rs`.
+
 ### Changed — `AA-5`: replace internal implementation jargon and leaked transport routes with plain prose
 
 CLI diagnostic and query outputs now report status in clear language without internal scoring references or leaked HTTP routes:

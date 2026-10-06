@@ -15496,17 +15496,7 @@ appear in it are how the §R-0 counts went wrong.
   matches a `ledger.jsonl` row for the same run, and a run that executed no check prints
   `Blocked` or `Failed` rather than `Completed`, watched by handing it a session with no checks.
 
-- **AE-2 — join a run to the checks it ran, and have the interactive loop file them.**
-  *Effort: S.* `runledger.rs:218` joins `RunRecord.session` to `ledger_for_session`, and that
-  join can only ever miss: both ledger writers hard-code `session: Some("cli")`
-  (`xencode-analysis-rs/src/toolchain.rs:419`, `xencode-cli/src/main.rs:7643,7650`) while the TUI
-  files its run under the trace's session id (`app.rs:10279`), and `xencode-tui-rs` contains zero
-  `append_ledger` or `write_artifact` calls. So `xencode runs show` reports no checks for the
-  runs a person actually does their work in. *Trap:* do not simply change the `"cli"` literal —
-  rows already on disk use it, so the reader must accept both the old constant and a real session
-  id, or history disappears. *Done-when:* a TUI session that ran `xencode verify` prints those
-  checks under `xencode runs show <id>`, a session that ran none says so in words, and one
-  join in one place produces both answers.
+- [x] **Item AE-2 — join a run to the checks it ran, and have the interactive loop file them.** — done 2026-10-06 in `xencode-analysis-rs/src/toolchain.rs`, `xencode-tui-rs/src/app.rs`, and `xencode-cli/src/main.rs`. Added `run_checklist_for_session` to accept an explicit session ID while defaulting to `'cli'`; updated TUI `/verify` handler to forward the active session ID, storing verification artifacts under `artifacts/<session_id>/` and recording ledger entries with that session tag; added `--session` flag to CLI `xencode verify` and `xencode test`; verified that `xencode runs show <run_id>` joins session checks for verified sessions and reports `checks: none — nothing verified this run` for sessions without checks in unit tests and integration tests in `tests/runs_cli.rs`. *Effort: S.*
 
 - **AE-3 — let the red-to-green reproduction evidence outlive the process.** *Effort: S.*
   `reprogate.rs` keeps its proof as an `Arc<Mutex<GateState>>` in memory, so the most valuable

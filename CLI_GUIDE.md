@@ -4135,13 +4135,14 @@ array.
 On this repository's own change it reports 2 caught, 8 missed, each one naming
 the function to strengthen first.
 
-### `xencode verify [--skip test|lint|fmt] [--timeout 1800] [--format text|json]`
+### `xencode verify [--skip test|lint|fmt] [--timeout 1800] [--session <id>] [--format text|json]`
 
 Run the machine-checkable checklist: the full test suite, clippy with zero
 tolerance, and `cargo fmt --check`. Each slot is verified by its exit code —
 nothing here is graded by a model — and each leaves a ledger row plus an
 artifact the verdict points at. Skipped slots are reported alongside, never
-counted as passed.
+counted as passed. `--session` files the verification rows under a specific
+conversation session (defaulting to the active session or `cli`).
 
 ### `xencode test --isolate <substring> [--base HEAD] [--repeat 3]`
 

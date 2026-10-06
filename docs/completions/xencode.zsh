@@ -1040,6 +1040,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '*--skip=[Skip these checks (repeatable); skipped is reported, never passed]:SKIP:_default' \
 '--timeout=[Wall-clock ceiling in seconds for the test slot]:TIMEOUT:_default' \
+'--session=[Session ID to file checks under in the verification ledger (defaults to active session or '\''cli'\'')]:SESSION:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
 '-h[Print help]' \
 '--help[Print help]' \
@@ -1260,6 +1261,7 @@ _arguments "${_arguments_options[@]}" : \
 '--base=[The ref the base tree is taken at for --isolate]:BASE:_default' \
 '--repeat=[Runs per side for --isolate; a pass on any run means flaky]:REPEAT:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
+'--session=[Session ID to file checks under in the verification ledger (defaults to active session or '\''cli'\'')]:SESSION:_default' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0

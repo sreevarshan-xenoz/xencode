@@ -6149,7 +6149,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__test)
-            opts="-h --package --retries --stress-count --timeout --isolate --base --repeat --format --help"
+            opts="-h --package --retries --stress-count --timeout --isolate --base --repeat --format --session --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -6185,6 +6185,10 @@ _xencode() {
                     ;;
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                --session)
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 *)
@@ -6227,7 +6231,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__verify)
-            opts="-h --skip --timeout --format --help"
+            opts="-h --skip --timeout --session --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -6238,6 +6242,10 @@ _xencode() {
                     return 0
                     ;;
                 --timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --session)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
