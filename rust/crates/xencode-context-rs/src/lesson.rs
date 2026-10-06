@@ -1,9 +1,11 @@
 //! EV-7: a lesson from a failure, drafted by the program and written by a person.
 //!
-//! The agent's work is undone in two places that leave a record: `/rewind` puts
-//! files back because a person did not want what was done, and `/verify` reports
-//! a checklist that failed with an exit code behind it. Both are facts about this
-//! repository, and neither is a reason the program is allowed to invent.
+//! The agent's work is undone in three places that leave a record: `/rewind` puts
+//! files back because a person did not want what was done, `/verify` reports a
+//! checklist that failed with an exit code behind it, and an approval prompt
+//! answered `n` refuses a change the model was about to make. All three are facts
+//! about this repository, and none of them is a reason the program is allowed to
+//! invent.
 //!
 //! So this module drafts, and a person decides. An event leaves one line in
 //! `<xencode dir>/lesson.candidate.md` under the evidence it came with, and the
@@ -35,13 +37,18 @@ pub const LESSON_CHECK_STREAK: usize = 3;
 /// The line a person writes their lesson into, blank until they do.
 const LESSON_PREFIX: &str = "- lesson:";
 
+/// The source a refused call is recorded under.
+pub const DENIED_SOURCE: &str = "denied";
+
 /// One thing that went wrong, as it is stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evidence {
-    /// The command that reported it — `/rewind`, `/verify`. Never a sentence
-    /// this module makes up, because the reader needs to know who said this.
+    /// What reported it — `/rewind`, `/verify`, [`DENIED_SOURCE`]. Never a
+    /// sentence this module makes up, because the reader needs to know who said
+    /// this.
     pub source: String,
-    /// What it said: which files went back, which check failed with what exit.
+    /// What it said: which files went back, which check failed with what exit,
+    /// which call was refused.
     pub detail: String,
     /// How many times exactly this has now happened. The same failing check
     /// reached three times is one idea, recorded three times: it holds one line
@@ -58,6 +65,24 @@ impl Evidence {
             count: 1,
         }
     }
+}
+
+/// A call a person refused at the approval prompt, as evidence.
+///
+/// The words are what the overlay itself showed them — the tool, the class of
+/// thing it does, and the one-line summary they said no to — because that is the
+/// only part of the refusal that was in front of them when they made it. What is
+/// not here is the reason: they did not give one, and a program filling it in is
+/// the invention the blank line exists to prevent. The summary is scrubbed like
+/// every other durable record, since it is an argument the model chose.
+pub fn denied_call(tool: &str, class: &str, what_was_shown: &str) -> Evidence {
+    Evidence::new(
+        DENIED_SOURCE,
+        format!(
+            "{tool} ({class}) — {}",
+            crate::trace::redact_secrets(what_was_shown)
+        ),
+    )
 }
 
 /// What the draft holds: the events, and whether a person has written the lesson.
@@ -379,11 +404,14 @@ pub fn check_streak(draft: &LessonDraft) -> usize {
 
 /// Whether this draft is now worth interrupting a person for.
 ///
-/// A rewind asks straight away. A failing check asks once it has failed
-/// [`LESSON_CHECK_STREAK`] times on the same run of attempts, because one red
-/// check is usually the next command's business rather than a lesson.
+/// A rewind and a refused call ask straight away: each is a decision somebody
+/// already made, so there is something to learn from the first time. A failing
+/// check asks once it has failed [`LESSON_CHECK_STREAK`] times on the same run of
+/// attempts, because one red check is usually the next command's business rather
+/// than a lesson.
 pub fn asks_for_words(draft: &LessonDraft, last: &Evidence) -> bool {
-    last.source == "/rewind" || check_streak(draft) >= LESSON_CHECK_STREAK
+    matches!(last.source.as_str(), "/rewind" | DENIED_SOURCE)
+        || check_streak(draft) >= LESSON_CHECK_STREAK
 }
 
 /// The draft as it should be printed: the events, and the lesson line whether or
@@ -436,6 +464,42 @@ mod tests {
         assert_eq!(read, draft);
         // And the reason it is worth a lesson is the rewind itself, not a streak.
         assert!(asks_for_words(&draft, &draft.evidence[0]));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_refused_call_asks_at_once_and_keeps_only_what_was_on_screen() {
+        // QM-6: a person saying no is a decision, so it needs no streak — and the
+        // evidence is the line they were shown, not a reason guessed afterwards.
+        let root = dir("denied");
+        let xencode = xencode_of(&root);
+        let event = denied_call(
+            "write_file",
+            "write",
+            "write_file src/auth.rs OPENAI_API_KEY=\"sk-FAKE-NOT-A-REAL-TEST-KEY\"",
+        );
+        assert_eq!(event.source, DENIED_SOURCE);
+        let (draft, repeat) = draft_lesson(&event, &xencode).unwrap();
+        assert!(!repeat);
+        assert!(draft.lesson.is_none());
+        assert!(!root.join("AGENTS.md").exists());
+        assert!(asks_for_words(&draft, &event));
+        let written = render_lesson(&draft);
+        assert!(written.contains("- denied: write_file (write) — write_file src/auth.rs"));
+        assert!(
+            written.contains("[redacted]"),
+            "the summary reached the draft unscrubbed: {written}"
+        );
+        assert!(
+            !written.contains("FAKE-NOT-A-REAL"),
+            "a credential-shaped argument was stored verbatim"
+        );
+        // And the same refusal twice is one line counting, as with a check.
+        let (twice, repeat) = draft_lesson(&event, &xencode).unwrap();
+        assert!(repeat);
+        assert_eq!(twice.evidence.len(), 1);
+        assert_eq!(twice.evidence[0].count, 2);
+        assert_eq!(read_lesson(&xencode).unwrap(), twice);
         std::fs::remove_dir_all(&root).ok();
     }
 

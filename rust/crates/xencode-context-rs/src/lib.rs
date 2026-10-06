@@ -144,9 +144,10 @@ pub use ledger::{
     append_ledger, digest_hex, ledger_for_session, ledger_path, read_ledger, LedgerEntry, RunClass,
 };
 pub use lesson::{
-    approve_lesson, asks_for_words, check_streak, draft_lesson, drop_lesson, lesson_candidate_path,
-    read_lesson, render_lesson, set_lesson, ApprovedLesson, Evidence, LessonDraft, LessonRefusal,
-    LessonWrite, LESSON_CANDIDATE_FILE, LESSON_CHECK_STREAK, LESSON_EVIDENCE_CAP,
+    approve_lesson, asks_for_words, check_streak, denied_call, draft_lesson, drop_lesson,
+    lesson_candidate_path, read_lesson, render_lesson, set_lesson, ApprovedLesson, Evidence,
+    LessonDraft, LessonRefusal, LessonWrite, DENIED_SOURCE, LESSON_CANDIDATE_FILE,
+    LESSON_CHECK_STREAK, LESSON_EVIDENCE_CAP,
 };
 pub use metrics::{
     append_metrics, metrics_path, read_metrics, read_metrics_since, read_metrics_tail,

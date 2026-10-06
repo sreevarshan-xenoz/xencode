@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2428 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2430 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -135,9 +135,11 @@ machine that never set it sends the model the same tool list it sent before), as
 every time because the question itself is what leaves the machine, and answers a
 half-configured engine by naming the half that is missing rather than failing a
 request, every answer is logged in the transcript, the model's todo list renders above the chat
-(`/plan`), and `/rewind` puts the files back — and knows when not to. A rewind, or a
-`/verify` checklist that has gone red three times running, drafts a lesson: the events land in
-`.xencode/lesson.candidate.md` with their exit codes, and the lesson line is left empty because
+(`/plan`), and `/rewind` puts the files back — and knows when not to. A rewind, a
+`/verify` checklist that has gone red three times running, or a change you answered `n` to at
+the approval prompt, drafts a lesson. The events land in `.xencode/lesson.candidate.md` with what
+each one reported — an exit code, the files that went back, the line the prompt was showing
+you — and the lesson line is left empty because
 why the work was undone is not something the program can know. `/lesson approve` is what appends
 your own sentence to `AGENTS.md` — the only command in the product that writes that file, and it
 refuses while the line is still blank, so no reason invented by the thing that was rejected can
@@ -292,9 +294,9 @@ These seventeen are the only strings the chat input intercepts (`SLASH_COMMANDS`
 /plan [clear]               Pin the model's todo list (or drop it)
 /rewind [turns] [--force] Undo agent file writes for recent turns (refuses files edited by hand since)
 /lesson [status|set <words>|approve|drop]
-                            The lesson a rewind or a run of failing checks drafted: the evidence
-                            is recorded, the lesson line starts blank, and only your `/lesson approve`
-                            appends your own line to AGENTS.md
+                            The lesson a rewind, a run of failing checks or a refused call
+                            drafted: the evidence is recorded, the lesson line starts blank, and
+                            only your `/lesson approve` appends your own line to AGENTS.md
 /gate [bugfix [paths] | off]
                             Read, open or close the red-to-green reproduction gate: while it
                             waits, the agent may write only its reproduction test
