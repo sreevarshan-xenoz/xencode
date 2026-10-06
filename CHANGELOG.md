@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AA-1`: verify model availability in `xencode models health` for llama.cpp
+
+The `llamacpp:` branch of `xencode models health` now queries the server's loaded models
+(`GET /v1/models` and `/props`) instead of performing a TCP ping only:
+
+- When a model name is provided (`llamacpp:<model>`), `LlamaCppClient::check_health` checks whether
+  the model is actually loaded in the server's model catalog.
+- If the model is not loaded, health reports `unavailable` with an explanation naming the missing model,
+  rather than falsely reporting `healthy`.
+- Empty model names (`llamacpp:`) continue to perform the lightweight ping-based server health probe.
+- Verified with unit test `check_health_distinguishes_loaded_model_from_unloaded` in `xencode-models-rs`.
+
 ### Fixed — `AD-1`: wait for dead MCP server stderr before assembling handshake failure error
 
 A stdio server that exits during handshake now boundedly drains its stderr stream before

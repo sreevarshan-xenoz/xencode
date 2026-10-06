@@ -1109,20 +1109,63 @@ impl LlamaCppClient {
         }))
     }
 
-    /// Check health of llama.cpp server.
+    /// Check health of llama.cpp server and verify model availability if a model name is provided.
     pub async fn check_health(&mut self, model: &str) -> Result<ModelHealth, LlamaCppError> {
         let start = Instant::now();
-        match self.ping().await {
-            Ok(response_time) => {
-                let health = ModelHealth {
-                    status: HealthStatus::Healthy,
-                    response_time,
-                    last_check: crate::health::current_timestamp(),
-                    error_message: None,
-                };
-                let key = if model.is_empty() { "llamacpp" } else { model };
-                self.health_tracker.update(key, health.clone());
-                Ok(health)
+        if model.is_empty() || model == "llamacpp" {
+            return match self.ping().await {
+                Ok(response_time) => {
+                    let health = ModelHealth {
+                        status: HealthStatus::Healthy,
+                        response_time,
+                        last_check: crate::health::current_timestamp(),
+                        error_message: None,
+                    };
+                    self.health_tracker.update("llamacpp", health.clone());
+                    Ok(health)
+                }
+                Err(e) => {
+                    let health = ModelHealth {
+                        status: HealthStatus::Unavailable,
+                        response_time: start.elapsed().as_secs_f64(),
+                        last_check: crate::health::current_timestamp(),
+                        error_message: Some(e.to_string()),
+                    };
+                    self.health_tracker.update("llamacpp", health.clone());
+                    Ok(health)
+                }
+            };
+        }
+
+        match self.list_models().await {
+            Ok(models) => {
+                let response_time = start.elapsed().as_secs_f64();
+                let matches_model = models.iter().any(|m| {
+                    m.id == model
+                        || m.id.ends_with(&format!("/{model}"))
+                        || m.id.split('/').next_back() == Some(model)
+                });
+                if matches_model {
+                    let health = ModelHealth {
+                        status: HealthStatus::Healthy,
+                        response_time,
+                        last_check: crate::health::current_timestamp(),
+                        error_message: None,
+                    };
+                    self.health_tracker.update(model, health.clone());
+                    Ok(health)
+                } else {
+                    let health = ModelHealth {
+                        status: HealthStatus::Unavailable,
+                        response_time,
+                        last_check: crate::health::current_timestamp(),
+                        error_message: Some(format!(
+                            "model '{model}' is not loaded on llama.cpp server"
+                        )),
+                    };
+                    self.health_tracker.update(model, health.clone());
+                    Ok(health)
+                }
             }
             Err(e) => {
                 let health = ModelHealth {
@@ -1131,8 +1174,7 @@ impl LlamaCppClient {
                     last_check: crate::health::current_timestamp(),
                     error_message: Some(e.to_string()),
                 };
-                let key = if model.is_empty() { "llamacpp" } else { model };
-                self.health_tracker.update(key, health.clone());
+                self.health_tracker.update(model, health.clone());
                 Ok(health)
             }
         }
@@ -2563,5 +2605,40 @@ mod tests {
         assert!(text.contains("waiting for the model to load"), "{text}");
         // The process is not left running behind the report.
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn check_health_distinguishes_loaded_model_from_unloaded() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..3 {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    let body = r#"{"object":"list","data":[{"id":"/path/to/my-loaded-model.gguf","object":"model"}]}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+                }
+            }
+        });
+
+        let mut client = LlamaCppClient::new(&format!("http://127.0.0.1:{port}"), 5);
+        let h1 = client.check_health("my-loaded-model.gguf").await.unwrap();
+        assert_eq!(h1.status, HealthStatus::Healthy);
+
+        let h2 = client.check_health("TOTALLY-FAKE-MODEL").await.unwrap();
+        assert_eq!(h2.status, HealthStatus::Unavailable);
+        assert!(h2.error_message.as_ref().unwrap().contains("TOTALLY-FAKE-MODEL"));
+
+        let h3 = client.check_health("").await.unwrap();
+        assert_eq!(h3.status, HealthStatus::Healthy);
+
+        handle.join().unwrap();
     }
 }

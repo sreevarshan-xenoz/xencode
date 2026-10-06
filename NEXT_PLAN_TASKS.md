@@ -15140,10 +15140,14 @@ what refuses with `HTTP 400 Bad Request` when the name does not match. A health 
 that does the same comparison cannot print `healthy` about a model the very next turn
 would fail on.
 
-- **Item AA-1** — make the llama.cpp branch of `models health` ask the server which
+- [x] **Item AA-1 — make the llama.cpp branch of `models health` ask the server which
   models it has and report the requested name against that answer, the way the Ollama
-  branch reports the model it actually reached. *Done-when:* `models health
-  llamacpp:<a-name-not-loaded>` prints a failure naming that model while the server is
+  branch reports the model it actually reached.** — done 2026-10-06 in
+  `xencode-models-rs/src/llamacpp.rs` and `xencode-cli/src/main.rs`. `check_health` queries
+  `list_models()` (`GET /v1/models` and `/props`) when a specific model name is provided,
+  reporting healthy only when the loaded model matches and unavailable with an explicit
+  missing-model reason otherwise. Verified with unit test `check_health_distinguishes_loaded_model_from_unloaded`.
+  *Done-when:* `models health llamacpp:<a-name-not-loaded>` prints a failure naming that model while the server is
   up, and `models health llamacpp:<the-loaded-model>` still prints healthy. Effort S.
   Joins W11.
 - **Trap.** The fix must not become a generating probe. The Ollama branch pays for a
