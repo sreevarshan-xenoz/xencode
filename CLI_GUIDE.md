@@ -4481,13 +4481,17 @@ Without nextest installed, it falls back to the repository's own test command
 including that a fallback run cannot check for retries, so its result cannot be
 compared to a nextest run.
 
-### `xencode review [--base main] [--format text|json]`
+### `xencode review [--base <ref>] [--format text|json]`
 PR-level diff triage: files changed between the base and HEAD with line
 counts, plus working-tree analysis per file (code issues, image
-inventory). `--base HEAD` reviews uncommitted changes. Unanalyzable files
+inventory). When `--base` is omitted, the base branch is resolved from
+`git symbolic-ref refs/remotes/origin/HEAD`, then `init.defaultBranch` (or existing `master`),
+falling back to `'main'` as a last resort, and the header explicitly states which source
+was used. `--base HEAD` reviews uncommitted changes. Unanalyzable files
 (deleted, binary) get visible notes, never silence.
 
 ```bash
+xencode review
 xencode review --base main
 xencode review --base HEAD --format json | jq '.files[] | {path, issues: (.issues|length)}'
 ```

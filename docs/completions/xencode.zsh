@@ -1267,7 +1267,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (review)
 _arguments "${_arguments_options[@]}" : \
-'--base=[Base branch, tag, commit — or HEAD for uncommitted changes]:BASE:_default' \
+'--base=[Base branch, tag, commit — or HEAD for uncommitted changes. Defaults to origin/HEAD, init.defaultBranch, or '\''main'\'']:BASE:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
 '-h[Print help]' \
 '--help[Print help]' \
