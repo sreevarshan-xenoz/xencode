@@ -1363,12 +1363,18 @@ enum AdvisoryAction {
 #[derive(Subcommand)]
 enum MemoryAction {
     /// List all conversation sessions
-    List,
+    List {
+        /// Show all sessions, including empty ones (0 messages)
+        #[arg(long)]
+        all: bool,
+    },
     /// Show transcript of a session
     Show {
         /// Session ID
         session: String,
     },
+    /// Delete conversation sessions that have no messages
+    Prune,
     /// List the durable facts this repository contradicts, with how long each
     /// has been contradicted for. `--apply` retires the ones past a year.
     Gc {
@@ -5112,30 +5118,76 @@ fn source_word(egress: xencode_providers_rs::Egress) -> &'static str {
 }
 
 fn run_memory(action: MemoryAction) -> Result<(), String> {
-    let mem = ConversationMemory::with_persistence(50).map_err(|e| e.to_string())?;
+    let mut mem = ConversationMemory::with_persistence(50).map_err(|e| e.to_string())?;
 
     match action {
-        MemoryAction::List => {
-            let sessions = mem.list_sessions();
+        MemoryAction::List { all } => {
+            let all_sessions = mem.list_all_sessions();
+            let non_empty = mem.list_sessions();
+            let empty_count = all_sessions.len().saturating_sub(non_empty.len());
+            let sessions = if all { all_sessions } else { non_empty };
             if sessions.is_empty() {
-                println!("No conversation sessions found.");
+                if empty_count > 0 {
+                    println!(
+                        "No non-empty conversation sessions found ({} empty session(s) omitted; use --all to show, or `xencode memory prune` to delete).",
+                        empty_count
+                    );
+                } else {
+                    println!("No conversation sessions found.");
+                }
             } else {
                 println!("Conversation Sessions:");
-                for s in sessions {
-                    println!("  {}", s);
+                for s in &sessions {
+                    if all {
+                        let count = mem
+                            .get_session(s)
+                            .map(|sess| sess.messages.len())
+                            .unwrap_or(0);
+                        println!(
+                            "  {} ({} message{})",
+                            s,
+                            count,
+                            if count == 1 { "" } else { "s" }
+                        );
+                    } else {
+                        println!("  {}", s);
+                    }
+                }
+                if !all && empty_count > 0 {
+                    println!(
+                        "\n  ({} empty session(s) omitted; use --all to show, or `xencode memory prune` to delete)",
+                        empty_count
+                    );
                 }
             }
             Ok(())
         }
         MemoryAction::Show { session } => {
             if let Some(sess) = mem.get_session(&session) {
-                for msg in &sess.messages {
-                    let role = msg.role.to_uppercase();
-                    println!("[{}] {}", role, msg.timestamp);
-                    println!("{}\n", msg.content);
+                if sess.messages.is_empty() {
+                    println!("Session {} is empty (0 messages).", session);
+                } else {
+                    for msg in &sess.messages {
+                        let role = msg.role.to_uppercase();
+                        println!("[{}] {}", role, msg.timestamp);
+                        println!("{}\n", msg.content);
+                    }
                 }
             } else {
                 println!("Session not found: {}", session);
+            }
+            Ok(())
+        }
+        MemoryAction::Prune => {
+            let pruned = mem.prune_empty_sessions();
+            if pruned == 0 {
+                println!("No empty conversation sessions to prune.");
+            } else {
+                println!(
+                    "Pruned {} empty conversation session{}.",
+                    pruned,
+                    if pruned == 1 { "" } else { "s" }
+                );
             }
             Ok(())
         }
