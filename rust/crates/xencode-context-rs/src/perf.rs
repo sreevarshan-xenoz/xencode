@@ -47,6 +47,36 @@ pub const DEFAULT_ALERT_PCT: f64 = 5.0;
 /// The significance level the Mann-Whitney test is judged at.
 pub const DEFAULT_ALPHA: f64 = 0.05;
 
+/// The two-sided z that level corresponds to, for the callers that need a
+/// quantile rather than a p-value — the Wilson score interval in `QK-1`.
+pub const Z_AT_DEFAULT_ALPHA: f64 = 1.959_963_985_052_364;
+
+/// The Wilson score interval for `successes` out of `trials` binary answers.
+///
+/// This lives beside [`mann_whitney`] because the workspace's statistical
+/// arithmetic lives here, and a second small statistics module somewhere else is
+/// how two places end up disagreeing about what 95% means.
+///
+/// Chosen over a proportion and its standard error because the evidence a durable
+/// fact carries sits at the ends, where the plain formula misbehaves: a fact
+/// re-checked at ten revisions and contradicted at none has a rate of exactly
+/// `1.0`, which reads as certainty, while Wilson reports what ten revisions
+/// actually support — it reaches down to 0.72, and a fact has to survive about
+/// forty of them before the floor clears 0.9. Zero trials is no interval at all,
+/// and `None` says that instead of inventing a wide one.
+pub fn wilson_interval(successes: u64, trials: u64, z: f64) -> Option<(f64, f64)> {
+    if trials == 0 || !z.is_finite() || z <= 0.0 {
+        return None;
+    }
+    let n = trials as f64;
+    let p = successes as f64 / n;
+    let z2 = z * z;
+    let denom = 1.0 + z2 / n;
+    let centre = (p + z2 / (2.0 * n)) / denom;
+    let spread = z * (p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt() / denom;
+    Some(((centre - spread).max(0.0), (centre + spread).min(1.0)))
+}
+
 /// Large enough to enumerate exactly and small enough to finish in well under a
 /// second — ten against ten is 184,756 splits. Past this the tie-corrected
 /// normal approximation is used, and the result says which one produced it.
@@ -1377,5 +1407,52 @@ Benchmarking compaction/soft_compact
             .unwrap_err()
             .contains("not a readable baseline"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every expected bound below is read off a published table of two-sided 95%
+    /// Wilson score intervals, not produced by this function — which is the only
+    /// way a hand-written formula earns the right to be called Wilson's.
+    #[test]
+    fn wilson_reproduces_the_intervals_the_literature_prints() {
+        let close = |got: (f64, f64), want: (f64, f64)| {
+            assert!(
+                (got.0 - want.0).abs() < 5e-4 && (got.1 - want.1).abs() < 5e-4,
+                "{got:?} is not the published {want:?}"
+            );
+        };
+        close(
+            wilson_interval(1, 1, Z_AT_DEFAULT_ALPHA).unwrap(),
+            (0.2065, 1.0),
+        );
+        close(
+            wilson_interval(10, 10, Z_AT_DEFAULT_ALPHA).unwrap(),
+            (0.7225, 1.0),
+        );
+        close(
+            wilson_interval(9, 10, Z_AT_DEFAULT_ALPHA).unwrap(),
+            (0.5959, 0.9822),
+        );
+        close(
+            wilson_interval(40, 40, Z_AT_DEFAULT_ALPHA).unwrap(),
+            (0.9124, 1.0),
+        );
+        close(
+            wilson_interval(0, 10, Z_AT_DEFAULT_ALPHA).unwrap(),
+            (0.0, 0.2775),
+        );
+        assert_eq!(wilson_interval(0, 0, Z_AT_DEFAULT_ALPHA), None);
+    }
+
+    /// The reason this function exists rather than a proportion and an error bar:
+    /// an unbroken run of checks reaches 1.00 either way, and only the interval
+    /// says how little ten of them prove.
+    #[test]
+    fn a_short_unbroken_run_still_reads_as_thin_evidence() {
+        let ten = wilson_interval(10, 10, Z_AT_DEFAULT_ALPHA).unwrap();
+        let forty = wilson_interval(40, 40, Z_AT_DEFAULT_ALPHA).unwrap();
+        assert!(
+            ten.0 < 0.73 && forty.0 > 0.91 && forty.0 > ten.0,
+            "ten checks and forty must not print the same strength: {ten:?} against {forty:?}"
+        );
     }
 }

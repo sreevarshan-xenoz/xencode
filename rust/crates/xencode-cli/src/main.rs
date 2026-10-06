@@ -1322,6 +1322,13 @@ enum MemoryAction {
         #[arg(long)]
         apply: bool,
     },
+    /// How many revisions each durable fact has been re-checked against, and what
+    /// that evidence supports saying. Prints an interval, never a confidence.
+    Evidence {
+        /// Output format
+        #[arg(long, value_enum, default_value = "text")]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Subcommand)]
@@ -5011,6 +5018,70 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
                 && report.disagreeing == 0
             {
                 println!("  Nothing to collect: this repository agrees with every durable fact it can check.");
+            }
+            Ok(())
+        }
+        MemoryAction::Evidence { format } => {
+            let xencode = xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
+            let rows = xencode_context_rs::evidence_rows(&xencode);
+            match format {
+                OutputFormat::Json => {
+                    let body: Vec<serde_json::Value> = rows
+                        .iter()
+                        .map(|row| {
+                            serde_json::json!({
+                                "fact": row.fact,
+                                "revisions_checked": row.trials,
+                                "survived": row.survived,
+                                "unchecked": row.unchecked,
+                                "wilson_95_of_next_check_agreeing": row.interval.map(|(lower, upper)| {
+                                    [
+                                        (lower * 1000.0).round() / 1000.0,
+                                        (upper * 1000.0).round() / 1000.0,
+                                    ]
+                                }),
+                                "verified_by": row.verified_by(),
+                                "last_revision": row.last.as_ref().map(|c| c.revision.clone()),
+                                "contradicted_by": row.problem.map(|p| p.reason()),
+                            })
+                        })
+                        .collect();
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&body)
+                            .map_err(|e| format!("cannot write the report: {e}"))?
+                    );
+                }
+                OutputFormat::Text => {
+                    if rows.is_empty() {
+                        println!(
+                            "No durable fact here has been re-checked against a revision. A fact \
+                             gains evidence on the turn it is next assembled into a prompt, in a \
+                             repository git can search."
+                        );
+                        return Ok(());
+                    }
+                    println!(
+                        "Durable facts, weakest evidence first — the interval is over the checks \
+                         this repository ran, and is not a chance that the fact is true"
+                    );
+                    for row in &rows {
+                        println!("  {}", row.fact);
+                        println!("    {}", row.evidence_sentence());
+                        println!("    verified by {}", row.verified_by());
+                        if let Some(problem) = row.problem {
+                            println!("    contradicted now: {}", problem.reason());
+                        }
+                    }
+                    let thin = rows.iter().filter(|row| row.trials < 2).count();
+                    if thin > 0 {
+                        println!(
+                            "  {thin} of {} reach fewer than two revisions, where an interval spans \
+                             most of what it could and no verdict is available.",
+                            rows.len()
+                        );
+                    }
+                }
             }
             Ok(())
         }

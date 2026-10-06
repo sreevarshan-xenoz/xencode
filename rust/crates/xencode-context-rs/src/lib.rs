@@ -28,6 +28,7 @@ pub mod editing;
 pub mod embed;
 pub mod eval;
 pub mod factgc;
+pub mod factverify;
 pub mod gitinfo;
 pub mod histdigest;
 pub mod history;
@@ -124,6 +125,10 @@ pub use eval::{
 pub use factgc::{
     age_words, collect_gc, now_ms as gc_now_ms, queue_exists, read_tombstones, record_stale_facts,
     tombstone_path, FactTombstone, GcReport, Recording, RETIRE_AFTER_MONTHS, TOMBSTONE_FILE,
+};
+pub use factverify::{
+    evidence_path, evidence_rows, read_evidence, record_evidence, CheckRecord, CheckVerdict,
+    EvidenceRow, FactEvidence, EVIDENCE_FILE, REVISIONS_KEPT,
 };
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,

@@ -477,7 +477,7 @@ fn enforce_state_caps(state: &mut ContextState, report: &mut FoldReport) {
 
 /// The opening of a provenance marker, as it appears inside a fact line:
 /// `… [src:rust/crates/x/src/auth.rs@a1b2c3d4]`.
-const SRC_OPEN: &str = "[src:";
+pub(crate) const SRC_OPEN: &str = "[src:";
 
 /// Where a fact came from, read back out of its marker.
 ///
@@ -569,6 +569,11 @@ pub struct StaleFacts {
     /// resolve, or code it cannot search. They stay: an answer nobody can check is
     /// not an answer that is wrong.
     pub unverifiable: usize,
+    /// The fact lines this pass reached an answer on and the answer was that
+    /// nothing contradicted them. Not the same as "still in the state": a line with
+    /// no marker at all is in the state and is not here, because nothing was
+    /// checked about it. `QK-1` counts these as evidence.
+    pub passed: Vec<String>,
     /// Facts that two sources place in different files. They stay too, and the
     /// prompt is told about them — see [`disagreement_note`].
     pub disagreeing: Vec<FactDisagreement>,
@@ -757,7 +762,7 @@ pub fn disagreement_note(disagreeing: &[FactDisagreement]) -> String {
 const CHECK_CAP: usize = 4;
 
 /// The opening of a check marker: `… [chk:parse_reply,fold_state>write_candidate]`.
-const CHK_OPEN: &str = "[chk:";
+pub(crate) const CHK_OPEN: &str = "[chk:";
 
 /// A claim about this repository's own code, read off a fact line at promotion and
 /// re-run against the code on every later turn.
@@ -1166,6 +1171,11 @@ pub fn drop_stale_facts(state_md: &str, root: &Path) -> StaleFacts {
                 None => {
                     if unchecked {
                         check.unverifiable += 1;
+                    } else if line.contains(SRC_OPEN) || line.contains(CHK_OPEN) {
+                        // Only a line that asked for something can be evidence that
+                        // nothing contradicts it. An unmarked line was not checked
+                        // and says nothing about how reliable the next one will be.
+                        check.passed.push(line.clone());
                     }
                     if let Some(odds) = odds {
                         check.disagreeing.push(odds);

@@ -975,23 +975,27 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     // in. A fact about `src/auth.rs` written three weeks ago is a claim about a
     // file that may not say that any more, and the model has no way to tell which
     // it is meeting.
-    let state_check = std::fs::read_to_string(xencode.join("state.md"))
-        .ok()
-        .map(|text| crate::compact::drop_stale_facts(&text, root));
+    let stored_state = std::fs::read_to_string(xencode.join("state.md")).ok();
+    let state_check = stored_state
+        .as_deref()
+        .map(|text| crate::compact::drop_stale_facts(text, root));
     // QK-6: the pass above says nothing and writes nothing, so a fact the code
     // contradicted simply stops arriving and no one keeps the date. The record of
     // *when* is kept here instead, best effort — a queue this turn cannot write
     // must not break the turn — and at the cost of one metadata call in a
     // repository with nothing contradicted, which is nearly every repository
     // nearly every time.
-    if let Some(check) = state_check.as_ref() {
+    if let (Some(stored), Some(check)) = (stored_state.as_deref(), state_check.as_ref()) {
+        let now = crate::factgc::now_ms();
         if !check.dropped.is_empty() || crate::factgc::queue_exists(&xencode) {
-            let _ = crate::factgc::record_stale_facts(
-                &xencode,
-                &check.dropped,
-                crate::factgc::now_ms(),
-            );
+            let _ = crate::factgc::record_stale_facts(&xencode, &check.dropped, now);
         }
+        // QK-1: the same pass answers a question nobody was recording the answer
+        // to — has this line survived being re-checked, or did it land here five
+        // minutes ago? One entry per revision the check could answer at, and the
+        // ledger rewrites only when a revision or a verdict is new. A project with
+        // nothing marked pays one string scan here and no disk write at all.
+        let _ = crate::factverify::record_evidence(&xencode, stored, check, now);
     }
     let state_md = state_check.as_ref().and_then(|check| {
         if check.text.trim().is_empty() {

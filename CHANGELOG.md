@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QK-1`: a durable fact now says how much re-checking it has survived
+
+`QM-2` stamped each durable fact with the file and revision it came from, and `QK-6`
+built the queue of facts the code contradicts. Neither answered the question a person
+promoting a fact actually asks: *how long has this been believed, and on what
+evidence?* A fact that has agreed for a year and one promoted five minutes ago arrived
+in the same prompt looking exactly alike. Every turn that assembles a marked fact now
+files its verdict against the revision it was checked at, in
+`.xencode/facts.evidence.jsonl` — one row per fact, one entry per distinct revision —
+and `xencode memory evidence` reads that ledger out loud, weakest evidence first.
+
+The unit is a revision rather than a turn, and that is the whole reason the number means
+anything. The check is deterministic: the same commit gives the same answer, so a fact
+looked at forty times at one revision was looked at once, and counting turns would let a
+busy afternoon read like a fact that survived forty changes. A turn where the check could
+not reach a conclusion — git would not answer, or the revision the line names cannot be
+resolved — is filed so the gap stays visible and is never counted. Not-an-answer is not an
+answer. The ledger is rewritten only when a revision or a verdict is new, and keeps the
+first moment a revision was seen, so the clock describes the code rather than how often
+the project was used.
+
+Three things the report is careful not to say. It is not a probability that the fact is
+true: the interval covers the checks this repository ran, and what those checks can answer
+is narrow — the cited file is still there, still matches the revision it was written at,
+still declares the name the line talks about — so a fact about *why* a decision was made
+passes forever and proves nothing about the reasoning. It is never a single number: a
+Wilson 95% interval is printed, not a score, because one agreeing revision reaching 20.7%
+is the honest sentence about one observation while the same evidence written as `0.62` is a
+lie with two decimals, and a footer counts the rows that do not yet reach two revisions.
+And it names no model: `verified by` names the search that answered — this binary looking
+for the cited file and the cited name in the working tree at one revision, at one moment.
+Attributing a mechanical verdict to the model driving the turn would put an answer in a
+model's mouth that no model gave, and the no-cross-model-transfer rule would then be
+guarding a judgement nobody made.
+
+**Proven by running it.** Ten checks in
+`rust/crates/xencode-context-rs/tests/fact_evidence.rs`, five in
+`rust/crates/xencode-cli/tests/memory_evidence_cli.rs` and two on the interval helper
+itself, over a real repository built by the test — `git init`, committed files, the
+ledger written by `collect_live_context`, which is the function a session calls before it
+sends anything. The five CLI checks run the built binary as a second process against a
+ledger a turn wrote in another, because the split is the claim: what one xencode recorded
+is what another prints. The interval is pinned to published values computed by hand from
+Wilson's formula — 1 of 1 to 0.2065, 2 of 2 to 0.3424, 9 of 10 to 0.5959–0.9822, 40 of 40
+to 0.9124, 0 of 10 to 0.2775 — and the assertion is that ten of something and forty of the
+same something do not print the same strength.
+
+Ten deliberate breaks, each watched to fail at least one check: count turns instead of
+revisions, let a check that reached no conclusion count as evidence, move the clock on
+every turn, keep the tally of a fact that left the file, replace the interval with the bare
+proportion, stop recording the lines the check kept, name a model in the verdict, print the
+provenance markers instead of the sentence, put a table header over an empty report, and
+collapse the range to one number repeated. Two of the ten were not caught the first time
+round, and both were the test's fault rather than the code's: rewriting the clock changed
+nothing on disk because the row was not written anyway, and the deletion pruning is only
+reachable when one of several facts leaves, since the every-facts-gone case is handled
+earlier. The breaks were rebuilt to do the damage they describe and the ledger gained a
+check for a fact deleted beside a surviving one; both now fail exactly the check that names
+them.
+
+Then live, in a scratch repository, with the product's own turn path: three revisions, the
+third one moving the file a fact cites. The ledger holds three verdicts per fact and the
+report from the binary that wrote it reads —
+
+```text
+$ xencode memory evidence
+Durable facts, weakest evidence first — the interval is over the checks this repository ran, and is not a chance that the fact is true
+  session folding lives in src/sessions.rs
+    checked against 3 revisions; 3 of them found nothing to contradict it — the 95% interval over a future check agreeing runs 43.9% to 100.0%
+    verified by the file-and-name re-check, at revision 5da8a584 since 2026-10-06
+  the login entry point is src/auth.rs
+    checked against 3 revisions; 2 of them found nothing to contradict it — the 95% interval over a future check agreeing runs 20.8% to 93.9%
+    verified by the file-and-name re-check, at revision 5da8a584 since 2026-10-06
+    contradicted now: the file it cites has changed since
+```
+
+— the contradicted line still showing the two revisions that agreed before it, and the same
+repository's `xencode memory gc` answering the other half of the question in one run:
+`1 contradicted, 0 past 12 months, 0 removed`. A project whose facts are all unmarked gains
+no file at all, and a fact deleted from `state.md` takes its tally with it. Workspace total:
+2,491 tests passed, 0 failed, 19 ignored across 74 result lines — 72 lines and 2,473 tests at
+the last entry, and the eighteen added tests are exactly these, in the two new files and the
+two interval checks.
+
 ### Added — `QK-2`: the instructions a person approved are the last thing a budget may drop
 
 `AGENTS.md` is sent to the model under a ceiling of its own, 1,200 tokens
