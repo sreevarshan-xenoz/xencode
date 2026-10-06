@@ -2323,13 +2323,43 @@ llama.cpp reports the GGUF path it was started with as its model id, so on the
 `/root/...` because Colab injects the bridge key for root. Read it from
 `/v1/models` rather than assuming it.
 
+### `xencode remote <action>`
+Manage remote inference hosts reached over SSH (`L-2`). Stores destinations,
+inference runtimes, and models in per-host profiles under `remotes/` in the
+settings directory (`$XDG_CONFIG_HOME/xencode/remotes/<name>.json`, mode `0600`).
+
+```bash
+# Record a remote machine (user@host[:port] or ~/.ssh/config alias)
+xencode remote add lab work@192.168.1.100:2222 --runtime llama.cpp --model qwen2.5:7b
+xencode remote add box lab-server --runtime ollama
+
+# List recorded remote profiles (active profile marked with *)
+xencode remote list
+
+# Select active profile
+xencode remote use lab
+
+# Show details of active profile, or a specific profile by name
+xencode remote show
+xencode remote show lab
+
+# Remove a profile (and clear the active pointer if it was the selected one)
+xencode remote forget lab
+```
+
+Safety rules:
+- Profile names are strictly validated file names (up to 32 characters: `a-z`, `0-9`, `_`, `-`, `.`).
+- Destinations refuse leading hyphens (which `ssh` would parse as flags), whitespace, shell metacharacters, and unbracketed colons (IPv6 literals belong in `~/.ssh/config`).
+- Overwriting an existing profile requires `--force`.
+- The active host is a pointer (`remotes/active`), never a duplicate copy.
+
 ### Where xencode keeps its files
 Four kinds of file, in four directories, so that clearing one of them cannot
 take the others with it:
 
 | Kind | Directory | What lives there |
 | --- | --- | --- |
-| settings | `$XDG_CONFIG_HOME/xencode` | `config.json` and its backups, the Colab bridge key pair, `model_advice.json`, `skills/` |
+| settings | `$XDG_CONFIG_HOME/xencode` | `config.json` and its backups, the Colab bridge key pair, `model_advice.json`, `remotes/<name>.json`, `skills/` |
 | state | `$XDG_STATE_HOME/xencode` | `audit.jsonl`, `conversation_memory.json`, `colab.json`, `last_panic.log`, `llamaserver.pid` |
 | cache | `$XDG_CACHE_HOME/xencode` | cached responses, and the advisory corpora under `advisories/` |
 | downloaded models | `$XDG_DATA_HOME/xencode` | GGUF weights — kept out of the cache so a cache cleaner can never delete a multi-gigabyte download |

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `L-2`: store per-host remote profiles and manage them with `xencode remote`
+
+Remote inference hosts reached over SSH are now recorded in per-host profiles rather than
+requiring manual flags or global config rewrites. `xencode remote add|list|use|forget|show`
+stores and manages destinations, runtimes, and models in the settings directory:
+
+- Profiles live in `$XDG_CONFIG_HOME/xencode/remotes/<name>.json` with owner-only permissions
+  (`0600`), written through the atomic owner-only path.
+- Profile names are strictly validated file names (up to 32 characters of `a-z`, `0-9`, `_`,
+  `-`, `.`), refusing directory traversal and path separators.
+- Destinations (`[user@]host[:port]` or `~/.ssh/config` alias) refuse leading hyphens (which
+  `ssh` would read as command-line flags), whitespace, shell metacharacters, and unbracketed
+  colons (IPv6 literals belong in `~/.ssh/config`).
+- Overwriting an existing profile requires `--force`.
+- The active machine is a pointer file (`remotes/active`), never a duplicated copy of the
+  profile data. `xencode remote forget` cleans up the pointer file if the forgotten host was
+  the active one.
+- 16 new tests (11 in `xencode-config-rs::remotes`, 5 integration tests in `xencode-cli::tests::remotes_cli`).
+  Workspace total: 2,519 passed, 0 failed, 19 ignored across 76 result lines.
+
 ### Added — `EV-4`: a durable fact is kept for as long as it is true, and picked for as long as it is asked about
 
 `state.md` is the tier that says what this project is in the middle of, and it had one
