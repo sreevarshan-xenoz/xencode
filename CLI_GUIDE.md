@@ -1332,10 +1332,12 @@ recorded answer is a real Qwen3-0.6B fold: the transcript it was given held a to
 failure under a `[data]` source line, and the model carried that line verbatim into
 `## unresolved`. A line that arrived under such a banner is somebody else's bytes,
 so it is dropped rather than kept-and-labelled; a line with credential-shaped text in
-it is written with that text replaced by `[redacted]`. The two caps are the ones tier
-4 is already budgeted for — 15 fact lines and 800 tokens of rendered text — trimmed
+it is written with that text replaced by `[redacted]`. The two caps are the ones the
+store is allowed to reach — 60 fact lines and 4,000 tokens of rendered text — trimmed
 across completed, decisions and unresolved in turn so no one section is starved,
-keeping the model's own first items.
+keeping the model's own first items. Those are caps on the *file*, not on a turn: a
+turn pays 800 tokens of it, and which 800 is decided every turn by what you ask (see
+[Which facts a turn is about](#which-facts-a-turn-is-about) below).
 
 `/ctx promote` is the act that makes a fold durable. It checks the candidate again,
 because an edit made in between can break the shape or paste a fetched block back in,
@@ -1448,9 +1450,49 @@ check. On this repository the search costs about 0.1 seconds for 221 tracked `.r
 (7471 declaration lines, measured 2026-10-05), once per turn at most.
 
 The markers are bytes, so both caps are re-checked after stamping: a fold trimmed to
+exactly the store's limit and then stamped would otherwise have its last line's marker
+cut off mid-word. Trimming takes lines from the tail of each section, never half a line.
 
-exactly 800 tokens and then stamped would otherwise have its last line's marker cut off
-mid-word. Trimming takes lines from the tail of each section, never half a line.
+##### Which facts a turn is about
+
+`state.md` is a store and a prompt is a budget, and the two are different numbers. The
+file may reach 60 fact lines and 4,000 tokens; one turn is given 800 of them, and every
+turn that is asked something different gets a different 800. Before this, promotion
+trimmed the *file* to the *turn's* budget, so a project kept the first fifteen facts it
+ever approved and deleted the rest — a line about the login flow promoted in March
+reached every later turn, and a line about the file being edited now reached none.
+
+The choice is made with the same signals retrieval uses for files, at the same weights:
+a fact naming the file the question names, a fact naming a directory along that path, a
+fact about a file the working tree has already changed, and — worth less than one path
+hit, and capped at two — words the question and the fact's own sentence share. Four
+things follow from that, and each is a rule rather than a tuning choice:
+
+- **Truth is not decided here.** A fact the code contradicts is gone before ranking, by
+  the check above; the panel names those separately as `dropped as stale` and never
+  counts them among the facts a turn left behind.
+- **The `## working-on` line is never ranked and never dropped.** A turn is about what
+  it says it is.
+- **A section that keeps no fact keeps no heading.** A model shown an empty
+  `## unresolved` reports an open question that was answered weeks ago.
+- **Ties keep the order the file writes them in**, and a store small enough to fit one
+  turn is passed through as its own bytes. Asking the same question twice sends the
+  same text, which is what both the person's expectations and a server's cache need.
+
+A hand-written `state.md` keeps its layout for the same reason: the selection works on
+the file's lines, not on a parsed-and-rewritten copy, because parsing drops any section
+whose name it does not recognise.
+
+`/ctx kv` says when the two numbers have come apart. This is a real run of the binary in a
+scratch repository whose `state.md` held 45 fact lines:
+
+```console
+[CTX]🧾 Tier 4 state.md — 775 tokens in the prompt · 45 fact line(s) on disk
+[CTX]   28 of those 45 fact line(s) are more than one turn can hold — which ones arrive is chosen by what you ask, and the rest stay in the file until a question reaches them.
+```
+
+The panel has no question of its own to rank against, so 28 is the floor: a turn that is
+asked something sends fewer lines, and different ones.
 
 ##### Notes the agent keeps for itself: `write_note`
 

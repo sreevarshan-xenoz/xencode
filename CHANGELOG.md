@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EV-4`: a durable fact is kept for as long as it is true, and picked for as long as it is asked about
+
+`state.md` is the tier that says what this project is in the middle of, and it had one
+number on it: 800 tokens, which is what *a turn* may spend. Promotion therefore deleted
+whatever you had approved most recently — a fold trimmed the file to fifteen fact lines so
+one prompt would stay small — and the ten-thousandth fact a project ever wrote could not
+exist, because the fifth had been thrown away to keep the second company-friendly. A
+surviving fact then reached every later turn whether or not it was what you were asking
+about, since the tier took the front of the file.
+
+The store and the turn are separate numbers now. `state.md` may hold 60 fact lines and
+4,000 tokens of rendered text; a turn is still given 800 of them, and every turn chooses
+which. The choice uses the signals retrieval already uses for files, at the same weights —
+a fact naming the file you asked about, a directory along that path, a file the working
+tree has already changed, and, worth less than any of those and capped at two, words your
+question and the fact's sentence happen to share.
+
+Three things it does not do. It does not decide what is *true*: a fact the code contradicts
+is gone before ranking, by the check that was already there, and is named as `dropped as
+stale` rather than counted among the facts a turn left behind. It does not drop the line
+saying what you are working on — `## working-on` is never ranked and never cut. And it does
+not show a section with nothing under it: a heading whose facts all lost the budget goes
+with them, because a model shown an empty `## unresolved` will report an open question that
+was answered weeks ago.
+
+Asking the same question twice sends the same bytes, and a store small enough to fit one
+turn is sent exactly as its author wrote it — layout included, which matters because the
+parser drops sections it does not recognise and a hand-written file would otherwise be
+reformatted by the code meant only to choose from it. All of this reads lines already in
+memory and calls no git and no disk, so a bigger store costs a turn nothing extra.
+
+Measured on this machine, in a scratch repository with 45 fact lines (8,014 bytes) promoted
+into `.xencode/state.md`, running `/ctx kv` in the real binary under a sandboxed `HOME`:
+
+```console
+[CTX]🧾 Tier 4 state.md — 775 tokens in the prompt · 45 fact line(s) on disk
+[CTX]   28 of those 45 fact line(s) are more than one turn can hold — which ones arrive is
+       chosen by what you ask, and the rest stay in the file until a question reaches them.
+```
+
+That panel has no question to rank against, so the count it prints is the floor: turn with a
+matching question carries fewer lines, and different ones. The done-when is
+`rust/crates/xencode-context-rs/tests/state_relevance.rs`, which builds a real repository
+with `git init`, promotes 41 facts with the one about `src/csv_export.rs` written *last*,
+asks about the export header, and finds it — while asserting that a cut from the front of the
+same file at the same budget does not. Twelve tests added, each watched to fail under a
+deliberate break first; the workspace then ran 2,503 passed, 0 failed, 19 ignored across 75
+result lines, matching 75 test binaries and doc-test headers.
+
 ### Added — `QK-1`: a durable fact now says how much re-checking it has survived
 
 `QM-2` stamped each durable fact with the file and revision it came from, and `QK-6`
@@ -625,9 +674,10 @@ at a commit that is not there. The assembly half is checked in
 `rust/crates/xencode-context-rs/tests/state_staleness.rs`, at the level that matters: the
 sentence is in the prompt, the cited file is edited, the sentence is gone from it.
 
-Markers are bytes, so the two caps on this tier — 15 fact lines, 800 tokens — are applied
-again after stamping. A fold trimmed to exactly the budget and then marked would
-otherwise have had its last line's marker truncated mid-word.
+Markers are bytes, so the caps are applied again after stamping — against the store's own
+ceilings, 60 fact lines and 4,000 tokens, which is what the file is allowed to hold rather
+than what one turn is allowed to send. A fold trimmed to exactly the cap and then marked
+would otherwise have had its last line's marker truncated mid-word.
 
 ### Added — `QM-1`: the task summary a long session writes, and only keeps after you approve it
 
@@ -648,11 +698,11 @@ The reason for the extra step is what a summary is made of: the model folds
 together pages it fetched, files it read and commands it ran, and any of those can
 carry instructions that were not meant for it. So the fold refuses a line that
 arrived under a data banner rather than keeping it with a warning, replaces
-credential-shaped text with `[redacted]`, and holds to the two caps that tier is
-already budgeted for — 15 fact lines, 800 tokens of rendered text — trimming across
-the sections in turn so no one section is starved. The report says how many lines
-were kept and names each thing it took out, so a fold that quietly lost your
-decision looks different from one that had none.
+credential-shaped text with `[redacted]`, and holds to the two ceilings the
+store is allowed to reach — 60 fact lines, 4,000 tokens of rendered text —
+trimming across the sections in turn so no one section is starved. The report
+says how many lines were kept and names each thing it took out, so a fold that
+quietly lost your decision looks different from one that had none.
 
 Measured on this machine against a local `llama-server` (build 10809) serving a
 Qwen3-0.6B model: after a real fold was promoted, `/ctx kv` reported the
