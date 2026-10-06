@@ -132,8 +132,71 @@ promotes a new implementation ID.
   prompt-target option make S-13's Claude-only statement stale as a description
   of current CLI surfaces. They do not establish a complete xencode-controlled,
   per-request approval round trip.
-- T-1 does not cover T-2's ten investigations in depth. It supplies the compact
-  candidate crosswalk and identifies the measured questions T-2 should answer.
+- T-1 and T-2 complete the ten investigations in depth. The disposition for all
+  ten questions is recorded below; every surviving direction is folded or refined
+  into an existing roadmap item. Zero new implementation IDs were required.
+
+## T-2 — Detailed investigations across W01–W04
+
+### 1. Common event model
+- **Current Xencode seam:** `AR-9` (`AgentEvent` with `Origin::{Observed, Synthesised}`), `AR-4`.
+- **Strongest external contract:** [MCP 2026-07-28 specification](https://blog.modelcontextprotocol.io/posts/2026-07-28/) (stateless notifications and requests), [A2A v1.0 specification](https://a2a-protocol.org/v1.0.0/) (Task message formats), OpenAI Codex App Server JSON-RPC.
+- **Installed agent support:** Claude 2.1.283 (`--output-format stream-json`), Gemini 0.61.0 (`--output-format stream-json`), Codex 0.157.1 (`exec --json`), OpenCode 1.18.32 (`run --format json`), Agy 1.2.11 (`--output-format stream-json`), Crush (no structured stream option in help). The observed outputs are distinct vendor streams with incompatible event vocabularies.
+- **Disposition:** REFINE into `AR-9`. Store normalized `AgentEvent` entries tagged with `Origin::Observed` (for parsed vendor output) or `Origin::Synthesised` (for internal projections). Do not assume or impose an upstream shared schema on external CLIs.
+
+### 2. Cross-agent session semantics
+- **Current Xencode seam:** `crates/xencode-memory-rs/src/session.rs` (`ConversationSession`), run ledger (`EVd-1`).
+- **Strongest external contract:** OpenAI Codex App Server (fork/resume), Claude session resume (`--session-id`), OpenCode session fork.
+- **Installed agent support:** All probed agents store their sessions locally in proprietary databases or JSON structures. None supports cross-tool session importing or interoperable state resumption.
+- **Disposition:** FOLD into `AR-5` (worker identity) and `AR-7` (context package). Xencode tracks task boundaries and handoff packages; external vendor transcript stores remain vendor-owned and authoritative for their respective tools.
+
+### 3. Adapter compatibility and a conformance test suite
+- **Current Xencode seam:** External worker adapters in `crates/xencode-core-rs`, CLI discovery in `AR-1` / `AR-3`.
+- **Strongest relevant external contract:** Versioned CLI contracts (`--version`, `--help`, stdout schema).
+- **Installed agent support:** CLI interfaces change frequently across minor versions (e.g. Claude 2.1.283 deprecating `--permission-prompt-tool` in favor of `--permission-prompts host|none`, Gemini adding `--acp`).
+- **Disposition:** REFINE into `AR-1` / `AR-3` regression tests using real recorded runs rather than synthetic mocks. Defer a broad TCK (Technology Compatibility Kit) until multi-worker execution encounters demonstrable schema breakage.
+
+### 4. Agent identity
+- **Current Xencode seam:** Local worker attribution in `AR-5`, metrics attribution in `CX-2`.
+- **Strongest relevant external contract:** [NIST agent identity concept paper](https://csrc.nist.gov/pubs/other/2026/02/05/accelerating-the-adoption-of-software-and-ai-agent/ipd) (Initial Public Draft, 2026-02-05; non-normative concept paper).
+- **Installed agent support:** Local OS process execution under current user credentials; vendor accounts are managed per-CLI via user logins (`~/.claude.json`, `~/.codex/`, gcloud auth). No cross-vendor cryptographic identity exists.
+- **Disposition:** FOLD into `AR-5`. Assign local UUID/name per worker instance for attribution in logs and run ledgers. Avoid claiming cryptographic non-repudiation of vendor identities. Reject credential brokerage.
+
+### 5. Authority and delegation
+- **Current Xencode seam:** `xencode-context-rs/src/security.rs`, `CAP-1` (capability profiles), live approval prompt in `xencode-tui-rs`.
+- **Strongest relevant external contract:** [Gemini CLI ACP mode documentation](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md) (`setSessionMode`), [Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage) (`--permission-prompts host|none`), [MCP 2026-07-28 specification](https://blog.modelcontextprotocol.io/posts/2026-07-28/) (stateless auth).
+- **Installed agent support:** Launch-time execution modes (e.g. `--dangerously-skip-permissions`, `--auto`). Live interactive delegation is limited to Claude host prompt mode and Gemini ACP mode.
+- **Disposition:** REFINE into `CAP-1`, `OR-3`, `OR-15`, `OR-17`. Strictly distinguish configured-at-launch policies from live per-request interactive approval interception. Never represent startup CLI flags as live runtime authorization control.
+
+### 6. Trace schema
+- **Current Xencode seam:** `xencode-context-rs/src/trace.rs`, `turns.jsonl`, `CX-2` metrics rollup.
+- **Strongest relevant external contract:** [OpenTelemetry GenAI observability overview](https://opentelemetry.io/blog/2026/genai-observability/) (active community draft).
+- **Installed agent support:** Each CLI logs internally or to stdout; none natively exports OpenTelemetry GenAI spans.
+- **Disposition:** REFINE into `EVd-1` and `AR-4`. Maintain structured JSONL events with run IDs, tool call metrics, and secret redaction (`SE-5`). Defer external OTel collector exporters until a concrete downstream monitoring destination is required.
+
+### 7. Privacy boundaries
+- **Current Xencode seam:** `xencode-context-rs/src/trace.rs` (`redact_secrets`), `xencode-config-rs`.
+- **Strongest relevant external contract:** OpenTelemetry content capture guidelines (prompts and tool payloads opt-in only), GDPR / data minimization principles.
+- **Installed agent support:** External CLIs often log full user prompts and model responses to disk or vendor backends without redaction.
+- **Disposition:** REFINE into `SE-5`. Enforce secret redaction across all stored traces and handoff packages; keep content capture opt-in; never mirror vendor private credentials or unredacted raw secret tokens.
+
+### 8. Orchestration scheduling
+- **Current Xencode seam:** Subprocess supervision, worktree isolation (`crates/xencode-core-rs`), background tasks (`tasks_file.rs`, `run --detach`), `OR-2`, `OR-4`, `OR-9`.
+- **Strongest relevant external contract:** OpenDots background turns, MiroFish task simulation passes.
+- **Installed agent support:** Standard OS process spawning; background execution via nohup/subprocesses.
+- **Disposition:** REFINE into `OR-2` (FIFO scheduling), `OR-4` (worktree leases), `OR-9` (data-driven recipes). Enforce single-broker lock per worktree to prevent concurrent modification collisions. Reject autonomous agent swarms without cost caps.
+
+### 9. Cross-agent evidence
+- **Current Xencode seam:** `verify.rs`, `Checkpoints`, run ledger (`EVd-1`), `OR-16` (evidence envelope), `AF-5` (competing arms).
+- **Strongest relevant external contract:** Git commits, unified diffs, POSIX exit codes, verifier assertions.
+- **Installed agent support:** All agents modify files in the repo and exit with standard process return codes.
+- **Disposition:** REFINE into `OR-16` and `AE-1` (`ResultEnvelope`). Ground truth is exclusively repository state changes and independent verification test exit codes, not model-generated narrative summaries.
+
+### 10. Evaluation
+- **Current Xencode seam:** `xencode eval run`, `xencode-eval-rs` (8 seeded defect testbeds), `EV-1`, `QA-5`.
+- **Strongest relevant external contract:** SWE-bench, deterministic seed evaluation suites.
+- **Installed agent support:** Vendor benchmarks evaluate their own models; none provides a standardized harness for multi-agent handoff on reproducible bugs.
+- **Disposition:** FOLD into `EV-1` and `QA-5`. Benchmark agents and adapters against reproducible seeded defect repositories using objective pass/fail verifiers.
 
 ## Primary references
 
@@ -145,5 +208,4 @@ promotes a new implementation ID.
 - [NIST agent identity concept paper](https://csrc.nist.gov/pubs/other/2026/02/05/accelerating-the-adoption-of-software-and-ai-agent/ipd) (initial public draft).
 - [OpenAI Codex App Server article](https://openai.com/index/unlocking-the-codex-harness/).
 - [Gemini CLI ACP mode documentation](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/acp-mode.md).
-- [Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage).
 - [Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage).

@@ -12530,6 +12530,14 @@ implementation work is separately assigned an ID in the dependency plan. The
 catalog's claimed first 50 is not present in the source file; do not infer the
 remaining forty from X0001–X0050, whose entries are generic subsystem variants.
 
+- [x] **T-2 — Work the supplied first investigations** — 2026-10-06. The ten
+  investigations across W01–W04 are fielded in
+  [AGENT_FABRIC_RESEARCH_W01_W04.md](docs/AGENT_FABRIC_RESEARCH_W01_W04.md) with
+  Xencode seams, external contracts, vendor probe evidence, and dispositions. All
+  ten fold or refine into existing items (`AR-1…AR-9`, `CAP-1`, `SE-5`, `EVd-1`,
+  `OR-2…OR-17`, `EV-1`, `QA-5`, `AE-1`, `AF-5`); zero new implementation IDs are
+  required. Credential brokerage and vendor identity rotation remain rejected.
+
 ### T-3 — Schedule only validated survivors
 
 After T-1 and T-2, add genuinely new work to the existing dependency waves with

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `T-2`: complete the ten agent-fabric research investigations across W01–W04
+
+The ten initial research questions across agent interoperability, identity, observability,
+and evaluation are dispositioned in `docs/AGENT_FABRIC_RESEARCH_W01_W04.md`:
+
+- Documented seams, external contracts (MCP 2026-07-28, A2A v1.0, OpenTelemetry GenAI conventions,
+  NIST draft concept paper), and observed CLI capabilities across Codex, Claude Code, Gemini CLI,
+  OpenCode, Agy, and Crush.
+- All surviving directions fold or refine into existing roadmap items (`AR-1…AR-9`, `CAP-1`, `SE-5`,
+  `EVd-1`, `OR-2…OR-17`, `EV-1`, `QA-5`, `AE-1`, `AF-5`); zero new implementation IDs are required.
+- External credential brokerage and vendor identity rotation remain rejected.
+
 ### Added — `L-2`: store per-host remote profiles and manage them with `xencode remote`
 
 Remote inference hosts reached over SSH are now recorded in per-host profiles rather than
