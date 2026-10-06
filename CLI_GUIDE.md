@@ -3078,13 +3078,14 @@ here stops a model from reading them, and the diff check is what notices.
 
 ### `xencode memory <action>`
 Conversation memory (kept as `conversation_memory.json` in the state directory):
-`list`, `show <session>`. `gc` works on a different file — the project's own
-`.xencode/state.md` — and is described below.
+`list`, `show <session>`. `gc` and `evidence` work on a different file — the
+project's own `.xencode/state.md` — and are described below.
 
 ```bash
 xencode memory list
 xencode memory show <session-id>
 xencode memory gc [--apply]
+xencode memory evidence [--format text|json]
 ```
 
 #### `xencode memory gc`
@@ -3127,6 +3128,61 @@ Three boundaries hold in every mode:
 
 A fact retired by `--apply` and later promoted again starts a new clock; it does
 not inherit the retired one's.
+
+### `xencode memory evidence [--format text|json]`
+
+Every durable fact carries the file and revision it was written against, and every
+turn re-checks it. Neither of those answered the question a cleanup starts from:
+*how much of this code has this fact been re-checked against, and what is that
+worth?* The turn that assembles a marked fact into a prompt now files its answer
+against the revision it was checked at, in `.xencode/facts.evidence.jsonl` — one
+row per fact, one verdict per revision. This command reads that ledger out loud.
+
+The unit is a **revision, not a turn**. The check is deterministic, so a fact looked
+at forty times at one commit was looked at once; counting turns would let a busy
+afternoon read like a fact that survived forty changes. A turn where the check could
+not reach a conclusion — git would not answer, or the revision the line names cannot
+be resolved — is filed so the gap is visible, and is never counted: not-an-answer is
+not an answer. Rows come out weakest evidence first, because the line a person should
+read is the one with the least behind it.
+
+```text
+$ xencode memory evidence
+Durable facts, weakest evidence first — the interval is over the checks this repository ran, and is not a chance that the fact is true
+  session folding lives in src/sessions.rs
+    checked against 3 revisions; 3 of them found nothing to contradict it — the 95% interval over a future check agreeing runs 43.9% to 100.0%
+    verified by the file-and-name re-check, at revision 5da8a584 since 2026-10-06
+  the login entry point is src/auth.rs
+    checked against 3 revisions; 2 of them found nothing to contradict it — the 95% interval over a future check agreeing runs 20.8% to 93.9%
+    verified by the file-and-name re-check, at revision 5da8a584 since 2026-10-06
+    contradicted now: the file it cites has changed since
+```
+
+Three things the report is careful not to say.
+
+- **Not a probability that the fact is true.** The interval is over the checks this
+  repository ran, and what those checks can answer is narrow: the cited file is still
+  there, still matches the revision it was written at, and still declares the name the
+  line talks about. A fact about *why* a decision was made passes that forever and
+  proves nothing about the reasoning.
+- **Never a single number.** A range is printed, not a score. `checked against 1
+  revision` running 20.7% to 100.0% is the honest sentence about one observation; the
+  same evidence written as `0.62` is a lie with two decimals. A footer counts the rows
+  that reach fewer than two revisions, where no verdict is available yet.
+- **No model's name.** `verified by` names the search that answered — this binary
+  looking for the cited file and the cited name at one revision, at one moment — not
+  the model that happened to be driving the turn. Attributing a mechanical verdict to a
+  model would be exactly the cross-model transfer this project refuses.
+
+| Invocation | Behavior |
+|---|---|
+| `xencode memory evidence` | The ledger as text: each fact's own sentence, its interval, the revision and day of its last check, and, for a fact currently contradicted, the reason the code gave. |
+| `xencode memory evidence --format json` | The same rows as an array: `fact`, `revisions_checked`, `survived`, `unchecked`, `wilson_95_of_next_check_agreeing`, `verified_by`, `last_revision`, `contradicted_by`. |
+
+A fact removed from `state.md` takes its tally with it — the evidence belongs to the
+line, and deleting the line is the decision the tally would have argued about. A project
+with nothing marked never creates the file at all: the turn asks one metadata question
+and moves on, so a repository whose facts all hold costs nothing extra.
 
 ### `xencode tasks <action>`
 File-backed background tasks. State lives in `.xencode/tasks/` under the

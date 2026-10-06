@@ -118,14 +118,14 @@ fn sort_entries(entries: &mut [FactTombstone]) {
 /// comparison as well as before the write, so a line whose marker was scrubbed
 /// on disk still matches the record made from it, and the unscrubbed bytes never
 /// land in the queue or in a report.
-fn stored_form(line: &str) -> String {
+pub(crate) fn stored_form(line: &str) -> String {
     crate::trace::redact_secrets(line)
 }
 
 /// The fact a line of `state.md` contributes, in the shape the staleness pass
 /// works on it in: the parser takes a bullet's body with any leading `-` gone,
 /// and that body is what a queue entry quotes.
-fn body_of(line: &str) -> String {
+pub(crate) fn body_of(line: &str) -> String {
     let trimmed = line.trim();
     trimmed.trim_start_matches('-').trim().to_string()
 }

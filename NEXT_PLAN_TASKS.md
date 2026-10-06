@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2473 tests passing, zero warnings (re-verified 2026-10-06, after `QK-2`; 19 ignored, so 2492 in the run)
+- [x] Workspace gates green — 16 crates, 2491 tests passing, zero warnings (re-verified 2026-10-06, after `QK-1`; 19 ignored, so 2510 in the run)
 
 ## Model Catalog Honesty
 
@@ -10095,7 +10095,7 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 | **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
 | **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
 
-#### W10 — Durable project knowledge — 23 items, 17 done
+#### W10 — Durable project knowledge — 23 items, 18 done
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
@@ -10109,7 +10109,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance — **covered by committed work, no separate task left**: `QM-1` gave the tier a writer with a human promotion step, `QM-2` the `[src:path@commit]` provenance and the git-dirty staleness this row asked for, `MEM-3` the verify-on-read. Counted with those rows, not as its own commit |
 | **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts — done 2026-10-05 against `git grep`, not `xencode-analysis-rs`, see the W10 progress note |
 | **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 — **covered by `EV-5`'s commit, no separate task left**: the walk is read-only, so there is no writer to keep human-only, and the byte-identical-prefix done-when is the second test in `tests/scoped_agents.rs` |
-| **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
+| **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) — done 2026-10-06 as `.xencode/facts.evidence.jsonl` plus `xencode memory evidence [--format json]`: one verdict per **distinct revision** per fact, never per turn, an unanswered check stored and never counted, and a Wilson 95% interval printed as a range with no scalar anywhere. `verified_by` names the `git grep` that answered, the revision and the day — not a model. See the W10 progress note |
 | **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored — done 2026-10-06 as `## Lessons` / `## Preferences` lifted out of the root file before its cap and sent on 300 tokens of their own (`PREFERENCES_CAP_TOKENS`); the overflow falls back into the file's budget so the lift can only ever add, and the block rides after the bulk so a reworded lesson costs the least cache. Live before/after on the same scratch repository: head 5,604 → 5,680 bytes, `AGENTS.md` 1,198 → 1,217 tokens, and a file with no such block byte-identical under both binaries — see the W10 progress note |
 | **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1; done 2026-10-05, see the W10 progress note |
 | **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows — the **report** half done 2026-10-06: `xencode doctor` gains a `knowledge:stale` row and `doctor --env` names each dropped fact, and neither writes to `state.md`. The **seed** half became `QK-9` (row 63), see the W10 progress note |
@@ -10127,6 +10127,54 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 
 #### W10 progress
 
+- [x] `QK-1` — 2026-10-06, as `.xencode/facts.evidence.jsonl`, written by the turn path
+  that already re-checks every durable fact, and `xencode memory evidence`, which reads it.
+  Five things the row did not say. **(1)** `n` is revisions, not turns. `drop_stale_facts`
+  is a function of `state.md`, `HEAD` and the working tree, so a fact re-checked at the same
+  commit forty times was looked at *once*: forty entries would let one busy afternoon read as
+  a fact that survived forty changes of code. One verdict per distinct revision, oldest first,
+  sixty-four revisions kept. **(2)** An answer nobody could get is not an answer. A turn where
+  git would not answer, or the revision the line names cannot be resolved, is filed as
+  `Unchecked` so the gap is visible, and contributes nothing to the denominator — the same
+  conservative direction `QK-6` chose for its clock, and for the same reason. **(3)** The clock
+  in the ledger describes the code, not the calendar of usage: a row is written only when a
+  revision or a verdict is new, and keeps the first moment that revision was seen. **(4)** Row
+  identity is shared with `QK-6`, not reimplemented — `factgc::stored_form(body_of(line))`, made
+  `pub(crate)` so the queue and the ledger cannot mean two different things by the same fact,
+  with redaction running on the comparison as well as on the write. **(5)** The half of the row
+  that reads like a model profile stayed declined. `verified_by` therefore names a *search*:
+  this binary looking for the cited file and the cited name in the working tree at one revision,
+  at one moment. A model's name there would misattribute a mechanical verdict to whatever was
+  driving the turn, and the plan's no-cross-model-transfer rule would then have to defend a
+  judgement no model made. The interval is a Wilson 95% range and never a scalar, which is row
+  76's own word: one agreeing revision runs 20.7% to 100.0%, and that spread is the finding —
+  the same evidence written as `0.62` is a lie with two decimals. Supporting change:
+  `StaleFacts` gained `passed`, because until now the pass reported only what it *dropped*, so
+  "survived" was not observable anywhere, and an unmarked line — in the state, never tested —
+  is deliberately not in it. **Proven by running it.** Ten checks in `tests/fact_evidence.rs`,
+  five in `tests/memory_evidence_cli.rs`, two on the interval helper, over a repository the test
+  builds with `git init` and commits itself; the CLI five run the built binary as a *second*
+  process against a ledger a turn wrote in another, because that join is the claim. The interval
+  is pinned to published values computed by hand from Wilson's formula (1/1 → 0.2065, 2/2 →
+  0.3424, 9/10 → 0.5959–0.9822, 40/40 → 0.9124, 0/10 → 0.2775) rather than to a formula this
+  function wrote. Ten deliberate breaks, each watched to fail: count turns, let `Unchecked`
+  count, move the clock every turn, keep a deleted fact's row, replace Wilson with the bare
+  proportion, stop recording the kept lines, name a model in the verdict, print the markers
+  instead of the sentence, put a header over an empty report, collapse the range to one number.
+  **Two of the ten were not caught the first time, and both were the test's fault:** moving the
+  clock changed nothing on disk because the row was not rewritten anyway, and the deletion
+  prune is reachable only when one of several facts leaves, since the all-gone case is handled
+  earlier. The break was rebuilt to do the damage it describes and the suite gained
+  `dropping_one_of_two_facts_leaves_the_tally_of_the_one_that_stayed`; each now fails exactly
+  the check that names it. Then live, in a scratch repository driven through the product's own
+  turn path — three `/egress` runs at three revisions, the third moving a cited file — reporting
+  `3 revisions; 3 of them found nothing to contradict it … 43.9% to 100.0%` beside
+  `2 of them … 20.8% to 93.9%` with `contradicted now: the file it cites has changed since`,
+  while `memory gc` in the same tree said `1 contradicted, 0 past 12 months, 0 removed`. A
+  project with nothing marked creates no file and asks git nothing. **What this does not do:** it
+  gives a fact no confidence score a model assigned, it does not touch `AGENTS.md`, and it says
+  nothing about whether a fact's *reasoning* holds — a why-fact passes this check forever.
+  `QK-5`'s value proxy is still blocked on `AC-5`'s real tokenizer.
 - [x] `QK-2` — 2026-10-06, as `## Lessons` and `## Preferences` lifted out of the root
   `AGENTS.md` before its cap is applied and sent on `PREFERENCES_CAP_TOKENS` of their own.
   Four things the row did not say. **(1)** "Inside AC-4's ceiling" describes a constraint the
