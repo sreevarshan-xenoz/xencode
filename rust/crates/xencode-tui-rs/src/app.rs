@@ -6334,9 +6334,15 @@ impl<'a> App<'a> {
         self.system_line("Running machine verification checklist (fmt, lint, test)...");
         let root = xencode_context_rs::default_root();
         let lesson_root = root.clone();
+        let session_id = self.memory.current_session().cloned();
         tokio::spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
-                xencode_analysis_rs::toolchain::run_checklist(&root, &skip, 180)
+                xencode_analysis_rs::toolchain::run_checklist_for_session(
+                    &root,
+                    &skip,
+                    180,
+                    session_id.as_deref(),
+                )
             })
             .await;
             match result {

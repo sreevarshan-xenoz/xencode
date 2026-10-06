@@ -336,6 +336,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand migrate" -l dry-run -d '
 complete -c xencode -n "__fish_xencode_using_subcommand migrate" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand verify" -l skip -d 'Skip these checks (repeatable); skipped is reported, never passed' -r
 complete -c xencode -n "__fish_xencode_using_subcommand verify" -l timeout -d 'Wall-clock ceiling in seconds for the test slot' -r
+complete -c xencode -n "__fish_xencode_using_subcommand verify" -l session -d 'Session ID to file checks under in the verification ledger (defaults to active session or \'cli\')' -r
 complete -c xencode -n "__fish_xencode_using_subcommand verify" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand verify" -s h -l help -d 'Print help'
@@ -419,6 +420,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand test" -l base -d 'The re
 complete -c xencode -n "__fish_xencode_using_subcommand test" -l repeat -d 'Runs per side for --isolate; a pass on any run means flaky' -r
 complete -c xencode -n "__fish_xencode_using_subcommand test" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
+complete -c xencode -n "__fish_xencode_using_subcommand test" -l session -d 'Session ID to file checks under in the verification ledger (defaults to active session or \'cli\')' -r
 complete -c xencode -n "__fish_xencode_using_subcommand test" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand release-notes" -l from -d 'Start the range here instead of at the newest tag. An empty value means no lower bound: every commit reachable from --to' -r
 complete -c xencode -n "__fish_xencode_using_subcommand release-notes" -l to -d 'End the range here (default: HEAD)' -r

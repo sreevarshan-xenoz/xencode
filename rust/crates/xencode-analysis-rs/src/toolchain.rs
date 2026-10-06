@@ -395,8 +395,19 @@ impl Checklist {
 /// verifies, not a list anyone grades. Evidence goes to the session artifacts
 /// and a ledger row per check, so the verdict points at what produced it.
 pub fn run_checklist(root: &Path, skip: &[String], timeout_secs: u64) -> Result<Checklist, String> {
+    run_checklist_for_session(root, skip, timeout_secs, None)
+}
+
+/// Run the machine-checkable checklist filed under an explicit session, or "cli" if none.
+pub fn run_checklist_for_session(
+    root: &Path,
+    skip: &[String],
+    timeout_secs: u64,
+    session: Option<&str>,
+) -> Result<Checklist, String> {
     use xencode_context_rs::{artifacts, ledger};
 
+    let session_tag = session.unwrap_or("cli");
     let manifest = manifest_dir(root)?;
     let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
     let skipped = |name: &str| skip.iter().any(|s| s == name);
@@ -416,7 +427,7 @@ pub fn run_checklist(root: &Path, skip: &[String], timeout_secs: u64) -> Result<
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0),
-                session: Some("cli".to_string()),
+                session: Some(session_tag.to_string()),
                 run_class: match name {
                     "test" => ledger::RunClass::Test,
                     "lint" => ledger::RunClass::Lint,
@@ -438,7 +449,7 @@ pub fn run_checklist(root: &Path, skip: &[String], timeout_secs: u64) -> Result<
         let clean = fmt_check(&manifest)?;
         let evidence = artifacts::write_artifact(
             &xencode_dir,
-            "cli",
+            session_tag,
             "verify-fmt.log",
             if clean {
                 "fmt: clean\n"
@@ -466,7 +477,7 @@ pub fn run_checklist(root: &Path, skip: &[String], timeout_secs: u64) -> Result<
             ));
         }
         let evidence =
-            artifacts::write_artifact(&xencode_dir, "cli", "verify-lint.log", &evidence_text)
+            artifacts::write_artifact(&xencode_dir, session_tag, "verify-lint.log", &evidence_text)
                 .ok()
                 .map(|p| display_relative(root, &p))
                 .unwrap_or_default();
@@ -497,7 +508,7 @@ pub fn run_checklist(root: &Path, skip: &[String], timeout_secs: u64) -> Result<
             evidence_text.push_str(&format!("note: {note}\n"));
         }
         let evidence =
-            artifacts::write_artifact(&xencode_dir, "cli", "verify-test.log", &evidence_text)
+            artifacts::write_artifact(&xencode_dir, session_tag, "verify-test.log", &evidence_text)
                 .ok()
                 .map(|p| display_relative(root, &p))
                 .unwrap_or_default();
@@ -581,10 +592,40 @@ mod tests {
             3,
             "every slot leaves a ledger row, skips included"
         );
+        assert_eq!(rows[0].session.as_deref(), Some("cli"));
         assert!(
             !rows[0].log_ref.is_empty(),
             "the ran check points at evidence"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_checklist_for_session_records_under_specified_session() {
+        let dir = std::env::temp_dir().join(format!("xe-verify-sess-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"vsess\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src").join("lib.rs"), "// clean\n").unwrap();
+        let list = run_checklist_for_session(
+            &dir,
+            &["test".to_string(), "lint".to_string()],
+            60,
+            Some("session_abc123"),
+        )
+        .unwrap();
+        assert_eq!(list.checks.len(), 3);
+        let xencode = dir.join(".xencode");
+        let session_rows = xencode_context_rs::ledger::ledger_for_session(&xencode, "session_abc123");
+        assert_eq!(session_rows.len(), 3);
+        assert_eq!(session_rows[0].session.as_deref(), Some("session_abc123"));
+        assert!(session_rows[0].log_ref.contains("session_abc123"));
+        // An unrelated session query returns none
+        assert!(xencode_context_rs::ledger::ledger_for_session(&xencode, "other_sess").is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -522,6 +522,10 @@ enum Commands {
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
 
+        /// Session ID to file checks under in the verification ledger (defaults to active session or 'cli')
+        #[arg(long)]
+        session: Option<String>,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -684,6 +688,10 @@ enum Commands {
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
+
+        /// Session ID to file checks under in the verification ledger (defaults to active session or 'cli')
+        #[arg(long)]
+        session: Option<String>,
     },
 
     /// Draft the release notes from the commits since the last release and the
@@ -1669,8 +1677,9 @@ async fn main() {
         Commands::Verify {
             skip,
             timeout,
+            session,
             format,
-        } => run_verify(skip, timeout, format),
+        } => run_verify(skip, timeout, session, format),
         Commands::Envcheck { format } => run_envcheck(format),
         Commands::Agents { contract, format } => run_agents(contract, format),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
@@ -1708,6 +1717,7 @@ async fn main() {
             base,
             repeat,
             format,
+            session,
         } => run_test(
             packages,
             retries,
@@ -1717,6 +1727,7 @@ async fn main() {
             base,
             repeat,
             format,
+            session,
         ),
         Commands::ReleaseNotes {
             from,
@@ -6802,7 +6813,12 @@ fn run_session(action: SessionAction) -> Result<(), String> {
     }
 }
 
-fn run_verify(skip: Vec<String>, timeout: u64, format: OutputFormat) -> Result<(), String> {
+fn run_verify(
+    skip: Vec<String>,
+    timeout: u64,
+    session: Option<String>,
+    format: OutputFormat,
+) -> Result<(), String> {
     use xencode_analysis_rs::toolchain as kit;
 
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -6813,7 +6829,12 @@ fn run_verify(skip: Vec<String>, timeout: u64, format: OutputFormat) -> Result<(
             ));
         }
     }
-    let list = kit::run_checklist(&root, &skip, timeout)?;
+    let target_session = session.or_else(|| {
+        ConversationMemory::with_persistence(50)
+            .ok()
+            .and_then(|m| m.current_session().cloned())
+    });
+    let list = kit::run_checklist_for_session(&root, &skip, timeout, target_session.as_deref())?;
     if matches!(format, OutputFormat::Json) {
         println!(
             "{}",
@@ -8140,6 +8161,7 @@ fn run_test(
     base: String,
     repeat: u32,
     format: OutputFormat,
+    session: Option<String>,
 ) -> Result<(), String> {
     use xencode_context_rs::verify;
 
@@ -8224,8 +8246,14 @@ fn run_test(
         for note in &outcome.notes {
             log.push_str(&format!("note: {note}\n"));
         }
+        let target_session = session.or_else(|| {
+            ConversationMemory::with_persistence(50)
+                .ok()
+                .and_then(|m| m.current_session().cloned())
+        });
+        let session_tag = target_session.as_deref().unwrap_or("cli");
         let log_ref =
-            artifacts::write_artifact(&xencode_dir, "cli", &format!("test-{now_ms}.log"), &log)
+            artifacts::write_artifact(&xencode_dir, session_tag, &format!("test-{now_ms}.log"), &log)
                 .ok()
                 .map(|p| {
                     p.strip_prefix(&root)
@@ -8236,7 +8264,7 @@ fn run_test(
         let _ = artifacts::prune_artifacts(&xencode_dir, artifacts::KEEP_LAST_PASSING);
         let entry = ledger::LedgerEntry {
             ts_unix_ms: now_ms,
-            session: Some("cli".to_string()),
+            session: Some(session_tag.to_string()),
             run_class: ledger::RunClass::Test,
             exit_code: outcome.exit.unwrap_or(-1),
             subjects: vec![ledger::digest_hex(&outcome.command)],
