@@ -160,8 +160,8 @@ pub use repo_map::{
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
 pub use rollup::{
     local_day_key, read_rollup, refresh_rollup, rollup_path, trim_metrics, write_rollup, DayTotals,
-    MetricsRollup, Percentiles, ProfileSample, SessionTotals, TokenTotals, DAYS_KEPT,
-    METRICS_KEEP_BYTES, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
+    MetricsRollup, ModelRates, Percentiles, ProfileSample, SessionTotals, TokenTotals, DAYS_KEPT,
+    METRICS_KEEP_BYTES, MODEL_RATE_SAMPLE_WINDOW, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
 };
 pub use runledger::{
     accountability_trailer, append_run, read_runs, recent_runs, run_by_id, run_evidence, runs_path,

@@ -94,7 +94,8 @@ from and their outcome, the files the context put in front of the model, whether
 the turn carried the `[d]` decision marker, and any token count a server
 reported — read from `.xencode/cache/turns.jsonl` in the project,
 so it answers with every model server down), `/cost` (tokens, KV-cache reuse,
-p50/p95 speed and spend for the turns recorded in this project, read from
+p50/p95 speed — pooled, and for each model separately — and spend for the turns
+recorded in this project, read from
 `.xencode/cache/metrics.jsonl` through its rollup sidecar and priced by
 `.xencode/pricing.json` — or, with `price_lookup` on, by a listing
 `xencode prices fetch` read off a public catalogue, which every such line names
@@ -2707,6 +2708,28 @@ Today (2026-10-03), against the caps set in the config:
   • dollar cap $5 · today $0.000957 · room left
   • 1 price read off the openrouter catalogue on 2026-10-03, 0 days ago
 ```
+
+That block is the report as it was recorded on 2026-10-03, with one model in the
+project. A `Per model:` line now carries two more things, and the format is the
+point rather than the numbers, so it is written as a shape:
+
+```text
+  <model> — <n> records · <prompted> prompted · <generated> generated · <the price, or why there is none> · p50 <speed> tok/s (<m> records that reported one)
+```
+
+The count is there because a rate over three records is not a property of a
+model, and the speed is there because the pooled line above it cannot be one
+either. `cache/metrics-rollup.json` keeps the newest 512 rate samples for the
+project and the newest 64 for each model it has seen, so a slow model and a fast
+one used in the same week stop producing a single median that belongs to neither:
+six turns at 2, 4, 6, 10, 20 and 30 tok/s report `p50 10.0` for the project, `p50
+4.0` for the model that ran at 2, 4 and 6, and `p50 20.0` for the one that ran at
+10, 20 and 30. A server that never reported a rate leaves the clause out rather
+than writing `0.0 tok/s`.
+
+None of it decides anything. Model selection reads the config and the hardware
+profile; these numbers are printed and nothing branches on them, because a turn
+that ran slowly while the machine was busy is not evidence about the model.
 
 ### What a day's caps do when they are passed
 

@@ -14,14 +14,17 @@
 //! What is kept is a sum plus a fixed-size window of the recent rate samples:
 //! the totals answer "how many tokens", the window answers "how fast, usually".
 //! Percentiles are exact over that window and say how long the window is; no
-//! estimate is presented as if it were measured over all rows.
+//! estimate is presented as if it were measured over all rows. The window is
+//! kept per model as well as globally, because the speed of one model is not an
+//! average of the speeds of several, and a figure that mixes them cannot be
+//! read as a property of either.
 
 use crate::metrics::{read_metrics_since, RequestMetrics};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Bumped when the sidecar holds something the previous shape did not. A
+/// Bumped when the sidecar holds something the previous version did not. A
 /// rollup written by another version is rebuilt from the records rather than
 /// trusted. Version 2 added the repeatability counts, which a version 1 file
 /// would read back as zeros — a wrong answer rather than a missing one.
@@ -29,11 +32,23 @@ use std::path::{Path, PathBuf};
 /// from `metrics.jsonl` rather than read, because `by_day` groups records that a
 /// version-2 fold never sorted that way — and a daily budget computed from a
 /// partial day would fire late, or not at all.
-pub const ROLLUP_VERSION: u8 = 3;
+/// Version 4 added [`MetricsRollup::by_model_rates`]. A version-3 file has no
+/// such field, and every field here has a default, so it would read back
+/// cleanly and answer "this model never reported a speed" about records that
+/// did report one.
+pub const ROLLUP_VERSION: u8 = 4;
 
 /// How many of the most recent rate samples are kept for the percentiles. The
 /// window is the whole of what a percentile here can claim to cover.
 pub const RATE_SAMPLE_WINDOW: usize = 512;
+
+/// How many samples one model keeps, which is fewer than all models together
+/// get. The global window answers "how fast is this machine, usually"; a
+/// per-model window answers the same of one model, and a dozen models sharing
+/// 512 slots would leave each of them with a median over a handful of turns.
+/// Sixty-four is the smallest number whose median moves slowly enough to be
+/// worth printing beside the count of what it covers.
+pub const MODEL_RATE_SAMPLE_WINDOW: usize = 64;
 
 /// How many days [`MetricsRollup::by_day`] keeps. The sidecar is a bounded file
 /// by intent — the rows it summarises are themselves cut at
@@ -164,6 +179,47 @@ pub fn local_day_key(ts_unix_ms: u64) -> String {
     )
 }
 
+/// The recent rate samples of one model, kept apart from every other model's
+/// because a speed measured across two models describes neither.
+///
+/// This is a report and nothing else. Model selection reads the configuration
+/// and the hardware profile, never these numbers: a machine that ran one model
+/// slowly because something else was busy is not a machine that should stop
+/// being asked to use it, and a table of measured speeds is exactly the kind of
+/// figure that quietly becomes a router if a caller is allowed to branch on it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", default)]
+pub struct ModelRates {
+    /// Oldest first, truncated to [`MODEL_RATE_SAMPLE_WINDOW`] from the front.
+    pub generation_tok_s: Vec<f32>,
+    pub prompt_tok_s: Vec<f32>,
+}
+
+impl ModelRates {
+    fn add_record(&mut self, row: &RequestMetrics) {
+        push_sample(
+            &mut self.generation_tok_s,
+            row.generation_tok_s,
+            MODEL_RATE_SAMPLE_WINDOW,
+        );
+        push_sample(
+            &mut self.prompt_tok_s,
+            row.prompt_tok_s,
+            MODEL_RATE_SAMPLE_WINDOW,
+        );
+    }
+
+    /// p50 and p95 over this model's own samples, with how many that is. A model
+    /// whose records never reported a rate has none, which is not the same as 0.
+    pub fn generation_percentiles(&self) -> Option<Percentiles> {
+        Percentiles::new(&self.generation_tok_s)
+    }
+
+    pub fn prompt_percentiles(&self) -> Option<Percentiles> {
+        Percentiles::new(&self.prompt_tok_s)
+    }
+}
+
 /// The sidecar itself. Every field has a default so a partially written or
 /// older file degrades to a rebuild rather than an error.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -183,6 +239,10 @@ pub struct MetricsRollup {
     /// Grouped by the model id as it was asked for. The empty string again means
     /// the record did not name one.
     pub by_model: BTreeMap<String, TokenTotals>,
+    /// The same grouping, of the speed samples rather than the token counts, so
+    /// a model's median says what that model did. See [`ModelRates`] for what
+    /// may not be decided from this.
+    pub by_model_rates: BTreeMap<String, ModelRates>,
     /// Grouped by the local date the record was written, oldest key first, so a
     /// daily budget can be answered from the sidecar. The empty key is the day
     /// whose records claimed no time at all. See [`DAYS_KEPT`].
@@ -225,6 +285,7 @@ impl MetricsRollup {
             totals: TokenTotals::default(),
             by_session: BTreeMap::new(),
             by_model: BTreeMap::new(),
+            by_model_rates: BTreeMap::new(),
             by_day: BTreeMap::new(),
             last_by_profile: BTreeMap::new(),
             generation_tok_s: Vec::new(),
@@ -260,6 +321,10 @@ impl MetricsRollup {
             .entry(model.clone())
             .or_default()
             .add_record(row);
+        self.by_model_rates
+            .entry(model.clone())
+            .or_default()
+            .add_record(row);
         let day = self
             .by_day
             .entry(local_day_key(row.ts_unix_ms))
@@ -276,8 +341,12 @@ impl MetricsRollup {
                 retrieved_files: row.retrieved_files,
             },
         );
-        push_sample(&mut self.generation_tok_s, row.generation_tok_s);
-        push_sample(&mut self.prompt_tok_s, row.prompt_tok_s);
+        push_sample(
+            &mut self.generation_tok_s,
+            row.generation_tok_s,
+            RATE_SAMPLE_WINDOW,
+        );
+        push_sample(&mut self.prompt_tok_s, row.prompt_tok_s, RATE_SAMPLE_WINDOW);
         // The subset holds by construction: only a record that produced tokens
         // can have produced them repeatably.
         if row.completion_tokens > 0 {
@@ -356,11 +425,11 @@ fn sampling_words(row: &RequestMetrics) -> String {
     parts.join(" · ")
 }
 
-fn push_sample(window: &mut Vec<f32>, value: f32) {
+fn push_sample(window: &mut Vec<f32>, value: f32, cap: usize) {
     if !(value.is_finite() && value > 0.0) {
         return;
     }
-    if window.len() == RATE_SAMPLE_WINDOW {
+    if window.len() == cap {
         window.remove(0);
     }
     window.push(value);
@@ -731,6 +800,138 @@ mod tests {
         // The 200 oldest rates were dropped, so the window covers 201.0 ..=
         // 712.0 and its median is the 257th of those.
         assert_eq!(speed.p50, 457.0);
+        fs_reset(&dir);
+    }
+
+    /// Records for two models, written the way the writers write them, each with
+    /// its own generation rate.
+    fn rates(rows: &[(f32, &str)]) -> Vec<RequestMetrics> {
+        rows.iter()
+            .map(|(tok_s, model)| {
+                let mut m = RequestMetrics::from_timings("LOW", 4096, 10, 10, 1, *tok_s, 0.0, 1);
+                m.model = Some(model.to_string());
+                m
+            })
+            .collect()
+    }
+
+    /// The whole point of keeping a window per model: a slow model and a fast
+    /// one used in the same project have one median between them, and that
+    /// number belongs to neither of them.
+    #[test]
+    fn a_models_speed_is_not_the_average_of_the_models_it_shares_a_window_with() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        append(
+            &xencode,
+            &rates(&[
+                (1.0, "slow"),
+                (10.0, "fast"),
+                (2.0, "slow"),
+                (20.0, "fast"),
+                (3.0, "slow"),
+                (30.0, "fast"),
+                (4.0, "slow"),
+                (5.0, "slow"),
+            ]),
+        );
+        let rollup = refresh_rollup(&xencode).unwrap();
+
+        // Eight records, five of them slow: each window carries only its own.
+        assert_eq!(rollup.by_model_rates.len(), 2);
+        let slow = rollup.by_model_rates["slow"]
+            .generation_percentiles()
+            .unwrap();
+        let fast = rollup.by_model_rates["fast"]
+            .generation_percentiles()
+            .unwrap();
+        assert_eq!(slow.samples, 5, "the slow window saw the fast model");
+        assert_eq!(fast.samples, 3, "the fast window saw the slow model");
+        // Sorted 1..=5, so the median is the third value; sorted 10, 20, 30 the
+        // second.
+        assert_eq!(slow.p50, 3.0);
+        assert_eq!(fast.p50, 20.0);
+        // And the figure over everything together is neither of those, which is
+        // why it is not what a model gets shown.
+        let all = rollup.generation_percentiles().unwrap();
+        assert_eq!(all.samples, 8);
+        assert_eq!(all.p50, 5.0);
+        fs_reset(&dir);
+    }
+
+    /// A per-model window is bounded by its own cap, and one model filling its
+    /// six hundred-odd samples cannot take any from its neighbour.
+    #[test]
+    fn a_models_rate_window_is_bounded_on_its_own_and_not_against_the_others() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let cap = MODEL_RATE_SAMPLE_WINDOW;
+        // Seventy-four rates for one model, then one for the other, so a shared
+        // window would show up as a missing row rather than a subtle loss.
+        let mut rows: Vec<RequestMetrics> = rates(
+            &(1..=(cap + 10) as u32)
+                .map(|i| (i as f32, "busy"))
+                .collect::<Vec<_>>(),
+        );
+        rows.extend(rates(&[(999.0, "quiet")]));
+        append(&xencode, &rows);
+        let rollup = refresh_rollup(&xencode).unwrap();
+
+        assert_eq!(rollup.by_model_rates["busy"].generation_tok_s.len(), cap);
+        // The ten oldest went: the window is 11.0 ..= 74.0 and its median is the
+        // 32nd of those.
+        assert_eq!(rollup.by_model_rates["busy"].generation_tok_s[0], 11.0);
+        assert_eq!(
+            rollup.by_model_rates["busy"]
+                .generation_percentiles()
+                .unwrap()
+                .p50,
+            43.0
+        );
+        assert_eq!(rollup.by_model_rates["quiet"].generation_tok_s.len(), 1);
+        assert_eq!(
+            rollup.by_model_rates["quiet"]
+                .generation_percentiles()
+                .unwrap()
+                .p50,
+            999.0
+        );
+        fs_reset(&dir);
+    }
+
+    /// A version 3 sidecar is a real file from the build before this one: the
+    /// same shape, no per-model rates in it. Reading it back would have answered
+    /// "no server reported a speed for this model" about records that named one,
+    /// which is the wrong answer rather than the missing one, so the version
+    /// check turns it into a rebuild.
+    #[test]
+    fn a_version_3_sidecar_is_rebuilt_because_it_never_split_speed_by_model() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        append(&xencode, &rates(&[(8.0, "qwen3-4b"), (9.0, "qwen3-4b")]));
+        refresh_rollup(&xencode).unwrap();
+
+        let sidecar = rollup_path(&xencode);
+        let mut written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&sidecar).unwrap()).unwrap();
+        written["v"] = serde_json::json!(3);
+        written
+            .as_object_mut()
+            .unwrap()
+            .remove("by_model_rates")
+            .expect("the current sidecar does hold the field a v3 file lacked");
+        std::fs::write(&sidecar, written.to_string()).unwrap();
+
+        assert!(
+            read_rollup(&xencode).is_none(),
+            "a v3 sidecar was read as if it knew about per-model speeds"
+        );
+        let rollup = refresh_rollup(&xencode).unwrap();
+        let speed = rollup.by_model_rates["qwen3-4b"]
+            .generation_percentiles()
+            .expect("the two records did report a speed, and the rebuild lost it");
+        assert_eq!(speed.samples, 2);
+        assert_eq!(rollup.v, ROLLUP_VERSION);
         fs_reset(&dir);
     }
 

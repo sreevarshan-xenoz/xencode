@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `QM-5`: each model's speed is kept apart, and `/cost` says how many records it rests on
+
+The rollup kept one window of recent generation and prompt rates for the whole project and
+printed its p50 and p95. Six turns split between a 4 tok/s model and a 30 tok/s one produce
+one median from those six, which describes neither of them, and the `Per model:` lines
+carried token counts only — so the figure a person would pick a model from was the pooled
+one, and no line said what anything had been measured over.
+
+The sidecar now keeps the newest 64 rate samples for each model as well as the newest 512
+for everything together, and `/cost` prints each model's own median beside the count of
+records behind it: `llamacpp:qwen3-4b — 3 records · 300 prompted · 30 generated · … · p50
+20.0 tok/s (3 records that reported one)`. The pooled line stays, because it is the answer to
+a different question — how fast this machine is, usually — and the two are shown separately
+rather than one being dropped. A rate never appears without the number of records it covers,
+and a model whose server never reported one gets no rate at all rather than a zero.
+
+This is a report, not a control. Nothing selects a model from these numbers: routing reads
+the configuration and the hardware profile, and a turn that ran slowly because something else
+on the machine was busy is not evidence that the model should be avoided. The field is
+documented as such, and the version of the sidecar went up to 4 — a file written before this
+change has no per-model rates in it, and reading it back would have answered "this model
+never reported a speed" about records that did.
+
 ### Added — `QK-8`: `/trust` can name a directory's `AGENTS.md`, so those bytes can be followed
 
 `EV-5` gave a turn the instruction files of the directories it works in, and left them
