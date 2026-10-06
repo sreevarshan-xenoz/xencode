@@ -89,10 +89,57 @@ pub enum OllamaError {
     Parse(String),
 }
 
+/// Turn transport/connect error messages into user-readable prose, stripping
+/// leaked internal REST routes like `/api/show`, `/api/generate`, or `/api/version`.
+pub fn sanitize_not_running(msg: &str) -> String {
+    if let Some(url_start) = msg.find("url (") {
+        let after = &msg[url_start + 5..];
+        if let Some(url_end) = after.find(')') {
+            let full_url = &after[..url_end];
+            let base_url = if let Some(api_pos) = full_url.find("/api/") {
+                &full_url[..api_pos]
+            } else {
+                full_url
+            };
+            if msg.to_lowercase().contains("refused") || msg.to_lowercase().contains("connect") {
+                return format!("connection refused: nothing is listening on {base_url}");
+            }
+            if msg.to_lowercase().contains("timed out") || msg.to_lowercase().contains("timeout") {
+                return format!("request timed out connecting to {base_url}");
+            }
+            return format!("cannot connect to {base_url}");
+        }
+    }
+    if let Some(pos) = msg.find("/api/") {
+        if let Some(end) = msg[pos..].find(|c: char| c.is_whitespace() || c == ')' || c == ':') {
+            let mut s = msg[..pos].to_string();
+            s.push_str(&msg[pos + end..]);
+            return s;
+        }
+    }
+    msg.to_string()
+}
+
+impl OllamaError {
+    /// The raw transport/system error string without prose sanitization.
+    pub fn raw_message(&self) -> &str {
+        match self {
+            OllamaError::NotRunning(s)
+            | OllamaError::ModelNotFound(s)
+            | OllamaError::Timeout(s)
+            | OllamaError::Api(s)
+            | OllamaError::Parse(s) => s,
+        }
+    }
+}
+
 impl fmt::Display for OllamaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OllamaError::NotRunning(msg) => write!(f, "Ollama not running: {msg}"),
+            OllamaError::NotRunning(msg) => {
+                let prose = sanitize_not_running(msg);
+                write!(f, "Ollama not running: {prose}")
+            }
             OllamaError::ModelNotFound(name) => write!(f, "model not found: {name}"),
             OllamaError::Timeout(msg) => write!(f, "request timed out: {msg}"),
             OllamaError::Api(msg) => write!(f, "API error: {msg}"),
@@ -263,7 +310,7 @@ impl OllamaClient {
                         status: HealthStatus::Unavailable,
                         response_time: start.elapsed().as_secs_f64(),
                         last_check: crate::health::current_timestamp(),
-                        error_message: Some(e.to_string()),
+                        error_message: Some(sanitize_not_running(&e.to_string())),
                     };
                     Ok(health)
                 }
@@ -322,7 +369,7 @@ impl OllamaClient {
                     status,
                     response_time: start.elapsed().as_secs_f64(),
                     last_check: crate::health::current_timestamp(),
-                    error_message: Some(e.to_string()),
+                    error_message: Some(sanitize_not_running(&e.to_string())),
                 };
                 self.health_tracker.update(model, health.clone());
                 Ok(health)
@@ -673,6 +720,28 @@ mod tests {
             .name
             .clone();
         assert_eq!(picked, "qwen3:4b");
+    }
+
+    #[test]
+    fn sanitize_not_running_drops_leaked_routes() {
+        let raw_show = "error sending request for url (http://localhost:11434/api/show): tcp connect error: Connection refused (os error 111)";
+        let prose_show = sanitize_not_running(raw_show);
+        assert!(!prose_show.contains("/api/show"), "prose should not contain /api/show: {prose_show}");
+        assert!(prose_show.contains("nothing is listening on http://localhost:11434"), "{prose_show}");
+
+        let err = OllamaError::NotRunning(raw_show.to_string());
+        assert_eq!(err.raw_message(), raw_show);
+        let displayed = err.to_string();
+        assert!(!displayed.contains("/api/show"), "Display should not contain /api/show: {displayed}");
+        assert!(displayed.contains("nothing is listening on http://localhost:11434"), "{displayed}");
+
+        let raw_generate = "error sending request for url (http://localhost:11434/api/generate): tcp connect error: Connection refused";
+        let prose_generate = sanitize_not_running(raw_generate);
+        assert!(!prose_generate.contains("/api/generate"), "{prose_generate}");
+
+        let raw_version = "error sending request for url (http://localhost:11434/api/version): tcp connect error: Connection refused";
+        let prose_version = sanitize_not_running(raw_version);
+        assert!(!prose_version.contains("/api/version"), "{prose_version}");
     }
 
     // Integration tests below require a running Ollama instance.

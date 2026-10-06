@@ -4792,7 +4792,7 @@ async fn run_query_once(
     // profile's own numbers. The interactive session sizes them per turn instead.
     let caps = xencode_context_rs::ContextCaps::from_profile(hardware.profile);
     eprintln!(
-        "retrieval: up to {} files, {} characters each (character arithmetic, not measured)",
+        "retrieval: up to {} files, {} characters each",
         caps.top_k, caps.content_cap_chars
     );
     let live = xencode_context_rs::collect_live_context(&root, &prompt, caps);
@@ -6355,6 +6355,7 @@ fn check_endpoints(config: &xencode_config_rs::XencodeConfig) -> Vec<doc::SelfCh
                     "xencode config set {}_url <http-or-https-address>",
                     endpoint.name
                 )),
+                raw: None,
             },
         })
         .collect()
@@ -6446,7 +6447,8 @@ async fn model_check(config: &xencode_config_rs::XencodeConfig) -> doc::SelfChec
                     false,
                     format!("Ollama at {}: {error}", config.ollama_url),
                     Some(ollama_fix(&error, &model)),
-                ),
+                )
+                .with_raw(error.raw_message()),
             }
         }
         other => doc::SelfCheck {
@@ -6456,6 +6458,7 @@ async fn model_check(config: &xencode_config_rs::XencodeConfig) -> doc::SelfChec
                 "{model} is served by {other}; provider:{other} is the row that dials it"
             ),
             fix: None,
+            raw: None,
         },
     }
 }
@@ -6542,6 +6545,7 @@ fn bridge_rows(report: xencode_colab_rs::PreflightReport) -> Vec<doc::SelfCheck>
                 state: if check.ok { "pass" } else { "fail" }.to_string(),
                 detail: check.detail,
                 fix: check.fix,
+                raw: None,
             }
         })
         .collect()
@@ -6566,6 +6570,7 @@ async fn colab_checks() -> Vec<doc::SelfCheck> {
             detail: "the Colab bridge is not installed here and has never been brought up"
                 .to_string(),
             fix: None,
+            raw: None,
         }];
     }
     // Never `generate_key`: a report reads the machine, it does not create
@@ -6577,6 +6582,7 @@ async fn colab_checks() -> Vec<doc::SelfCheck> {
             state: "fail".to_string(),
             detail: format!("the bridge could not be probed: {problem}"),
             fix: Some("xencode colab preflight".to_string()),
+            raw: None,
         }],
     }
 }
