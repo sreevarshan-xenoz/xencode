@@ -436,6 +436,7 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (list)
 _arguments "${_arguments_options[@]}" : \
+'--all[Show all sessions, including empty ones (0 messages)]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0
@@ -445,6 +446,12 @@ _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
 ':session -- Session ID:_default' \
+&& ret=0
+;;
+(prune)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
 && ret=0
 ;;
 (gc)
@@ -478,6 +485,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(prune)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -2026,6 +2037,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(prune)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (gc)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3362,6 +3377,7 @@ _xencode__subcmd__help__subcmd__memory_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
     )
@@ -3381,6 +3397,11 @@ _xencode__subcmd__help__subcmd__memory__subcmd__gc_commands() {
 _xencode__subcmd__help__subcmd__memory__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help memory list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__prune_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__prune_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory prune commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__show_commands] )) ||
 _xencode__subcmd__help__subcmd__memory__subcmd__show_commands() {
@@ -3948,6 +3969,7 @@ _xencode__subcmd__memory_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -3969,6 +3991,7 @@ _xencode__subcmd__memory__subcmd__help_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -3995,6 +4018,11 @@ _xencode__subcmd__memory__subcmd__help__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory help list commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__prune_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__prune_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help prune commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__show_commands] )) ||
 _xencode__subcmd__memory__subcmd__help__subcmd__show_commands() {
     local commands; commands=()
@@ -4004,6 +4032,11 @@ _xencode__subcmd__memory__subcmd__help__subcmd__show_commands() {
 _xencode__subcmd__memory__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__prune_commands] )) ||
+_xencode__subcmd__memory__subcmd__prune_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory prune commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory__subcmd__show_commands] )) ||
 _xencode__subcmd__memory__subcmd__show_commands() {

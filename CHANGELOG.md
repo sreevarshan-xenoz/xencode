@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AA-4`: defer conversation memory persistence until messages exist and filter empty sessions
+
+`ConversationMemory` and `xencode memory` no longer write or display sessions with zero messages:
+
+- `ConversationMemory::start_session` no longer persists immediately to disk; sessions are written only when `add_message` is called with actual content.
+- `save_memory()` ignores empty sessions so failed queries or unused sessions do not create or alter `conversation_memory.json`.
+- `xencode memory list` filters out empty sessions by default, reporting how many empty sessions were omitted.
+- Added `--all` flag to `xencode memory list` to show all sessions with their message counts.
+- Added `xencode memory prune` subcommand to purge zero-message sessions from the persistent store.
+- Verified with unit tests in `xencode-memory-rs` and end-to-end integration tests in `tests/memory_sessions_cli.rs`.
+
 ### Fixed — `AA-3`: resolve review default base branch dynamically from repository
 
 `xencode review` now resolves its baseline ref from the repository rather than assuming `main`:

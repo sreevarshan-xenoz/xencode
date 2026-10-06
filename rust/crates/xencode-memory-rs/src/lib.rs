@@ -117,11 +117,21 @@ impl ConversationMemory {
         Ok(())
     }
 
-    /// Save conversation memory to disk.
+    /// Save conversation memory to disk. Empty sessions with no messages
+    /// are not written to disk, leaving the file untouched until a message is added.
     fn save_memory(&self) -> Result<(), MemoryError> {
         if let Some(ref memory_file) = self.memory_file {
+            let active_conversations: HashMap<String, ConversationSession> = self
+                .conversations
+                .iter()
+                .filter(|(_, s)| !s.messages.is_empty())
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if active_conversations.is_empty() && !memory_file.exists() {
+                return Ok(());
+            }
             let data = MemoryData {
-                conversations: self.conversations.clone(),
+                conversations: active_conversations,
                 current_session: self.current_session.clone(),
                 last_updated: Utc::now().to_rfc3339(),
             };
@@ -131,7 +141,8 @@ impl ConversationMemory {
         Ok(())
     }
 
-    /// Start a new conversation session.
+    /// Start a new conversation session. Does not persist to disk until
+    /// a message is added.
     pub fn start_session(&mut self, session_id: Option<String>) -> String {
         let id = session_id.unwrap_or_else(|| format!("session_{}", Utc::now().timestamp()));
 
@@ -147,7 +158,6 @@ impl ConversationMemory {
             );
         }
         self.current_session = Some(id.clone());
-        let _ = self.save_memory();
         id
     }
 
@@ -191,9 +201,40 @@ impl ConversationMemory {
         Vec::new()
     }
 
-    /// List all conversation session IDs.
+    /// List conversation session IDs that contain at least one message.
     pub fn list_sessions(&self) -> Vec<String> {
-        self.conversations.keys().cloned().collect()
+        let mut ids: Vec<String> = self
+            .conversations
+            .iter()
+            .filter(|(_, s)| !s.messages.is_empty())
+            .map(|(k, _)| k.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// List all conversation session IDs, including empty ones.
+    pub fn list_all_sessions(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.conversations.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// Prune empty conversation sessions that have no messages, saving to disk.
+    /// Returns the number of pruned sessions.
+    pub fn prune_empty_sessions(&mut self) -> usize {
+        let before = self.conversations.len();
+        self.conversations.retain(|_, s| !s.messages.is_empty());
+        if let Some(ref cur) = self.current_session {
+            if !self.conversations.contains_key(cur) {
+                self.current_session = None;
+            }
+        }
+        let pruned = before - self.conversations.len();
+        if pruned > 0 {
+            let _ = self.save_memory();
+        }
+        pruned
     }
 
     /// Get a specific session.
@@ -205,7 +246,11 @@ impl ConversationMemory {
     pub fn switch_session(&mut self, session_id: &str) -> bool {
         if self.conversations.contains_key(session_id) {
             self.current_session = Some(session_id.to_string());
-            let _ = self.save_memory();
+            if let Some(sess) = self.conversations.get(session_id) {
+                if !sess.messages.is_empty() {
+                    let _ = self.save_memory();
+                }
+            }
             true
         } else {
             false
@@ -310,6 +355,76 @@ mod tests {
         let ctx = mem2.get_context(5);
         assert_eq!(ctx.len(), 1);
         assert_eq!(ctx[0].content, "save me");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_session_leaves_file_untouched_until_message_added() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("conversation_memory.json");
+
+        let mut mem = ConversationMemory {
+            max_items: 10,
+            conversations: HashMap::new(),
+            current_session: None,
+            memory_file: Some(file.clone()),
+        };
+
+        // Starting a session must not write to disk
+        let sid = mem.start_session(Some("unfilled".to_string()));
+        assert_eq!(sid, "unfilled");
+        assert!(!file.exists(), "starting an empty session must not create memory file");
+        assert!(mem.list_sessions().is_empty(), "list_sessions must filter out empty session");
+        assert_eq!(mem.list_all_sessions(), vec!["unfilled"]);
+
+        // Adding a message must now write to disk
+        mem.add_message("user", "first turn", None);
+        assert!(file.exists(), "adding a message must persist memory file");
+        assert_eq!(mem.list_sessions(), vec!["unfilled"]);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_sessions_are_filtered_from_listing_and_can_be_pruned() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("conversation_memory.json");
+
+        let mut mem = ConversationMemory {
+            max_items: 10,
+            conversations: HashMap::new(),
+            current_session: None,
+            memory_file: Some(file.clone()),
+        };
+
+        mem.start_session(Some("empty_1".to_string()));
+        mem.start_session(Some("full_1".to_string()));
+        mem.add_message("user", "content", None);
+        mem.start_session(Some("empty_2".to_string()));
+
+        assert_eq!(mem.list_sessions(), vec!["full_1"]);
+        let mut all = mem.list_all_sessions();
+        all.sort();
+        assert_eq!(all, vec!["empty_1", "empty_2", "full_1"]);
+
+        // Pruning removes the two empty sessions and keeps full_1
+        let pruned = mem.prune_empty_sessions();
+        assert_eq!(pruned, 2);
+        assert_eq!(mem.list_all_sessions(), vec!["full_1"]);
+        assert_eq!(mem.list_sessions(), vec!["full_1"]);
+
+        // Reload from disk to verify disk state was updated
+        let mut mem2 = ConversationMemory {
+            max_items: 10,
+            conversations: HashMap::new(),
+            current_session: None,
+            memory_file: Some(file.clone()),
+        };
+        mem2.load_memory().unwrap();
+        assert_eq!(mem2.list_all_sessions(), vec!["full_1"]);
 
         fs::remove_dir_all(&dir).unwrap();
     }

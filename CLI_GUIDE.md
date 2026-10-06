@@ -3150,12 +3150,16 @@ here stops a model from reading them, and the diff check is what notices.
 
 ### `xencode memory <action>`
 Conversation memory (kept as `conversation_memory.json` in the state directory):
-`list`, `show <session>`. `gc` and `evidence` work on a different file — the
-project's own `.xencode/state.md` — and are described below.
+`list [--all]`, `show <session>`, `prune`. `gc` and `evidence` work on a different file — the
+project's own `.xencode/state.md` — and are described below. Sessions with 0 messages are
+never persisted to disk and are filtered from `xencode memory list` by default (`--all`
+shows them). `xencode memory prune` deletes any empty sessions stored on disk.
 
 ```bash
 xencode memory list
+xencode memory list --all
 xencode memory show <session-id>
+xencode memory prune
 xencode memory gc [--apply]
 xencode memory evidence [--format text|json]
 ```

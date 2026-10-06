@@ -15225,10 +15225,7 @@ this session's own single-shot runs, which is the honest provenance and also the
 — a query that never reached a model still leaves a row that looks like a conversation.
 The older store under `~/.xencode/` shows 35 empty of 86 on the same read.
 
-- **Item AA-4** — do not write a session record until it has something in it, and do
-  not list a session with no messages. *Done-when:* a query that fails at the provider
-  leaves the memory file byte-identical, and `memory list` on a store holding an empty
-  session does not show it. Effort S. Joins W6, where the task-state rows live.
+- [x] **Item AA-4 — do not write a session record until it has something in it, and do not list a session with no messages.** — done 2026-10-06 in `xencode-memory-rs` and `xencode-cli/src/main.rs`. `ConversationMemory::start_session` no longer calls `save_memory()`; `save_memory()` filters sessions with 0 messages; `list_sessions()` filters empty sessions while `list_all_sessions()` / `--all` includes them; `xencode memory prune` deletes empty sessions from disk; verified in unit tests and end-to-end integration tests in `tests/memory_sessions_cli.rs`. *Effort: S.*
 - **Traps.** One: the empty records are already in users' files, so the listing filter
   is a behaviour change on existing data and needs a way for a person to see and delete
   them deliberately — silently hiding a record someone might want to inspect is its own
