@@ -718,9 +718,10 @@ enum Commands {
 
     /// Review the diff between a base branch and HEAD, file by file
     Review {
-        /// Base branch, tag, commit — or HEAD for uncommitted changes
-        #[arg(long, default_value = "main")]
-        base: String,
+        /// Base branch, tag, commit — or HEAD for uncommitted changes. Defaults
+        /// to origin/HEAD, init.defaultBranch, or 'main'.
+        #[arg(long)]
+        base: Option<String>,
 
         /// Output format
         #[arg(long, default_value = "text")]
@@ -5682,9 +5683,42 @@ fn review_file(root: &std::path::Path, diff: &xencode_context_rs::DiffFile) -> R
     file
 }
 
+/// Where the base branch for `xencode review` came from, reported in the
+/// triage header so a person knows what baseline was used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BaseSource {
+    Explicit,
+    OriginHead,
+    InitDefaultBranch(String),
+    DefaultFallback,
+}
+
+impl BaseSource {
+    fn header_suffix(&self) -> String {
+        match self {
+            BaseSource::Explicit => String::new(),
+            BaseSource::OriginHead => " [base resolved from origin/HEAD]".to_string(),
+            BaseSource::InitDefaultBranch(name) => {
+                format!(" [no remote; fell back to init.defaultBranch ({name})]")
+            }
+            BaseSource::DefaultFallback => " [no remote; fell back to default 'main']".to_string(),
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            BaseSource::Explicit => "explicit",
+            BaseSource::OriginHead => "origin/HEAD",
+            BaseSource::InitDefaultBranch(_) => "init.defaultBranch",
+            BaseSource::DefaultFallback => "fallback",
+        }
+    }
+}
+
 /// PR-level triage view: per-file stats plus issue counts. Pure — unit-tested.
-fn format_review_text(base: &str, files: &[ReviewedFile]) -> String {
-    let mut out = format!("Review of diff {base}...HEAD ({} files)\n", files.len());
+fn format_review_text(base: &str, suffix: Option<&str>, files: &[ReviewedFile]) -> String {
+    let s = suffix.unwrap_or("");
+    let mut out = format!("Review of diff {base}...HEAD ({} files){s}\n", files.len());
     for file in files {
         let stats = match (file.added, file.deleted) {
             (Some(a), Some(d)) => format!("+{a} -{d}"),
@@ -5717,6 +5751,72 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
     toplevel
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| cwd.to_path_buf())
+}
+
+/// Base branch for `xencode review`: explicit `--base`, else `origin/HEAD`,
+/// else `init.defaultBranch` (or existing `master`), else fallback `'main'`.
+fn resolve_review_base(root: &std::path::Path, explicit_base: Option<&str>) -> (String, BaseSource) {
+    if let Some(b) = explicit_base {
+        return (b.to_string(), BaseSource::Explicit);
+    }
+
+    let ref_exists = |r: &str| -> bool {
+        std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "--quiet", r])
+            .current_dir(root)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    // 1. Try git symbolic-ref refs/remotes/origin/HEAD
+    let origin_head = std::process::Command::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if let Some(sym_ref) = origin_head {
+        let short_ref = sym_ref
+            .strip_prefix("refs/remotes/")
+            .unwrap_or(&sym_ref)
+            .to_string();
+        if ref_exists(&short_ref) || ref_exists(&sym_ref) {
+            return (short_ref, BaseSource::OriginHead);
+        }
+    }
+
+    // 2. Try git config --get init.defaultBranch
+    let default_branch = std::process::Command::new("git")
+        .args(["config", "--get", "init.defaultBranch"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if let Some(branch) = default_branch {
+        if ref_exists(&branch) {
+            return (branch.clone(), BaseSource::InitDefaultBranch(branch));
+        }
+    }
+
+    // If init.defaultBranch was unset, check if local master exists
+    if ref_exists("master") {
+        return (
+            "master".to_string(),
+            BaseSource::InitDefaultBranch("master".to_string()),
+        );
+    }
+
+    // 3. Fall back to "main"
+    ("main".to_string(), BaseSource::DefaultFallback)
 }
 
 /// The `AR-1` interop probe.
@@ -8434,9 +8534,10 @@ fn run_interop(
     Ok(())
 }
 
-fn run_review(base: String, format: OutputFormat) -> Result<(), String> {
+fn run_review(explicit_base: Option<String>, format: OutputFormat) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = resolve_review_root(&cwd);
+    let (base, source) = resolve_review_base(&root, explicit_base.as_deref());
     let diffs = xencode_context_rs::git_diff_numstat(&root, &base)?;
     let files: Vec<ReviewedFile> = diffs.iter().map(|d| review_file(&root, d)).collect();
     match format {
@@ -8453,18 +8554,27 @@ fn run_review(base: String, format: OutputFormat) -> Result<(), String> {
                     })
                 })
                 .collect();
-            let output = serde_json::json!({
+            let mut output = serde_json::json!({
                 "base": base,
                 "files_changed": files.len(),
                 "files": arr,
             });
+            if let Some(obj) = output.as_object_mut() {
+                obj.insert(
+                    "base_source".to_string(),
+                    serde_json::Value::String(source.label().to_string()),
+                );
+            }
             println!(
                 "{}",
                 serde_json::to_string_pretty(&output).map_err(|e| e.to_string())?
             );
         }
         OutputFormat::Text => {
-            println!("{}", format_review_text(&base, &files));
+            println!(
+                "{}",
+                format_review_text(&base, Some(&source.header_suffix()), &files)
+            );
             for file in &files {
                 for issue in &file.issues {
                     let icon = match issue.severity.label() {
@@ -10779,13 +10889,86 @@ mod tests {
                 note: Some("binary".to_string()),
             },
         ];
-        let out = super::format_review_text("main", &files);
+        let out = super::format_review_text("main", None, &files);
         assert!(
             out.contains("Review of diff main...HEAD (2 files)"),
             "{out}"
         );
         assert!(out.contains("src/a.rs (+10 -2)"), "{out}");
         assert!(out.contains("assets/logo.png (binary)"), "{out}");
+
+        let suffixed = super::format_review_text(
+            "origin/main",
+            Some(" [base resolved from origin/HEAD]"),
+            &files,
+        );
+        assert!(
+            suffixed.contains("Review of diff origin/main...HEAD (2 files) [base resolved from origin/HEAD]"),
+            "{suffixed}"
+        );
+    }
+
+    #[test]
+    fn resolve_review_base_explicit_and_fallbacks() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-cli-base-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 1. Explicit base always wins
+        let (base, src) = super::resolve_review_base(&dir, Some("custom-branch"));
+        assert_eq!(base, "custom-branch");
+        assert_eq!(src, super::BaseSource::Explicit);
+        assert_eq!(src.header_suffix(), "");
+
+        // Outside a repo: falls back to "main"
+        let (base, src) = super::resolve_review_base(&dir, None);
+        assert_eq!(base, "main");
+        assert_eq!(src, super::BaseSource::DefaultFallback);
+        assert_eq!(
+            src.header_suffix(),
+            " [no remote; fell back to default 'main']"
+        );
+
+        // Inside a repo with only master branch:
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        git(&["init", "-q", "-b", "master"]);
+        git(&["config", "user.email", "test@xencode.local"]);
+        git(&["config", "user.name", "Xencode Test"]);
+        git(&["commit", "--allow-empty", "-q", "-m", "initial"]);
+
+        let (base, src) = super::resolve_review_base(&dir, None);
+        assert_eq!(base, "master");
+        assert_eq!(
+            src,
+            super::BaseSource::InitDefaultBranch("master".to_string())
+        );
+        assert_eq!(
+            src.header_suffix(),
+            " [no remote; fell back to init.defaultBranch (master)]"
+        );
+
+        // With origin/HEAD pointing to origin/main:
+        git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        let (base, src) = super::resolve_review_base(&dir, None);
+        assert_eq!(base, "origin/main");
+        assert_eq!(src, super::BaseSource::OriginHead);
+        assert_eq!(src.header_suffix(), " [base resolved from origin/HEAD]");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

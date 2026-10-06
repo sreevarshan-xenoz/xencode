@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AA-3`: resolve review default base branch dynamically from repository
+
+`xencode review` now resolves its baseline ref from the repository rather than assuming `main`:
+
+- `--base` on `Review` is now optional (`Option<String>`).
+- When `--base` is omitted, the base branch is resolved in priority order from `git symbolic-ref refs/remotes/origin/HEAD` (e.g. `origin/main`), then `init.defaultBranch` (or existing `master`), falling back to `'main'` as a last resort.
+- The review header and `--format json` output report which base was chosen and its source (`[base resolved from origin/HEAD]`, `[no remote; fell back to init.defaultBranch (master)]`, or `[no remote; fell back to default 'main']`).
+- Repositories whose only branch is `master` now review cleanly without requiring an explicit `--base master` flag.
+- Verified with unit tests in `main.rs` and end-to-end integration tests in `tests/review_cli.rs`.
+
 ### Fixed — `AA-2`: exit non-zero when `xencode doctor` encounters failing self-checks
 
 `xencode doctor` and `xencode doctor --selfcheck` now exit with status code 1 when one or more checks fail:

@@ -15200,12 +15200,7 @@ To be exact about the blast radius: it fails loudly. A person gets an error nami
 branch, not a confident review of the wrong diff. So this is not a trust defect like
 `AA-1` and `AA-2` — it is a default chosen for one hosting service.
 
-- **Item AA-3** — take the default base from the repository instead of from a
-  constant: `git symbolic-ref refs/remotes/origin/HEAD`, then `init.defaultBranch`,
-  then `main` as the last resort, and say which of the three was used in the review
-  header. *Done-when:* a repository whose only branch is `master` reviews cleanly with
-  no `--base`, and a repository with no remote says it fell back and to what. Effort S.
-  Joins W14.
+- [x] **Item AA-3 — take the default base from the repository instead of from a constant: `git symbolic-ref refs/remotes/origin/HEAD`, then `init.defaultBranch`, then `main` as the last resort, and say which of the three was used in the review header.** — done 2026-10-06 in `xencode-cli/src/main.rs`. `--base` on `Review` is now `Option<String>`; `resolve_review_base` discovers `origin/HEAD` or `init.defaultBranch` (or `master`) or falls back to `'main'`; header and `--format json` report the base source; verified on master-only and origin/HEAD repositories in unit tests and `tests/review_cli.rs`. *Effort: S.*
 - **Trap.** Falling back to `HEAD` or to the single local branch would review an empty
   or self-referential diff and report "no changes" as a clean review. Every candidate
   has to be checked to exist as a *different* commit from the head being reviewed; a
