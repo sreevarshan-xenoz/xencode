@@ -13,7 +13,7 @@
 //!
 //! | kind | resolves to | holds |
 //! |---|---|---|
-//! | settings | `$XDG_CONFIG_HOME/xencode`, else `~/.config/xencode` | `config.json` and its backups, `layout.json`, `model_advice.json`, `skills/`, the Colab keypair |
+//! | settings | `$XDG_CONFIG_HOME/xencode`, else `~/.config/xencode` | `config.json` and its backups, `layout.json`, `model_advice.json`, `remotes/<host>.json`, `skills/`, the Colab keypair |
 //! | state | `$XDG_STATE_HOME/xencode`, else `~/.local/state/xencode` | `conversation_memory.json`, `colab.json`, `audit.jsonl`, `last_panic.log`, `llamaserver.pid` |
 //! | cache | `$XDG_CACHE_HOME/xencode`, else `~/.cache/xencode` | cached model responses, `advisories/` |
 //! | data | `$XDG_DATA_HOME/xencode`, else `~/.local/share/xencode` | downloaded GGUF weights |

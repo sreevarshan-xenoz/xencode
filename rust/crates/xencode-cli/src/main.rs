@@ -297,6 +297,12 @@ enum Commands {
         action: ColabAction,
     },
 
+    /// Manage remote inference hosts reached over SSH: add, list, use, forget
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
+
     /// Repository insights from the .xencode snapshot: broken imports,
     /// import cycles, hub files and orphans
     Advise {
@@ -1106,6 +1112,54 @@ enum ColabAction {
 }
 
 #[derive(Subcommand)]
+enum RemoteAction {
+    /// Record a remote host profile
+    Add {
+        /// Profile name (up to 32 characters: a-z, 0-9, _, -, .)
+        #[arg(allow_hyphen_values = true)]
+        name: String,
+        /// Host destination: [user@]host[:port] or ~/.ssh/config alias
+        #[arg(allow_hyphen_values = true)]
+        host: String,
+        /// Inference runtime: llama.cpp or ollama
+        #[arg(long, default_value = "llama.cpp")]
+        runtime: String,
+        /// Model repo/tag to serve on the remote machine
+        #[arg(long)]
+        model: Option<String>,
+        /// SSH port (defaults to 22 or the port parsed from host)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Local port the SSH forward listens on (defaults to 18100)
+        #[arg(long, default_value_t = xencode_config_rs::remotes::DEFAULT_LOCAL_PORT)]
+        local_port: u16,
+        /// Remote port the inference runtime binds inside the machine (0 = runtime default)
+        #[arg(long, default_value_t = 0)]
+        remote_port: u16,
+        /// Overwrite an existing profile with this name
+        #[arg(long)]
+        force: bool,
+    },
+    /// List recorded remote host profiles
+    List,
+    /// Select the active remote host profile used by default
+    Use {
+        /// Profile name to set as active
+        name: String,
+    },
+    /// Remove a recorded remote host profile
+    Forget {
+        /// Profile name to remove
+        name: String,
+    },
+    /// Show details of a remote host profile (or the active profile if omitted)
+    Show {
+        /// Profile name to display (defaults to the active profile)
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum ModelAction {
     /// List all installed Ollama models
     List,
@@ -1723,6 +1777,7 @@ async fn main() {
         Commands::Hw { action } => run_hw(action),
         Commands::History { action } => run_history(action),
         Commands::Colab { action } => run_colab(action).await,
+        Commands::Remote { action } => run_remote(action),
         Commands::Bootstrap {
             path,
             check,
@@ -3811,6 +3866,116 @@ async fn run_colab_preflight(generate_key: bool) -> Result<(), String> {
             "colab preflight found {} failing check(s)",
             report.failed()
         ))
+    }
+}
+
+fn run_remote(action: RemoteAction) -> Result<(), String> {
+    use xencode_config_rs::remotes::{
+        active, forget, list, load, parse_destination, save, set_active, Forgot, RemoteProfile,
+    };
+    match action {
+        RemoteAction::Add {
+            name,
+            host,
+            runtime,
+            model,
+            port,
+            local_port,
+            remote_port,
+            force,
+        } => {
+            let dest = parse_destination(&host).map_err(|e| e.to_string())?;
+            let ssh_port = port.or(dest.port).unwrap_or(22);
+            let profile = RemoteProfile {
+                name: name.clone(),
+                host: dest.host,
+                user: dest.user,
+                port: ssh_port,
+                runtime,
+                model,
+                local_port,
+                remote_port,
+            };
+            let path = save(&profile, force).map_err(|e| e.to_string())?;
+            println!(
+                "Recorded remote profile `{}` in {}",
+                profile.name,
+                path.display()
+            );
+            Ok(())
+        }
+        RemoteAction::List => {
+            let inventory = list().map_err(|e| e.to_string())?;
+            let current = active().map_err(|e| e.to_string())?;
+            let active_name = current.as_ref().map(|p| p.name.as_str());
+            if inventory.is_empty() {
+                println!(
+                    "No remote profiles recorded. Add one with `xencode remote add <name> <user@host>`."
+                );
+                return Ok(());
+            }
+            println!("Remote profiles:");
+            for profile in &inventory.profiles {
+                let marker = if active_name == Some(profile.name.as_str()) {
+                    "*"
+                } else {
+                    " "
+                };
+                println!("  {marker} {:<12} {}", profile.name, profile.summary());
+            }
+            for (bad, err) in &inventory.unreadable {
+                println!("  ! {:<12} unreadable: {err}", bad);
+            }
+            Ok(())
+        }
+        RemoteAction::Use { name } => {
+            set_active(&name).map_err(|e| e.to_string())?;
+            println!("Active remote profile set to `{name}`.");
+            Ok(())
+        }
+        RemoteAction::Forget { name } => match forget(&name).map_err(|e| e.to_string())? {
+            Forgot::Removed => {
+                println!("Removed remote profile `{name}`.");
+                Ok(())
+            }
+            Forgot::RemovedWhileActive => {
+                println!("Removed remote profile `{name}` (active profile cleared).");
+                Ok(())
+            }
+            Forgot::NotRecorded => Err(format!("`{name}` is not a recorded remote profile")),
+        },
+        RemoteAction::Show { name } => {
+            let target = match name {
+                Some(n) => load(&n)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("`{n}` is not a recorded remote profile"))?,
+                None => active().map_err(|e| e.to_string())?.ok_or_else(|| {
+                    "No active remote profile. Use `xencode remote use <name>` or specify a profile name."
+                        .to_string()
+                })?,
+            };
+            let is_active = active()
+                .ok()
+                .flatten()
+                .map(|a| a.name == target.name)
+                .unwrap_or(false);
+            let active_marker = if is_active { " [active]" } else { "" };
+            println!("Remote profile `{}`{active_marker}", target.name);
+            println!("  destination: {}", target.destination());
+            println!("  ssh port:    {}", target.port);
+            println!("  runtime:     {}", target.runtime);
+            if let Some(m) = &target.model {
+                println!("  model:       {m}");
+            }
+            println!("  local port:  {}", target.local_port);
+            let rport = if target.remote_port == 0 {
+                "0 (runtime default)".to_string()
+            } else {
+                target.remote_port.to_string()
+            };
+            println!("  remote port: {rport}");
+            Ok(())
+        }
     }
 }
 

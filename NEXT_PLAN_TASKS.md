@@ -1362,6 +1362,13 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       the same GGUF up somewhere that is not Colab, answer a real
       `xencode query -m 'remote:…'`, `down` cleanly, and `status` after a killed
       tunnel says so instead of lying.
+      *(Mid-item progress 2026-10-06: profile store and CLI subcommands landed — `xencode remote add|list|use|forget|show`
+      stores per-host profiles under `remotes/<name>.json` (mode 0600) with safe
+      validation against shell metacharacters and leading option flags, and pointer
+      file `remotes/active`. 16 tests pass — 11 in config crate, 5 CLI integration.
+      Second half of the row — live `up`/`status`/`down` — requires the SSH backend,
+      L-3 probe, L-4 hardening, and a second real machine for its end-to-end verification,
+      so the item remains open until run on real hardware.)*
 - [ ] **L-3 — remote capability probe.** Run detection **on the box** —
       `nvidia-smi`, `lspci` for AMD, `system_profiler`/`sysctl` for Apple, plus
       RAM and free disk — and pick the runtime from the result: CUDA tarball →
@@ -11098,6 +11105,15 @@ Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal or
   (`round_cap` after one tool round, `wall_cap` after 7.6 s against 1.2 s,
   `cost_cap` after one round priced at 4,097,000 microdollars). Twelve unit
   tests on the caps arithmetic, the derived status and the history join.
+
+- [-] `L-2` (in progress) — 2026-10-06. Profile store and CLI management landed:
+  `xencode remote add|list|use|forget|show` records and manages per-host
+  profiles under `$XDG_CONFIG_HOME/xencode/remotes/<name>.json` (mode 0600)
+  with strict validation against shell metacharacters and leading option flags,
+  plus pointer file `remotes/active`. 16 tests pass (11 in config crate, 5 CLI
+  integration). Second half of the row (`up`/`status`/`down`) requires the SSH
+  backend, L-3 probe, L-4 pinning, and a second real machine for its end-to-end
+  verification, so the item remains open until run on real hardware.
 
 #### W13 — Agent pipelines, not graphs — 3 items
 

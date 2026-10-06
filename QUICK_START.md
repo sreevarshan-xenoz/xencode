@@ -259,6 +259,19 @@ its disk, so when the row goes red run `xencode colab up --reconnect` — it
 reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 `colab.json` alone.
 
+### Remote inference hosts (SSH)
+Have your own machine with a GPU? Record host profiles and manage which one to use over SSH (`L-2`):
+
+```bash
+# Record a remote host profile (user@host[:port] or ~/.ssh/config alias)
+xencode remote add lab dev@192.168.1.100:2222 --runtime llama.cpp --model qwen2.5:7b
+
+# List recorded profiles and pick the active one
+xencode remote list
+xencode remote use lab
+xencode remote show
+```
+
 ## Commands
 
 ### In the TUI

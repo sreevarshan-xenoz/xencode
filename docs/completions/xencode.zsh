@@ -757,6 +757,105 @@ esac
     ;;
 esac
 ;;
+(remote)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__remote_commands" \
+"*::: :->remote" \
+&& ret=0
+
+    case $state in
+    (remote)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-remote-command-$line[1]:"
+        case $line[1] in
+            (add)
+_arguments "${_arguments_options[@]}" : \
+'--runtime=[Inference runtime\: llama.cpp or ollama]:RUNTIME:_default' \
+'--model=[Model repo/tag to serve on the remote machine]:MODEL:_default' \
+'--port=[SSH port (defaults to 22 or the port parsed from host)]:PORT:_default' \
+'--local-port=[Local port the SSH forward listens on (defaults to 18100)]:LOCAL_PORT:_default' \
+'--remote-port=[Remote port the inference runtime binds inside the machine (0 = runtime default)]:REMOTE_PORT:_default' \
+'--force[Overwrite an existing profile with this name]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Profile name (up to 32 characters\: a-z, 0-9, _, -, .):_default' \
+':host -- Host destination\: \[user@\]host\[\:port\] or ~/.ssh/config alias:_default' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(use)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Profile name to set as active:_default' \
+&& ret=0
+;;
+(forget)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Profile name to remove:_default' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+'::name -- Profile name to display (defaults to the active profile):_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__remote__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-remote-help-command-$line[1]:"
+        case $line[1] in
+            (add)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(use)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(forget)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[Maximum findings to show (0 shows all)]:LIMIT:_default' \
@@ -2035,6 +2134,42 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(remote)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__remote_commands" \
+"*::: :->remote" \
+&& ret=0
+
+    case $state in
+    (remote)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-remote-command-$line[1]:"
+        case $line[1] in
+            (add)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(use)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(forget)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2443,6 +2578,7 @@ _xencode_commands() {
 'tasks:Manage background tasks (file-backed, survives this process)' \
 'worktree:Manage git worktrees of the current repository' \
 'colab:Google Colab bridge\: preflight, then up / status / down for a model server running on a Colab VM' \
+'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -2871,6 +3007,7 @@ _xencode__subcmd__help_commands() {
 'tasks:Manage background tasks (file-backed, survives this process)' \
 'worktree:Manage git worktrees of the current repository' \
 'colab:Google Colab bridge\: preflight, then up / status / down for a model server running on a Colab VM' \
+'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3376,6 +3513,42 @@ _xencode__subcmd__help__subcmd__query_commands() {
 _xencode__subcmd__help__subcmd__release-notes_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help release-notes commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__remote_commands] )) ||
+_xencode__subcmd__help__subcmd__remote_commands() {
+    local commands; commands=(
+'add:Record a remote host profile' \
+'list:List recorded remote host profiles' \
+'use:Select the active remote host profile used by default' \
+'forget:Remove a recorded remote host profile' \
+'show:Show details of a remote host profile (or the active profile if omitted)' \
+    )
+    _describe -t commands 'xencode help remote commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__remote__subcmd__add_commands] )) ||
+_xencode__subcmd__help__subcmd__remote__subcmd__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help remote add commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__remote__subcmd__forget_commands] )) ||
+_xencode__subcmd__help__subcmd__remote__subcmd__forget_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help remote forget commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__remote__subcmd__list_commands] )) ||
+_xencode__subcmd__help__subcmd__remote__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help remote list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__remote__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__remote__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help remote show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__remote__subcmd__use_commands] )) ||
+_xencode__subcmd__help__subcmd__remote__subcmd__use_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help remote use commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__removal_commands] )) ||
 _xencode__subcmd__help__subcmd__removal_commands() {
@@ -4093,6 +4266,85 @@ _xencode__subcmd__query_commands() {
 _xencode__subcmd__release-notes_commands() {
     local commands; commands=()
     _describe -t commands 'xencode release-notes commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote_commands] )) ||
+_xencode__subcmd__remote_commands() {
+    local commands; commands=(
+'add:Record a remote host profile' \
+'list:List recorded remote host profiles' \
+'use:Select the active remote host profile used by default' \
+'forget:Remove a recorded remote host profile' \
+'show:Show details of a remote host profile (or the active profile if omitted)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode remote commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__add_commands] )) ||
+_xencode__subcmd__remote__subcmd__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote add commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__forget_commands] )) ||
+_xencode__subcmd__remote__subcmd__forget_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote forget commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help_commands] )) ||
+_xencode__subcmd__remote__subcmd__help_commands() {
+    local commands; commands=(
+'add:Record a remote host profile' \
+'list:List recorded remote host profiles' \
+'use:Select the active remote host profile used by default' \
+'forget:Remove a recorded remote host profile' \
+'show:Show details of a remote host profile (or the active profile if omitted)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode remote help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help__subcmd__add_commands] )) ||
+_xencode__subcmd__remote__subcmd__help__subcmd__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote help add commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help__subcmd__forget_commands] )) ||
+_xencode__subcmd__remote__subcmd__help__subcmd__forget_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote help forget commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__remote__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help__subcmd__list_commands] )) ||
+_xencode__subcmd__remote__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote help list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__remote__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__help__subcmd__use_commands] )) ||
+_xencode__subcmd__remote__subcmd__help__subcmd__use_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote help use commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__list_commands] )) ||
+_xencode__subcmd__remote__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__show_commands] )) ||
+_xencode__subcmd__remote__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__remote__subcmd__use_commands] )) ||
+_xencode__subcmd__remote__subcmd__use_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode remote use commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__removal_commands] )) ||
 _xencode__subcmd__removal_commands() {
