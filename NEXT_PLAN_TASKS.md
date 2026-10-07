@@ -12206,6 +12206,14 @@ worker, `OR-` for the thing that decides what workers to talk to.
       checked by mutation, then reverted — so the parallelism claim is falsifiable, not
       decorative. This is a library capability: no CLI command or control-room surface
       drives it yet (`X-3`/`OR-12` consume it), so no user-facing doc changes here.
+      *Corrected 2026-10-07:* a cycle was detected but not named. The reported path was
+      trimmed from the last task the search had reached rather than from the task the
+      back edge closed on, so a `A → B → A` loop printed as `B → B`, and a task that
+      merely walks into a loop was printed as if it were inside it. The test only
+      matched the error variant, never the ids, which is how a promise about naming
+      passed without naming anything. The search now returns the task the cycle closes
+      on and trims from there; three cases assert the exact node list, including the
+      walk-in-one case.
 - [x] **OR-3 — the permission broker.** Answer a worker's approval request where the
       vendor supports it (Claude's `--permission-prompt-tool` over `M-5`), pre-grant the
       lowest sufficient mode where it does not, and never widen a mode on a worker's own

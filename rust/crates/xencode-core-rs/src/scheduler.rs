@@ -138,43 +138,46 @@ impl TaskGraph {
         let mut state: BTreeMap<String, u8> = BTreeMap::new();
         let mut path: Vec<NodeId> = Vec::new();
         for node in &self.nodes {
-            if Self::dfs_cycle(node.id.as_str(), &by_id, &mut state, &mut path) {
-                // The path ends with a repeat of a node still on it; trim to the loop.
-                let last = path.last()?.clone();
-                if let Some(start) = path.iter().position(|p| *p == last) {
-                    let mut cycle = path[start..].to_vec();
-                    cycle.push(last);
-                    return Some(cycle);
-                }
-                return Some(path);
+            if let Some(closed_on) =
+                Self::dfs_cycle(node.id.as_str(), &by_id, &mut state, &mut path)
+            {
+                // The descent is left on the path when the back edge is found, so
+                // the loop is everything from the node it closed on, plus that
+                // node again to show where it comes back around.
+                let start = path.iter().position(|p| *p == closed_on)?;
+                let mut cycle = path[start..].to_vec();
+                cycle.push(closed_on);
+                return Some(cycle);
             }
         }
         None
     }
 
+    /// Returns the node a back edge closed on, which is the node the reported
+    /// cycle has to start at — `A → B → A` is that loop, not the innermost node.
     fn dfs_cycle(
         id: &str,
         by_id: &BTreeMap<&str, &TaskNode>,
         state: &mut BTreeMap<String, u8>,
         path: &mut Vec<NodeId>,
-    ) -> bool {
+    ) -> Option<NodeId> {
         match state.get(id).copied().unwrap_or(0) {
-            1 => return true,  // back edge to a node still on the path
-            2 => return false, // already proven acyclic from here
+            1 => return Some(id.to_string()), // back edge to a node still on the path
+            2 => return None,                 // already proven acyclic from here
             _ => {}
         }
         state.insert(id.to_string(), 1);
         path.push(id.to_string());
         if let Some(node) = by_id.get(id) {
             for need in &node.needs {
-                if Self::dfs_cycle(need, by_id, state, path) {
-                    return true;
+                if let Some(closed_on) = Self::dfs_cycle(need, by_id, state, path) {
+                    return Some(closed_on);
                 }
             }
         }
         path.pop();
         state.insert(id.to_string(), 2);
-        false
+        None
     }
 
     /// The nodes that can start now: not already finished, every node they need
@@ -558,9 +561,37 @@ mod tests {
         let mut cycle = TaskGraph::new();
         cycle.add(node("A", "true", &["B"]));
         cycle.add(node("B", "true", &["A"]));
-        assert!(
-            matches!(cycle.validate(), Err(GraphError::Cycle(_))),
-            "a two-node cycle must be named, not run"
+        assert_eq!(
+            cycle.validate(),
+            Err(GraphError::Cycle(vec!["A".into(), "B".into(), "A".into()])),
+            "a two-node cycle must be named by the nodes on it, not run"
+        );
+
+        // The nodes named have to be the loop itself: A leads into B → C → B but
+        // is not part of it, so reporting it would send someone to fix a task
+        // that has no cycle in it.
+        let mut joined = TaskGraph::new();
+        joined.add(node("A", "true", &["B"]));
+        joined.add(node("B", "true", &["C"]));
+        joined.add(node("C", "true", &["B"]));
+        assert_eq!(
+            joined.validate(),
+            Err(GraphError::Cycle(vec!["B".into(), "C".into(), "B".into()])),
+            "the tail that walks into a cycle is not on it"
+        );
+
+        let mut three = TaskGraph::new();
+        three.add(node("A", "true", &["B"]));
+        three.add(node("B", "true", &["C"]));
+        three.add(node("C", "true", &["A"]));
+        assert_eq!(
+            three.validate(),
+            Err(GraphError::Cycle(vec![
+                "A".into(),
+                "B".into(),
+                "C".into(),
+                "A".into()
+            ]))
         );
     }
 
