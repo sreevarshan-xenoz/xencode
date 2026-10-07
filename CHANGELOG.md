@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AF-2`: typed agent event publication and user interface reducer
+
+The agent engine now publishes typed events onto an internal broadcast event bus, and the user interface reduces these events into view state:
+
+- Added `EventBus` in `xencode-tui-rs` utilizing Tokio broadcast channels for decoupled event distribution.
+- Added `AgentEvent::PermissionDenied` variant in `xencode-agents-rs` capturing denied tool executions with origin tracking.
+- Implemented `reduce_agent_event` and `drain_agent_events` on `App` to reduce incoming agent events into transcript messages and status indicators.
+- Emitted `PermissionDenied` through the event bus upon user denial in `resolve_approval`, updating both chat log and the status line from that single event.
+- Connected `control_room` fleet and approval projections to `agent_stack_panes` in the layout tree over active worker event streams.
+
 ### Added — `AF-1`: append-only event log for durable conversation memory
 
 Conversation memory is now backed by an append-only event log, preserving full conversation history while deriving compacted message projections for active context:

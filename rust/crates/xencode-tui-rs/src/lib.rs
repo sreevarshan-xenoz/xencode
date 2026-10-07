@@ -8,6 +8,7 @@ pub mod crate_docs;
 pub mod crate_sources;
 pub mod detached;
 pub mod eval_judge;
+pub mod event_bus;
 pub mod focus;
 pub mod gitsign;
 pub mod help;

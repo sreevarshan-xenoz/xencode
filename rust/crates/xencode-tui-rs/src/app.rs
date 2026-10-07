@@ -200,6 +200,7 @@ pub struct SpawnRecord {
     pub running: bool,
     pub failed: bool,
     pub steps: Vec<(String, String)>,
+    pub events: Vec<xencode_agents_rs::protocol::AgentEvent>,
 }
 
 impl SpawnRecord {
@@ -525,6 +526,9 @@ pub struct App<'a> {
         )>,
     >,
     pub memory: ConversationMemory,
+    pub event_bus: crate::event_bus::EventBus,
+    pub event_rx: tokio::sync::broadcast::Receiver<xencode_agents_rs::protocol::AgentEvent>,
+    pub last_permission_denied: Option<String>,
     pub feature_nav_selected: usize,
 
     // Performance & health tracking
@@ -2457,10 +2461,30 @@ impl<'a> App<'a> {
         self.note_layout_change(crate::transitions::Trigger::SessionOpened { restored });
     }
 
+    /// Control room projection over active agent event streams (AF-2).
+    ///
+    /// Reached from the layout tree (`agent_stack_panes`) on every draw pass,
+    /// turning the engine's typed event streams into projected fleet and approval panes.
+    pub fn control_room_panes(&self) -> Vec<crate::view::AgentPane> {
+        let streams: Vec<crate::control_room::Stream<'_>> = self
+            .spawns
+            .iter()
+            .map(|s| crate::control_room::Stream {
+                worker: crate::control_room::WorkerRef {
+                    agent: "subagent".to_string(),
+                    task: s.task.clone(),
+                    node: None,
+                },
+                events: &s.events,
+            })
+            .collect();
+        let room = crate::control_room::ControlRoom::new(streams, None);
+        crate::worker_bridge::bridge(&room)
+    }
+
     /// The agent stack's panes, rebuilt from live state on every draw: one
     /// per spawned subagent run, one for the ByteBot run, one for queued
-    /// approvals. Always three, idle ones saying so — switching never lands on
-    /// nothing, and no content here can go stale.
+    /// approvals, and any control room panes projected from active agent event streams (AF-2).
     pub fn agent_stack_panes(&self) -> Vec<crate::view::AgentPane> {
         let spawns: Vec<(String, String)> = self
             .spawns
@@ -2472,7 +2496,30 @@ impl<'a> App<'a> {
             .iter()
             .map(|(request, _)| format!("{} — {}", request.tool, request.summary))
             .collect();
-        crate::view::agent_panes(&spawns, &self.bytebot_steps, &approvals)
+        let mut panes = crate::view::agent_panes(&spawns, &self.bytebot_steps, &approvals);
+        panes.extend(self.control_room_panes());
+        panes
+    }
+
+    /// Reduce an agent event into UI state (AF-2).
+    pub fn reduce_agent_event(&mut self, event: &xencode_agents_rs::protocol::AgentEvent) {
+        if let xencode_agents_rs::protocol::AgentEvent::PermissionDenied { tool, reason, .. } =
+            event
+        {
+            let summary = reason.as_deref().unwrap_or(tool.as_str());
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("⚙ {summary} · denied"),
+            });
+            self.last_permission_denied = Some(format!("denied: {summary}"));
+        }
+    }
+
+    /// Drain queued agent events from the event bus and reduce them into UI state (AF-2).
+    pub fn drain_agent_events(&mut self) {
+        while let Ok(event) = self.event_rx.try_recv() {
+            self.reduce_agent_event(&event);
+        }
     }
 
     /// Isolated app for tests: default config, non-persistent conversation
@@ -2607,6 +2654,8 @@ impl<'a> App<'a> {
         let theme = ThemeColors::get(&config.active_theme);
 
         let (approval_tx, approval_rx) = mpsc::unbounded_channel();
+        let event_bus = crate::event_bus::EventBus::default();
+        let event_rx = event_bus.subscribe();
         let git_status = git_status_map();
         let git_branch = Command::new("git")
             .args(["branch", "--show-current"])
@@ -2717,6 +2766,9 @@ impl<'a> App<'a> {
             approval_tx,
             approval_rx: Some(approval_rx),
             memory,
+            event_bus,
+            event_rx,
+            last_permission_denied: None,
             feature_nav_selected: 0,
             session_start_time: now,
             ollama_health_entries: HashMap::new(),
@@ -3167,10 +3219,21 @@ impl<'a> App<'a> {
         }
         let _ = responder.send(answer);
         self.approval_scroll = 0;
-        self.messages.push(UiMessage {
-            role: "system".to_string(),
-            content: format!("⚙ {} · {}", request.summary, answer.tag()),
-        });
+        if answer == crate::agent_tools::ApprovalAnswer::Denied {
+            let event = xencode_agents_rs::protocol::AgentEvent::PermissionDenied {
+                tool: request.tool.clone(),
+                call_id: None,
+                reason: Some(request.summary.clone()),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            };
+            self.event_bus.publish(event);
+            self.drain_agent_events();
+        } else {
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("⚙ {} · {}", request.summary, answer.tag()),
+            });
+        }
     }
 
     pub(crate) fn style_chat_input(&mut self) {
@@ -4552,6 +4615,7 @@ impl<'a> App<'a> {
             running: true,
             failed: false,
             steps: Vec::new(),
+            events: Vec::new(),
         });
         // The worktree list (Ctrl+O) should show it immediately.
         self.refresh_worktrees();
@@ -4598,15 +4662,28 @@ impl<'a> App<'a> {
             return;
         };
         if let Some(summary) = body.strip_prefix("call:") {
-            self.spawns[i]
-                .steps
-                .push((summary.to_string(), "running".to_string()));
+            let rec = &mut self.spawns[i];
+            rec.steps.push((summary.to_string(), "running".to_string()));
+            let step_count = rec.steps.len();
+            rec.events.push(xencode_agents_rs::protocol::AgentEvent::ToolStarted {
+                tool: summary.split_whitespace().next().unwrap_or(summary).to_string(),
+                call_id: Some(format!("spawn-{id}-step-{step_count}")),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            });
             return;
         }
         if let Some(outcome) = body.strip_prefix("done:") {
-            if let Some(last) = self.spawns[i].steps.last_mut() {
+            let rec = &mut self.spawns[i];
+            if let Some(last) = rec.steps.last_mut() {
                 last.1 = outcome.to_string();
             }
+            let step_count = rec.steps.len();
+            rec.events.push(xencode_agents_rs::protocol::AgentEvent::ToolOutput {
+                tool: "tool".to_string(),
+                call_id: Some(format!("spawn-{id}-step-{step_count}")),
+                output: Some(outcome.to_string()),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            });
             return;
         }
         if let Some(text) = body.strip_prefix("log:") {
@@ -4622,12 +4699,16 @@ impl<'a> App<'a> {
                     last.1 = "failed".to_string();
                 }
             }
+            self.spawns[i].events.push(xencode_agents_rs::protocol::AgentEvent::Error {
+                message: text.to_string(),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            });
             self.system_line(&format!("⏺ spawn #{id} failed — {text}"));
             return;
         }
         if let Some(text) = body.strip_prefix("finish:") {
             self.spawns[i].running = false;
-            let (id, task, line, final_text) = {
+            let (id, task, line, final_text, failed) = {
                 let rec = &self.spawns[i];
                 let line = format!(
                     "⏺ spawn #{id} {} — branch `{}` at `{}`, {}",
@@ -4636,8 +4717,16 @@ impl<'a> App<'a> {
                     rec.path.display(),
                     rec.finished_line()
                 );
-                (rec.id, rec.task.clone(), line, text.to_string())
+                (rec.id, rec.task.clone(), line, text.to_string(), rec.failed)
             };
+            self.spawns[i].events.push(xencode_agents_rs::protocol::AgentEvent::Completed {
+                outcome: Some(if failed {
+                    "failed".to_string()
+                } else {
+                    "success".to_string()
+                }),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            });
             self.system_line(&line);
             if !final_text.trim().is_empty() {
                 self.messages.push(UiMessage {
@@ -15229,6 +15318,7 @@ mod tests {
             running: true,
             failed: false,
             steps: Vec::new(),
+            events: Vec::new(),
         });
         app.spawn_event(1, "call:read_file src/app.rs");
         app.spawn_event(1, "done:done");
@@ -15277,6 +15367,7 @@ mod tests {
             running: true,
             failed: false,
             steps: Vec::new(),
+            events: Vec::new(),
         });
         app.spawn_event(2, "call:run_command cargo test");
         app.spawn_event(2, "err:connection refused");
@@ -15293,8 +15384,9 @@ mod tests {
             .messages
             .iter()
             .rev()
-            .any(|m| m.role == "system"
-                && m.content.contains("spawn #2 failed — connection refused")));
+            .find(|m| m.role == "system"
+                && m.content.contains("spawn #2 failed — connection refused"))
+            .is_some());
     }
 
     #[test]
@@ -15308,6 +15400,7 @@ mod tests {
             running: true,
             failed: false,
             steps: vec![("read_file src/app.rs".to_string(), "running".to_string())],
+            events: Vec::new(),
         });
         app.spawns.push(SpawnRecord {
             id: 2,
@@ -15317,6 +15410,7 @@ mod tests {
             running: false,
             failed: false,
             steps: vec![("write_file src/lib.rs".to_string(), "done".to_string())],
+            events: Vec::new(),
         });
         let before = app.messages.len();
         app.handle_spawn_command("/spawn status", mpsc::unbounded_channel().0);
@@ -17369,5 +17463,56 @@ mod tests {
         app.handle_gate_command("/gate");
         let report = system_lines(&app).join("\n");
         assert!(report.contains("recording only"), "{report}");
+    }
+
+    #[test]
+    fn event_bus_permission_denied_reduces_into_transcript_and_status() {
+        let mut app = App::for_tests();
+        assert!(app.last_permission_denied.is_none());
+
+        // 1. Publishing an AgentEvent::PermissionDenied to the event bus
+        app.event_bus.publish(xencode_agents_rs::protocol::AgentEvent::PermissionDenied {
+            tool: "run_command".to_string(),
+            call_id: None,
+            reason: Some("delete files".to_string()),
+            origin: xencode_agents_rs::protocol::Origin::Observed,
+        });
+
+        // Drain bus events into UI reducer
+        app.drain_agent_events();
+
+        // Chat transcript has the formatted system line
+        let last_msg = app.messages.last().expect("must have message");
+        assert_eq!(last_msg.role, "system");
+        assert_eq!(last_msg.content, "⚙ delete files · denied");
+
+        // Status bar line holds the indicator
+        assert_eq!(
+            app.last_permission_denied.as_deref(),
+            Some("denied: delete files")
+        );
+
+        // 2. Control room reached from agent_stack_panes
+        app.spawns.push(SpawnRecord {
+            id: 42,
+            branch: "spawn-42".to_string(),
+            path: std::path::PathBuf::from("/tmp/spawn-42"),
+            task: "refactor agent loop".to_string(),
+            running: true,
+            failed: false,
+            steps: Vec::new(),
+            events: vec![
+                xencode_agents_rs::protocol::AgentEvent::ToolStarted {
+                    tool: "read_file".to_string(),
+                    call_id: Some("c1".to_string()),
+                    origin: xencode_agents_rs::protocol::Origin::Observed,
+                },
+            ],
+        });
+
+        let panes = app.agent_stack_panes();
+        // Base 3 panes + at least 1 control room fleet pane
+        assert!(panes.len() > 3);
+        assert!(panes.iter().any(|p| p.title.contains("Workers (1)")));
     }
 }

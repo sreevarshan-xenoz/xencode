@@ -15707,6 +15707,7 @@ Three corrections the brief did not carry, each of which changes what should be 
   event, `control_room.rs` is reached from the layout tree rather than only from its own tests,
   and the existing keymap and approval tests pass unchanged — proof the seam moved plumbing and
   not behaviour.
+  *Shipped:* Engine publishes typed events (`AgentEvent::PermissionDenied`, `ToolStarted`, `ToolOutput`, `Error`, `Completed`) over an internal `EventBus` broadcast channel. `App` reduces events via `reduce_agent_event` and `drain_agent_events` updating transcript messages and status bar denied indicator. `resolve_approval` on user denial publishes through the event bus. `agent_stack_panes` connects to `control_room` fleet and approval projections from active worker event streams. 2560 tests passing; clippy clean.
 
 - **AF-3 — compose the engine from statically-linked implementations chosen by configuration.**
   *Effort: M.* This is the honest Rust half of "everything is a plugin", and the dishonest half

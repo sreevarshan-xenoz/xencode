@@ -42,6 +42,7 @@ const ALL_VARIANTS: &[&str] = &[
     "tool_output",
     "file_changed",
     "permission_requested",
+    "permission_denied",
     "error",
     "completed",
     "session_ended",
@@ -219,7 +220,9 @@ fn the_two_unobserved_variants_are_gaps_and_not_fabricated_input() {
             assert!(
                 !matches!(
                     event,
-                    AgentEvent::PermissionRequested { .. } | AgentEvent::Error { .. }
+                    AgentEvent::PermissionRequested { .. }
+                        | AgentEvent::PermissionDenied { .. }
+                        | AgentEvent::Error { .. }
                 ),
                 "{agent} produced {:?}, so a variant the kit records as an \
                  evidence gap is now covered by a real line — replace this \
@@ -250,7 +253,7 @@ fn no_real_line_is_ever_read_as_an_invention() {
 }
 
 #[test]
-fn the_variant_names_are_the_ten_the_model_defines() {
+fn the_variant_names_are_what_the_model_defines() {
     // The kit keys on `AgentEvent::name()`. If a variant is added or renamed in
     // `protocol.rs`, this table no longer matches it and the whole kit is stale —
     // so this check ties the kit's vocabulary to the model's own, rather than to a
@@ -287,6 +290,12 @@ fn the_variant_names_are_the_ten_the_model_defines() {
         AgentEvent::PermissionRequested {
             tool: String::new(),
             call_id: None,
+            origin: Default::default(),
+        },
+        AgentEvent::PermissionDenied {
+            tool: String::new(),
+            call_id: None,
+            reason: None,
             origin: Default::default(),
         },
         AgentEvent::Error {

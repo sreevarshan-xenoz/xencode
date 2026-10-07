@@ -199,6 +199,9 @@ impl<'a> ControlRoom<'a> {
                         AgentEvent::PermissionRequested { .. } => {
                             needs_approval = Trace::Known(true);
                         }
+                        AgentEvent::PermissionDenied { .. } => {
+                            needs_approval = Trace::Known(false);
+                        }
                         AgentEvent::Error { message, .. } => {
                             status = CardStatus::Failed {
                                 message: message.clone(),
@@ -277,13 +280,23 @@ impl<'a> ControlRoom<'a> {
             if ended {
                 continue;
             }
+            let denied_tools: Vec<&str> = s
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    AgentEvent::PermissionDenied { tool, .. } => Some(tool.as_str()),
+                    _ => None,
+                })
+                .collect();
             for ev in s.events {
                 if let AgentEvent::PermissionRequested { tool, call_id, .. } = ev {
-                    out.push(PendingApproval {
-                        worker: s.worker.clone(),
-                        tool: tool.clone(),
-                        call_id: call_id.clone(),
-                    });
+                    if !denied_tools.contains(&tool.as_str()) {
+                        out.push(PendingApproval {
+                            worker: s.worker.clone(),
+                            tool: tool.clone(),
+                            call_id: call_id.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -318,6 +331,10 @@ fn detail_of(ev: &AgentEvent) -> String {
         AgentEvent::ToolRequested { tool, .. }
         | AgentEvent::ToolStarted { tool, .. }
         | AgentEvent::PermissionRequested { tool, .. } => tool.clone(),
+        AgentEvent::PermissionDenied { tool, reason, .. } => match reason {
+            Some(r) => format!("{tool}: {r}"),
+            None => format!("{tool}: denied"),
+        },
         AgentEvent::ToolOutput { tool, output, .. } => match output {
             Some(o) => format!("{tool}: {}", truncate(o)),
             None => tool.clone(),

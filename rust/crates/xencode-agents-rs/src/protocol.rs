@@ -105,6 +105,15 @@ pub enum AgentEvent {
         #[serde(default)]
         origin: Origin,
     },
+    /// A permission request was denied by policy or the operator.
+    PermissionDenied {
+        tool: String,
+        call_id: Option<String>,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        origin: Origin,
+    },
     /// The run hit a problem, or the stream said it did.
     Error {
         message: String,
@@ -140,6 +149,7 @@ impl AgentEvent {
             AgentEvent::ToolOutput { .. } => "tool_output",
             AgentEvent::FileChanged { .. } => "file_changed",
             AgentEvent::PermissionRequested { .. } => "permission_requested",
+            AgentEvent::PermissionDenied { .. } => "permission_denied",
             AgentEvent::Error { .. } => "error",
             AgentEvent::Completed { .. } => "completed",
             AgentEvent::SessionEnded { .. } => "session_ended",
@@ -156,6 +166,7 @@ impl AgentEvent {
             | AgentEvent::ToolOutput { origin, .. }
             | AgentEvent::FileChanged { origin, .. }
             | AgentEvent::PermissionRequested { origin, .. }
+            | AgentEvent::PermissionDenied { origin, .. }
             | AgentEvent::Error { origin, .. }
             | AgentEvent::Completed { origin, .. }
             | AgentEvent::SessionEnded { origin, .. } => *origin,

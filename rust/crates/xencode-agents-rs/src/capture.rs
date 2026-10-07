@@ -410,6 +410,10 @@ fn describe(event: &AgentEvent) -> String {
         AgentEvent::PermissionRequested { tool, .. } => {
             format!("approval wanted for {tool}")
         }
+        AgentEvent::PermissionDenied { tool, reason, .. } => match reason {
+            Some(r) => format!("denied for {tool}: {r}"),
+            None => format!("denied for {tool}"),
+        },
         AgentEvent::Error { message, .. } => clip(message),
         AgentEvent::Completed { outcome, .. } => match outcome {
             Some(o) => format!("completed ({o})"),
