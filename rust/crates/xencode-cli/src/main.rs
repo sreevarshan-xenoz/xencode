@@ -2685,6 +2685,13 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // from the two above: this trip has no named host in front of it,
                 // so it stays unoffered until the user says it may be.
                 "allow_web_fetch" => config.allow_web_fetch = parse_bool(&value)?,
+                // The same kind of consent, about work instead of bytes: while this
+                // is false, xencode hands nothing to another vendor's coding agent,
+                // because that program signs into its own account and xencode never
+                // sees the traffic it sends. It is not a network switch, so it is not
+                // checked against the four above — see `xencode team plan` or
+                // `xencode agents --route` for the surfaces that refuse on it.
+                "allow_external_workers" => config.allow_external_workers = parse_bool(&value)?,
                 // Which engine `web_search` may ask, if any. Checked against the
                 // names the search code itself accepts, so a typo here is told at
                 // the keyboard instead of at the first search of the next session.
@@ -4840,6 +4847,27 @@ async fn run_team(action: TeamAction) -> Result<(), String> {
                 }
                 Some(who) => who,
             };
+            // The posture is checked after the name, because a run with nobody on
+            // it was never asked for, and before anything else, because a team is
+            // not launched with refused roles dropped or one role left behind
+            // (`OR-13`).
+            if !planned.refused.is_empty() {
+                let lines: Vec<String> = planned
+                    .refused
+                    .iter()
+                    .map(|refusal| format!("  - {}", refusal.line()))
+                    .collect();
+                return Err(format!(
+                    "the {} posture refuses {} of the agents this recipe assigns roles to, so \
+                     nothing was launched and nothing was recorded:\n{}\nOpen the rule with \
+                     `xencode config set allow_external_workers true`, or give those roles a \
+                     worker the posture does not refuse — a team is never launched with the \
+                     refused roles quietly dropped.",
+                    planned.profile.name(),
+                    planned.refused.len(),
+                    lines.join("\n"),
+                ));
+            }
             if !matches!(format, OutputFormat::Json) {
                 // The JSON form prints one document once the run is over — the
                 // plan it ran on and what it took, in the same object.
@@ -4881,6 +4909,18 @@ struct PlannedRecipe {
     estimate: Option<xencode_core_rs::Estimate>,
     runs_dir: std::path::PathBuf,
     tariff: Option<f64>,
+    /// The posture this plan was read under, and the roles it refuses. A plan is
+    /// still a read, so it shows the whole team and marks what would be declined;
+    /// only `xencode team run` acts on the refusals.
+    profile: xencode_core_rs::Profile,
+    refused: Vec<xencode_core_rs::WorkerRefusal>,
+}
+
+impl PlannedRecipe {
+    /// The refusal a role's worker drew, if it drew one.
+    fn refusal_for(&self, worker: &str) -> Option<&xencode_core_rs::WorkerRefusal> {
+        self.refused.iter().find(|r| r.worker == worker)
+    }
 }
 
 fn plan_recipe(
@@ -4904,6 +4944,21 @@ fn plan_recipe(
     })?;
     let fingerprint = xencode_core_rs::recipe_fingerprint(recipe);
     let estimate = xencode_core_rs::estimate_from_runs(&runs, &fingerprint);
+    // The posture is read once, here, so the plan view, the JSON and the refusal
+    // at run time all quote the same two settings rather than each loading a
+    // config and possibly disagreeing (`OR-13`).
+    let config = XencodeConfig::load().unwrap_or_default();
+    let mut considered: Vec<(String, bool)> = Vec::new();
+    for role in &recipe.roles {
+        let answer = (
+            role.worker.clone(),
+            xencode_agents_rs::is_external_worker(&role.worker),
+        );
+        if !considered.contains(&answer) {
+            considered.push(answer);
+        }
+    }
+    let refused = config.profile().refused_workers(&considered);
     Ok(PlannedRecipe {
         waves: readiness_waves(&graph),
         critical: graph.longest_chain().unwrap_or_default(),
@@ -4915,9 +4970,9 @@ fn plan_recipe(
         recipe: recipe.clone(),
         file: file.path.clone(),
         graph,
-        tariff: XencodeConfig::load()
-            .unwrap_or_default()
-            .power_cents_per_kwh,
+        tariff: config.power_cents_per_kwh,
+        profile: config.profile(),
+        refused,
     })
 }
 
@@ -4933,6 +4988,14 @@ fn print_plan(planned: &PlannedRecipe, awaiting_approval: bool) {
         planned.scheduler.binding().label(),
     );
     println!("Nothing was launched and no check was run — this is the plan only.");
+    // Only the worker rule is enforced here, so only the worker rule is quoted:
+    // a model route is decided by the egress policy where the prompt is sent, not
+    // by a plan that launches nothing.
+    println!(
+        "Posture: {} — {}",
+        planned.profile.name(),
+        planned.profile.worker_rule()
+    );
     for (n, wave) in planned.waves.iter().enumerate() {
         for (i, id) in wave.iter().enumerate() {
             let role = planned
@@ -4948,6 +5011,9 @@ fn print_plan(planned: &PlannedRecipe, awaiting_approval: bool) {
                 role.name
             );
             println!("      worker:   {}", worker_status(role));
+            if let Some(refusal) = planned.refusal_for(&role.worker) {
+                println!("      refused:  {}", refusal.why);
+            }
             println!("      gate:     {}", gate_words(role));
             println!("      needs:    {}", needs_words(role));
             println!("      command:  {}", role.command);
@@ -5013,12 +5079,39 @@ fn print_plan(planned: &PlannedRecipe, awaiting_approval: bool) {
     println!(
         "\n  The gates above are named, not run. xencode verify is what runs those three checks."
     );
+    if !planned.refused.is_empty() {
+        let roles = planned
+            .recipe
+            .roles
+            .iter()
+            .filter(|r| planned.refusal_for(&r.worker).is_some())
+            .count();
+        println!(
+            "\n  {roles} of {} {} assigned to {} the posture above refuses, and a team is \
+             not run with roles quietly dropped: `xencode team run {}` would launch nothing at \
+             all while it stands. The posture line above names the setting that opens the rule; \
+             the other way is to give those roles a worker the posture does not refuse.",
+            plural_count(planned.recipe.roles.len(), "role", "roles"),
+            if roles == 1 { "is" } else { "are" },
+            if planned.refused.len() == 1 {
+                "an agent"
+            } else {
+                "agents"
+            },
+            planned.recipe.name,
+        );
+    }
     if awaiting_approval {
         println!(
             "\n  Nothing above has been launched, and nothing will be: run\n     xencode team \
              run {} --approved-by <your name>\n  to approve it. That prints this plan again, \
-             then runs the roles as written.",
-            planned.recipe.name
+             then runs the roles as written{}.",
+            planned.recipe.name,
+            if planned.refused.is_empty() {
+                String::new()
+            } else {
+                " — or refuses the whole team, for the reason above".to_string()
+            }
         );
     }
 }
@@ -5032,6 +5125,8 @@ fn plan_json(planned: &PlannedRecipe, launches: bool) -> serde_json::Value {
         "file": planned.file.display().to_string(),
         "capacity": planned.scheduler.capacity(),
         "binding": planned.scheduler.binding().label(),
+        "posture": planned.profile.name(),
+        "posture_rules": planned.profile.rules(),
         "launches": launches,
         "waves": planned.waves,
         "critical_path": planned.critical,
@@ -5052,6 +5147,9 @@ fn plan_json(planned: &PlannedRecipe, launches: bool) -> serde_json::Value {
             "name": role.name,
             "worker": role.worker,
             "worker_status": worker_status(role),
+            "refused_by_posture": planned
+                .refusal_for(&role.worker)
+                .map(|refusal| refusal.why.clone()),
             "gate": role.gate,
             "needs": role.needs,
             "command": role.command,
@@ -8907,6 +9005,12 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
         let probed: std::collections::BTreeSet<String> =
             claims.iter().map(|claim| claim.agent.to_string()).collect();
 
+        // The posture is read from the same config the TUI shows, and it refuses a
+        // roster agent by that name before the capability, load and cost checks are
+        // consulted, so the reason printed here is the reason the router actually
+        // applied (`OR-13`).
+        let profile = XencodeConfig::load().unwrap_or_default().profile();
+
         let installed = xencode_agents_rs::inventory();
         let names: Vec<String> = if installed.is_empty() {
             // Nothing on `PATH` matched the roster. Its names are still listed, so a
@@ -8932,6 +9036,11 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
                     .cloned()
                     .unwrap_or_default(),
                 probed: probed.contains(name),
+                // Answered from the roster row, not from the shape of the name:
+                // every candidate listed here came off that roster, so under the
+                // shipped posture all of them are refused before a measurement is
+                // read, and the refusal says which setting would change that.
+                external: xencode_agents_rs::is_external_worker(name),
                 capability_evidence: evidence_by_agent.get(name).cloned().unwrap_or_default(),
                 load: xencode_core_rs::Fact::unknown(
                     "xencode cannot see what another process has given this worker to do; the \
@@ -8958,9 +9067,16 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
             task_id: task_id.to_string(),
             required_capabilities: required_caps,
             cost_ceiling: args.max_cost,
+            profile,
         };
 
         let decision = xencode_core_rs::CapabilityRouter::route(&task, &candidates)?;
+
+        // Whether anything was refused on the posture at all, so the closing note
+        // only claims the rule is in force when it was the reason.
+        let refused_by_profile = candidates
+            .iter()
+            .any(|c| profile.check_worker(&c.id, c.external).is_err());
 
         if matches!(args.format, OutputFormat::Json) {
             println!(
@@ -8969,6 +9085,11 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
             );
         } else {
             println!("Routing decision for task '{}':", decision.task_id);
+            println!();
+            println!("  Posture: {}", profile.name());
+            for rule in profile.rules() {
+                println!("    {rule}");
+            }
             println!();
             match &decision.selected_worker {
                 Some(worker) => println!("  chosen: {worker}"),
@@ -9038,11 +9159,20 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
                 }
             }
             println!(
-                "\n  Nothing above was inferred from a name or a document: the capability lines \
+                "\n  The capability lines above were not inferred from a name or a document: they \
                 came from the help output of the binaries on this machine, read during this \
                 command. Where a line says `not measured`, that is the whole of what xencode \
                 knows, and no worker was accepted or refused because of it."
             );
+            if refused_by_profile {
+                println!(
+                    "  The one thing decided before the capability, load and cost checks were \
+                    consulted is the posture: it refuses a roster agent by its roster row, which \
+                    is a policy and not a measurement. The `Posture:` block above names the \
+                    setting that would open the rule (`xencode config set \
+                    allow_external_workers true`)."
+                );
+            }
         }
         return Ok(());
     }

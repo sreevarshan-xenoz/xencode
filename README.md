@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2743 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2765 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -616,6 +616,27 @@ flowchart TD
   forwards a rented GPU VM to `http://127.0.0.1:18000/v1`, so that route counts
   as local — the prompt still travels to Google's machine through a tunnel you
   hold. `xencode colab down` is what ends that.
+- **Work is handed to xencode's own loop unless you say otherwise.**
+  `allow_external_workers` (default `false`) is the permission about *work*
+  rather than bytes. With it off, `xencode team run` refuses a recipe whose role
+  names an agent xencode has a roster row for — the ten names on that list are
+  opencode, cline, codex, claude, gemini, crush, agy, cursor-agent, kilo and
+  kiro-cli — `xencode agents --route` declines every one of them before it
+  consults a single capability, load or price fact, and the Workers panel marks
+  such a role `refused by the Local Only posture, not launched` instead of
+  leaving it as a missing reading. The criterion is the roster row, never a
+  guess from a name, and it cuts both ways: a worker the roster cannot place is
+  not claimed to be xencode's own either, and every surface says that as the
+  unanswered question it is. Opening the rule is one setting — `xencode config
+  set allow_external_workers true`, or the **External Workers** row of the
+  Settings panel — and it does not open `allow_cloud_models` with it.
+- **The two refusals have one name.** Both rules closed is the posture the
+  product installs with, and every screen that reports it calls it `Local Only`:
+  the `Posture:` block of a team plan and of `agents --route`, the title of the
+  Workers panel, and the `/egress` preview. A refusal quotes that name, so a
+  reader can check the decision they are arguing with rather than hunt for a
+  failed check; the setting that changes it is stated once, on the rule line,
+  rather than repeated against every refused name.
 - **A text file arrives only if you say so, too.** `allow_online_docs`
   (default `false`) is a separate permission from the one above: it is the agent's
   `read_docs` tool asking crates.io or docs.rs for a crate's documentation, and it
@@ -772,7 +793,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2743 passing)
+cargo test                          # Full workspace suite (2765 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

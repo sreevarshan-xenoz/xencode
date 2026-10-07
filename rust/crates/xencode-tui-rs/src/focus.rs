@@ -501,6 +501,14 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         section: "Providers",
         kind: SettingKind::Toggle,
     },
+    // The other half of the same posture, and a different kind of consent: this
+    // row is about work handed to another vendor's program, not bytes sent over
+    // a socket, so it is its own row and cannot be read off the one above.
+    SettingRow {
+        label: "External Workers",
+        section: "Providers",
+        kind: SettingKind::Toggle,
+    },
     SettingRow {
         label: "Factory Reset",
         section: "Actions",

@@ -77,6 +77,41 @@ fn open(app: &mut App) {
     app.focus = FocusArea::WorkerPanel;
 }
 
+/// A scratch project holding one team recipe, written to disk for real so the
+/// panel reads it back through the same loader the CLI uses.
+fn scratch_project(recipe_name: &str, toml: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "xencode-workers-panel-{recipe_name}-{}",
+        std::process::id()
+    ));
+    let teams = root.join(".xencode").join("teams");
+    std::fs::create_dir_all(&teams).unwrap();
+    std::fs::write(teams.join(format!("{recipe_name}.toml")), toml).unwrap();
+    root
+}
+
+/// Two branch heads and a join, naming the agents the roster has rows for —
+/// which is what makes one of them a refusal under the shipped posture.
+const SWEEP_TOML: &str = r#"name = "docs-sweep"
+
+[[roles]]
+name = "survey"
+worker = "opencode"
+gate = ["lint"]
+command = "echo survey"
+
+[[roles]]
+name = "integrate"
+worker = "claude"
+gate = []
+needs = ["survey"]
+command = "echo integrate"
+
+[capacity]
+workers = 2
+verification_throughput = 2
+"#;
+
 #[test]
 fn ctrl_a_opens_the_panel_over_the_current_state_and_closes_again() {
     let _guard = cwd_guard();
@@ -241,40 +276,23 @@ fn r_re_reads_so_a_worker_that_started_after_the_panel_opened_shows_up() {
 /// panel's sharpest claim: a role xencode does not launch is one it cannot
 /// observe, so it must appear as unknown rather than as an idle worker — and
 /// must carry no figures, because a zero would read as a measurement.
+///
+/// This is the posture with its worker rule opened; the other test in this file
+/// reads the same project under the shipped one, where these two roles are not
+/// unobserved but refused.
 #[test]
 fn the_roles_a_recipe_names_but_xencode_did_not_launch_are_unknown_and_uncounted() {
     let _guard = cwd_guard();
-    let root = std::env::temp_dir().join(format!("xencode-workers-panel-{}", std::process::id()));
-    let teams = root.join(".xencode").join("teams");
-    std::fs::create_dir_all(&teams).unwrap();
-    let recipe = teams.join("docs-sweep.toml");
-    std::fs::write(
-        &recipe,
-        r#"name = "docs-sweep"
-
-[[roles]]
-name = "survey"
-worker = "opencode"
-gate = ["lint"]
-command = "echo survey"
-
-[[roles]]
-name = "integrate"
-worker = "claude"
-gate = []
-needs = ["survey"]
-command = "echo integrate"
-
-[capacity]
-workers = 2
-verification_throughput = 2
-"#,
-    )
-    .unwrap();
+    let root = scratch_project("docs-sweep-open", SWEEP_TOML);
+    let recipe = root
+        .join(".xencode")
+        .join("teams")
+        .join("docs-sweep-open.toml");
 
     let previous = std::env::current_dir().unwrap();
     std::env::set_current_dir(&root).unwrap();
     let mut app = App::for_tests();
+    app.config.allow_external_workers = true;
     app.refresh_worker_panel();
     let all = rows(&app);
     let details: Vec<String> = app.workers_rows.iter().map(|r| r.detail()).collect();
@@ -295,6 +313,12 @@ verification_throughput = 2
             "{line}: an unlaunched role carries no figures"
         );
     }
+    // Opening the worker rule does not open the model rule: the panel is not a
+    // way to get a prompt off the machine by accident.
+    assert!(
+        !app.config.allow_cloud_models,
+        "the row that permits work must not permit a trip"
+    );
     // The recipe's own words, traced to the file they were read from.
     let path = recipe.display().to_string();
     let survey_detail = details
@@ -331,4 +355,86 @@ verification_throughput = 2
             .any(|line| line.contains("graph: nothing measured")),
         "{all:#?}"
     );
+}
+
+/// The posture the product ships in, read off a real project (`OR-13`): a role
+/// assigned to another vendor's agent is refused by that name on screen, the row
+/// carries the rule and the setting that opens it, and opening the rule turns the
+/// very same rows back into the unobserved ones the test above describes — so
+/// what changed is the posture, not the file.
+#[test]
+fn the_shipped_posture_refuses_a_recipe_role_by_name_on_screen() {
+    let _guard = cwd_guard();
+    let root = scratch_project("docs-sweep-refused", SWEEP_TOML);
+
+    let previous = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&root).unwrap();
+    let mut app = App::for_tests();
+    assert_eq!(
+        app.config.profile(),
+        xencode_core_rs::Profile::LOCAL_ONLY,
+        "this is the posture a new install is in, not one the test arranged"
+    );
+    app.refresh_worker_panel();
+    let refused: Vec<String> = rows(&app)
+        .into_iter()
+        .filter(|line| line.contains("refused by the"))
+        .collect();
+    let details: Vec<String> = app.workers_rows.iter().map(|r| r.detail()).collect();
+
+    assert_eq!(
+        refused,
+        vec![
+            "opencode — survey: refused by the Local Only posture, not launched".to_string(),
+            "claude — integrate: refused by the Local Only posture, not launched".to_string(),
+        ],
+        "both roles name a roster agent, so both are refused by that name"
+    );
+    for line in &refused {
+        assert!(
+            !line.chars().any(|c| c.is_ascii_digit()),
+            "{line}: a refused role quotes no figures either"
+        );
+    }
+    assert_eq!(
+        app.workers_posture, "Local Only",
+        "the title quotes the posture the rows were refused by"
+    );
+    let detail = details
+        .iter()
+        .find(|d| d.contains("opencode — survey"))
+        .expect("the refused row's detail");
+    assert!(
+        detail.contains("xencode config set allow_external_workers true"),
+        "a refusal on screen has to be readable as a rule with a way out: {detail}"
+    );
+    assert!(
+        detail.contains("xencode has a roster row for `opencode`"),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("worker routes: work is handed only to xencode's own loop"),
+        "{detail}"
+    );
+
+    // Open the rule and re-read the same project: the rows go back to being
+    // unobserved rather than refused, which is what proves the refusal came from
+    // the posture and not from anything about the recipe.
+    app.config.allow_external_workers = true;
+    app.refresh_worker_panel();
+    assert_eq!(app.workers_posture, "Local Only (external workers allowed)");
+    assert!(
+        rows(&app)
+            .iter()
+            .any(|line| line == "opencode — survey: unknown, not idle"),
+        "{:#?}",
+        rows(&app)
+    );
+    assert!(
+        !rows(&app).iter().any(|l| l.contains("refused by")),
+        "an opened rule leaves nothing to refuse: {:#?}",
+        rows(&app)
+    );
+    std::env::set_current_dir(&previous).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
 }

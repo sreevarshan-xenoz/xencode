@@ -7,16 +7,57 @@
 //! out of them rather than out of a list of agents that happens to be installed
 //! here: a worker is only ever offered for a capability a probe confirmed on it,
 //! and nothing is printed as a number unless something measured it.
+//!
+//! Every roster agent is refused outright by the posture a new install is in
+//! (`OR-13`), so the gating cases below run in a home that has opened that one
+//! rule — they are about what a probe confirmed, and a refusal that happens
+//! before any probe would test nothing. The shipped posture is the two cases at
+//! the end of the file.
 
+use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
+use tempfile::TempDir;
 
 fn xencode_bin() -> &'static str {
     env!("CARGO_BIN_EXE_xencode")
 }
 
-fn run(args: &[&str]) -> String {
+/// A home with the worker rule opened by the command a person would use, so a
+/// candidate reaches the measurements these cases are about.
+fn open_home() -> &'static Path {
+    static HOME: OnceLock<TempDir> = OnceLock::new();
+    HOME.get_or_init(|| {
+        let home = TempDir::new().unwrap();
+        let out = Command::new(xencode_bin())
+            .args(["config", "set", "allow_external_workers", "true"])
+            .current_dir(home.path())
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path().join(".config"))
+            .output()
+            .expect("xencode ran");
+        assert!(
+            out.status.success(),
+            "opening the worker rule failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        home
+    })
+    .path()
+}
+
+/// A home with nothing written to it: the posture the product installs with, both
+/// rules closed.
+fn default_home() -> &'static Path {
+    static HOME: OnceLock<TempDir> = OnceLock::new();
+    HOME.get_or_init(|| TempDir::new().unwrap()).path()
+}
+
+fn run_in(home: &Path, args: &[&str]) -> String {
     let out = Command::new(xencode_bin())
         .args(args)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
         .output()
         .expect("must run xencode agents --route");
     assert!(
@@ -25,6 +66,10 @@ fn run(args: &[&str]) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn run(args: &[&str]) -> String {
+    run_in(open_home(), args)
 }
 
 fn route_json(task: &str, extra: &[&str]) -> serde_json::Value {
@@ -174,6 +219,7 @@ fn the_checks_are_reported_in_the_order_the_router_applied_them() {
     assert_eq!(
         checks,
         vec![
+            "profile",
             "capabilities",
             "load",
             "cost ceiling",
@@ -238,4 +284,127 @@ fn an_unrankable_field_is_reported_as_the_convention_that_it_is() {
             "the convention line must name the worker it settled on: {stdout}"
         );
     }
+}
+
+/// The posture a new install is in, run for real (`OR-13`): every candidate the
+/// roster knows is refused by that name before a single probe is read, the
+/// refusal is printed as its own step and against every worker, and the rule
+/// line above them names the setting that opens it — once, not per worker.
+#[test]
+fn the_shipped_posture_refuses_every_roster_agent_before_any_probe_is_read() {
+    let text = run_in(default_home(), &["agents", "--route", "posture-check"]);
+    assert!(text.contains("Posture: Local Only"), "{text}");
+    assert!(
+        text.contains("work is handed only to xencode's own loop"),
+        "the rule in force is stated, not implied: {text}"
+    );
+    assert!(
+        text.contains("xencode config set allow_external_workers true"),
+        "the printed rule names the way out: {text}"
+    );
+
+    let decision: serde_json::Value = serde_json::from_str(&run_in(
+        default_home(),
+        &["agents", "--route", "posture-check", "--format", "json"],
+    ))
+    .expect("the json form still prints one decision");
+    assert!(
+        decision["selected_worker"].is_null(),
+        "nothing on the roster may be chosen under it: {:?}",
+        decision["selected_worker"]
+    );
+    let steps = decision["steps"].as_array().unwrap();
+    assert_eq!(steps[0]["check"].as_str().unwrap(), "profile");
+    assert!(
+        steps[0]["decided"].as_bool().unwrap(),
+        "the posture decided this one: {}",
+        steps[0]["words"]
+    );
+    assert!(
+        steps[0]["words"]
+            .as_str()
+            .unwrap()
+            .contains("before the capability, load and cost checks were consulted"),
+        "{}",
+        steps[0]["words"]
+    );
+
+    let evaluations = decision["candidate_evaluations"].as_array().unwrap();
+    assert!(!evaluations.is_empty(), "the roster names candidates");
+    for ev in evaluations {
+        let refusal = &ev["rejection"]["ExternalWorkerRefused"];
+        assert!(
+            refusal.is_object(),
+            "a roster agent is refused by name, not left unexplained: {ev:?}"
+        );
+        let words = refusal["refusal"].as_str().unwrap();
+        assert!(
+            words.contains("another vendor's agent"),
+            "the reason is said: {words}"
+        );
+        assert!(
+            words.contains("Local Only profile"),
+            "and says which posture said it: {words}"
+        );
+        assert!(
+            ev["rejection"]["MissingCapabilities"].is_null(),
+            "a posture refusal is not reported as a capability refusal: {ev:?}"
+        );
+    }
+    // The summary is the one line a reader actually parses, so it groups every
+    // name under the reason instead of repeating that reason once per name.
+    let explanation = decision["explanation"].as_str().unwrap();
+    let names = evaluations
+        .iter()
+        .map(|ev| ev["worker_id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    for name in &names {
+        assert!(explanation.contains(name), "{name} is named: {explanation}");
+    }
+    assert_eq!(
+        explanation
+            .matches("refused by the Local Only posture")
+            .count(),
+        1,
+        "one sentence for one rule, shared by all {}: {explanation}",
+        names.len()
+    );
+    assert!(
+        explanation.contains("a program xencode does not control"),
+        "and it says what the rule is protecting: {explanation}"
+    );
+}
+
+/// Opening the one rule puts the same machine's agents back in the running, and
+/// nothing else changes: the capability, load and cost steps are the ones that
+/// decide, exactly as the cases above describe them.
+#[test]
+fn opening_the_worker_rule_puts_the_same_agents_back_in_the_running() {
+    let decision = route_json("posture-check", &[]);
+    let steps = decision["steps"].as_array().unwrap();
+    assert_eq!(steps[0]["check"].as_str().unwrap(), "profile");
+    assert!(
+        !steps[0]["decided"].as_bool().unwrap(),
+        "with the rule open the posture settles nothing: {}",
+        steps[0]["words"]
+    );
+    assert!(
+        steps[0]["words"]
+            .as_str()
+            .unwrap()
+            .contains("external workers allowed"),
+        "the posture is named as what it is once opened: {}",
+        steps[0]["words"]
+    );
+    for ev in decision["candidate_evaluations"].as_array().unwrap() {
+        assert!(
+            ev["rejection"]["ExternalWorkerRefused"].is_null(),
+            "nothing is refused on the posture now: {ev:?}"
+        );
+    }
+    let text = run(&["agents", "--route", "posture-check"]);
+    assert!(
+        !text.contains("The one thing decided before the capability, load and cost checks"),
+        "that sentence belongs to a decision the posture actually made: {text}"
+    );
 }

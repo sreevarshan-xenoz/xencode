@@ -2674,6 +2674,7 @@ in it was unchanged by the session that opened on it.
 | `agent_fallback_models` | list | comma-separated ordered alternates for the agent's turns (I4-01), e.g. `xencode config set agent_fallback_models "qwen2.5:14b,google_gemini:gemini-2.0-flash"`. The configured default model is always tried first, so this list holds only fallbacks (duplicates of it are dropped). A candidate is abandoned — and the chain moves on — only when it failed **before emitting any token** and the error is not our own response-decode failure; a token already on screen, or a `Parse` error, fixes the model in place. Each candidate gets one attempt per step and the transcript records a `[FALLBACK]` line when the chain moves. A candidate that would send the conversation somewhere the primary would not — a cloud API as the alternate for a local model, or the reverse — is never tried, and the transcript names it as skipped instead; a `remote:` endpoint counts as local only when its configured URL points at this machine (`localhost`, `127.x`, `::1`, `.local`). `xencode query` is single-shot and does not use this chain. An empty list (the default) disables fallback. |
 | `session_recording` | bool | Write down every model call of an agent turn — the request, the response bytes as they arrived, and what each tool returned — to `.xencode/cache/sessions/<run-id>.jsonl`, so `xencode replay` can run that turn again. Off by default. Only the routes whose bytes this program reads itself are recordable: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter. Asking for a recording of an Anthropic, Gemini or Qwen model is refused with the reason, because those have their own readers and a "recording" of them would be a paraphrase. |
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
+| `allow_external_workers` | bool | Whether a team role or a routed worker may be an agent xencode has a roster row for — another vendor's coding-agent CLI. Off by default, and off for a config written before the key existed, so the ten roster names (opencode, cline, codex, claude, gemini, crush, agy, cursor-agent, kilo, kiro-cli) are refused by that name before the capability, load and cost checks are consulted: `xencode team run` declines the whole team and records nothing, `xencode agents --route` chooses nothing and prints the refusal as its own first step, and the TUI Workers panel marks the role `refused … not launched` rather than leaving it unobserved. The criterion is the roster row, so a worker name the roster does not carry is not claimed to be xencode's own either — it is reported as a question that went unanswered. Independent of `allow_cloud_models`: opening one does not open the other. The two closed are the posture every surface calls `Local Only`. |
 | `allow_online_docs` | bool | Whether the agent's `read_docs` tool may fetch a crate's documentation when cargo has not unpacked it on this machine. Off by default, and independent of `allow_cloud_models` — turning one on does not turn on the other, because one is a prompt leaving and the other is a text file arriving. With it off, `read_docs` answers from cargo's own copy and says what else would be needed to get more. Open it with `xencode config set allow_online_docs true`. |
 | `allow_web_fetch` | bool | Whether the agent is offered the `web_fetch` tool, which reads one page or API response at an address **the model names**. Off by default, and independent of both switches above. Turning it on only offers the tool: every call stops at the approval prompt showing the exact address and whether that address could land, and "allow for the session" does not apply to this tool — a yes about one page is not a yes about the next host. Approval is not a route into this machine either: the address is resolved and refused before the connection, and again at every redirect, so RFC1918, carrier-grade NAT, link-local and cloud-metadata addresses are unreachable even after a `y`, while `127.0.0.1` is allowed so a local dev server stays fetchable. The text handed back is capped at 30 000 characters and says how much of the page was left out. A page the server reports as missing buys one more request on the same address — its root `/llms.txt`, the index some documentation sites publish for models — returned labelled as that index, and reported as a plain miss when there is none. Open it with `xencode config set allow_web_fetch true`. |
 | `search_provider` | string | Which search engine, if any, the agent's `web_search` tool asks. `"none"` (the default) leaves the tool unoffered; the other names are `wikipedia`, `searxng`, `brave` and `tavily`. There is no default public instance on purpose: DuckDuckGo's free endpoints answer this machine with a bot CAPTCHA or `410 Gone`, a public SearXNG instance refuses to serve JSON, and MDN's JSON search endpoint is `404` (measured 2026-10-04), so a tool built on one would break weekly. Wikipedia is the keyless engine that does answer and covers people, places and concepts; `searxng` needs `search_searxng_url`; `brave` and `tavily` need their own key. The name is checked against that list as you type it, so a typo is told at the keyboard rather than at the first search of the next session. Every call still asks: a search sends the model's question off this machine, and a yes about one question is not a yes about the next. |
@@ -4045,7 +4046,10 @@ machine (`--require-cap <cap>`), never from a vendor name, and prints the facts
 behind the choice. A task requiring an exclusive capability cannot route to the other
 candidates even when they are idle, and a worker whose `--help` never mentioned the
 capability is refused for that reason — a capability the probe confirmed *absent* is
-not an ability.
+not an ability. Before any of those checks sits the posture (`OR-13`): while
+`allow_external_workers` is off, every candidate the agent roster carries a row for is
+refused by that name, and the report prints the rule as its own first step rather than
+leaving a reader to notice that ten workers are missing.
 
 Load, capacity and price are printed as what they are. Nothing on this machine measures
 what another vendor's agent has been given to do, xencode's leases count only work its
@@ -4056,7 +4060,7 @@ to a worker xencode cannot price instead of counting as a pass, and when neither
 nor price could be compared the decision says it fell on the order of the names.
 
 ```
-$ xencode agents --route task-1 --require-cap acp
+$ xencode agents --route task-1 --require-cap acp   # read with allow_external_workers open
 Routing decision for task 'task-1':
 
   chosen: cline
@@ -4089,6 +4093,34 @@ check that settled the choice. `--format json` prints the same decision as data 
 `steps` in order, each candidate's `facts`, and `not_checked` for the checks that
 could not run against it — so a caller can tell that a number was never measured
 instead of assuming it was.
+
+The same machine under the posture it installs with, read for real:
+
+```
+$ xencode agents --route "fix the flaky test"
+Routing decision for task 'fix the flaky test':
+
+  Posture: Local Only
+    model routes: confined to this machine — a `qwen:…`, `google_gemini:…`, `vendor/model` or off-machine `remote:…` route is refused before a connection is opened (`allow_cloud_models=false`; open it with `xencode config set allow_cloud_models true`)
+    worker routes: work is handed only to xencode's own loop — a name on the agent roster is refused by that name (`allow_external_workers=false`; open it with `xencode config set allow_external_workers true`)
+
+  chosen: nothing — no candidate could take this task
+  why:    Nothing was routed for task 'fix the flaky test': none of the 10 candidates could take it. opencode, cline, codex, claude, gemini, crush, agy, cursor-agent, kilo, kiro-cli: refused by the Local Only posture, which hands work only to xencode's own loop — xencode has a roster row for those names, so the work would leave this machine through a program xencode does not control.
+
+  What the router asked, in the order it asked it:
+    profile        decided it           10 workers of 10 were refused by the Local Only profile before the capability, load and cost checks were consulted: opencode, cline, codex, claude, gemini, crush, agy, cursor-agent, kilo, kiro-cli
+    capabilities   asked, settled nothing no capability was required, so nothing was ruled out on it
+    load           not asked            no worker was ruled out on load, because nothing on this machine counts the tasks a vendor's own agent has been given
+    cost ceiling   not asked            no ceiling was set, so price was never a question
+    choice         not asked            there was nothing left to choose between
+```
+
+The names are listed once under the one sentence that refuses them, and each candidate
+still carries its own `why not:` line in `Every worker considered`, because that is the
+line that says which roster row was read. The capability probe is not skipped on the way
+to saying no: the printed `probed here as:` lines are the ones this machine answered, so
+opening the rule a moment later can put those same measurements back to work instead of
+starting from nothing.
 
 `--redispatch <task-id>` re-queues a failed or terminated worker task onto a replacement
 worker (`--replacement-agent <worker>`) using a continuation package, capturing the failure
@@ -4489,7 +4521,12 @@ a team of nobody.
   installed on this machine, and the estimated wall clock and cost. **Nothing is
   launched and no check is run** — planning reads the files, walks the graph, and
   looks the workers up on `PATH`. The gates it prints are named, not executed;
-  `xencode verify` is what runs those three checks.
+  `xencode verify` is what runs those three checks. A `Posture:` line states which
+  consent rules are in force before any of it, and a role whose worker the posture
+  refuses carries a `refused:` line under it plus a closing count of how many roles
+  a run would decline — the plan still shows the whole team, because planning is a
+  read. In JSON those are `posture`, `posture_rules` and, per role,
+  `refused_by_posture` (`null` for a role the posture does not refuse).
 - `xencode team run <name> [--approved-by <your name>] [--format text|json]` — the
   plan view first, and the run only under a name. Without `--approved-by` this is
   `xencode team plan` again, plus the line saying what would change that: no role
@@ -4498,6 +4535,10 @@ a team of nobody.
   every role runs as its own real `sh -c` child through the queue, at most
   `min(workers, verification_throughput)` at once. A blank `--approved-by ""` is
   refused: the record of a run says who agreed to it, and a blank is nobody. A role
+  assigned to an agent that `allow_external_workers` (off by default) refuses is
+  refused *as a team* — the command exits non-zero, launches nothing and records
+  nothing, and names the setting — because a team is never run with the refused
+  roles quietly dropped or one role left behind. A role
   that does not exit 0 makes the command exit non-zero — and is still recorded,
   because the next plan needs those numbers too.
 

@@ -59,11 +59,23 @@ fn project(files: &[(&str, String)]) -> TempDir {
 /// A home directory of its own, so the tariff a run is priced at is whatever this
 /// test set rather than whatever the person running it has in their settings. The
 /// tariff is written with `xencode config set`, the same way a person sets it.
+///
+/// This file is about a team that really launches, and the shipped posture refuses
+/// a roster agent by name before anything is launched (`OR-13`), so the home it
+/// builds opens that one rule with the same command a person would. The refusal
+/// itself is what `the_shipped_posture_refuses_a_run_and_records_nothing` checks,
+/// in a home that leaves the rule as the product installed it.
 fn sandbox_home(tariff: Option<&str>) -> TempDir {
     let home = TempDir::new().unwrap();
-    if let Some(cents) = tariff {
+    for (key, value) in [
+        ("allow_external_workers", "true"),
+        ("power_cents_per_kwh", tariff.unwrap_or("")),
+    ] {
+        if value.is_empty() {
+            continue;
+        }
         let out = Command::new(xencode_bin())
-            .args(["config", "set", "power_cents_per_kwh", cents])
+            .args(["config", "set", key, value])
             .current_dir(home.path())
             .env("HOME", home.path())
             .env("XDG_CONFIG_HOME", home.path().join(".config"))
@@ -71,7 +83,7 @@ fn sandbox_home(tariff: Option<&str>) -> TempDir {
             .expect("xencode ran");
         assert!(
             out.status.success(),
-            "setting a tariff failed: {}",
+            "setting {key} failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }
@@ -571,5 +583,124 @@ fn the_run_report_in_json_carries_the_plan_the_approval_and_the_actuals() {
         parsed["fingerprint"],
         records(dir.path())[0]["fingerprint"],
         "the plan and the record disagree about which recipe ran"
+    );
+}
+
+/// The posture a new install is in, driven against the real binary (`OR-13`): a
+/// recipe whose roles name another vendor's agents is refused as a team — no role
+/// child, no record, no runs directory — and the refusal quotes the setting that
+/// opens the rule. Opening it with that same command is what lets it run.
+#[test]
+fn the_shipped_posture_refuses_a_run_and_launches_nothing_at_all() {
+    let text = recipe("touch-team").replace("sleep 0.3", "touch SHOULD-NOT-EXIST");
+    let dir = project(&[("quick.toml", text)]);
+    // A home with nothing written to it, so the settings are the ones the product
+    // installs with rather than ones this file arranged.
+    let home = TempDir::new().unwrap();
+
+    // A plan is still a read: it shows the whole team and marks what it refuses.
+    let plan = succeeds(dir.path(), home.path(), &["team", "plan", "touch-team"]);
+    assert!(plan.contains("Posture: Local Only"), "{plan}");
+    assert!(
+        plan.contains("worker routes: work is handed only to xencode's own loop"),
+        "the rule in force is stated, not implied: {plan}"
+    );
+    assert!(
+        plan.contains("refused:  the Local Only profile does not hand work to it"),
+        "{plan}"
+    );
+    assert!(
+        plan.contains("would launch nothing at all while it stands"),
+        "and the plan says what that means for a run: {plan}"
+    );
+    assert_eq!(
+        plan.matches("xencode config set allow_external_workers true")
+            .count(),
+        1,
+        "the plan states the setting once, on the posture line, rather than under every \
+         refused role: {plan}"
+    );
+
+    let out = run_in(
+        dir.path(),
+        home.path(),
+        &["team", "run", "touch-team", "--approved-by", "Sree"],
+    );
+    assert!(
+        !out.status.success(),
+        "a team the posture refuses must not report a run"
+    );
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("nothing was launched and nothing was recorded"),
+        "{said}"
+    );
+    assert!(
+        said.contains("xencode config set allow_external_workers true"),
+        "a refusal that refuses to say how to stop being refused is an obstacle, not a \
+         rule: {said}"
+    );
+    assert!(
+        !dir.path().join("SHOULD-NOT-EXIST").exists(),
+        "the posture refused the team, yet a role's command ran"
+    );
+    assert_no_history(
+        dir.path(),
+        "team run --approved-by Sree under the shipped posture",
+    );
+
+    // The JSON plan carries the same refusal against each role, so a script
+    // reading it does not have to parse the prose to see why nothing would run.
+    let json = succeeds(
+        dir.path(),
+        home.path(),
+        &["team", "plan", "touch-team", "--format", "json"],
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["posture"], serde_json::json!("Local Only"));
+    assert_eq!(parsed["launches"], serde_json::json!(false));
+    let refused: Vec<&serde_json::Value> = parsed["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|role| !role["refused_by_posture"].is_null())
+        .collect();
+    assert_eq!(
+        refused.len(),
+        3,
+        "every role in this recipe names a roster agent: {json}"
+    );
+
+    // Open the one rule the way a person would, and the same project runs.
+    let opened = run_in(
+        dir.path(),
+        home.path(),
+        &["config", "set", "allow_external_workers", "true"],
+    );
+    assert!(
+        opened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    let ran = succeeds(
+        dir.path(),
+        home.path(),
+        &["team", "run", "touch-team", "--approved-by", "Sree"],
+    );
+    assert!(ran.contains("Recorded in"), "{ran}");
+    assert!(
+        dir.path().join("SHOULD-NOT-EXIST").exists(),
+        "the roles' commands really ran once the rule was open"
+    );
+    let recorded = records(dir.path());
+    assert_eq!(recorded.len(), 1, "one run, one record");
+    assert_eq!(recorded[0]["approved_by"], serde_json::json!("Sree"));
+    assert!(
+        !ran.contains("refused by the Local Only"),
+        "the opened posture refuses nothing: {ran}"
     );
 }
