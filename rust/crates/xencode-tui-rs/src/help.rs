@@ -155,6 +155,8 @@ const COMMANDS: &[Binding] = &[
         "/egress [text]",
         "show where the next turn would send your prompt, and what redaction holds back, without sending it",
     ),
+    ("/goto <destination>", "switch focus to destination by name"),
+    ("/level [1-4]", "progressive disclosure tier: 1 Core, 2 Workflow, 3 Advanced, 4 All"),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

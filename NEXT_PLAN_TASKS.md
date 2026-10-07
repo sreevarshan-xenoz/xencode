@@ -15525,7 +15525,7 @@ appear in it are how the §R-0 counts went wrong.
   top-level variants with manual links and reports one stale `serve` reference. 2542 tests
   passing; clippy clean.
 
-- **AE-5 — a disclosure level per destination, enforced rather than decorative.** *Effort: M.*
+- ~~**AE-5 — a disclosure level per destination, enforced rather than decorative.** *Effort: M.*
   26 `FocusArea` variants (`focus.rs:52-83`) and a 19-entry emoji `FEATURE_LIST`
   (`focus.rs:407-427`) are reachable through one flat navigator on `Ctrl+F`
   (`keymap.rs:500`). `UX-4`, `UX-6` and `UX-7` each want a different slice of "hide it until it
@@ -15539,7 +15539,14 @@ appear in it are how the §R-0 counts went wrong.
   for both the palette and the first-run screen, a test fails the build when a variant has no
   level, and a scripted beginner drive — the headless tmux recipe in memory — reaches a
   committed change seeing no level-4 destination at all, with every deferred destination still
-  reachable by name.
+  reachable by name.~~ ✅ **Done.** Single canonical `DESTINATIONS` table in `focus.rs` maps all
+  26 `FocusArea` destinations to 4 disclosure levels (`Level1` Core, `Level2` Workflow, `Level3`
+  Advanced, `Level4` Specialist/All). Exhaustive `disclosure_level()` match ensures any added
+  variant must define its tier. Feature navigator and first-run welcome screen adapt dynamically
+  from `DESTINATIONS`. Stepped setting and `/level` slash command allow switching levels; all
+  destinations remain reachable by name (`/goto <dest>` or direct slash navigation). Turning to
+  Level 4 restores plain xencode behavior identically. Verified by comprehensive beginner drive
+  integration test. 2549 tests passing; clippy clean.
 - **AE-6 — advice that becomes a proposed goal.** *Effort: S.* `advise.rs` produces repo
   insights and `/plan` pins a model-authored todo list, but nothing converts one into the other:
   the plan's own output is prose in the transcript, and the file-backed task list

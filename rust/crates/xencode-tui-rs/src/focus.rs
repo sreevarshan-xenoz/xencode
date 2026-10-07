@@ -47,7 +47,7 @@ impl Default for Mode {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FocusArea {
     ChatInput,
@@ -82,7 +82,118 @@ pub enum FocusArea {
     LayoutPanel,
 }
 
+/// Four levels of progressive disclosure (AE-5).
+/// Hide complexity until needed; four levels, never mixed.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum DisclosureLevel {
+    /// Level 1: Core interaction (Chat, Editor, Explorer, Models, Settings).
+    Level1 = 1,
+    /// Level 2: Standard workflow (Review, Git Commit, Tasks, Worktrees, Advice).
+    Level2 = 2,
+    /// Level 3: Advanced inspection and diagnostics (Dashboards, Analyzers, Health, PR Review, Impact, Layout, Feature Navigator).
+    Level3 = 3,
+    /// Level 4: Specialist / deep tooling (ByteBot, Collab, Voice, Terminal Assistant, Security Auditor, Profiler, Custom Models, Learning, MultiLanguage).
+    Level4 = 4,
+}
+
+impl DisclosureLevel {
+    pub const fn rank(self) -> u8 {
+        match self {
+            DisclosureLevel::Level1 => 1,
+            DisclosureLevel::Level2 => 2,
+            DisclosureLevel::Level3 => 3,
+            DisclosureLevel::Level4 => 4,
+        }
+    }
+
+    pub fn from_u8(val: u8) -> Self {
+        match val {
+            1 => DisclosureLevel::Level1,
+            2 => DisclosureLevel::Level2,
+            3 => DisclosureLevel::Level3,
+            _ => DisclosureLevel::Level4,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            DisclosureLevel::Level1 => "Level 1 (Core)",
+            DisclosureLevel::Level2 => "Level 2 (Workflow)",
+            DisclosureLevel::Level3 => "Level 3 (Advanced)",
+            DisclosureLevel::Level4 => "Level 4 (All / Specialist)",
+        }
+    }
+}
+
 impl FocusArea {
+    /// All variants of FocusArea.
+    pub const ALL: [FocusArea; 26] = [
+        FocusArea::ChatInput,
+        FocusArea::FileExplorer,
+        FocusArea::CodeEditor,
+        FocusArea::ModelSelector,
+        FocusArea::Settings,
+        FocusArea::CodeReview,
+        FocusArea::PerformanceDashboard,
+        FocusArea::ProviderHealth,
+        FocusArea::ProjectAnalyzer,
+        FocusArea::GitCommit,
+        FocusArea::FeatureNavigator,
+        FocusArea::ByteBotPanel,
+        FocusArea::CollaborationHub,
+        FocusArea::VoiceInterface,
+        FocusArea::TerminalAssistant,
+        FocusArea::SecurityAuditor,
+        FocusArea::PerformanceProfiler,
+        FocusArea::CustomModels,
+        FocusArea::LearningMode,
+        FocusArea::MultiLanguage,
+        FocusArea::ReviewDashboard,
+        FocusArea::TaskManager,
+        FocusArea::WorktreePanel,
+        FocusArea::AdvisePanel,
+        FocusArea::ImpactPanel,
+        FocusArea::LayoutPanel,
+    ];
+
+    /// Progressive disclosure tier required to see this destination in navigators / palettes.
+    /// Exhaustive pattern match ensures any added FocusArea must explicitly define its tier.
+    pub const fn disclosure_level(self) -> DisclosureLevel {
+        match self {
+            FocusArea::ChatInput
+            | FocusArea::FileExplorer
+            | FocusArea::CodeEditor
+            | FocusArea::ModelSelector
+            | FocusArea::Settings => DisclosureLevel::Level1,
+
+            FocusArea::CodeReview
+            | FocusArea::GitCommit
+            | FocusArea::TaskManager
+            | FocusArea::WorktreePanel
+            | FocusArea::AdvisePanel => DisclosureLevel::Level2,
+
+            FocusArea::PerformanceDashboard
+            | FocusArea::ProviderHealth
+            | FocusArea::ProjectAnalyzer
+            | FocusArea::ReviewDashboard
+            | FocusArea::ImpactPanel
+            | FocusArea::LayoutPanel
+            | FocusArea::FeatureNavigator => DisclosureLevel::Level3,
+
+            FocusArea::ByteBotPanel
+            | FocusArea::CollaborationHub
+            | FocusArea::VoiceInterface
+            | FocusArea::TerminalAssistant
+            | FocusArea::SecurityAuditor
+            | FocusArea::PerformanceProfiler
+            | FocusArea::CustomModels
+            | FocusArea::LearningMode
+            | FocusArea::MultiLanguage => DisclosureLevel::Level4,
+        }
+    }
+
     /// Short human name for the header's focused-panel badge. Kept under
     /// ~12 columns so the right side survives narrow terminals.
     pub fn display_name(self) -> &'static str {
@@ -252,6 +363,15 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Toggle,
     },
     SettingRow {
+        label: "Disclosure Level",
+        section: "Display",
+        kind: SettingKind::Stepped {
+            step: 1,
+            min: 1,
+            max: 4,
+        },
+    },
+    SettingRow {
         label: "Agent Approval",
         section: "Agent",
         kind: SettingKind::Cycle(crate::agent_tools::APPROVAL_MODE_NAMES),
@@ -404,26 +524,315 @@ pub fn mask_secret(value: &str) -> String {
     xencode_mcp_rs::mask_secret(value)
 }
 
+/// Canonical metadata for a TUI destination.
+/// One table in `focus.rs` is the single source of truth for both the palette
+/// and the first-run recommendations (AE-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Destination {
+    pub area: FocusArea,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub level: DisclosureLevel,
+    pub shortcut: Option<&'static str>,
+    pub command_name: &'static str,
+}
+
+/// Canonical table of all 26 TUI destinations.
+/// Every variant of `FocusArea` is represented with its progressive disclosure tier.
+pub const DESTINATIONS: &[Destination] = &[
+    // ── Level 1: Core interaction ─────────────────────────────────────────────
+    Destination {
+        area: FocusArea::ChatInput,
+        name: "Chat",
+        description: "Interactive conversation & prompt instructions",
+        level: DisclosureLevel::Level1,
+        shortcut: Some("i"),
+        command_name: "chat",
+    },
+    Destination {
+        area: FocusArea::FileExplorer,
+        name: "Explorer",
+        description: "Workspace file tree navigation",
+        level: DisclosureLevel::Level1,
+        shortcut: Some("Tab"),
+        command_name: "explorer",
+    },
+    Destination {
+        area: FocusArea::CodeEditor,
+        name: "Editor",
+        description: "Focused file viewer & inline editor",
+        level: DisclosureLevel::Level1,
+        shortcut: Some("e"),
+        command_name: "editor",
+    },
+    Destination {
+        area: FocusArea::ModelSelector,
+        name: "Models",
+        description: "Select model provider & inference endpoint",
+        level: DisclosureLevel::Level1,
+        shortcut: Some("m"),
+        command_name: "models",
+    },
+    Destination {
+        area: FocusArea::Settings,
+        name: "Settings",
+        description: "Configuration & preferences panel",
+        level: DisclosureLevel::Level1,
+        shortcut: Some("s"),
+        command_name: "settings",
+    },
+    // ── Level 2: Standard development workflow ─────────────────────────────────
+    Destination {
+        area: FocusArea::CodeReview,
+        name: "Code Review",
+        description: "AI review & suggestions on changes",
+        level: DisclosureLevel::Level2,
+        shortcut: Some("Ctrl+R"),
+        command_name: "review",
+    },
+    Destination {
+        area: FocusArea::GitCommit,
+        name: "Git Commit",
+        description: "Stage changes and write commits",
+        level: DisclosureLevel::Level2,
+        shortcut: Some("Ctrl+S"),
+        command_name: "commit",
+    },
+    Destination {
+        area: FocusArea::TaskManager,
+        name: "Background Tasks",
+        description: "Running & finished command tasks",
+        level: DisclosureLevel::Level2,
+        shortcut: Some("Ctrl+K"),
+        command_name: "tasks",
+    },
+    Destination {
+        area: FocusArea::WorktreePanel,
+        name: "Worktrees",
+        description: "List, create and remove git worktrees",
+        level: DisclosureLevel::Level2,
+        shortcut: Some("Ctrl+O"),
+        command_name: "worktree",
+    },
+    Destination {
+        area: FocusArea::AdvisePanel,
+        name: "Insights & Advice",
+        description: "Live refactor suggestions & warnings",
+        level: DisclosureLevel::Level2,
+        shortcut: Some("Ctrl+L"),
+        command_name: "advise",
+    },
+    // ── Level 3: Advanced diagnostics & inspection ────────────────────────────
+    Destination {
+        area: FocusArea::PerformanceDashboard,
+        name: "Performance Dashboard",
+        description: "Session stats & metrics",
+        level: DisclosureLevel::Level3,
+        shortcut: None,
+        command_name: "dashboard",
+    },
+    Destination {
+        area: FocusArea::ProviderHealth,
+        name: "Provider Health",
+        description: "API connection status & latency",
+        level: DisclosureLevel::Level3,
+        shortcut: Some("Ctrl+H"),
+        command_name: "health",
+    },
+    Destination {
+        area: FocusArea::ProjectAnalyzer,
+        name: "Project Analyzer",
+        description: "Workspace file breakdown & analysis",
+        level: DisclosureLevel::Level3,
+        shortcut: None,
+        command_name: "analyzer",
+    },
+    Destination {
+        area: FocusArea::ReviewDashboard,
+        name: "PR Review",
+        description: "Per-file diff browsing against base",
+        level: DisclosureLevel::Level3,
+        shortcut: Some("Ctrl+Y"),
+        command_name: "diff",
+    },
+    Destination {
+        area: FocusArea::ImpactPanel,
+        name: "Blast Radius",
+        description: "What a change to one file reaches",
+        level: DisclosureLevel::Level3,
+        shortcut: None,
+        command_name: "impact",
+    },
+    Destination {
+        area: FocusArea::LayoutPanel,
+        name: "Layout History",
+        description: "Why the screen is arranged this way",
+        level: DisclosureLevel::Level3,
+        shortcut: None,
+        command_name: "layout",
+    },
+    Destination {
+        area: FocusArea::FeatureNavigator,
+        name: "Feature Navigator",
+        description: "Command palette and destination picker",
+        level: DisclosureLevel::Level3,
+        shortcut: Some("Ctrl+F"),
+        command_name: "palette",
+    },
+    // ── Level 4: Specialist & deep tooling ────────────────────────────────────
+    Destination {
+        area: FocusArea::ByteBotPanel,
+        name: "Agent",
+        description: "Autonomous task execution loop",
+        level: DisclosureLevel::Level4,
+        shortcut: Some("/bytebot"),
+        command_name: "bytebot",
+    },
+    Destination {
+        area: FocusArea::CollaborationHub,
+        name: "Collaboration Hub",
+        description: "Team collaboration tools & sessions",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "collab",
+    },
+    Destination {
+        area: FocusArea::VoiceInterface,
+        name: "Voice Interface",
+        description: "Record a clip, transcribe if able",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "voice",
+    },
+    Destination {
+        area: FocusArea::TerminalAssistant,
+        name: "Terminal Assistant",
+        description: "AI-powered shell helper & commands",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "assistant",
+    },
+    Destination {
+        area: FocusArea::SecurityAuditor,
+        name: "Security Auditor",
+        description: "Vulnerability scanning & dependencies",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "security",
+    },
+    Destination {
+        area: FocusArea::PerformanceProfiler,
+        name: "Performance Profiler",
+        description: "Code profiling tools & CPU/mem gauges",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "profiler",
+    },
+    Destination {
+        area: FocusArea::CustomModels,
+        name: "Custom Models",
+        description: "Model configuration & hyperparameter tuning",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "custom-models",
+    },
+    Destination {
+        area: FocusArea::LearningMode,
+        name: "Learning Mode",
+        description: "Lessons from this repo's own files",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "learning",
+    },
+    Destination {
+        area: FocusArea::MultiLanguage,
+        name: "Multi-Language",
+        description: "Language detection & translation tools",
+        level: DisclosureLevel::Level4,
+        shortcut: None,
+        command_name: "languages",
+    },
+];
+
+/// Find destination by FocusArea.
+pub fn find_destination(area: FocusArea) -> Option<&'static Destination> {
+    DESTINATIONS.iter().find(|d| d.area == area)
+}
+
+/// Find destination by name, label or slash command (case-insensitive).
+pub fn find_destination_by_name(query: &str) -> Option<&'static Destination> {
+    let q = query.trim().trim_start_matches('/').to_ascii_lowercase();
+    DESTINATIONS.iter().find(|d| {
+        d.command_name == q
+            || d.name.eq_ignore_ascii_case(&q)
+            || d.area.display_name().eq_ignore_ascii_case(&q)
+            || (d.area == FocusArea::LearningMode && (q == "learn" || q == "learning"))
+            || (d.area == FocusArea::ByteBotPanel
+                && (q == "bytebot" || q == "agent" || q == "bytebot agent"))
+    })
+}
+
+/// Filter destinations visible up to the given disclosure level.
+pub fn destinations_for_level(
+    max_level: DisclosureLevel,
+) -> impl Iterator<Item = &'static Destination> {
+    DESTINATIONS.iter().filter(move |d| d.level <= max_level)
+}
+
+/// Feature list items visible in the palette / navigator up to max disclosure level.
+/// Excludes the navigator itself from its own options.
+pub fn feature_items_for_level(
+    max_level: DisclosureLevel,
+) -> Vec<(&'static str, &'static str, FocusArea)> {
+    DESTINATIONS
+        .iter()
+        .filter(|d| d.level <= max_level && d.area != FocusArea::FeatureNavigator)
+        .map(|d| (d.name, d.description, d.area))
+        .collect()
+}
+
+/// Formatted shortcuts text for the first-run welcome screen (AE-5).
+/// Generates only shortcuts for destinations allowed by the disclosure level,
+/// so novice levels never see Level 4 tooling.
+pub fn first_run_shortcuts_line(max_level: DisclosureLevel) -> String {
+    let mut parts = Vec::new();
+    for d in DESTINATIONS.iter().filter(|d| d.level <= max_level) {
+        if let Some(sc) = d.shortcut {
+            if matches!(
+                d.area,
+                FocusArea::ModelSelector
+                    | FocusArea::FileExplorer
+                    | FocusArea::CodeReview
+                    | FocusArea::GitCommit
+                    | FocusArea::ByteBotPanel
+            ) {
+                parts.push(format!("{}={}", sc, d.name.to_ascii_lowercase()));
+            }
+        }
+    }
+    parts.join(", ")
+}
+
 pub const FEATURE_LIST: &[(&str, &str)] = &[
-    ("📊 Performance Dashboard", "Session stats & metrics"),
-    ("🏥 Provider Health", "API connection status"),
-    ("📈 Project Analyzer", "Workspace file breakdown"),
-    ("📝 Git Commit", "Stage and commit changes"),
-    ("🤖 ByteBot Agent", "Autonomous task execution"),
-    ("👥 Collaboration Hub", "Team collaboration tools"),
-    ("🎙️ Voice Interface", "Record a clip, transcribe if able"),
-    ("💡 Terminal Assistant", "AI-powered shell helper"),
-    ("🛡️ Security Auditor", "Vulnerability scanning"),
-    ("⚡ Performance Profiler", "Code profiling tools"),
-    ("🧩 Custom Models", "Model configuration & tuning"),
-    ("📚 Learning Mode", "Lessons from this repo's own files"),
-    ("🌐 Multi-Language", "Language detection & tools"),
-    ("🔍 PR Review", "Per-file diff browsing"),
-    ("⏳ Background Tasks", "Running & finished commands"),
-    ("🌳 Worktrees", "List, create and remove git worktrees"),
-    ("💡 Insights", "Live refactor suggestions & warnings"),
-    ("🎯 Blast Radius", "What a change to one file reaches"),
-    ("📐 Layout History", "Why the screen is arranged this way"),
+    ("Performance Dashboard", "Session stats & metrics"),
+    ("Provider Health", "API connection status"),
+    ("Project Analyzer", "Workspace file breakdown"),
+    ("Git Commit", "Stage and commit changes"),
+    ("ByteBot Agent", "Autonomous task execution"),
+    ("Collaboration Hub", "Team collaboration tools"),
+    ("Voice Interface", "Record a clip, transcribe if able"),
+    ("Terminal Assistant", "AI-powered shell helper"),
+    ("Security Auditor", "Vulnerability scanning"),
+    ("Performance Profiler", "Code profiling tools"),
+    ("Custom Models", "Model configuration & tuning"),
+    ("Learning Mode", "Lessons from this repo's own files"),
+    ("Multi-Language", "Language detection & tools"),
+    ("PR Review", "Per-file diff browsing"),
+    ("Background Tasks", "Running & finished commands"),
+    ("Worktrees", "List, create and remove git worktrees"),
+    ("Insights", "Live refactor suggestions & warnings"),
+    ("Blast Radius", "What a change to one file reaches"),
+    ("Layout History", "Why the screen is arranged this way"),
 ];
 
 /// Maps a feature-navigator index to its target FocusArea.
@@ -484,5 +893,93 @@ mod tests {
         assert_eq!(mask_secret("sk-12345"), "••••");
         // One char over the boundary is the first value that leaks a tail.
         assert_eq!(mask_secret("123456789"), "•••••6789");
+    }
+
+    #[test]
+    fn every_focus_area_variant_has_a_disclosure_level_and_table_entry() {
+        for area in FocusArea::ALL {
+            let level = area.disclosure_level();
+            assert!(
+                level.rank() >= 1 && level.rank() <= 4,
+                "FocusArea::{:?} must have a valid disclosure level (1..=4)",
+                area
+            );
+            let dest = DESTINATIONS.iter().find(|d| d.area == area);
+            assert!(
+                dest.is_some(),
+                "FocusArea::{:?} must have an entry in DESTINATIONS table",
+                area
+            );
+            let dest = dest.unwrap();
+            assert_eq!(
+                dest.level, level,
+                "FocusArea::{:?} disclosure_level() must match DESTINATIONS table level",
+                area
+            );
+        }
+    }
+
+    #[test]
+    fn destinations_table_has_all_26_focus_areas_uniquely() {
+        assert_eq!(DESTINATIONS.len(), 26);
+        let mut seen = std::collections::HashSet::new();
+        for dest in DESTINATIONS {
+            assert!(
+                seen.insert(dest.area),
+                "Duplicate FocusArea::{:?} in DESTINATIONS table",
+                dest.area
+            );
+            assert!(!dest.name.is_empty());
+            assert!(!dest.description.is_empty());
+            assert!(!dest.command_name.is_empty());
+        }
+    }
+
+    #[test]
+    fn disclosure_filtering_hides_level_4_from_palette_and_first_run() {
+        let l2_items = feature_items_for_level(DisclosureLevel::Level2);
+        for (_name, _desc, area) in &l2_items {
+            assert!(
+                area.disclosure_level().rank() <= 2,
+                "Level 2 palette must not contain {:?} (level {:?})",
+                area,
+                area.disclosure_level()
+            );
+        }
+
+        let l2_shortcuts = first_run_shortcuts_line(DisclosureLevel::Level2);
+        assert!(!l2_shortcuts.contains("bytebot"));
+        assert!(!l2_shortcuts.contains("voice"));
+        assert!(!l2_shortcuts.contains("collab"));
+
+        // But level 4 palette contains all features
+        let l4_items = feature_items_for_level(DisclosureLevel::Level4);
+        assert!(l4_items
+            .iter()
+            .any(|(_, _, a)| *a == FocusArea::ByteBotPanel));
+        assert!(l4_items
+            .iter()
+            .any(|(_, _, a)| *a == FocusArea::VoiceInterface));
+    }
+
+    #[test]
+    fn deferred_destinations_remain_reachable_by_name() {
+        // Even when deferred from discovery, all Level 4 destinations can be reached by name
+        assert_eq!(
+            find_destination_by_name("bytebot").map(|d| d.area),
+            Some(FocusArea::ByteBotPanel)
+        );
+        assert_eq!(
+            find_destination_by_name("/voice").map(|d| d.area),
+            Some(FocusArea::VoiceInterface)
+        );
+        assert_eq!(
+            find_destination_by_name("collab").map(|d| d.area),
+            Some(FocusArea::CollaborationHub)
+        );
+        assert_eq!(
+            find_destination_by_name("security").map(|d| d.area),
+            Some(FocusArea::SecurityAuditor)
+        );
     }
 }

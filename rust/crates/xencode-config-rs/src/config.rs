@@ -389,6 +389,11 @@ pub struct XencodeConfig {
     #[serde(default = "default_true")]
     pub mouse_capture: bool,
 
+    /// Progressive disclosure level for UI destinations: 1 = Core, 2 = Standard/Workflow, 3 = Advanced, 4 = All/Specialist (AE-5).
+    /// Defaults to 4 (unrestricted plain xencode).
+    #[serde(default = "default_disclosure_level")]
+    pub disclosure_level: u8,
+
     /// Agent tool-approval mode: "ask", "edit-allow", "all-allow", "plan"
     /// (read-only, enforced) or "autonomous" (local writes free, off-box denied).
     /// Unknown values fall back to "ask" at decision time.
@@ -985,6 +990,10 @@ fn default_colab_weights() -> String {
     "hf".to_string()
 }
 
+fn default_disclosure_level() -> u8 {
+    4
+}
+
 impl Default for XencodeConfig {
     fn default() -> Self {
         Self {
@@ -997,6 +1006,7 @@ impl Default for XencodeConfig {
             show_scrollbars: true,
             show_line_numbers: true,
             mouse_capture: true,
+            disclosure_level: default_disclosure_level(),
             agent_approval: default_agent_approval(),
             agent_max_rounds: default_agent_max_rounds(),
             agent_command_timeout: default_agent_command_timeout(),

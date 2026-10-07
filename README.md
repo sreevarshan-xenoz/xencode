@@ -321,6 +321,8 @@ These seventeen are the only strings the chat input intercepts (`SLASH_COMMANDS`
 /agents                     Inventory the coding-agent CLIs installed on PATH
 /trust [status|forget] [path] Follow an AGENTS.md as instructions — the workspace's, or a directory's like src/auth/AGENTS.md — or report/withdraw; trust is per content hash
 /egress [text]              Show where the next turn would send your prompt, and what redaction holds back — without sending it
+/goto <destination>         Switch focus directly to any panel destination by name
+/level [1-4]                Progressive disclosure tier: 1 Core, 2 Workflow, 3 Advanced, 4 All
 ```
 
 Press `?` in the TUI for the live keybinding and command overlay.
@@ -763,7 +765,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2542 passing)
+cargo test                          # Full workspace suite (2549 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AE-5`: progressive disclosure levels across destinations and first-run welcome screen
+
+Navigation and discovery across all 26 `FocusArea` destinations are now organized into four enforced progressive disclosure levels (`Level1` Core, `Level2` Workflow, `Level3` Advanced, `Level4` Specialist):
+
+- Added `DisclosureLevel` enum and a single canonical `DESTINATIONS` table in `xencode-tui-rs::focus` serving both the feature palette (`Ctrl+F`) and first-run welcome screen shortcuts line.
+- Exhaustive `disclosure_level()` match ensures every `FocusArea` variant chooses an explicit disclosure level at compile time, backed by tests ensuring all variants are uniquely present in `DESTINATIONS`.
+- Added stepped "Disclosure Level" row (1..=4) in settings and `/level [1-4]` slash command allowing live adjustment.
+- Added `/goto <destination>` slash command and direct destination slash navigation so all deferred destinations remain reachable by name.
+- First-run welcome shortcuts line adapts dynamically to the active disclosure level, omitting high-tier tools for beginner levels while preserving full visibility at Level 4.
+- Integration test verifies a beginner workflow reaches a committed change without displaying specialist tools, while deferred destinations remain fully reachable by name.
+
 ### Added — `AE-4`: report CLI command variants and manual links when `xencode impact` targets `main.rs`
 
 `xencode impact main.rs` now detects the clap `enum Commands` definition in the target file and cross-references every variant against the repository's markdown manuals:

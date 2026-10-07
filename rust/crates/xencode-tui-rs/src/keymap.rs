@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use xencode_config_rs::XencodeConfig;
 
 use crate::app::{llama_model_target, App};
-use crate::focus::{navigate_feature, FocusArea, InputMode, FEATURE_LIST};
+use crate::focus::{FocusArea, InputMode};
 use crate::theme::ThemeColors;
 
 type Tx = mpsc::UnboundedSender<String>;
@@ -501,6 +501,10 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             app.focus = if app.focus == FocusArea::FeatureNavigator {
                 FocusArea::ChatInput
             } else {
+                let max_idx = app.palette_items().len().saturating_sub(1);
+                if app.feature_nav_selected > max_idx {
+                    app.feature_nav_selected = max_idx;
+                }
                 FocusArea::FeatureNavigator
             };
         }
@@ -1192,6 +1196,11 @@ fn settings_step(app: &mut App, dir: i32) {
                     app.config.agent_command_timeout =
                         stepped(app.config.agent_command_timeout, dir, step, min, max)
                 }
+                "Disclosure Level" => {
+                    let next =
+                        stepped(app.config.disclosure_level as u64, dir, step, min, max) as u8;
+                    app.set_disclosure_level(crate::focus::DisclosureLevel::from_u8(next));
+                }
                 _ => return,
             }
             app.save_config();
@@ -1849,6 +1858,7 @@ fn key_multi_language(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
 }
 
 fn key_feature_nav(app: &mut App, key: KeyEvent) -> bool {
+    let items_len = app.palette_items().len();
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             if app.feature_nav_selected > 0 {
@@ -1856,12 +1866,14 @@ fn key_feature_nav(app: &mut App, key: KeyEvent) -> bool {
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if app.feature_nav_selected + 1 < FEATURE_LIST.len() {
+            if app.feature_nav_selected + 1 < items_len {
                 app.feature_nav_selected += 1;
             }
         }
         KeyCode::Enter => {
-            app.focus = navigate_feature(app.feature_nav_selected);
+            if let Some(target) = app.selected_palette_area() {
+                app.focus = target;
+            }
         }
         _ => return false,
     }
@@ -2860,7 +2872,8 @@ mod tests {
                 "Rounded Borders",
                 "Show Scrollbars",
                 "Line Numbers",
-                "Mouse Capture"
+                "Mouse Capture",
+                "Disclosure Level",
             ]
         );
         // I1-01: the agent policy row is a three-option Cycle in its own section.

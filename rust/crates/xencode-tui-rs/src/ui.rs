@@ -14,8 +14,7 @@ use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
 use crate::focus::{
-    mask_secret, FocusArea, InputMode, SettingKind, FEATURE_LIST, SETTINGS_ITEMS,
-    SETTINGS_LABEL_WIDTH,
+    mask_secret, FocusArea, InputMode, SettingKind, SETTINGS_ITEMS, SETTINGS_LABEL_WIDTH,
 };
 use crate::widgets::{gauge, panel_border_set, spinner};
 
@@ -769,8 +768,9 @@ fn chat_lines(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(app.theme.message_system),
         )));
         text.push(Line::from(""));
+        let shortcuts = crate::focus::first_run_shortcuts_line(app.active_disclosure_level());
         text.push(Line::from(Span::styled(
-            "  Shortcuts: m=models, Tab=explorer, Ctrl+R=review, /bytebot=agent",
+            format!("  Shortcuts: {}", shortcuts),
             Style::default().fg(app.theme.message_system),
         )));
     }
@@ -1195,6 +1195,10 @@ fn setting_display(app: &App, idx: usize) -> String {
             "Memory Items" => format!("{} entries", app.config.max_memory_items),
             "Response Timeout" => format!("{}s", app.config.response_timeout),
             "Command Timeout" => format!("{}s", app.config.agent_command_timeout),
+            "Disclosure Level" => {
+                let lvl = crate::focus::DisclosureLevel::from_u8(app.config.disclosure_level);
+                format!("Level {} ({})", lvl.rank(), lvl.label())
+            }
             _ => String::new(),
         },
         SettingKind::Text => {
@@ -2866,10 +2870,11 @@ fn draw_feature_navigator(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🚀 Feature Navigator (↑↓ Enter, Esc to close) ");
 
-    let items: Vec<ListItem> = FEATURE_LIST
+    let palette = app.palette_items();
+    let items: Vec<ListItem> = palette
         .iter()
         .enumerate()
-        .map(|(i, (name, desc))| {
+        .map(|(i, (name, desc, _area))| {
             let style = if i == app.feature_nav_selected {
                 Style::default()
                     .fg(app.theme.highlight_fg)
