@@ -893,6 +893,92 @@ esac
     ;;
 esac
 ;;
+(computers)
+_arguments "${_arguments_options[@]}" : \
+'--json[Output results as JSON]' \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__computers_commands" \
+"*::: :->computers" \
+&& ret=0
+
+    case $state in
+    (computers)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-computers-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'--json[Output results as JSON]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'--json[Output results as JSON]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Computer backend identifier (colab, ssh, docker):_default' \
+&& ret=0
+;;
+(use)
+_arguments "${_arguments_options[@]}" : \
+'--json[Output results as JSON]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Computer backend identifier (colab, ssh, docker):_default' \
+&& ret=0
+;;
+(probe)
+_arguments "${_arguments_options[@]}" : \
+'--json[Output results as JSON]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Computer backend identifier (colab, ssh, docker):_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__computers__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-computers-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(use)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(probe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[Maximum findings to show (0 shows all)]:LIMIT:_default' \
@@ -2221,6 +2307,38 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(computers)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__computers_commands" \
+"*::: :->computers" \
+&& ret=0
+
+    case $state in
+    (computers)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-computers-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(use)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(probe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2630,6 +2748,7 @@ _xencode_commands() {
 'worktree:Manage git worktrees of the current repository' \
 'colab:Google Colab bridge\: preflight, then up / status / down for a model server running on a Colab VM' \
 'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
+'computers:Manage and inspect registered computer backends (AF-4)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -2915,6 +3034,73 @@ _xencode__subcmd__colab__subcmd__up_commands() {
     local commands; commands=()
     _describe -t commands 'xencode colab up commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__computers_commands] )) ||
+_xencode__subcmd__computers_commands() {
+    local commands; commands=(
+'list:List all registered computer backends (default)' \
+'show:Show details of a specific computer backend' \
+'use:Set the active computer backend' \
+'probe:Probe connectivity to a computer backend' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode computers commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__help_commands] )) ||
+_xencode__subcmd__computers__subcmd__help_commands() {
+    local commands; commands=(
+'list:List all registered computer backends (default)' \
+'show:Show details of a specific computer backend' \
+'use:Set the active computer backend' \
+'probe:Probe connectivity to a computer backend' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode computers help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__computers__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__help__subcmd__list_commands] )) ||
+_xencode__subcmd__computers__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers help list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__help__subcmd__probe_commands] )) ||
+_xencode__subcmd__computers__subcmd__help__subcmd__probe_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers help probe commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__computers__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__help__subcmd__use_commands] )) ||
+_xencode__subcmd__computers__subcmd__help__subcmd__use_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers help use commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__list_commands] )) ||
+_xencode__subcmd__computers__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__probe_commands] )) ||
+_xencode__subcmd__computers__subcmd__probe_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers probe commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__show_commands] )) ||
+_xencode__subcmd__computers__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__computers__subcmd__use_commands] )) ||
+_xencode__subcmd__computers__subcmd__use_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode computers use commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__config_commands] )) ||
 _xencode__subcmd__config_commands() {
     local commands; commands=(
@@ -3071,6 +3257,7 @@ _xencode__subcmd__help_commands() {
 'worktree:Manage git worktrees of the current repository' \
 'colab:Google Colab bridge\: preflight, then up / status / down for a model server running on a Colab VM' \
 'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
+'computers:Manage and inspect registered computer backends (AF-4)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3231,6 +3418,36 @@ _xencode__subcmd__help__subcmd__colab__subcmd__status_commands() {
 _xencode__subcmd__help__subcmd__colab__subcmd__up_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help colab up commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__computers_commands] )) ||
+_xencode__subcmd__help__subcmd__computers_commands() {
+    local commands; commands=(
+'list:List all registered computer backends (default)' \
+'show:Show details of a specific computer backend' \
+'use:Set the active computer backend' \
+'probe:Probe connectivity to a computer backend' \
+    )
+    _describe -t commands 'xencode help computers commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__computers__subcmd__list_commands] )) ||
+_xencode__subcmd__help__subcmd__computers__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help computers list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__computers__subcmd__probe_commands] )) ||
+_xencode__subcmd__help__subcmd__computers__subcmd__probe_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help computers probe commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__computers__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__computers__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help computers show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__computers__subcmd__use_commands] )) ||
+_xencode__subcmd__help__subcmd__computers__subcmd__use_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help computers use commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__config_commands] )) ||
 _xencode__subcmd__help__subcmd__config_commands() {

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AF-4`: computer registry and agent binding to compute environments
+
+A registry of execution computers is now available with support for Google Colab, OpenSSH, and Docker environments, and agent runs record which computer they are bound to:
+
+- Added `SshBackend` in `xencode-colab-rs` providing compute execution and port forwarding over OpenSSH transport.
+- Added `DockerBackend` in `xencode-colab-rs` providing containerized compute execution, checking daemon accessibility and reporting honest failure messages when unreachable.
+- Extended `BackendRegistry` with multi-arm computer registration (`colab`, `ssh`, `docker`) and status reporting via `ComputerInfo`.
+- Added `xencode computers` command with `list`, `show`, `use`, and `probe` subcommands, including machine-readable JSON output.
+- Added `computer` tracking field to `RunRecord` in `xencode-context-rs` and bound active computer configuration in `xencode-tui-rs::app`, displaying bound computer in `xencode runs list` and `xencode runs show`.
+
 ### Added — `AF-3`: compose engine subsystems from statically-linked implementations chosen by configuration
 
 Subsystems are now composed through static registration and configuration selection without conditional matching on subsystem identity:

@@ -129,6 +129,9 @@ pub struct RunRecord {
     /// One human line, redacted on the way in. May be empty.
     #[serde(default)]
     pub note: String,
+    /// Which computer backend this run was bound to (AF-4).
+    #[serde(default)]
+    pub computer: Option<String>,
 }
 
 /// The ledger file for a project.
@@ -295,6 +298,7 @@ mod tests {
             ],
             recording: None,
             note: String::new(),
+            computer: None,
         }
     }
 

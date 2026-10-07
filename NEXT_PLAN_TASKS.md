@@ -15743,6 +15743,7 @@ Three corrections the brief did not carry, each of which changes what should be 
   backends with what each is (colab / ssh / docker), one run records which computer it used, and
   the two-arm registry is proved by a job that cannot reach a machine answering honestly that it
   cannot.
+  *Shipped:* Multi-arm computer registry (`BackendRegistry`) in `xencode-colab-rs` providing statically linked support for `colab` (`ColabBackend`), `ssh` (`SshBackend`), and `docker` (`DockerBackend`). CLI command `xencode computers` lists registered backends with kind and availability, supporting `list`, `show`, `use`, and `probe` actions as well as JSON output. Run ledger entries (`RunRecord`) track the bound computer backend, rendered in `runs list` and `runs show`. Probing unreachable remote machines or inaccessible docker daemon answers with honest failure details. 2576 tests passing; clippy clean.
 
 - **AF-5 — competing arms: run two or three candidate implementations and print what each one
   did.** *Effort: L.* This is the MiroFish primitive, shrunk to a size this machine can pay for.

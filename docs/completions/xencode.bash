@@ -43,6 +43,9 @@ _xencode() {
             xencode,colab)
                 cmd="xencode__subcmd__colab"
                 ;;
+            xencode,computers)
+                cmd="xencode__subcmd__computers"
+                ;;
             xencode,config)
                 cmd="xencode__subcmd__config"
                 ;;
@@ -262,6 +265,36 @@ _xencode() {
             xencode__subcmd__colab__subcmd__help,up)
                 cmd="xencode__subcmd__colab__subcmd__help__subcmd__up"
                 ;;
+            xencode__subcmd__computers,help)
+                cmd="xencode__subcmd__computers__subcmd__help"
+                ;;
+            xencode__subcmd__computers,list)
+                cmd="xencode__subcmd__computers__subcmd__list"
+                ;;
+            xencode__subcmd__computers,probe)
+                cmd="xencode__subcmd__computers__subcmd__probe"
+                ;;
+            xencode__subcmd__computers,show)
+                cmd="xencode__subcmd__computers__subcmd__show"
+                ;;
+            xencode__subcmd__computers,use)
+                cmd="xencode__subcmd__computers__subcmd__use"
+                ;;
+            xencode__subcmd__computers__subcmd__help,help)
+                cmd="xencode__subcmd__computers__subcmd__help__subcmd__help"
+                ;;
+            xencode__subcmd__computers__subcmd__help,list)
+                cmd="xencode__subcmd__computers__subcmd__help__subcmd__list"
+                ;;
+            xencode__subcmd__computers__subcmd__help,probe)
+                cmd="xencode__subcmd__computers__subcmd__help__subcmd__probe"
+                ;;
+            xencode__subcmd__computers__subcmd__help,show)
+                cmd="xencode__subcmd__computers__subcmd__help__subcmd__show"
+                ;;
+            xencode__subcmd__computers__subcmd__help,use)
+                cmd="xencode__subcmd__computers__subcmd__help__subcmd__use"
+                ;;
             xencode__subcmd__config,dump)
                 cmd="xencode__subcmd__config__subcmd__dump"
                 ;;
@@ -336,6 +369,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,colab)
                 cmd="xencode__subcmd__help__subcmd__colab"
+                ;;
+            xencode__subcmd__help,computers)
+                cmd="xencode__subcmd__help__subcmd__computers"
                 ;;
             xencode__subcmd__help,config)
                 cmd="xencode__subcmd__help__subcmd__config"
@@ -495,6 +531,18 @@ _xencode() {
                 ;;
             xencode__subcmd__help__subcmd__colab,up)
                 cmd="xencode__subcmd__help__subcmd__colab__subcmd__up"
+                ;;
+            xencode__subcmd__help__subcmd__computers,list)
+                cmd="xencode__subcmd__help__subcmd__computers__subcmd__list"
+                ;;
+            xencode__subcmd__help__subcmd__computers,probe)
+                cmd="xencode__subcmd__help__subcmd__computers__subcmd__probe"
+                ;;
+            xencode__subcmd__help__subcmd__computers,show)
+                cmd="xencode__subcmd__help__subcmd__computers__subcmd__show"
+                ;;
+            xencode__subcmd__help__subcmd__computers,use)
+                cmd="xencode__subcmd__help__subcmd__computers__subcmd__use"
                 ;;
             xencode__subcmd__help__subcmd__config,dump)
                 cmd="xencode__subcmd__help__subcmd__config__subcmd__dump"
@@ -1055,7 +1103,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --dump-config --help --version scan config models cache audit advisories deps query memory tasks worktree colab remote advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
+            opts="-h -V --dump-config --help --version scan config models cache audit advisories deps query memory tasks worktree colab remote computers advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1726,6 +1774,160 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__computers)
+            opts="-h --json --help list show use probe help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__help)
+            opts="list show use probe help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__help__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__help__subcmd__probe)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__help__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__help__subcmd__use)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__list)
+            opts="-h --json --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__probe)
+            opts="-h --json --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__show)
+            opts="-h --json --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__computers__subcmd__use)
+            opts="-h --json --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__config)
             opts="-h --help show dump set reset help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
@@ -2147,7 +2349,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories deps query memory tasks worktree colab remote advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
+            opts="scan config models cache audit advisories deps query memory tasks worktree colab remote computers advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2441,6 +2643,76 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__colab__subcmd__up)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__computers)
+            opts="list show use probe"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__computers__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__computers__subcmd__probe)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__computers__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__computers__subcmd__use)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
