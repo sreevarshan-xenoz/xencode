@@ -1343,6 +1343,9 @@ _arguments "${_arguments_options[@]}" : \
 '--route=[Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)]:ROUTE_TASK:_default' \
 '*--require-cap=[Capabilities required for the routed task (e.g. stream, acp, mcp, resume, daemon, approval) (OR-6)]:REQUIRE_CAPS:_default' \
 '--max-cost=[Maximum cost ceiling allowed for the routed task (OR-6)]:MAX_COST:_default' \
+'--redispatch=[Re-dispatch a killed or failed worker'\''s task onto another agent (OR-7)]:REDISPATCH_TASK:_default' \
+'--replacement-agent=[Replacement agent to resume the re-dispatched task (OR-7)]:REPLACEMENT_AGENT:_default' \
+'--stop-reason=[Process stop reason for the killed worker (e.g. signal\:9, exit\:137, timeout\:300) (OR-7)]:STOP_REASON:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
 '--contract[Verify each roster claim against the agent'\''s live --help]' \
 '--health[Report worker health (installed, version, authenticated, responsive, rate-limited) (AR-8)]' \

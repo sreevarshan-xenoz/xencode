@@ -435,6 +435,9 @@ complete -c xencode -n "__fish_xencode_using_subcommand agents" -l test-cmd -d '
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l route -d 'Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l require-cap -d 'Capabilities required for the routed task (e.g. stream, acp, mcp, resume, daemon, approval) (OR-6)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l max-cost -d 'Maximum cost ceiling allowed for the routed task (OR-6)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l redispatch -d 'Re-dispatch a killed or failed worker\'s task onto another agent (OR-7)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l replacement-agent -d 'Replacement agent to resume the re-dispatched task (OR-7)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l stop-reason -d 'Process stop reason for the killed worker (e.g. signal:9, exit:137, timeout:300) (OR-7)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l contract -d 'Verify each roster claim against the agent\'s live --help'

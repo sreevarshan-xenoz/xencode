@@ -32,6 +32,7 @@ pub mod envelope;
 pub mod health;
 pub mod probe;
 pub mod protocol;
+pub mod redispatch;
 pub mod roster;
 pub mod worker_package;
 
@@ -50,6 +51,9 @@ pub use health::{
 };
 pub use probe::{FanOut, ProbeOptions, ProbeReport, RunCapture, Usage};
 pub use protocol::{AgentEvent, Origin};
+pub use redispatch::{
+    redispatch_failed_worker, RedispatchOutcome, TaskAttemptEntry, TaskAttemptLedger,
+};
 pub use roster::{
     inventory, provenance_of_help_cell, AgentSpec, InstallSource, InstalledAgent, Provenance,
     ROSTER,
