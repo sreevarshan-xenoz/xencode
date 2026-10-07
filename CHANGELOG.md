@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a refused dependency cycle named the wrong tasks
+
+The task scheduler (`rust/crates/xencode-core-rs/src/scheduler.rs`) checks a task graph before
+launching anything, and a cycle is supposed to be rejected by naming the tasks on it. It did reject
+the cycle, but the path it reported was trimmed from the last task the search had reached instead of
+from the task the cycle closed back on:
+
+- A two-task loop printed as `these tasks form a dependency cycle: B → B`, naming one task twice and
+  hiding the other.
+- A task that only leads into a loop was excluded correctly by accident, while the real loop was not
+  named — so following the message would have sent someone to edit a task with no cycle in it.
+
+The search now returns the task the back edge closed on and trims from there, so the same graph
+reads `A → B → A`, and a third case is covered where `A` walks into `B → C → B`: only `B` and `C`
+are named. The original test matched the error variant but never the task list, which is why the
+wrong message went unnoticed since the scheduler landed on 2026-10-02; three cases now assert the
+exact list.
+
 ### Added — `OR-8`: shared memory between workers, scoped and marked
 
 Workers can hand each other findings without handing each other instructions (`xencode memory publish`, `xencode memory read`, `xencode memory policy set|show`):
