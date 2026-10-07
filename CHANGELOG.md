@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-8`: shared memory between workers, scoped and marked
+
+Workers can hand each other findings without handing each other instructions (`xencode memory publish`, `xencode memory read`, `xencode memory policy set|show`):
+
+- Every worker needs a policy naming the scopes it may read and the scopes it may publish to (`architecture`, `decisions`, `constraints`, or a custom domain). A worker that was never given one is refused in both directions, and a policy naming no scope grants nothing rather than everything.
+- What a reader is shown is marked and attributable: the finding arrives under `[data] shared_memory scope:architecture author:planner`, with the time it was published — the same leading token every other untrusted body carries, so another worker's notes read as material to consider, not orders to follow.
+- A refusal really refuses. Nothing lands in the store, and a denied publish does not quietly write into a scope the worker was allowed to use instead.
+- Findings and policies live in `.xencode/shared_memory.json` and `.xencode/memory_policies.json`, written atomically, so two worker processes in the same project meet the same records.
+
 ### Added — `OR-7`: worker failure re-dispatch using continuation packages
 
 Tasks from terminated or failed workers can now be re-dispatched onto another worker agent (`xencode agents --redispatch <task> [--replacement-agent <worker>] [--stop-reason <reason>]`):

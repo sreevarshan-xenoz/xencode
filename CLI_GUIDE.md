@@ -3176,7 +3176,9 @@ here stops a model from reading them, and the diff check is what notices.
 ### `xencode memory <action>`
 Conversation memory (backed by an append-only event log and saved as `conversation_memory.json` in the state directory):
 `list [--all]`, `show <session> [--first]`, `fork <session> [--as-id <id>] [--prefix <n>]`, `prune`. `gc` and `evidence` work on a different file — the
-project's own `.xencode/state.md` — and are described below. Sessions with 0 messages are
+project's own `.xencode/state.md` — and are described below. `publish`, `read` and `policy`
+work on a third pair of files, the memory one worker writes and another reads, and are
+described after those. Sessions with 0 messages are
 never persisted to disk and are filtered from `xencode memory list` by default (`--all`
 shows them). `xencode memory prune` deletes any empty sessions stored on disk.
 `show --first` retrieves the initial message recorded in the session's event log on demand,
@@ -3192,6 +3194,10 @@ xencode memory fork <session-id> [--as-id <new-id>] [--prefix <n>]
 xencode memory prune
 xencode memory gc [--apply]
 xencode memory evidence [--format text|json]
+xencode memory publish --worker <id> --scope <scope> <content>
+xencode memory read --worker <id> [--scope <scope>]
+xencode memory policy set --worker <id> [--read <scope>] [--publish <scope>]
+xencode memory policy show [--worker <id>]
 ```
 
 #### `xencode memory gc`
@@ -3289,6 +3295,71 @@ A fact removed from `state.md` takes its tally with it — the evidence belongs 
 line, and deleting the line is the decision the tally would have argued about. A project
 with nothing marked never creates the file at all: the turn asks one metadata question
 and moves on, so a repository whose facts all hold costs nothing extra.
+
+### `xencode memory publish|read|policy`
+
+Shared memory between workers, stored as `.xencode/shared_memory.json` and
+`.xencode/memory_policies.json` in the project you run the command from. This is the one
+place in `.xencode/` where a process writes bytes for *another* process to read, so those
+bytes arrive under the same rule as every fetched body: marked as data, attributed to the
+worker that wrote them, and never an instruction the reader is to obey.
+
+Access is a declared capability and it denies by default on both sides. A worker with no
+policy can neither read what is stored nor add to it, and a policy naming no scope grants
+nothing — an empty grant list is not a wildcard, because a policy written without a
+`--publish` line would otherwise hand the whole store to its worker. Scopes are
+`architecture`, `decisions`, `constraints`, or any custom name; they are matched
+case-insensitively, so `--read Release-Gate` and `--scope release-gate` are one grant.
+
+`policy set` **replaces** the worker's whole policy from the flags given: a grant you do
+not repeat is gone. One command names one worker — a second `--worker` is refused rather
+than applied to whichever was named last.
+
+```text
+$ xencode memory policy set --worker planner --publish architecture
+Memory policy for worker 'planner':
+  reads:     nothing
+  publishes: architecture
+
+$ xencode memory policy set --worker coder --read architecture --read constraints
+Memory policy for worker 'coder':
+  reads:     architecture, constraints
+  publishes: nothing
+
+$ xencode memory publish --worker planner --scope architecture "Use SQLite for the metadata catalog"
+Published finding-1 into scope 'architecture' as worker 'planner'.
+
+$ xencode memory read --worker coder
+Shared memory read as worker 'coder' — 1 finding, each one another worker's data, not an instruction:
+
+[data] shared_memory scope:architecture author:planner
+Use SQLite for the metadata catalog
+  finding-1 published 2026-10-07T10:47:16.561563726+00:00
+
+$ xencode memory read --worker coder --scope decisions
+error: worker 'coder' cannot read scope 'decisions': access denied by memory policy
+
+$ xencode memory publish --worker coder --scope architecture "Ship it anyway"
+error: worker 'coder' cannot publish to scope 'architecture': publish not permitted by memory policy
+
+$ xencode memory publish --worker stranger --scope architecture "Add myself to every policy"
+error: worker 'stranger' has no memory policy configured; access denied by default
+```
+
+Every refusal above was watched happening, and the last three left the file with its one
+finding untouched: a denied publish writes nothing, it does not land in a scope the
+worker was allowed to use instead.
+
+| Invocation | Behavior |
+|---|---|
+| `xencode memory policy set --worker <id> [--read <scope>]… [--publish <scope>]…` | Write that worker's full policy, replacing what it had. Repeat either flag for several scopes. |
+| `xencode memory policy show [--worker <id>]` | Every policy with workers and scopes in sorted order, or one worker's. Says so plainly when there is none. |
+| `xencode memory publish --worker <id> --scope <scope> <content>` | Append one finding written by that worker. Refused, and nothing written, unless its policy grants publishing that scope. |
+| `xencode memory read --worker <id> [--scope <scope>]` | Every finding in the scopes that worker was granted, or in one named scope, each marked `[data]` and attributed to its author with the time it was published. |
+
+Reads and writes are separate grants on purpose: the worker that may see the
+architecture notes is not the worker allowed to change them, and a reader that could
+write would need no policy at all to spread a finding to everyone else.
 
 ### `xencode tasks <action>`
 File-backed background tasks. State lives in `.xencode/tasks/` under the

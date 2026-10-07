@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap` — and clap's
   built-in `help`, 50 entries in the list)
-- [x] Workspace gates green — 16 crates, 2640 tests passing, zero warnings (re-verified 2026-10-07, after `OR-7`; 19 ignored, so 2659 in the run)
+- [x] Workspace gates green — 16 crates, 2651 tests passing, zero warnings (re-verified 2026-10-07, after `OR-8`; 19 ignored, so 2670 in the run)
 
 ## Model Catalog Honesty
 
@@ -12261,11 +12261,35 @@ worker, `OR-` for the thing that decides what workers to talk to.
       from prose.
       **Done-when:** a killed worker's task completes elsewhere without losing the diff,
       and the retry is visible in the ledger as a second attempt on one task.
-- [ ] **OR-8 — shared memory as a scoped capability.** Architecture/decisions/constraints
+- [x] **OR-8 — shared memory as a scoped capability.** Architecture/decisions/constraints
       published to workers through `QK-3`'s source classes, with `SE-2` marking per
       worker.
       **Done-when:** one worker's finding reaches another as *marked, attributable*
       content, and a worker cannot read memory the policy did not hand it.
+      *Shipped:* `xencode memory publish|read|policy` over `xencode-memory-rs::scoped`,
+      kept in `.xencode/shared_memory.json` and `.xencode/memory_policies.json`. The
+      module was already written and dead — `lib.rs` never declared it, so nothing in the
+      workspace had ever compiled it — and its write side was permissive while its read
+      side was not. Publishing into a scope now requires a grant for that scope, so a
+      policy naming no scopes grants nothing rather than everything, and a worker that was
+      never given a policy is refused on both sides; the unit tests written against the
+      permissive behaviour were rewritten to grant the author first. What a reader is
+      shown leads with `[data] ` taken from `SourceClass::SharedMemory::marker()` rather
+      than typed out here, then `shared_memory scope:… author:…` and the time of
+      publishing, with the scope and worker name flattened onto that one header line so a
+      worker id typed on a command line cannot buy itself a second header. Live in a
+      scratch project: the planner published into `architecture`, the coder read it back
+      marked and attributed, and every refusal fired and wrote nothing — reading `decisions`
+      as the coder (`access denied by memory policy`), publishing into `architecture` as
+      the coder (`publish not permitted by memory policy`), and both as a worker with no
+      policy (`has no memory policy configured`). `policy set` replaces the whole policy,
+      which is how an omitted grant disappears; a second `--worker` in one command is
+      refused by clap rather than applied to whichever was named last; and the listing
+      sorts scopes rather than echoing the order typed, which one of the new checks found
+      by expecting the opposite. Four end-to-end tests exist, and running them with
+      `can_read` and `can_publish` forced to `true` fails three — the refusals come from
+      the capability check, not from argument parsing. Completions and the man page were
+      regenerated from the clap definition. 2651 tests passing; clippy clean.
 - [ ] **OR-9 — team recipes as data.** Named role→worker→gate recipes in existing TOML,
       over `OR-2`. No team engine.
       **Done-when:** a recipe is a file a person can read and diff, and removing it

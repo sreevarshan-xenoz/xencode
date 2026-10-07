@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2640 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2651 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -344,6 +344,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Memory** | `xencode memory list` | List conversation sessions |
 | **Memory** | `xencode memory gc [--apply]` | What the code contradicts in `state.md` and for how long; `--apply` retires the ones past twelve months |
 | **Memory** | `xencode memory evidence [--format text\|json]` | How many revisions each durable fact has been re-checked against, how many of them agreed, and the 95% interval over the next one agreeing |
+| **Memory** | `xencode memory publish\|read\|policy` | Shared memory between workers in `.xencode/`: a finding reaches another worker marked `[data]` and attributed to who wrote it, and both sides deny unless a policy names the scope |
 | **Bootstrap** | `xencode bootstrap [path] [--check]` | Write `AGENTS.md`, `.xencode/anchor.md` and a settings example for a project that has none of them, from what git reports — no command guessed, no existing file replaced, and no `--force` to ask for one |
 | **Advise** | `xencode advise [FILTER] [--json] [--limit 40]` | Repo insights from the `.xencode` snapshot |
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
@@ -768,7 +769,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2640 passing)
+cargo test                          # Full workspace suite (2651 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -888,6 +889,12 @@ RUST_BACKTRACE=1 xencode tui
 - `xencode analyze` runs a pattern-based scanner over OWASP Top 10 categories
   (hardcoded secrets, injection, weak crypto, path traversal, SSRF). It matches
   source text — it does not consult a CVE database or your dependency tree.
+- Memory one worker writes for another to read (`.xencode/shared_memory.json`) is a
+  capability, not a shared scratch pad. A finding reaches a worker only if its own policy
+  names that scope, and both directions deny by default: a worker that was never given a
+  policy can neither read what is stored nor add to it, and a policy that names no scope
+  grants nothing. What does arrive leads with `[data]` and the author's name, because
+  another worker's notes are bytes to be read, not instructions to be obeyed.
 - The collaboration server authenticates every mutation with bearer tokens, gates
   the relay by role, and appends joins, mutations and denials to an audit log.
 - Never commit plaintext credentials — use environment-specific secrets management and least-privilege access.
