@@ -79,6 +79,122 @@ pub trait Backend: Send + Sync {
     }
 }
 
+/// Pinned boxed future for dynamic dispatch on backends.
+pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
+/// Object-safe companion of [`Backend`] for engine composition (AF-3).
+///
+/// Enables polymorphic selection and invocation of computer backends
+/// without hardcoded `match` branches in the execution loops.
+pub trait ComputerBackend: std::fmt::Debug + Send + Sync {
+    fn id(&self) -> &'static str;
+    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>>;
+    fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>>;
+    fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>>;
+    fn forward_command(&self, session: &str, local_port: u16, remote_port: u16) -> TransportCmd;
+    fn exec_command(&self, session: &str, command: &str) -> TransportCmd;
+    fn reap_hint(&self, started_at: Option<&str>, endpoint_ok: bool) -> Option<String>;
+    fn is_transient(&self, _err: &str) -> bool {
+        false
+    }
+}
+
+impl ComputerBackend for crate::colab::ColabBackend {
+    fn id(&self) -> &'static str {
+        <Self as Backend>::id(self)
+    }
+
+    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            <Self as Backend>::provision(self, session, gpu).await
+        })
+    }
+
+    fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>> {
+        Box::pin(async move {
+            <Self as Backend>::list_sessions(self).await
+        })
+    }
+
+    fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            <Self as Backend>::deprovision(self, session).await
+        })
+    }
+
+    fn forward_command(&self, session: &str, local_port: u16, remote_port: u16) -> TransportCmd {
+        <Self as Backend>::forward_command(self, session, local_port, remote_port)
+    }
+
+    fn exec_command(&self, session: &str, command: &str) -> TransportCmd {
+        <Self as Backend>::exec_command(self, session, command)
+    }
+
+    fn reap_hint(&self, started_at: Option<&str>, endpoint_ok: bool) -> Option<String> {
+        <Self as Backend>::reap_hint(self, started_at, endpoint_ok)
+    }
+
+    fn is_transient(&self, err: &str) -> bool {
+        <Self as Backend>::is_transient(self, err)
+    }
+}
+
+/// Constructor for dynamically mounted computer backends.
+pub type BackendConstructor = Box<
+    dyn Fn(&crate::orchestrate::Binaries, &std::path::Path) -> Box<dyn ComputerBackend>
+        + Send
+        + Sync,
+>;
+
+/// Statically linked mount point for computer backends (AF-3).
+pub struct BackendRegistry {
+    entries: std::collections::BTreeMap<&'static str, BackendConstructor>,
+}
+
+impl Default for BackendRegistry {
+    fn default() -> Self {
+        let mut reg = Self::new();
+        reg.register(
+            "colab",
+            Box::new(|bins, key| {
+                Box::new(crate::colab::ColabBackend::new(bins.clone(), key.to_path_buf()))
+            }),
+        );
+        reg
+    }
+}
+
+impl BackendRegistry {
+    pub fn new() -> Self {
+        Self {
+            entries: std::collections::BTreeMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, id: &'static str, ctor: BackendConstructor) {
+        self.entries.insert(id, ctor);
+    }
+
+    pub fn available_backends(&self) -> Vec<&'static str> {
+        self.entries.keys().copied().collect()
+    }
+
+    pub fn resolve(
+        &self,
+        id: &str,
+        bins: &crate::orchestrate::Binaries,
+        key: &std::path::Path,
+    ) -> Result<Box<dyn ComputerBackend>, String> {
+        match self.entries.get(id) {
+            Some(ctor) => Ok(ctor(bins, key)),
+            None => Err(format!(
+                "unknown computer backend `{id}`; available backends: {}",
+                self.available_backends().join(", ")
+            )),
+        }
+    }
+}
+
 /// A captured subprocess run, with a timeout. `argv` mirrors the other
 /// builders — `argv[0]` is the exe itself (it must equal `exe`) and is
 /// skipped here so `Command` gets its args only.
@@ -158,5 +274,25 @@ mod tests {
             error_tail("Warning: Permanently added 'x' to the list.\n"),
             None
         );
+    }
+
+    #[test]
+    fn backend_registry_resolves_statically_registered_backends() {
+        let reg = BackendRegistry::default();
+        assert_eq!(reg.available_backends(), vec!["colab"]);
+
+        let bins = crate::orchestrate::Binaries {
+            colab: std::path::PathBuf::from("/bin/colab"),
+            ssh: std::path::PathBuf::from("/bin/ssh"),
+        };
+        let key = std::path::Path::new("/tmp/id_test");
+        let backend = reg.resolve("colab", &bins, key).expect("must resolve colab");
+        assert_eq!(backend.id(), "colab");
+
+        let err = match reg.resolve("docker", &bins, key) {
+            Err(e) => e,
+            Ok(_) => panic!("docker should not be registered"),
+        };
+        assert!(err.contains("unknown computer backend `docker`"), "{err}");
     }
 }

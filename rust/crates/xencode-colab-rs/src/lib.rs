@@ -26,7 +26,7 @@ pub mod orchestrate;
 pub mod preflight;
 pub mod state;
 
-pub use backend::{Backend, TransportCmd};
+pub use backend::{Backend, BackendRegistry, BoxFuture, ComputerBackend, TransportCmd};
 pub use bootstrap::bootstrap_script;
 pub use colab::{
     colab_new_argv, colab_sessions_argv, colab_stop_argv, exec_ssh_argv, forward_argv,

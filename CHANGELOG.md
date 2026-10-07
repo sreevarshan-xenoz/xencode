@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AF-3`: compose engine subsystems from statically-linked implementations chosen by configuration
+
+Subsystems are now composed through static registration and configuration selection without conditional matching on subsystem identity:
+
+- Added `CompositionProfile` and `CompositionSummary` in `xencode-config-rs` defining permission mappings over capability vocabulary (`filesystem.read`, `filesystem.write`, `shell.execute`, `network.request`, `external.mcp`).
+- Added `ComputerBackend` trait and `BackendRegistry` in `xencode-colab-rs` providing an object-safe mount point for compute environments with static registration and dynamic dispatch.
+- Added `WorkerAdapter` trait and `WorkerAdapterRegistry` in `xencode-tui-rs` providing an object-safe mount point for tool exposure adapters.
+- Added configuration keys `composition_profile`, `computer_backend`, and `worker_adapter` to `XencodeConfig` with validation against known profiles and registered backends.
+- Added `--dump-config` command-line flag and `xencode config dump` command emitting the resolved composition summary in JSON format.
+
 ### Added — `AF-2`: typed agent event publication and user interface reducer
 
 The agent engine now publishes typed events onto an internal broadcast event bus, and the user interface reduces these events into view state:
