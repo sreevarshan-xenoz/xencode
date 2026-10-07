@@ -377,6 +377,9 @@ pub struct ChangeImpact {
     /// subprocess. A file the manifest does not claim (a build artifact, a stray
     /// `.rs` outside any member) is simply absent from this map.
     pub file_crates: BTreeMap<String, String>,
+    /// The CLI commands and manual documentation impact (AE-4), when the target
+    /// defines CLI commands.
+    pub cli_impact: Option<crate::cli_impact::CliImpact>,
 }
 
 /// The three-layer answer for one file. `file` may be a repo-relative or absolute
@@ -452,6 +455,9 @@ pub fn change_impact(
         }
     }
 
+    let repo_root = crate::cli_impact::find_repo_root(&root);
+    let cli_impact = crate::cli_impact::detect_cli_impact(&repo_root, &root.join(&target), None);
+
     Ok(ChangeImpact {
         files: report,
         target,
@@ -462,6 +468,7 @@ pub fn change_impact(
         own_commits,
         history_known,
         file_crates,
+        cli_impact,
     })
 }
 
