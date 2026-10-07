@@ -1160,6 +1160,7 @@ fn settings_toggle(app: &mut App, label: &str) -> bool {
         "Cache Enabled" => &mut app.config.cache_enabled,
         "Memory Enabled" => &mut app.config.memory_enabled,
         "Cloud Models" => &mut app.config.allow_cloud_models,
+        "External Workers" => &mut app.config.allow_external_workers,
         "Mouse Capture" => &mut app.config.mouse_capture,
         _ => return false,
     };
@@ -1185,6 +1186,22 @@ fn settings_step(app: &mut App, dir: i32) {
         }
         SettingKind::Toggle => {
             if settings_toggle(app, label) {
+                if label == "External Workers" {
+                    // Opening this hands work to a program whose traffic xencode
+                    // cannot see, so the cost of the flip is said at the keystroke
+                    // that makes it.
+                    app.push_toast(
+                        crate::toast::ToastKind::Info,
+                        if app.config.allow_external_workers {
+                            "external workers on: a team role may be handed to another \
+                             vendor's agent"
+                        } else {
+                            "external workers off: a name on the agent roster is refused \
+                             by that name"
+                        }
+                        .to_string(),
+                    );
+                }
                 if label == "Mouse Capture" {
                     // The row is the escape hatch for what the mouse costs, so
                     // the cost is said at the keystroke rather than in a manual
@@ -3038,12 +3055,57 @@ mod tests {
             .filter(|row| row.section == "Providers")
             .map(|row| row.label)
             .collect();
-        assert_eq!(providers.last().copied(), Some("Cloud Models"));
+        assert_eq!(providers.last().copied(), Some("External Workers"));
         let consent = SETTINGS_ITEMS
             .iter()
             .find(|row| row.label == "Cloud Models")
             .unwrap();
         assert_eq!(consent.kind, SettingKind::Toggle);
+    }
+
+    /// The worker rule is its own consent, so its row must move its own flag and
+    /// nothing else: opening it cannot open the egress policy, and the flip is
+    /// said out loud because what it permits is a program xencode cannot watch.
+    #[test]
+    fn the_external_workers_row_switches_work_not_egress_and_says_what_it_did() {
+        use crate::focus::{settings_row_index, SettingKind, SETTINGS_ITEMS};
+
+        let mut app = app_with(FocusArea::Settings);
+        app.config = XencodeConfig::default();
+        assert_eq!(
+            app.config.profile(),
+            xencode_core_rs::Profile::LOCAL_ONLY,
+            "a session starts with both rules of the posture closed"
+        );
+
+        app.settings_cursor = settings_row_index("External Workers");
+        press(&mut app, KeyCode::Right);
+        assert!(
+            app.config.allow_external_workers,
+            "the row is the switch for work"
+        );
+        assert!(
+            !app.egress_policy().allow_cloud,
+            "and it is not a way to open the model rule"
+        );
+        assert!(app
+            .toasts
+            .iter()
+            .any(|t| t.message.contains("another vendor's agent")),);
+
+        press(&mut app, KeyCode::Right);
+        assert!(!app.config.allow_external_workers);
+        assert_eq!(app.config.profile(), xencode_core_rs::Profile::LOCAL_ONLY);
+        assert!(app
+            .toasts
+            .iter()
+            .any(|t| t.message.contains("refused by that name")));
+
+        let row = SETTINGS_ITEMS
+            .iter()
+            .find(|row| row.label == "External Workers")
+            .unwrap();
+        assert_eq!(row.kind, SettingKind::Toggle);
     }
 
     #[test]

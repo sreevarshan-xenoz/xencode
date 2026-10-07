@@ -25,9 +25,16 @@
 //! - **A ranking that could not run is said out loud.** When load and cost are
 //!   both unknown for every candidate, the choice was settled by name, and saying
 //!   "settled by name" is the truth the printed decision owes the reader.
+//!
+//! A fourth check runs ahead of all three, and it is not a measurement: the
+//! [`Profile`] in force may refuse to hand work to another vendor's agent at all
+//! (`OR-13`). A worker ruled out that way is ruled out by the posture, in the
+//! posture's own words, and it is printed as the first thing the router asked.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+use crate::profile::Profile;
 
 /// How a number used by routing came to be known.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +161,11 @@ pub struct WorkerCandidate {
     /// above is empty because nothing was observed — which is a different answer
     /// from observing that the worker cannot do something, and is printed as one.
     pub probed: bool,
+    /// Whether the agent roster says this name belongs to another vendor's
+    /// program (`OR-13`). Supplied by the caller because this crate has no view
+    /// of which binaries are installed here; `false` is the roster having no row
+    /// to read, which is not a claim that the worker is xencode's own.
+    pub external: bool,
     /// One line per capability the probe spoke to, saying what was read and what
     /// was found in it. Kept beside the candidate so a reason can be checked
     /// rather than taken on trust.
@@ -175,6 +187,10 @@ pub struct TaskRequirement {
     pub required_capabilities: BTreeSet<String>,
     /// Optional maximum cost ceiling allowed for this task.
     pub cost_ceiling: Option<f64>,
+    /// The posture the task is being routed under (`OR-13`). A worker the profile
+    /// refuses is refused before its capabilities, load or price are looked at, so
+    /// a policy decision is never printed as though it were a measurement.
+    pub profile: Profile,
 }
 
 /// Why a worker candidate was rejected during routing.
@@ -203,6 +219,13 @@ pub enum RejectionReason {
         ceiling: f64,
         source: String,
     },
+    /// The posture in force refuses to hand work to another vendor's agent
+    /// (`OR-13`). This is not a measurement and nothing about the worker was
+    /// checked to produce it: the refusal quotes the profile it was refused by,
+    /// and the rule line the surface prints above the refusals names the setting
+    /// that opens it — a reader who disagrees with a policy should be arguing with
+    /// the policy, not hunting for a failed check.
+    ExternalWorkerRefused { refusal: String },
 }
 
 impl RejectionReason {
@@ -243,6 +266,7 @@ impl RejectionReason {
                 "costs {cost:.2}$ against a ceiling of {ceiling:.2}$ ({source}), so it is out \
                  on price"
             ),
+            RejectionReason::ExternalWorkerRefused { refusal } => refusal.clone(),
         }
     }
 }
@@ -313,6 +337,8 @@ impl CapabilityRouter {
     /// Evaluates candidate workers and chooses the best eligible worker for `task`.
     ///
     /// Rules:
+    /// 0. The posture comes first: a worker the [`Profile`] refuses to hand work
+    ///    to is out, by name, with the profile's own sentence as the reason.
     /// 1. Must satisfy all `required_capabilities` from `probed_capabilities`. An
     ///    idle worker lacking any required capability is strictly rejected; a
     ///    worker that was never probed is rejected too, and told apart in words.
@@ -335,12 +361,33 @@ impl CapabilityRouter {
         let mut eligible: Vec<&WorkerCandidate> = Vec::new();
         let mut load_rejections = 0usize;
         let mut cost_rejections = 0usize;
+        let mut profile_rejections = 0usize;
         let mut ceiling_skipped: Vec<String> = Vec::new();
         let mut load_checks_run = 0usize;
 
         for candidate in candidates {
             let mut facts = Vec::new();
             let mut not_checked = Vec::new();
+
+            // 0. The posture, before anything is measured. A worker the roster
+            //    says belongs to another vendor is not eligible while the worker
+            //    rule is closed, and saying so first keeps the capability, load
+            //    and cost lines from reading as the reason.
+            if let Err(refusal) = task.profile.check_worker(&candidate.id, candidate.external) {
+                facts.push(format!("profile: {}", task.profile.name()));
+                evaluations.push(CandidateEvaluation {
+                    worker_id: candidate.id.clone(),
+                    eligible: false,
+                    rejection: Some(RejectionReason::ExternalWorkerRefused {
+                        refusal: refusal.why,
+                    }),
+                    probed_capabilities: candidate.probed_capabilities.iter().cloned().collect(),
+                    facts,
+                    not_checked,
+                });
+                profile_rejections += 1;
+                continue;
+            }
 
             let missing: Vec<String> = required
                 .iter()
@@ -512,26 +559,65 @@ impl CapabilityRouter {
 
         let mut steps = Vec::new();
         steps.push(StepNote {
+            check: "profile".to_string(),
+            ran: true,
+            decided: profile_rejections > 0,
+            words: if profile_rejections > 0 {
+                let refused: Vec<String> = evaluations
+                    .iter()
+                    .filter(|e| {
+                        matches!(
+                            e.rejection,
+                            Some(RejectionReason::ExternalWorkerRefused { .. })
+                        )
+                    })
+                    .map(|e| e.worker_id.clone())
+                    .collect();
+                format!(
+                    "{} of {} {} refused by the {} profile before the capability, load and cost \
+                     checks were consulted: {}",
+                    count(refused.len(), "worker", "workers"),
+                    candidates.len(),
+                    was_were(refused.len()),
+                    task.profile.name(),
+                    refused.join(", ")
+                )
+            } else {
+                format!(
+                    "the {} profile let every candidate through to the measurements",
+                    task.profile.name()
+                )
+            },
+        });
+        // A worker the posture refused was never measured for this task, so it
+        // must not be counted as a capability refusal below.
+        let capability_refusals: Vec<&CandidateEvaluation> = evaluations
+            .iter()
+            .filter(|e| {
+                !e.eligible
+                    && !matches!(
+                        e.rejection,
+                        Some(RejectionReason::ExternalWorkerRefused { .. })
+                    )
+            })
+            .collect();
+        steps.push(StepNote {
             check: "capabilities".to_string(),
             ran: true,
-            decided: !required.is_empty()
-                && evaluations
-                    .iter()
-                    .any(|e| !e.eligible && e.rejection.is_some()),
+            decided: !required.is_empty() && !capability_refusals.is_empty(),
             words: if required.is_empty() {
                 "no capability was required, so nothing was ruled out on it".to_string()
             } else {
                 let needs = required.join(", ");
-                let out: Vec<String> = evaluations
+                let out: Vec<String> = capability_refusals
                     .iter()
-                    .filter(|e| !e.eligible)
                     .map(|e| e.worker_id.clone())
                     .collect();
                 let mut words = format!(
-                    "{needs} was required of every worker, and {} of {} {} probed here as able \
-                     to do it",
+                    "{needs} was required of every worker that reached this check, and {} of {} \
+                     {} probed here as able to do it",
                     eligible.len(),
-                    candidates.len(),
+                    candidates.len() - profile_rejections,
                     was_were(eligible.len())
                 );
                 if !out.is_empty() {
@@ -587,20 +673,55 @@ impl CapabilityRouter {
         });
 
         if eligible.is_empty() {
-            let refused: Vec<String> = evaluations
-                .iter()
-                .filter_map(|e| {
-                    e.rejection
-                        .as_ref()
-                        .map(|r| format!("{}: {}", e.worker_id, r.words()))
-                })
-                .collect();
+            // One sentence per reason, with every name that drew it. Listing the
+            // candidates separately is right when the reasons differ and wrong
+            // when they do not: the shipped posture refuses every agent on the
+            // roster for one sentence's worth of reason, and printing it once per
+            // name buries the answer under it (`OR-13`). A posture refusal is
+            // grouped on its own, in the rule's words, because the sentence it
+            // carries names the worker it refused.
+            let mut posture_refused: Vec<String> = Vec::new();
+            let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+            for evaluation in &evaluations {
+                let Some(reason) = evaluation.rejection.as_ref() else {
+                    continue;
+                };
+                if matches!(reason, RejectionReason::ExternalWorkerRefused { .. }) {
+                    posture_refused.push(evaluation.worker_id.clone());
+                    continue;
+                }
+                let words = reason.words();
+                match groups.iter_mut().find(|(w, _)| *w == words) {
+                    Some((_, names)) => names.push(evaluation.worker_id.clone()),
+                    None => groups.push((words, vec![evaluation.worker_id.clone()])),
+                }
+            }
+            let mut refused: Vec<String> = Vec::new();
+            if !posture_refused.is_empty() {
+                refused.push(format!(
+                    "{}: refused by the {} posture, which hands work only to xencode's own \
+                     loop — xencode has a roster row for {}, so the work would leave this \
+                     machine through a program xencode does not control",
+                    posture_refused.join(", "),
+                    task.profile.name(),
+                    if posture_refused.len() == 1 {
+                        "that name"
+                    } else {
+                        "those names"
+                    },
+                ));
+            }
+            refused.extend(
+                groups
+                    .iter()
+                    .map(|(words, names)| format!("{}: {}", names.join(", "), words)),
+            );
             let explanation = format!(
                 "Nothing was routed for task '{}': none of the {} candidates could take it. \
                  {}.",
                 task.task_id,
                 candidates.len(),
-                refused.join(". ")
+                refused.join(" ")
             );
             steps.push(StepNote {
                 check: "choice".to_string(),
@@ -791,12 +912,16 @@ mod tests {
     }
 
     /// A candidate whose load, capacity and cost are all things nobody measured —
-    /// which is every vendor worker on this machine today.
+    /// which is every vendor worker on this machine today. `external` is `false`
+    /// because these fixtures name invented workers; a test that wants the
+    /// roster's answer calls [`external`], so the posture is never what a
+    /// capability test is quietly watching.
     fn unmeasured(id: &str, capabilities: &[&str]) -> WorkerCandidate {
         WorkerCandidate {
             id: id.to_string(),
             probed_capabilities: caps(capabilities),
             probed: true,
+            external: false,
             capability_evidence: capabilities
                 .iter()
                 .map(|c| {
@@ -812,11 +937,26 @@ mod tests {
         }
     }
 
+    /// The same candidate with the roster's answer on it: somebody else's agent.
+    fn external(mut candidate: WorkerCandidate) -> WorkerCandidate {
+        candidate.external = true;
+        candidate
+    }
+
     fn task(needs: &[&str], ceiling: Option<f64>) -> TaskRequirement {
         TaskRequirement {
             task_id: "t-1".to_string(),
             required_capabilities: caps(needs),
             cost_ceiling: ceiling,
+            profile: Profile::LOCAL_ONLY,
+        }
+    }
+
+    /// The same task under a posture that lets work reach other vendors.
+    fn open_task(needs: &[&str], ceiling: Option<f64>) -> TaskRequirement {
+        TaskRequirement {
+            profile: Profile::new(true, true),
+            ..task(needs, ceiling)
         }
     }
 
@@ -1118,8 +1258,84 @@ mod tests {
             );
         }
         assert!(decision.explanation.contains("telepathy"));
+        // The two drew one reason, so the reason is stated once and both names
+        // stand under it. Repeating a sentence per candidate is not a longer
+        // explanation, and under the shipped posture every candidate shares one.
+        assert!(
+            decision.explanation.contains("a, b: needs telepathy"),
+            "{}",
+            decision.explanation
+        );
+        assert_eq!(
+            decision.explanation.matches("telepathy").count(),
+            1,
+            "{}",
+            decision.explanation
+        );
     }
 
+    /// Names that drew different reasons never merge into one line: the grouping
+    /// is by reason, so a reader is never told two workers were refused for the
+    /// same thing when they were not.
+    #[test]
+    fn candidates_refused_for_different_reasons_are_not_merged_into_one_line() {
+        let mut priced = unmeasured("refused-on-price", &["telepathy"]);
+        priced.cost = Fact::measured(0.02, "the rate card this project keeps");
+        let decision = CapabilityRouter::route(
+            &task(&["telepathy"], Some(0.01)),
+            &[unmeasured("refused-on-capability", &["stream"]), priced],
+        )
+        .unwrap();
+        assert_eq!(decision.selected_worker, None);
+        assert!(
+            decision
+                .explanation
+                .contains("refused-on-capability: needs telepathy"),
+            "{}",
+            decision.explanation
+        );
+        assert!(
+            decision
+                .explanation
+                .contains("refused-on-price: costs 0.02$ against a ceiling of 0.01$"),
+            "{}",
+            decision.explanation
+        );
+    }
+
+    /// What the shipped posture actually produces on a machine with the roster
+    /// installed: every candidate refused by one rule. The answer is one sentence
+    /// with the names under it, not that sentence five times.
+    #[test]
+    fn one_posture_refusing_every_candidate_is_answered_with_one_sentence() {
+        let ids = ["opencode", "cline", "codex", "claude", "gemini"];
+        let candidates: Vec<WorkerCandidate> = ids
+            .iter()
+            .map(|id| external(unmeasured(id, &["stream"])))
+            .collect();
+        let decision = CapabilityRouter::route(&task(&[], None), &candidates).unwrap();
+        assert!(decision.selected_worker.is_none());
+        assert_eq!(
+            decision
+                .explanation
+                .matches("refused by the Local Only posture")
+                .count(),
+            1,
+            "the reason is said once, with every name under it: {}",
+            decision.explanation
+        );
+        for id in ids {
+            assert!(
+                decision.explanation.contains(id),
+                "{id} is named: {}",
+                decision.explanation
+            );
+        }
+    }
+
+    /// An estimate is labelled as a guess and a measurement is credited to where
+    /// it was seen, in the same line, because a reader comparing two numbers has
+    /// to be able to tell which kind each one is.
     #[test]
     fn an_estimate_is_labelled_and_a_measurement_is_credited_in_the_same_line() {
         let guess: Fact<f64> = Fact::estimated(0.02, "one minute of this machine at 12 c/kWh");
@@ -1149,5 +1365,138 @@ mod tests {
     #[test]
     fn no_candidates_is_still_a_hard_error() {
         assert!(CapabilityRouter::route(&task(&["stream"], None), &[]).is_err());
+    }
+
+    /// `OR-13`: the posture is asked before the measurements, and the refusal is
+    /// the profile's own sentence rather than a capability, load or price reason.
+    #[test]
+    fn a_worker_the_profile_refuses_is_refused_by_that_name_before_any_check() {
+        let decision = CapabilityRouter::route(
+            &task(&[], None),
+            &[
+                external(unmeasured("codex", &["stream"])),
+                unmeasured("xencode-own-loop", &[]),
+            ],
+        )
+        .unwrap();
+        let refused = decision
+            .candidate_evaluations
+            .iter()
+            .find(|e| e.worker_id == "codex")
+            .unwrap();
+        assert!(!refused.eligible);
+        match refused.rejection.as_ref().unwrap() {
+            RejectionReason::ExternalWorkerRefused { refusal } => {
+                assert!(refusal.contains("Local Only profile"), "{refusal}");
+                assert!(
+                    refusal.contains("another vendor's agent"),
+                    "the reason must say what the worker is: {refusal}"
+                );
+                assert!(
+                    !refusal.contains("allow_external_workers"),
+                    "the setting is stated once, by the rule line a surface prints above its \
+                     refusals, rather than pasted onto every one of them: {refusal}"
+                );
+                assert!(
+                    Profile::LOCAL_ONLY
+                        .worker_rule()
+                        .contains("allow_external_workers=false"),
+                    "and that rule line is where it is stated: {}",
+                    Profile::LOCAL_ONLY.worker_rule()
+                );
+            }
+            other => panic!("refused for {other:?}, not by the profile"),
+        }
+        assert_eq!(
+            decision.selected_worker.as_deref(),
+            Some("xencode-own-loop")
+        );
+        // The first thing the router asked is the posture, and it names who was
+        // refused rather than leaving a reader to notice an absent worker.
+        assert_eq!(decision.steps[0].check, "profile");
+        assert!(decision.steps[0].decided);
+        assert!(
+            decision.steps[0].words.contains("codex"),
+            "{}",
+            decision.steps[0].words
+        );
+        assert!(
+            !decision.steps[0].words.contains("xencode-own-loop"),
+            "only the refused are named: {}",
+            decision.steps[0].words
+        );
+    }
+
+    /// A worker the posture refused was never asked about its capabilities, so
+    /// the capability line must not report it as a worker that failed them.
+    #[test]
+    fn a_profile_refusal_is_not_reported_as_a_capability_refusal() {
+        let decision = CapabilityRouter::route(
+            &task(&["stream"], None),
+            &[external(unmeasured("claude", &["acp"]))],
+        )
+        .unwrap();
+        assert!(decision.selected_worker.is_none());
+        let capability = decision
+            .steps
+            .iter()
+            .find(|s| s.check == "capabilities")
+            .unwrap();
+        assert!(!capability.decided);
+        assert!(
+            capability.words.contains("0 of 0"),
+            "nobody reached the capability check: {}",
+            capability.words
+        );
+        assert!(
+            decision
+                .explanation
+                .contains("claude: refused by the Local Only posture"),
+            "the summary says which rule refused it, in the rule's own words: {}",
+            decision.explanation
+        );
+        assert!(
+            !decision
+                .explanation
+                .contains("xencode has a roster row for `claude`"),
+            "the per-worker sentence is the refusal's own and stays on the candidate, not \
+             repeated in the summary: {}",
+            decision.explanation
+        );
+        assert!(
+            !decision.explanation.contains("needs stream"),
+            "a worker never asked about `stream` cannot be refused for it: {}",
+            decision.explanation
+        );
+    }
+
+    #[test]
+    fn opening_the_worker_rule_puts_the_same_candidates_back_in_the_running() {
+        let decision = CapabilityRouter::route(
+            &open_task(&[], None),
+            &[
+                external(unmeasured("codex", &["stream"])),
+                external(unmeasured("agy", &["stream"])),
+            ],
+        )
+        .unwrap();
+        let profile = &decision.steps[0];
+        assert_eq!(profile.check, "profile");
+        assert!(!profile.decided);
+        assert!(profile.words.contains("let every candidate through"));
+        assert_eq!(decision.selected_worker.as_deref(), Some("agy"));
+    }
+
+    /// The roster row is the whole of what decides this, so a worker name xencode
+    /// cannot place is not quietly treated as xencode's own.
+    #[test]
+    fn a_name_the_roster_cannot_place_reaches_the_measurements() {
+        let decision = CapabilityRouter::route(
+            &task(&[], None),
+            &[unmeasured("my-home-grown-runner", &["stream"])],
+        )
+        .unwrap();
+        assert!(decision.candidate_evaluations[0].eligible);
+        assert!(!decision.steps[0].decided);
     }
 }

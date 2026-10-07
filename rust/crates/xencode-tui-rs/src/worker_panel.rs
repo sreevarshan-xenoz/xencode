@@ -10,7 +10,7 @@
 //! registry, a [`TeamRun`] from `.xencode/team-runs/`, an [`Estimate`] quoted
 //! from a run of that exact recipe.
 //!
-//! Two rules hold it honest, and both are the done-when.
+//! Three rules hold it honest, and all three are the done-when.
 //!
 //! - **Every number traces to a row.** Each row carries its own list of sources,
 //!   and `Enter` shows them beside the line they describe. A figure with nothing
@@ -21,6 +21,11 @@
 //!   here, or a stream that reported nothing, has no such claim to make: the
 //!   row says so and gives no numbers at all, because a zero would read as a
 //!   measurement.
+//! - **A worker the posture refuses is `refused`, which is not `unknown`.** Under
+//!   the shipped Local-Only profile a role assigned to another vendor's agent
+//!   will not be launched at all (`OR-13`), so the row says that instead of
+//!   leaving it as a missing reading, and quotes the setting that would open the
+//!   rule.
 //!
 //! Nothing here touches a file, a process or a socket. `App::refresh_worker_panel`
 //! does the reading when the panel opens and when the user asks it to, and hands
@@ -242,9 +247,24 @@ pub struct PlannedRole {
     /// the recipe's own answer and is shown as such.
     pub gates: Vec<String>,
     pub needs: Vec<String>,
+    /// Whether the agent roster has a row for this worker — the same answer the
+    /// router is handed, and answered by the caller because this projection reads
+    /// no files and no `PATH`.
+    pub external: bool,
 }
 
-pub fn planned_role_rows(roles: &[PlannedRole]) -> Vec<PanelRow> {
+/// One row per role, refused first when the posture refuses the worker it names.
+///
+/// A refusal is a stronger statement than `unknown`: an unobserved role might
+/// yet run, while a refused role will not be launched at all under the posture
+/// that is in force, and the row quotes that posture and the setting that opens
+/// it (`OR-13`). A worker the roster cannot place is not claimed as xencode's
+/// own — the row is the ordinary one, and its sources say the question went
+/// unanswered.
+pub fn planned_role_rows(
+    roles: &[PlannedRole],
+    profile: &xencode_core_rs::Profile,
+) -> Vec<PanelRow> {
     roles
         .iter()
         .map(|role| {
@@ -253,26 +273,56 @@ pub fn planned_role_rows(roles: &[PlannedRole]) -> Vec<PanelRow> {
             } else {
                 format!("{} check(s)", role.gates.len())
             };
+            let refusal = profile.check_worker(&role.worker, role.external);
+            let mut sources = vec![
+                "status, duration, messages and cost: unknown — xencode holds no event \
+                 stream for a role it did not launch, so it prints none of them"
+                    .to_string(),
+                format!("{gates}: the `gate` list in {}", role.path),
+                format!(
+                    "waits on {}: the `needs` list in {}",
+                    if role.needs.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        role.needs.join(", ")
+                    },
+                    role.path
+                ),
+                format!("recipe `{}`", role.recipe),
+            ];
+            if role.external {
+                sources.push(format!(
+                    "worker `{}`: the agent roster has a row for it, which is xencode's list of \
+                     another vendor's coding-agent CLI",
+                    role.worker
+                ));
+            } else {
+                sources.push(format!(
+                    "whose worker `{}` is: the roster has no row for it, so this is not a claim \
+                     that it is xencode's own — nothing here checked whether it exists",
+                    role.worker
+                ));
+            }
+            if let Err(refusal) = refusal {
+                sources.push(format!("posture: {}", profile.worker_rule()));
+                sources.push(refusal.why);
+                return PanelRow {
+                    section: PanelSection::Agents,
+                    is_header: false,
+                    line: format!(
+                        "{} — {}: refused by the {} posture, not launched",
+                        role.worker,
+                        role.role,
+                        profile.name()
+                    ),
+                    sources,
+                };
+            }
             PanelRow {
                 section: PanelSection::Agents,
                 is_header: false,
                 line: format!("{} — {}: unknown, not idle", role.worker, role.role),
-                sources: vec![
-                    "status, duration, messages and cost: unknown — xencode holds no event \
-                     stream for a role it did not launch, so it prints none of them"
-                        .to_string(),
-                    format!("{gates}: the `gate` list in {}", role.path),
-                    format!(
-                        "waits on {}: the `needs` list in {}",
-                        if role.needs.is_empty() {
-                            "nothing".to_string()
-                        } else {
-                            role.needs.join(", ")
-                        },
-                        role.path
-                    ),
-                    format!("recipe `{}`", role.recipe),
-                ],
+                sources,
             }
         })
         .collect()
@@ -750,19 +800,26 @@ mod tests {
     }
 
     /// A role a recipe names and xencode did not launch is the clearest case of
-    /// an unobservable worker: it has a name, a file, and no state whatsoever.
+    /// an unobservable worker: it has a name, a file, and no state whatsoever. A
+    /// worker the roster cannot place is the case the posture has nothing to say
+    /// about, so its row says the question went unanswered rather than that the
+    /// worker is xencode's own.
     #[test]
     fn a_recipe_role_xencode_did_not_launch_is_unknown_and_carries_no_figures() {
-        let rows = planned_role_rows(&[PlannedRole {
-            recipe: "rust-fix".into(),
-            worker: "codex".into(),
-            role: "survey".into(),
-            path: ".xencode/teams/rust-fix.toml".into(),
-            gates: vec!["cargo test".into()],
-            needs: vec![],
-        }]);
+        let rows = planned_role_rows(
+            &[PlannedRole {
+                recipe: "rust-fix".into(),
+                worker: "my-own-runner".into(),
+                role: "survey".into(),
+                path: ".xencode/teams/rust-fix.toml".into(),
+                gates: vec!["cargo test".into()],
+                needs: vec![],
+                external: false,
+            }],
+            &xencode_core_rs::Profile::LOCAL_ONLY,
+        );
         let line = &rows[0].line;
-        assert_eq!(line, "codex — survey: unknown, not idle");
+        assert_eq!(line, "my-own-runner — survey: unknown, not idle");
         assert!(
             rows[0]
                 .sources
@@ -771,11 +828,95 @@ mod tests {
             "{:?}",
             rows[0].sources
         );
+        assert!(
+            rows[0].sources.iter().any(|s| s.contains("no row for it")
+                && s.contains("not a claim that it is xencode's own")),
+            "a worker nobody could place must not read as an accepted one: {:?}",
+            rows[0].sources
+        );
         // The one count the recipe really does carry is the gate list's.
         assert!(rows[0]
             .sources
             .iter()
             .any(|s| s == "1 check(s): the `gate` list in .xencode/teams/rust-fix.toml"));
+    }
+
+    /// The refusal (`OR-13`): a role assigned to another vendor's agent is not an
+    /// unobserved role any more — under the posture in force it will not be
+    /// launched at all. The row says which posture refused it, and the sources
+    /// carry the rule and the setting that opens it.
+    #[test]
+    fn a_role_the_posture_refuses_is_said_as_refused_and_names_its_way_out() {
+        let refused = planned_role_rows(
+            &[PlannedRole {
+                recipe: "rust-fix".into(),
+                worker: "codex".into(),
+                role: "survey".into(),
+                path: ".xencode/teams/rust-fix.toml".into(),
+                gates: vec!["cargo test".into()],
+                needs: vec![],
+                external: true,
+            }],
+            &xencode_core_rs::Profile::LOCAL_ONLY,
+        );
+        let row = &refused[0];
+        assert_eq!(
+            row.line,
+            "codex — survey: refused by the Local Only posture, not launched"
+        );
+        assert!(
+            row.sources
+                .iter()
+                .any(|s| s.starts_with("posture: worker routes:")),
+            "{:?}",
+            row.sources
+        );
+        assert!(
+            row.sources
+                .iter()
+                .any(|s| s.contains("xencode has a roster row for `codex`")),
+            "the reason is on screen: {:?}",
+            row.sources
+        );
+        assert_eq!(
+            row.sources
+                .iter()
+                .filter(|s| s.contains("xencode config set allow_external_workers true"))
+                .count(),
+            1,
+            "the setting is stated once on the row, by the rule line, and not repeated \
+             under the reason: {:?}",
+            row.sources
+        );
+        // Opening the rule turns the very same role back into an unobserved one,
+        // which is what distinguishes a refusal from a missing reading.
+        let allowed = planned_role_rows(
+            &[first_refused_shape()],
+            &xencode_core_rs::Profile::new(false, true),
+        );
+        assert_eq!(allowed[0].line, "codex — survey: unknown, not idle");
+        assert!(
+            allowed[0]
+                .sources
+                .iter()
+                .any(|s| s.starts_with("worker `codex`: the agent roster has a row")),
+            "{:?}",
+            allowed[0].sources
+        );
+    }
+
+    /// The same role, for the two halves of the test above, so the only thing that
+    /// changes between a refusal and a pass is the posture.
+    fn first_refused_shape() -> PlannedRole {
+        PlannedRole {
+            recipe: "rust-fix".into(),
+            worker: "codex".into(),
+            role: "survey".into(),
+            path: ".xencode/teams/rust-fix.toml".into(),
+            gates: vec!["cargo test".into()],
+            needs: vec![],
+            external: true,
+        }
     }
 
     /// A locked registry is not an empty one. The two rows must differ in words,

@@ -21,7 +21,7 @@
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2743 tests passing, zero warnings (re-verified 2026-10-07, after `OR-12`; 19 ignored, so 2762 in the run)
+- [x] Workspace gates green — 16 crates, 2765 tests passing, zero warnings (re-verified 2026-10-07, after `OR-13`; 19 ignored, so 2784 in the run)
 
 ## Model Catalog Honesty
 
@@ -12487,6 +12487,23 @@ worker, `OR-` for the thing that decides what workers to talk to.
       keeps only local providers, with the refusal explained on screen.
       **Done-when:** the profile is the documented default posture, and `LF-8`'s conformance
       run passes under it.
+      The documented-default half is done and was watched; the `LF-8` half cannot be closed
+      here, because `LF-8` is itself still unchecked and this item rides it in W14. Done: the
+      two rules are one named thing (`xencode-core-rs/src/profile.rs` — `Profile`, shipped with
+      both closed, called `Local Only`), `allow_external_workers` (default `false`, in
+      `.xencode.example.json`) refuses a name the agent roster has a row for at the two places
+      a decision is really made — `xencode agents --route`, where the refusal is the first step
+      and names every refused worker before the capability, load and cost checks are consulted,
+      and `team run`, which declined a two-role team here with exit 1, no role child, no record
+      and no `.xencode/team-runs/` directory at all — and it is explained on screen in a plan's
+      `refused:` lines, in the worker panel (`opencode — survey: refused by the Local Only
+      posture, not launched`, deliberately not `OR-12`'s `unknown, not idle`) and in a new
+      Settings → Providers **External Workers** row that leaves the model rule closed when
+      opened. `README.md` and `CLI_GUIDE.md` name it as the default posture. Proof the posture
+      is not a claim about needing the internet: a recipe whose roles name workers the roster
+      cannot place ran both of them as real `sh -c` children inside a network namespace holding
+      only the loopback interface, where `ping 1.1.1.1` answered `Network is unreachable`.
+      Left open: no run under this profile has been described as `LF-8`'s conformance suite.
 - [ ] **OR-14 — `/orchestrator` as a mode, with its own command surface.** On/off, status,
       agents, tasks, graph, logs, permissions, costs, inspect, retry, stop, and terminal
       handover to a vendor's own session.

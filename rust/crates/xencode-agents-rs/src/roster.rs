@@ -339,6 +339,19 @@ pub fn find(name: &str) -> Option<&'static AgentSpec> {
     ROSTER.iter().find(|a| a.name == name)
 }
 
+/// Whether this worker name is on the roster — that is, whether xencode has a
+/// row saying it belongs to another vendor's coding-agent CLI.
+///
+/// `true` is a fact about the list, not a guess from a name: every row here was
+/// written from a binary somebody else installs, signs into and bills, so work
+/// handed to one travels through a program whose traffic xencode does not
+/// control. `false` is deliberately weaker than "local". It means there is no
+/// roster row to read, which is the same thing [`find`] could not answer — a
+/// caller must say it as an unanswered question rather than as permission.
+pub fn is_external_worker(name: &str) -> bool {
+    find(name).is_some()
+}
+
 /// Resolve an executable name to a full path, the way `which` would.
 ///
 /// A name containing a path separator is resolved directly rather than walked
@@ -761,5 +774,31 @@ mod tests {
         for (name, _) in CANDIDATES {
             assert!(covered.contains(&(*name).to_string()));
         }
+    }
+
+    /// The roster row is the whole of what `is_external_worker` claims, so the
+    /// answer cannot drift from the list and never guesses from a name.
+    #[test]
+    fn external_is_answered_from_the_roster_row_and_not_from_the_shape_of_a_name() {
+        for spec in ROSTER {
+            assert!(
+                is_external_worker(spec.name),
+                "{} has a roster row and so is somebody else's agent",
+                spec.name
+            );
+        }
+        // A name that merely looks like it could belong to a vendor is not on
+        // the roster, and the answer xencode can give for it is "no row", not
+        // "local" — that distinction is the caller's to print.
+        for name in ["xencode", "sh", "open-code", "codex-2", ""] {
+            assert!(
+                !is_external_worker(name),
+                "{name} is not a roster name, so it cannot be claimed as another vendor's agent"
+            );
+        }
+        assert_eq!(
+            ROSTER.iter().filter(|s| is_external_worker(s.name)).count(),
+            ROSTER.len()
+        );
     }
 }

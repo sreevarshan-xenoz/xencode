@@ -1191,6 +1191,7 @@ fn setting_display(app: &App, idx: usize) -> String {
                 "Cache Enabled" => app.config.cache_enabled,
                 "Memory Enabled" => app.config.memory_enabled,
                 "Cloud Models" => app.config.allow_cloud_models,
+                "External Workers" => app.config.allow_external_workers,
                 "Mouse Capture" => app.config.mouse_capture,
                 _ => false,
             };
@@ -1201,6 +1202,13 @@ fn setting_display(app: &App, idx: usize) -> String {
                     "\u{1F310} Allowed".to_string()
                 } else {
                     "\u{1F512} Local only".to_string()
+                }
+            } else if row.label == "External Workers" {
+                // The same reason: "Enabled" would not say whose work is meant.
+                if on {
+                    "\u{1F91D} Another vendor's agent".to_string()
+                } else {
+                    "\u{1F512} Roster refused by name".to_string()
                 }
             } else if on {
                 "✅ Enabled".to_string()
@@ -2060,7 +2068,8 @@ fn draw_worker_panel(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(format!(
-            " ⚙ Workers — {} row(s) · Enter shows where each was read from ",
+            " ⚙ Workers — {} · {} row(s) · Enter shows where each was read from ",
+            app.workers_posture,
             app.workers_rows.len()
         ));
     f.render_widget(outer, popup_area);

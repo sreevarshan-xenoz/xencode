@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-13`: the posture has a name, and it refuses to hand your work to another vendor's agent
+
+The two consent rules that keep things on this machine are now one thing with one name. `Local Only`
+is what the product installs with, and it says both halves: a prompt does not reach an internet
+service, and — the new half — *work* is not handed to an agent that is not xencode's own.
+`allow_external_workers` (default `false`) is that second rule. While it is off, a name on xencode's
+agent roster is refused as a worker by that name. The roster is the list of coding-agent CLIs
+somebody else installs, signs into and bills — opencode, cline, codex, claude, gemini, crush, agy,
+cursor-agent, kilo and kiro-cli on this machine — and what such a program sends off the machine is
+not xencode's to police.
+
+Where it bites, every one of these watched happening here:
+
+- `xencode agents --route "fix the flaky test"` prints the rule as its own first step and chooses
+  nothing: `10 workers of 10 were refused by the Local Only profile before the capability, load and
+  cost checks were consulted`. The refusal is a policy and the output calls it one. The capability
+  probe is not skipped on the way to saying no, so the `probed here as:` lines are still this
+  machine's answers and opening the rule a moment later puts them back to work rather than starting
+  from nothing.
+- `xencode team run <recipe> --approved-by <name>` declines the whole team as soon as one role names
+  such an agent: exit 1, nothing launched, nothing recorded, and not even the `.xencode/team-runs/`
+  directory created. A team is never run with the refused roles quietly dropped or one role left
+  behind. `xencode team plan <recipe>` still prints the entire team, with a `refused:` line under
+  each affected role and a count of what a run would decline, because planning is a read.
+- The TUI's Workers panel marks the role `opencode — survey: refused by the Local Only posture, not
+  launched`. That is deliberately not `OR-12`'s `unknown, not idle` reading: a refusal is a decision
+  somebody made, not a missing measurement, and the row quotes the setting that unmade it.
+  Settings → Providers gained an **External Workers** row beside **Cloud Models**, and opening one
+  leaves the other closed — the two are separate consents.
+
+The criterion is the roster row, never a guess from a name, and it cuts both ways: a worker the
+roster cannot place is not claimed to be xencode's own either. Such a name prints as
+`not an agent xencode has a roster row for; nothing here checks whether it exists`, and a team built
+out of them runs. It did, here, with no network at all — inside a network namespace that holds only
+the loopback interface, where `ping 1.1.1.1` answers `Network is unreachable`, both roles ran as
+real `sh -c` children and the file they were told to write appeared with both their lines in it.
+
+A refusal states its rule once. The `Posture:` block names the setting that opens it, and the
+refusals under it say which roster row was read, instead of pasting the same instruction ten times
+over a screen that is already about one rule.
+
+`LF-8`'s offline conformance suite is the run that would prove this posture end to end, and it does
+not exist yet: that half of the item's done-when is left unchecked rather than claimed.
+
 ### Added — `OR-12`: one screen for the fleet, and every figure on it names the row it came from
 
 `/workers` (or `Ctrl+A`) opens the worker panel: six sections laid end to end — the workers this

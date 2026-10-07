@@ -1,6 +1,7 @@
 pub mod atomic;
 pub mod jsonl;
 pub mod lease;
+pub mod profile;
 pub mod result_envelope;
 pub mod routing;
 pub mod rustc_json;
@@ -17,6 +18,7 @@ pub use jsonl::{read_jsonl_tolerant, JsonlRead};
 pub use lease::{
     LeaseConflict, LeaseDecision, LeaseRegistry, ScheduleOutcome, WaitingRequest, WorkerLease,
 };
+pub use profile::{Profile, WorkerRefusal};
 pub use result_envelope::{
     Claim, Evidence, FinishStatus, Handoff, RanCommand, ResultEnvelope, ReviewerView,
 };

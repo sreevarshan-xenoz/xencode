@@ -476,6 +476,9 @@ pub struct App<'a> {
     /// which is the whole point of the panel: a number on this list can be
     /// traced to a row before it can be argued with.
     pub workers_rows: Vec<crate::worker_panel::PanelRow>,
+    /// The posture those rows were read under, named once per refresh so the
+    /// panel title and every refused row quote the same thing (`OR-13`).
+    pub workers_posture: String,
     pub workers_selected: usize,
     pub workers_detail: bool,
     pub workers_scroll: usize,
@@ -2513,6 +2516,10 @@ impl<'a> App<'a> {
         let xencode_dir = root.join(".xencode");
         let teams_dir = xencode_dir.join(xencode_core_rs::RECIPES_DIR);
         let runs_dir = xencode_dir.join(xencode_core_rs::RUNS_DIR);
+        // Read once and used both to decide which role rows are refused and to
+        // name the posture in the panel title, so the screen cannot quote two
+        // different pairs of settings (`OR-13`).
+        let profile = self.config.profile();
 
         let rows = {
             let streams: Vec<crate::control_room::Stream<'_>> = self
@@ -2567,6 +2574,11 @@ impl<'a> App<'a> {
                                         path: file.path.display().to_string(),
                                         gates: role.gate.clone(),
                                         needs: role.needs.clone(),
+                                        // Read off the roster table, the same
+                                        // answer the router is given.
+                                        external: xencode_agents_rs::is_external_worker(
+                                            &role.worker,
+                                        ),
                                     });
                                 }
                                 quotes.push(panel::Quote {
@@ -2592,7 +2604,7 @@ impl<'a> App<'a> {
                     &problem.to_string(),
                 )),
             }
-            agents.extend(panel::planned_role_rows(&planned));
+            agents.extend(panel::planned_role_rows(&planned, &profile));
             agents.extend(unreadable);
 
             panel::sections([
@@ -2618,6 +2630,7 @@ impl<'a> App<'a> {
         };
 
         self.workers_rows = rows;
+        self.workers_posture = profile.name();
         self.workers_selected = 0;
         self.workers_detail = false;
         self.workers_scroll = 0;
@@ -2884,6 +2897,10 @@ impl<'a> App<'a> {
             layout_detail: false,
             layout_scroll: 0,
             workers_rows: Vec::new(),
+            // Never what the panel shows: opening it reads the config and
+            // replaces this (`refresh_worker_panel`), and a panel with no rows
+            // would be an empty list rather than a claim about the posture.
+            workers_posture: xencode_core_rs::Profile::LOCAL_ONLY.name(),
             workers_selected: 0,
             workers_detail: false,
             workers_scroll: 0,
@@ -7164,7 +7181,10 @@ impl<'a> App<'a> {
         let held_back = assembly.vault.len();
 
         let mut lines = vec![
-            format!("🌐 Egress preview — model {model:?}"),
+            format!(
+                "🌐 Egress preview — model {model:?} · posture: {}",
+                self.config.profile().name()
+            ),
             format!("   destination: {provider}  ·  {}", egress.label()),
             match (egress, allowed) {
                 (Egress::Local, _) => {
@@ -7174,11 +7194,13 @@ impl<'a> App<'a> {
                     "   leaves the machine: yes — an off-machine route, and the policy allows it"
                         .to_string()
                 }
-                (Egress::Cloud, false) => {
-                    "   BLOCKED — off-machine route but allow_cloud_models is off, so this turn \
-                     would be refused before anything is sent"
-                        .to_string()
-                }
+                (Egress::Cloud, false) => format!(
+                    "   BLOCKED — off-machine route, and the {} posture keeps a prompt on this \
+                     machine (`allow_cloud_models=false`; open it with `xencode config set \
+                     allow_cloud_models true`), so this turn would be refused before anything is \
+                     sent",
+                    self.config.profile().name()
+                ),
             },
             format!(
                 "   a real turn would send: {} message(s), {bytes} byte(s)",

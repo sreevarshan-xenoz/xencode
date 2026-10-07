@@ -674,6 +674,24 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub allow_web_fetch: bool,
 
+    /// Whether work may be handed to a coding agent that is not xencode's own.
+    ///
+    /// Not a fifth network switch — this one is about *work*, not bytes. The four
+    /// above decide whether something leaves this machine over a socket; a
+    /// vendor's agent runs as a local process and xencode never sees its traffic,
+    /// because it belongs to a program that signs into its own account and bills
+    /// its own use. So there is no egress test that could describe it, and
+    /// `OR-13`'s posture declines on that ground rather than pretending to have
+    /// measured one: while this is off, a worker the agent roster has a row for is
+    /// refused *by that name* — by the router (`xencode agents --route`), by a team
+    /// recipe that assigns it a role (`xencode team plan`, `xencode team run`), and
+    /// on the worker panel — each time quoting the setting that opens it. A name the
+    /// roster cannot place is not claimed as xencode's own either; those surfaces
+    /// say the question went unanswered. Off by default, and off for a config
+    /// written before the key existed, like every other consent here.
+    #[serde(default)]
+    pub allow_external_workers: bool,
+
     /// Which search engine the agent's `web_search` tool is allowed to ask, by its
     /// exact name — `none`, `wikipedia`, `searxng`, `brave` or `tavily`.
     ///
@@ -1071,6 +1089,7 @@ impl Default for XencodeConfig {
             run_command_sandbox: false,
             price_lookup: false,
             allow_web_fetch: false,
+            allow_external_workers: false,
             search_provider: default_search_provider(),
             search_searxng_url: String::new(),
             api_keys: ApiKeys::default(),
@@ -1182,6 +1201,14 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl XencodeConfig {
+    /// The posture these settings add up to (`OR-13`). One place turns the two
+    /// consent keys into the named thing the router, a team plan and the worker
+    /// panel all quote, so a screen never describes a posture by reading one key
+    /// and guessing at the other.
+    pub fn profile(&self) -> xencode_core_rs::Profile {
+        xencode_core_rs::Profile::new(self.allow_cloud_models, self.allow_external_workers)
+    }
+
     /// Composition summary of the configured engine and statically mounted subsystems (AF-3).
     pub fn composition_summary(&self) -> crate::composition::CompositionSummary {
         let profile = crate::composition::CompositionProfile::for_name(&self.composition_profile)
@@ -1668,6 +1695,15 @@ mod tests {
             "the example must show the posture the product ships with"
         );
         assert!(
+            !config.allow_external_workers,
+            "the example must show the posture the product ships with"
+        );
+        assert_eq!(
+            config.profile(),
+            xencode_core_rs::Profile::LOCAL_ONLY,
+            "the example, read whole, is the shipped Local-Only posture"
+        );
+        assert!(
             config.remote_base_url.is_empty(),
             "the example must not point at an invented endpoint"
         );
@@ -1772,6 +1808,41 @@ mod tests {
         let both = XencodeConfig::load_from(&path).unwrap();
         assert!(both.allow_cloud_models);
         assert!(!both.allow_online_docs);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `OR-13`: the two consent keys a posture is made of are separate, off by
+    /// default, off for a config written before the second one existed, and
+    /// opening either one changes only that one.
+    #[test]
+    fn the_worker_switch_is_off_by_itself_and_the_pair_names_the_posture() {
+        let config = XencodeConfig::default();
+        assert!(!config.allow_external_workers);
+        assert_eq!(config.profile(), xencode_core_rs::Profile::LOCAL_ONLY);
+        assert_eq!(config.profile().name(), "Local Only");
+
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("profile.json");
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        let mut loaded = XencodeConfig::load_from(&path).unwrap();
+        assert!(
+            !loaded.allow_external_workers,
+            "a config from before the key existed must not read as permission"
+        );
+
+        loaded.allow_external_workers = true;
+        loaded.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert!(again.allow_external_workers);
+        assert!(
+            !again.allow_cloud_models,
+            "opening the worker rule must not open the model rule"
+        );
+        assert_eq!(
+            again.profile().name(),
+            "Local Only (external workers allowed)"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
