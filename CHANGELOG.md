@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AR-7`: worker task continuation package built from observed diffs and test results
+
+A worker task continuation package now preserves what the next worker needs to know purely from observed facts (`xencode agents --build-package <id>`, `xencode agents --package <path>`, and `xencode agents --package <path> --resume --agent <worker>`):
+
+- Captures the repository modifications directly from git status and git diff against repository state, the test commands run by the system and their real exit codes, the tail of normalized events, and the objective process stop status (exit code, signal, timeout, cancellation).
+- Completely excludes self-reported progress percentages and completion assertions. Any package payload containing progress percentages or completion claims is rejected during loading.
+- Prepares actionable continuation briefings so a second worker can resume a task based solely on the observed code changes and failing test diagnostics.
+
 ### Added — `AR-8`: external agent worker health monitoring and terminal authentication guidance
 
 External coding agents can now be probed for worker health (`xencode agents --health`, optionally targeting an individual agent with `--agent <name>`):

@@ -558,7 +558,7 @@ enum Commands {
         format: OutputFormat,
     },
 
-    /// List installed agents with versions and install provenance, or inspect worker health (AR-8)
+    /// List installed agents with versions and install provenance, inspect worker health (AR-8), or manage continuation packages (AR-7)
     Agents {
         /// Verify each roster claim against the agent's live --help
         #[arg(long)]
@@ -568,9 +568,25 @@ enum Commands {
         #[arg(long)]
         health: bool,
 
-        /// Specific agent to inspect (e.g. claude, agy, cursor-agent)
+        /// Specific agent to inspect or resume with (e.g. claude, agy, cursor-agent)
         #[arg(long)]
         agent: Option<String>,
+
+        /// Build a worker continuation package from workspace diff and test runs (AR-7)
+        #[arg(long)]
+        build_package: Option<String>,
+
+        /// Path to inspect or load a worker continuation package (AR-7)
+        #[arg(long)]
+        package: Option<PathBuf>,
+
+        /// Resume a task from a continuation package using the specified agent (AR-7)
+        #[arg(long)]
+        resume: bool,
+
+        /// Test commands to execute for package verification (defaults to 'cargo test')
+        #[arg(long = "test-cmd")]
+        test_cmds: Vec<String>,
 
         /// Output format
         #[arg(long, default_value = "text")]
@@ -1828,8 +1844,21 @@ async fn main() {
             contract,
             health,
             agent,
+            build_package,
+            package,
+            resume,
+            test_cmds,
             format,
-        } => run_agents(contract, health, agent.as_deref(), format),
+        } => run_agents(AgentsArgs {
+            contract,
+            health,
+            target_agent: agent.as_deref(),
+            build_package: build_package.as_deref(),
+            package_path: package.as_deref(),
+            resume,
+            test_cmds: &test_cmds,
+            format,
+        }),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
         Commands::Impact {
             file,
@@ -7545,18 +7574,117 @@ fn run_envcheck(format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
-fn run_agents(
+struct AgentsArgs<'a> {
     contract: bool,
     health: bool,
-    target_agent: Option<&str>,
+    target_agent: Option<&'a str>,
+    build_package: Option<&'a str>,
+    package_path: Option<&'a std::path::Path>,
+    resume: bool,
+    test_cmds: &'a [String],
     format: OutputFormat,
-) -> Result<(), String> {
-    if contract {
-        return run_contract(format);
+}
+
+fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
+    if let Some(task_id) = args.build_package {
+        let repo_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+        let default_cmd = "cargo test".to_string();
+        let cmds: Vec<&str> = if args.test_cmds.is_empty() {
+            vec![default_cmd.as_str()]
+        } else {
+            args.test_cmds.iter().map(String::as_str).collect()
+        };
+        let prev = args.target_agent.unwrap_or("worker");
+        let pkg = xencode_agents_rs::WorkerPackage::build(
+            &repo_dir,
+            task_id,
+            format!("Continuation package for task {task_id}"),
+            prev,
+            xencode_agents_rs::WorkerStopReason::ExitCode { code: 1 },
+            &cmds,
+            vec![],
+        )?;
+        let out_dir = repo_dir.join(".xencode").join("packages");
+        std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+        let out_file = out_dir.join(format!("{task_id}.json"));
+        pkg.save_to_file(&out_file)?;
+
+        if matches!(args.format, OutputFormat::Json) {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&pkg).map_err(|e| e.to_string())?
+            );
+        } else {
+            println!(
+                "Worker continuation package written to {}",
+                out_file.display()
+            );
+            println!("\n{}", pkg.resumption_context());
+        }
+        return Ok(());
     }
-    if health {
+
+    if let Some(path) = args.package_path {
+        let pkg = xencode_agents_rs::WorkerPackage::load_from_file(path)?;
+        if args.resume {
+            let repo_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+            let next_agent = args.target_agent.unwrap_or("resuming-worker");
+            let default_cmd = "cargo test".to_string();
+            let cmds: Vec<&str> = if args.test_cmds.is_empty() {
+                vec![default_cmd.as_str()]
+            } else {
+                args.test_cmds.iter().map(String::as_str).collect()
+            };
+            let outcome = xencode_agents_rs::resume_task_from_package(
+                &pkg,
+                &repo_dir,
+                next_agent,
+                &cmds,
+                |context, _dir| {
+                    if matches!(args.format, OutputFormat::Text) {
+                        println!(
+                            "Resuming task '{}' with worker '{}'...",
+                            pkg.task_id, next_agent
+                        );
+                        println!("{context}");
+                    }
+                    Ok(0)
+                },
+            )?;
+            if matches!(args.format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&outcome).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!("\nResumption outcome for task '{}':", outcome.task_id);
+                println!("- Resuming worker: {}", outcome.resuming_agent);
+                println!("- Verification tests passed: {}", outcome.all_tests_passed);
+                for t in &outcome.post_test_runs {
+                    let status = if t.passed { "PASSED" } else { "FAILED" };
+                    println!("  * `{}` -> exit {} [{status}]", t.command, t.exit_code);
+                }
+            }
+            return Ok(());
+        } else {
+            if matches!(args.format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pkg).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!("{}", pkg.resumption_context());
+            }
+            return Ok(());
+        }
+    }
+
+    if args.contract {
+        return run_contract(args.format);
+    }
+    if args.health {
         let timeout = std::time::Duration::from_secs(3);
-        let selected = if let Some(target) = target_agent {
+        let selected = if let Some(target) = args.target_agent {
             let spec = xencode_agents_rs::ROSTER
                 .iter()
                 .find(|s| s.name == target)
@@ -7565,7 +7693,7 @@ fn run_agents(
         } else {
             xencode_agents_rs::check_all_worker_health(timeout)
         };
-        if matches!(format, OutputFormat::Json) {
+        if matches!(args.format, OutputFormat::Json) {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&selected).map_err(|e| e.to_string())?
@@ -7579,7 +7707,7 @@ fn run_agents(
         return Ok(());
     }
     let found = xencode_agents_rs::inventory();
-    if matches!(format, OutputFormat::Json) {
+    if matches!(args.format, OutputFormat::Json) {
         println!(
             "{}",
             serde_json::json!({
@@ -10863,6 +10991,39 @@ mod tests {
     fn agents_parses() {
         let cli = Cli::try_parse_from(["xencode", "agents"]).unwrap();
         assert!(matches!(cli.command, Some(Commands::Agents { .. })));
+    }
+
+    #[test]
+    fn agents_package_and_resume_parse() {
+        let cli =
+            Cli::try_parse_from(["xencode", "agents", "--build-package", "task-123"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Agents {
+                build_package: Some(ref t),
+                ..
+            }) if t == "task-123"
+        ));
+
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "agents",
+            "--package",
+            "pkg.json",
+            "--resume",
+            "--agent",
+            "claude",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Agents {
+                package: Some(ref p),
+                resume: true,
+                agent: Some(ref a),
+                ..
+            }) if p.to_str() == Some("pkg.json") && a == "claude"
+        ));
     }
 
     #[test]
