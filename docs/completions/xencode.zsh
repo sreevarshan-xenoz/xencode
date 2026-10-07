@@ -1257,8 +1257,10 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (agents)
 _arguments "${_arguments_options[@]}" : \
+'--agent=[Specific agent to inspect (e.g. claude, agy, cursor-agent)]:AGENT:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
 '--contract[Verify each roster claim against the agent'\''s live --help]' \
+'--health[Report worker health (installed, version, authenticated, responsive, rate-limited) (AR-8)]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0
@@ -2885,7 +2887,7 @@ _xencode_commands() {
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
-'agents:List installed agents with versions and install provenance' \
+'agents:List installed agents with versions and install provenance, or inspect worker health (AR-8)' \
 'hotspots:Rank files by churn times size with bus factor and owners' \
 'impact:What a change to one file affects\: the crates that depend on its crate, the files that link it, and the files its history is coupled to' \
 'removal:What deleting one file would cost\: the links it holds up, and the modules that become dead code the moment it is taken out' \
@@ -3462,7 +3464,7 @@ _xencode__subcmd__help_commands() {
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
-'agents:List installed agents with versions and install provenance' \
+'agents:List installed agents with versions and install provenance, or inspect worker health (AR-8)' \
 'hotspots:Rank files by churn times size with bus factor and owners' \
 'impact:What a change to one file affects\: the crates that depend on its crate, the files that link it, and the files its history is coupled to' \
 'removal:What deleting one file would cost\: the links it holds up, and the modules that become dead code the moment it is taken out' \

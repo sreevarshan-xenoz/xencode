@@ -6,9 +6,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::backend::{
-    first_line, run_capture, Backend, BoxFuture, ComputerBackend, TransportCmd,
-};
+use crate::backend::{first_line, run_capture, Backend, BoxFuture, ComputerBackend, TransportCmd};
 use crate::orchestrate::Binaries;
 
 const SSH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -26,7 +24,11 @@ impl SshBackend {
     pub fn new(bins: Binaries, key: PathBuf) -> Self {
         Self {
             bins,
-            key: if key.as_os_str().is_empty() { None } else { Some(key) },
+            key: if key.as_os_str().is_empty() {
+                None
+            } else {
+                Some(key)
+            },
             destination: "localhost".to_string(),
             port: 22,
         }
@@ -150,28 +152,29 @@ impl ComputerBackend for SshBackend {
 
     fn is_available(&self) -> (bool, String) {
         if self.bins.ssh.is_file() {
-            (true, format!("OpenSSH client available at {}", self.bins.ssh.display()))
+            (
+                true,
+                format!("OpenSSH client available at {}", self.bins.ssh.display()),
+            )
         } else {
             (false, "OpenSSH client not found on PATH".to_string())
         }
     }
 
-    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            <Self as Backend>::provision(self, session, gpu).await
-        })
+    fn provision<'a>(
+        &'a self,
+        session: &'a str,
+        gpu: &'a str,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move { <Self as Backend>::provision(self, session, gpu).await })
     }
 
     fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>> {
-        Box::pin(async move {
-            <Self as Backend>::list_sessions(self).await
-        })
+        Box::pin(async move { <Self as Backend>::list_sessions(self).await })
     }
 
     fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            <Self as Backend>::deprovision(self, session).await
-        })
+        Box::pin(async move { <Self as Backend>::deprovision(self, session).await })
     }
 
     fn forward_command(&self, session: &str, local_port: u16, remote_port: u16) -> TransportCmd {

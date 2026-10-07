@@ -35,7 +35,12 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 fn dump_config_flag_emits_valid_composition_json() {
     let tmp = temp_dir("flag");
     let out = xencode(&tmp, &["--dump-config"]);
-    assert!(out.status.success(), "stdout: {}, stderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     let val: serde_json::Value = serde_json::from_str(&stdout).expect("must be valid JSON");
 
@@ -44,10 +49,22 @@ fn dump_config_flag_emits_valid_composition_json() {
     assert_eq!(val["worker_adapter"], "mcp");
     assert!(val["capabilities"]["filesystem.read"] == "allow");
     assert!(val["capabilities"]["filesystem.write"] == "allow");
-    assert!(val["available_computer_backends"].as_array().unwrap().contains(&serde_json::json!("colab")));
-    assert!(val["available_worker_adapters"].as_array().unwrap().contains(&serde_json::json!("mcp")));
-    assert!(val["known_plugin_permissions"].as_array().unwrap().contains(&serde_json::json!("prompt")));
-    assert!(val["known_plugin_permissions"].as_array().unwrap().contains(&serde_json::json!("hooks")));
+    assert!(val["available_computer_backends"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("colab")));
+    assert!(val["available_worker_adapters"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("mcp")));
+    assert!(val["known_plugin_permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("prompt")));
+    assert!(val["known_plugin_permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("hooks")));
 }
 
 #[test]
@@ -79,11 +96,16 @@ fn setting_composition_profile_updates_dump() {
     let tmp = temp_dir("set_profile");
     // Initial profile is coding
     let set_out = xencode(&tmp, &["config", "set", "composition_profile", "minimal"]);
-    assert!(set_out.status.success(), "stderr: {}", String::from_utf8_lossy(&set_out.stderr));
+    assert!(
+        set_out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&set_out.stderr)
+    );
 
     let dump_out = xencode(&tmp, &["--dump-config"]);
     assert!(dump_out.status.success());
-    let val: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&dump_out.stdout)).unwrap();
+    let val: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&dump_out.stdout)).unwrap();
     assert_eq!(val["profile"], "minimal");
     assert_eq!(val["capabilities"]["filesystem.write"], "deny");
     assert_eq!(val["capabilities"]["shell.execute"], "deny");
@@ -92,8 +114,14 @@ fn setting_composition_profile_updates_dump() {
 #[test]
 fn setting_invalid_profile_is_refused() {
     let tmp = temp_dir("invalid_profile");
-    let set_out = xencode(&tmp, &["config", "set", "composition_profile", "super-unrestricted"]);
+    let set_out = xencode(
+        &tmp,
+        &["config", "set", "composition_profile", "super-unrestricted"],
+    );
     assert!(!set_out.status.success());
     let stderr = String::from_utf8_lossy(&set_out.stderr);
-    assert!(stderr.contains("composition_profile must be one of"), "{stderr}");
+    assert!(
+        stderr.contains("composition_profile must be one of"),
+        "{stderr}"
+    );
 }

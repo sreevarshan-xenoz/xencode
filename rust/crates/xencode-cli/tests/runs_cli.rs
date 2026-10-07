@@ -98,10 +98,16 @@ fn runs_show_joins_session_checks_and_reports_unverified_honestly() {
     assert!(out1.contains("run 1700000000-aaaa1111"), "{out1}");
     assert!(out1.contains("session: session_with_checks"), "{out1}");
     assert!(out1.contains("checks: 1 (1 passed)"), "{out1}");
-    assert!(out1.contains("exit 0  artifacts/session_with_checks/verify-test.log"), "{out1}");
+    assert!(
+        out1.contains("exit 0  artifacts/session_with_checks/verify-test.log"),
+        "{out1}"
+    );
 
     // Check run 1 in json format
-    let (json_out1, jok1) = run_cli(&root, &["runs", "show", "1700000000-aaaa1111", "--format", "json"]);
+    let (json_out1, jok1) = run_cli(
+        &root,
+        &["runs", "show", "1700000000-aaaa1111", "--format", "json"],
+    );
     assert!(jok1, "runs show json should succeed: {json_out1}");
     let doc1: serde_json::Value = serde_json::from_str(&json_out1).unwrap();
     assert_eq!(doc1["verified"], true);
@@ -112,10 +118,16 @@ fn runs_show_joins_session_checks_and_reports_unverified_honestly() {
     assert!(ok2, "runs show run2 should succeed: {out2}");
     assert!(out2.contains("run 1700000000-bbbb2222"), "{out2}");
     assert!(out2.contains("session: session_without_checks"), "{out2}");
-    assert!(out2.contains("checks: none — nothing verified this run"), "{out2}");
+    assert!(
+        out2.contains("checks: none — nothing verified this run"),
+        "{out2}"
+    );
 
     // Check run 2 in json format
-    let (json_out2, jok2) = run_cli(&root, &["runs", "show", "1700000000-bbbb2222", "--format", "json"]);
+    let (json_out2, jok2) = run_cli(
+        &root,
+        &["runs", "show", "1700000000-bbbb2222", "--format", "json"],
+    );
     assert!(jok2, "runs show json should succeed: {json_out2}");
     let doc2: serde_json::Value = serde_json::from_str(&json_out2).unwrap();
     assert_eq!(doc2["verified"], false);

@@ -1192,7 +1192,11 @@ mod tests {
         let anchor_file = write_anchor(tree.path(), &text).unwrap();
 
         // Writing anchor.md creates no sidecar file automatically.
-        assert!(!tree.path().join(XENCODE_DIR).join(ANCHOR_META_FILE).exists());
+        assert!(!tree
+            .path()
+            .join(XENCODE_DIR)
+            .join(ANCHOR_META_FILE)
+            .exists());
         assert_eq!(read_anchor_meta(tree.path()), None);
 
         let meta = AnchorMeta {

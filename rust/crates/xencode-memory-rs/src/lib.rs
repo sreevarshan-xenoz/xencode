@@ -662,8 +662,14 @@ mod tests {
         // Starting a session must not write to disk
         let sid = mem.start_session(Some("unfilled".to_string()));
         assert_eq!(sid, "unfilled");
-        assert!(!file.exists(), "starting an empty session must not create memory file");
-        assert!(mem.list_sessions().is_empty(), "list_sessions must filter out empty session");
+        assert!(
+            !file.exists(),
+            "starting an empty session must not create memory file"
+        );
+        assert!(
+            mem.list_sessions().is_empty(),
+            "list_sessions must filter out empty session"
+        );
         assert_eq!(mem.list_all_sessions(), vec!["unfilled"]);
 
         // Adding a message must now write to disk
@@ -736,7 +742,9 @@ mod tests {
         assert_eq!(ctx[1].content, "fourth message");
 
         // First message is preserved in append-only event log and printed on demand
-        let first = mem.first_message("capped_sess").expect("first message exists");
+        let first = mem
+            .first_message("capped_sess")
+            .expect("first message exists");
         assert_eq!(first.role, "user");
         assert_eq!(first.content, "first message");
 
@@ -805,11 +813,17 @@ mod tests {
         mem.add_message("user", &format!("My API token is {secret}"), None);
 
         let first = mem.first_message("secure_sess").expect("first message");
-        assert!(!first.content.contains(secret), "secret was not redacted from message");
+        assert!(
+            !first.content.contains(secret),
+            "secret was not redacted from message"
+        );
         assert!(first.content.contains("[redacted]"));
 
         let event = mem.first_event("secure_sess").expect("first event");
-        assert!(!event.message.content.contains(secret), "secret was not redacted from event log");
+        assert!(
+            !event.message.content.contains(secret),
+            "secret was not redacted from event log"
+        );
     }
 
     #[test]
@@ -851,7 +865,8 @@ mod tests {
         );
         fs::write(&events_path, &file_content).unwrap();
 
-        let (events, torn) = read_events_tolerant(&events_path).expect("read should tolerate torn tail");
+        let (events, torn) =
+            read_events_tolerant(&events_path).expect("read should tolerate torn tail");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].id, 1);
         assert_eq!(events[1].id, 2);
@@ -866,7 +881,10 @@ mod tests {
         );
         fs::write(&events_path, &file_content).unwrap();
         let err = read_events_tolerant(&events_path);
-        assert!(err.is_err(), "malformed mid-line corruption must be reported");
+        assert!(
+            err.is_err(),
+            "malformed mid-line corruption must be reported"
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }

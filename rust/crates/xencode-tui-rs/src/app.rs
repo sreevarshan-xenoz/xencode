@@ -4668,11 +4668,16 @@ impl<'a> App<'a> {
             let rec = &mut self.spawns[i];
             rec.steps.push((summary.to_string(), "running".to_string()));
             let step_count = rec.steps.len();
-            rec.events.push(xencode_agents_rs::protocol::AgentEvent::ToolStarted {
-                tool: summary.split_whitespace().next().unwrap_or(summary).to_string(),
-                call_id: Some(format!("spawn-{id}-step-{step_count}")),
-                origin: xencode_agents_rs::protocol::Origin::Observed,
-            });
+            rec.events
+                .push(xencode_agents_rs::protocol::AgentEvent::ToolStarted {
+                    tool: summary
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(summary)
+                        .to_string(),
+                    call_id: Some(format!("spawn-{id}-step-{step_count}")),
+                    origin: xencode_agents_rs::protocol::Origin::Observed,
+                });
             return;
         }
         if let Some(outcome) = body.strip_prefix("done:") {
@@ -4681,12 +4686,13 @@ impl<'a> App<'a> {
                 last.1 = outcome.to_string();
             }
             let step_count = rec.steps.len();
-            rec.events.push(xencode_agents_rs::protocol::AgentEvent::ToolOutput {
-                tool: "tool".to_string(),
-                call_id: Some(format!("spawn-{id}-step-{step_count}")),
-                output: Some(outcome.to_string()),
-                origin: xencode_agents_rs::protocol::Origin::Observed,
-            });
+            rec.events
+                .push(xencode_agents_rs::protocol::AgentEvent::ToolOutput {
+                    tool: "tool".to_string(),
+                    call_id: Some(format!("spawn-{id}-step-{step_count}")),
+                    output: Some(outcome.to_string()),
+                    origin: xencode_agents_rs::protocol::Origin::Observed,
+                });
             return;
         }
         if let Some(text) = body.strip_prefix("log:") {
@@ -4702,10 +4708,12 @@ impl<'a> App<'a> {
                     last.1 = "failed".to_string();
                 }
             }
-            self.spawns[i].events.push(xencode_agents_rs::protocol::AgentEvent::Error {
-                message: text.to_string(),
-                origin: xencode_agents_rs::protocol::Origin::Observed,
-            });
+            self.spawns[i]
+                .events
+                .push(xencode_agents_rs::protocol::AgentEvent::Error {
+                    message: text.to_string(),
+                    origin: xencode_agents_rs::protocol::Origin::Observed,
+                });
             self.system_line(&format!("⏺ spawn #{id} failed — {text}"));
             return;
         }
@@ -4722,14 +4730,16 @@ impl<'a> App<'a> {
                 );
                 (rec.id, rec.task.clone(), line, text.to_string(), rec.failed)
             };
-            self.spawns[i].events.push(xencode_agents_rs::protocol::AgentEvent::Completed {
-                outcome: Some(if failed {
-                    "failed".to_string()
-                } else {
-                    "success".to_string()
-                }),
-                origin: xencode_agents_rs::protocol::Origin::Observed,
-            });
+            self.spawns[i]
+                .events
+                .push(xencode_agents_rs::protocol::AgentEvent::Completed {
+                    outcome: Some(if failed {
+                        "failed".to_string()
+                    } else {
+                        "success".to_string()
+                    }),
+                    origin: xencode_agents_rs::protocol::Origin::Observed,
+                });
             self.system_line(&line);
             if !final_text.trim().is_empty() {
                 self.messages.push(UiMessage {
@@ -13362,12 +13372,22 @@ mod tests {
         // 1. Propose task
         app.propose_task(proposal);
         assert!(app.pending_task_proposal.is_some());
-        assert!(app.messages.last().unwrap().content.contains("Respond with `/plan accept` or `/plan decline`"));
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("Respond with `/plan accept` or `/plan decline`"));
 
         // 2. Decline proposed task: repo left byte-identical, no tasks recorded
         app.handle_plan_command("/plan decline");
         assert!(app.pending_task_proposal.is_none());
-        assert!(app.messages.last().unwrap().content.contains("Declined proposed task"));
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("Declined proposed task"));
         assert!(!dir.join("tasks.json").exists(), "declining writes nothing");
 
         // 3. Propose again and accept
@@ -13375,7 +13395,12 @@ mod tests {
         app.propose_task(proposal2);
         app.handle_plan_command("/plan accept");
         assert!(app.pending_task_proposal.is_none());
-        assert!(app.messages.last().unwrap().content.contains("Accepted proposed task"));
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("Accepted proposed task"));
 
         // Verify task exists on disk in tasks_file
         let registry = xencode_core_rs::tasks_file::FileTaskRegistry::new(&dir);
@@ -17476,12 +17501,13 @@ mod tests {
         assert!(app.last_permission_denied.is_none());
 
         // 1. Publishing an AgentEvent::PermissionDenied to the event bus
-        app.event_bus.publish(xencode_agents_rs::protocol::AgentEvent::PermissionDenied {
-            tool: "run_command".to_string(),
-            call_id: None,
-            reason: Some("delete files".to_string()),
-            origin: xencode_agents_rs::protocol::Origin::Observed,
-        });
+        app.event_bus
+            .publish(xencode_agents_rs::protocol::AgentEvent::PermissionDenied {
+                tool: "run_command".to_string(),
+                call_id: None,
+                reason: Some("delete files".to_string()),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            });
 
         // Drain bus events into UI reducer
         app.drain_agent_events();
@@ -17506,13 +17532,11 @@ mod tests {
             running: true,
             failed: false,
             steps: Vec::new(),
-            events: vec![
-                xencode_agents_rs::protocol::AgentEvent::ToolStarted {
-                    tool: "read_file".to_string(),
-                    call_id: Some("c1".to_string()),
-                    origin: xencode_agents_rs::protocol::Origin::Observed,
-                },
-            ],
+            events: vec![xencode_agents_rs::protocol::AgentEvent::ToolStarted {
+                tool: "read_file".to_string(),
+                call_id: Some("c1".to_string()),
+                origin: xencode_agents_rs::protocol::Origin::Observed,
+            }],
         });
 
         let panes = app.agent_stack_panes();

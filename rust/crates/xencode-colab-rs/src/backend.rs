@@ -91,7 +91,8 @@ pub trait ComputerBackend: std::fmt::Debug + Send + Sync {
     fn kind(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn is_available(&self) -> (bool, String);
-    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>>;
+    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str)
+        -> BoxFuture<'a, Result<(), String>>;
     fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>>;
     fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>>;
     fn forward_command(&self, session: &str, local_port: u16, remote_port: u16) -> TransportCmd;
@@ -125,22 +126,20 @@ impl ComputerBackend for crate::colab::ColabBackend {
         }
     }
 
-    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            <Self as Backend>::provision(self, session, gpu).await
-        })
+    fn provision<'a>(
+        &'a self,
+        session: &'a str,
+        gpu: &'a str,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move { <Self as Backend>::provision(self, session, gpu).await })
     }
 
     fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>> {
-        Box::pin(async move {
-            <Self as Backend>::list_sessions(self).await
-        })
+        Box::pin(async move { <Self as Backend>::list_sessions(self).await })
     }
 
     fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            <Self as Backend>::deprovision(self, session).await
-        })
+        Box::pin(async move { <Self as Backend>::deprovision(self, session).await })
     }
 
     fn forward_command(&self, session: &str, local_port: u16, remote_port: u16) -> TransportCmd {
@@ -188,7 +187,10 @@ impl Default for BackendRegistry {
         reg.register(
             "colab",
             Box::new(|bins, key| {
-                Box::new(crate::colab::ColabBackend::new(bins.clone(), key.to_path_buf()))
+                Box::new(crate::colab::ColabBackend::new(
+                    bins.clone(),
+                    key.to_path_buf(),
+                ))
             }),
         );
         reg.register(
@@ -199,9 +201,7 @@ impl Default for BackendRegistry {
         );
         reg.register(
             "docker",
-            Box::new(|_bins, _key| {
-                Box::new(crate::docker::DockerBackend::default())
-            }),
+            Box::new(|_bins, _key| Box::new(crate::docker::DockerBackend::default())),
         );
         reg
     }
@@ -349,7 +349,9 @@ mod tests {
             ssh: std::path::PathBuf::from("/bin/ssh"),
         };
         let key = std::path::Path::new("/tmp/id_test");
-        let colab_backend = reg.resolve("colab", &bins, key).expect("must resolve colab");
+        let colab_backend = reg
+            .resolve("colab", &bins, key)
+            .expect("must resolve colab");
         assert_eq!(colab_backend.id(), "colab");
         assert_eq!(colab_backend.kind(), "colab");
 
@@ -357,7 +359,9 @@ mod tests {
         assert_eq!(ssh_backend.id(), "ssh");
         assert_eq!(ssh_backend.kind(), "ssh");
 
-        let docker_backend = reg.resolve("docker", &bins, key).expect("must resolve docker");
+        let docker_backend = reg
+            .resolve("docker", &bins, key)
+            .expect("must resolve docker");
         assert_eq!(docker_backend.id(), "docker");
         assert_eq!(docker_backend.kind(), "docker");
 

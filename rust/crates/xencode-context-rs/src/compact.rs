@@ -2325,7 +2325,10 @@ assistant: hello";
             "# State\n\n## decisions\n- login in auth.rs {SRC_OPEN}src/auth.rs@deadbeef]\n- validate_token rejects empty {CHK_OPEN}validate_token]\n"
         );
         let check = drop_stale_facts(&marked, &outside);
-        assert!(check.dropped.is_empty(), "facts were dropped instead of kept unverifiable: {check:?}");
+        assert!(
+            check.dropped.is_empty(),
+            "facts were dropped instead of kept unverifiable: {check:?}"
+        );
         assert_eq!(check.unverifiable, 2);
         assert_eq!(check.no_such_commit, 1);
         assert_eq!(check.not_a_searchable_tree, 1);

@@ -5,9 +5,7 @@ pub mod paths;
 pub mod remotes;
 pub mod secrets;
 
-pub use composition::{
-    CompositionProfile, CompositionSummary, KNOWN_CAPABILITIES,
-};
+pub use composition::{CompositionProfile, CompositionSummary, KNOWN_CAPABILITIES};
 pub use config::{
     AgentHooks, ApiKeys, ColabConfig, ConfigError, McpServer, ModelProfile, XencodeConfig,
     CURRENT_CONFIG_VERSION, LEGACY_CONFIG_VERSION,

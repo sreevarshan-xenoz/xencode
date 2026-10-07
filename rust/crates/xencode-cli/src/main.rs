@@ -558,11 +558,19 @@ enum Commands {
         format: OutputFormat,
     },
 
-    /// List installed agents with versions and install provenance
+    /// List installed agents with versions and install provenance, or inspect worker health (AR-8)
     Agents {
         /// Verify each roster claim against the agent's live --help
         #[arg(long)]
         contract: bool,
+
+        /// Report worker health (installed, version, authenticated, responsive, rate-limited) (AR-8)
+        #[arg(long)]
+        health: bool,
+
+        /// Specific agent to inspect (e.g. claude, agy, cursor-agent)
+        #[arg(long)]
+        agent: Option<String>,
 
         /// Output format
         #[arg(long, default_value = "text")]
@@ -1816,7 +1824,12 @@ async fn main() {
             format,
         } => run_verify(skip, timeout, session, format),
         Commands::Envcheck { format } => run_envcheck(format),
-        Commands::Agents { contract, format } => run_agents(contract, format),
+        Commands::Agents {
+            contract,
+            health,
+            agent,
+            format,
+        } => run_agents(contract, health, agent.as_deref(), format),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
         Commands::Impact {
             file,
@@ -2577,7 +2590,8 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 "composition_profile" => {
                     let trimmed = value.trim();
                     if xencode_config_rs::CompositionProfile::for_name(trimmed).is_none() {
-                        let known = xencode_config_rs::CompositionProfile::known_profiles().join(", ");
+                        let known =
+                            xencode_config_rs::CompositionProfile::known_profiles().join(", ");
                         return Err(format!("composition_profile must be one of: {known}"));
                     }
                     config.composition_profile = trimmed.to_string();
@@ -4185,8 +4199,8 @@ async fn run_computers(action: Option<ComputersAction>, json: bool) -> Result<()
         Err(_) => {
             let colab_path = xencode_colab_rs::which("colab")
                 .unwrap_or_else(|| std::path::PathBuf::from("colab"));
-            let ssh_path = xencode_colab_rs::which("ssh")
-                .unwrap_or_else(|| std::path::PathBuf::from("ssh"));
+            let ssh_path =
+                xencode_colab_rs::which("ssh").unwrap_or_else(|| std::path::PathBuf::from("ssh"));
             xencode_colab_rs::Binaries {
                 colab: colab_path,
                 ssh: ssh_path,
@@ -6403,7 +6417,10 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
 
 /// Base branch for `xencode review`: explicit `--base`, else `origin/HEAD`,
 /// else `init.defaultBranch` (or existing `master`), else fallback `'main'`.
-fn resolve_review_base(root: &std::path::Path, explicit_base: Option<&str>) -> (String, BaseSource) {
+fn resolve_review_base(
+    root: &std::path::Path,
+    explicit_base: Option<&str>,
+) -> (String, BaseSource) {
     if let Some(b) = explicit_base {
         return (b.to_string(), BaseSource::Explicit);
     }
@@ -7328,7 +7345,11 @@ async fn run_bug_report(format: OutputFormat) -> Result<(), String> {
 
 /// One list, two renderings. The rows are the report: `--format json` emits them
 /// as they are, and the text listing is the same list with a mark in front.
-fn render_checks(surface: &str, checks: &[doc::SelfCheck], format: OutputFormat) -> Result<(), String> {
+fn render_checks(
+    surface: &str,
+    checks: &[doc::SelfCheck],
+    format: OutputFormat,
+) -> Result<(), String> {
     let failing: Vec<&str> = checks
         .iter()
         .filter(|check| check.state == "fail")
@@ -7524,9 +7545,38 @@ fn run_envcheck(format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
-fn run_agents(contract: bool, format: OutputFormat) -> Result<(), String> {
+fn run_agents(
+    contract: bool,
+    health: bool,
+    target_agent: Option<&str>,
+    format: OutputFormat,
+) -> Result<(), String> {
     if contract {
         return run_contract(format);
+    }
+    if health {
+        let timeout = std::time::Duration::from_secs(3);
+        let selected = if let Some(target) = target_agent {
+            let spec = xencode_agents_rs::ROSTER
+                .iter()
+                .find(|s| s.name == target)
+                .ok_or_else(|| format!("no roster agent named '{target}'"))?;
+            vec![xencode_agents_rs::check_worker_health(spec, timeout)]
+        } else {
+            xencode_agents_rs::check_all_worker_health(timeout)
+        };
+        if matches!(format, OutputFormat::Json) {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&selected).map_err(|e| e.to_string())?
+            );
+        } else {
+            println!(
+                "{}",
+                xencode_agents_rs::format_worker_health_table(&selected)
+            );
+        }
+        return Ok(());
     }
     let found = xencode_agents_rs::inventory();
     if matches!(format, OutputFormat::Json) {
@@ -8895,15 +8945,19 @@ fn run_test(
                 .and_then(|m| m.current_session().cloned())
         });
         let session_tag = target_session.as_deref().unwrap_or("cli");
-        let log_ref =
-            artifacts::write_artifact(&xencode_dir, session_tag, &format!("test-{now_ms}.log"), &log)
-                .ok()
-                .map(|p| {
-                    p.strip_prefix(&root)
-                        .map(|r| r.to_string_lossy().into_owned())
-                        .unwrap_or_else(|_| p.display().to_string())
-                })
-                .unwrap_or_default();
+        let log_ref = artifacts::write_artifact(
+            &xencode_dir,
+            session_tag,
+            &format!("test-{now_ms}.log"),
+            &log,
+        )
+        .ok()
+        .map(|p| {
+            p.strip_prefix(&root)
+                .map(|r| r.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| p.display().to_string())
+        })
+        .unwrap_or_default();
         let _ = artifacts::prune_artifacts(&xencode_dir, artifacts::KEEP_LAST_PASSING);
         let entry = ledger::LedgerEntry {
             ts_unix_ms: now_ms,
@@ -10792,6 +10846,20 @@ mod tests {
     }
 
     #[test]
+    fn agents_health_parses() {
+        let cli =
+            Cli::try_parse_from(["xencode", "agents", "--health", "--agent", "claude"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Agents {
+                health: true,
+                agent: Some(ref a),
+                ..
+            }) if a == "claude"
+        ));
+    }
+
+    #[test]
     fn agents_parses() {
         let cli = Cli::try_parse_from(["xencode", "agents"]).unwrap();
         assert!(matches!(cli.command, Some(Commands::Agents { .. })));
@@ -11640,7 +11708,9 @@ mod tests {
             &files,
         );
         assert!(
-            suffixed.contains("Review of diff origin/main...HEAD (2 files) [base resolved from origin/HEAD]"),
+            suffixed.contains(
+                "Review of diff origin/main...HEAD (2 files) [base resolved from origin/HEAD]"
+            ),
             "{suffixed}"
         );
     }
@@ -11699,7 +11769,11 @@ mod tests {
 
         // With origin/HEAD pointing to origin/main:
         git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
-        git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        git(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ]);
         let (base, src) = super::resolve_review_base(&dir, None);
         assert_eq!(base, "origin/main");
         assert_eq!(src, super::BaseSource::OriginHead);

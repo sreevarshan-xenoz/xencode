@@ -66,12 +66,18 @@ impl CliImpact {
 
     /// Commands with at least one documentation reference.
     pub fn documented_commands(&self) -> Vec<&CommandImpact> {
-        self.commands.iter().filter(|c| !c.doc_refs.is_empty()).collect()
+        self.commands
+            .iter()
+            .filter(|c| !c.doc_refs.is_empty())
+            .collect()
     }
 
     /// Commands with no documentation references in any manual.
     pub fn undocumented_commands(&self) -> Vec<&CommandImpact> {
-        self.commands.iter().filter(|c| c.doc_refs.is_empty()).collect()
+        self.commands
+            .iter()
+            .filter(|c| c.doc_refs.is_empty())
+            .collect()
     }
 }
 
@@ -287,15 +293,16 @@ pub fn extract_subcommand_references(line: &str) -> Vec<String> {
                 .next()
                 .unwrap_or("");
             if !variant_name.is_empty()
-                && variant_name.chars().next().is_some_and(|c| c.is_uppercase())
+                && variant_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase())
             {
                 subcmds.push(to_kebab_case(variant_name));
             }
         }
         // 3. Command listing context in README: "- CLI with ... among them: `scan`, ..."
-        else if trimmed.contains("subcommands, among them:")
-            || trimmed.contains("subcommands:")
-        {
+        else if trimmed.contains("subcommands, among them:") || trimmed.contains("subcommands:") {
             let clean = code.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
             if !clean.is_empty()
                 && !clean.starts_with('-')
@@ -463,9 +470,7 @@ pub fn detect_cli_impact(
 
     if let Some(symbol) = symbol_filter {
         let sym_lower = symbol.to_ascii_lowercase();
-        commands.retain(|c| {
-            c.variant.eq_ignore_ascii_case(symbol) || c.subcommand == sym_lower
-        });
+        commands.retain(|c| c.variant.eq_ignore_ascii_case(symbol) || c.subcommand == sym_lower);
     }
 
     let rel_source = target_path

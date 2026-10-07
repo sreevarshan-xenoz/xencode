@@ -71,7 +71,10 @@ fn failed_query_leaves_memory_file_byte_identical() {
     std::fs::write(&mem_file, &initial_bytes).unwrap();
 
     // Run a query against an invalid model name so it fails at provider resolution
-    let (out, ok) = run_cli(&env_dir, &["query", "hello", "--model", "ollama/no-such-model"]);
+    let (out, ok) = run_cli(
+        &env_dir,
+        &["query", "hello", "--model", "ollama/no-such-model"],
+    );
     assert!(!ok, "query should fail: {out}");
 
     // The file must be byte-identical!
@@ -120,24 +123,41 @@ fn memory_list_filters_empty_and_prune_removes_them() {
     let (out, ok) = run_cli(&env_dir, &["memory", "list"]);
     assert!(ok, "memory list should succeed: {out}");
     assert!(out.contains("full_session"), "{out}");
-    assert!(!out.contains("empty_session_1"), "empty session should be filtered: {out}");
-    assert!(out.contains("1 empty session(s) omitted; use --all to show, or `xencode memory prune` to delete"), "{out}");
+    assert!(
+        !out.contains("empty_session_1"),
+        "empty session should be filtered: {out}"
+    );
+    assert!(
+        out.contains(
+            "1 empty session(s) omitted; use --all to show, or `xencode memory prune` to delete"
+        ),
+        "{out}"
+    );
 
     // 2. memory list --all shows all sessions
     let (all_out, ok) = run_cli(&env_dir, &["memory", "list", "--all"]);
     assert!(ok, "memory list --all should succeed: {all_out}");
     assert!(all_out.contains("full_session (1 message)"), "{all_out}");
-    assert!(all_out.contains("empty_session_1 (0 messages)"), "{all_out}");
+    assert!(
+        all_out.contains("empty_session_1 (0 messages)"),
+        "{all_out}"
+    );
 
     // 3. memory prune deletes the empty session
     let (prune_out, ok) = run_cli(&env_dir, &["memory", "prune"]);
     assert!(ok, "memory prune should succeed: {prune_out}");
-    assert!(prune_out.contains("Pruned 1 empty conversation session."), "{prune_out}");
+    assert!(
+        prune_out.contains("Pruned 1 empty conversation session."),
+        "{prune_out}"
+    );
 
     // 4. memory list --all now shows only full_session
     let (after_prune, ok) = run_cli(&env_dir, &["memory", "list", "--all"]);
     assert!(ok, "{after_prune}");
-    assert!(after_prune.contains("full_session (1 message)"), "{after_prune}");
+    assert!(
+        after_prune.contains("full_session (1 message)"),
+        "{after_prune}"
+    );
     assert!(!after_prune.contains("empty_session_1"), "{after_prune}");
 
     let _ = std::fs::remove_dir_all(&env_dir);
