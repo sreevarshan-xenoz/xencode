@@ -17,6 +17,7 @@ pub mod anchor;
 pub mod artifacts;
 pub mod bootstrap;
 pub mod budget;
+pub mod cli_impact;
 pub mod cochange;
 pub mod compact;
 pub mod context;
@@ -88,6 +89,7 @@ pub use budget::{
     BudgetDimension, ContextCaps, DailyBudgets, HardwareProfile, ProfileDecision, PromptOverhead,
     TOKENS_PER_RETRIEVED_FILE,
 };
+pub use cli_impact::{detect_cli_impact, CliImpact, CommandDocRef, CommandImpact, StaleDocRef};
 pub use cochange::{
     load_history, mine_commit_history, parse_commit_log, save_history, CommitHistory, FileCommits,
     COCHANGE_BONUS, COMMIT_LOG_LIMIT, HUB_COMMIT_DIVISOR, MASS_COMMIT_FILES, RECENCY_BONUS,

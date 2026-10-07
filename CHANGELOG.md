@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AE-4`: report CLI command variants and manual links when `xencode impact` targets `main.rs`
+
+`xencode impact main.rs` now detects the clap `enum Commands` definition in the target file and cross-references every variant against the repository's markdown manuals:
+
+- Added `xencode-context-rs::cli_impact` module with `parse_commands_enum` (extracts top-level clap variants, depth-tracked so nested sub-enums are skipped), `find_manual_files` (discovers `README.md`, `CLI_GUIDE.md`, `QUICK_START.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, and `docs/*.md`), `extract_subcommand_references` (anchors on `` `xencode <cmd>` `` backtick spans, `Commands::<Variant>` references, and "subcommands, among them:" lists — not plain prose), and `scan_manuals_for_commands` (tracks table header columns named `Command` or `Subcommand` to extract subcommands only from dedicated command tables, avoiding false positives from layout or settings tables).
+- Any documented subcommand that no longer matches an active `Commands` variant is surfaced as a stale reference with file, line number, and the original line text — so a rename or removal makes the old docs row visibly stale rather than silently absent.
+- Added `cli_impact: Option<CliImpact>` to `ChangeImpact` in `xencode-context-rs::impact` and wired it through `change_impact`.
+- Updated `run_impact` in `xencode-cli::main` to print the CLI commands section (each variant, its source line, and its manual references) and the stale references section in both text and JSON formats.
+- Four unit tests in `cli_impact.rs`: kebab-case conversion, variant extraction from a synthetic enum, backtick-only anchoring that rejects plain prose, and a renamed-variant-makes-docs-stale integration test using a real temp directory and real files.
+
 ### Fixed — `AE-3`: persist red-to-green reproduction evidence across process sessions
 
 Reproduction evidence proving bug fixes now persists across sessions and is backed by real artifact files on disk:

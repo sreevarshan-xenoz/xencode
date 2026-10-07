@@ -15509,7 +15509,7 @@ appear in it are how the §R-0 counts went wrong.
   prints both runs with their exit codes, a second session sees that history, and the earlier
   one is gone if the artifact file is deleted rather than summarised from memory.
 
-- **AE-4 — impact edges for a CLI command and for a manual that names it.** *Effort: M.*
+- ~~**AE-4 — impact edges for a CLI command and for a manual that names it.** *Effort: M.*
   `QD-1`/`QD-2` reach cargo dependencies, file dependents and churn, so `xencode impact` answers
   "what breaks if I change this function" and is silent on "what breaks if I rename this
   subcommand" — where the things that break are the clap `Commands` enum (`main.rs:532` for
@@ -15518,7 +15518,12 @@ appear in it are how the §R-0 counts went wrong.
   `replay` is not a reference to it; anchor on backticked names, the command tables, and the
   `Commands` variant identifiers. *Done-when:* `xencode impact` on `main.rs` reports the clap
   variant and the manual lines that name it, and a renamed variant makes the corresponding docs
-  row appear as stale rather than as absent.
+  row appear as stale rather than as absent.~~ ✅ **Done.** `xencode-context-rs::cli_impact`
+  parses `enum Commands`, matches variants against backtick-anchored manual references, surfaces
+  stale docs for any renamed/removed variant, and wires the result into `ChangeImpact`; both text
+  and JSON output updated in `xencode-cli`. Verified live: `xencode impact main.rs` lists 49
+  top-level variants with manual links and reports one stale `serve` reference. 2542 tests
+  passing; clippy clean.
 
 - **AE-5 — a disclosure level per destination, enforced rather than decorative.** *Effort: M.*
   26 `FocusArea` variants (`focus.rs:52-83`) and a 19-entry emoji `FEATURE_LIST`

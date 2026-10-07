@@ -323,6 +323,7 @@ mod tests {
             own_commits: 0,
             history_known: true,
             file_crates: Default::default(),
+            cli_impact: None,
         }
     }
 

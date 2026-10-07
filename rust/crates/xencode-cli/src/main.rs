@@ -7079,6 +7079,26 @@ fn run_impact(file: &str, limit: usize, format: OutputFormat) -> Result<(), Stri
                         "file": f, "commits_together": n,
                     })).collect::<Vec<_>>(),
                 },
+                "cli_commands": impact.cli_impact.as_ref().map(|cli| serde_json::json!({
+                    "source_file": cli.source_file,
+                    "variants_count": cli.variants_count(),
+                    "commands": cli.commands.iter().map(|c| serde_json::json!({
+                        "variant": c.variant,
+                        "subcommand": c.subcommand,
+                        "line": c.line,
+                        "doc_refs": c.doc_refs.iter().map(|d| serde_json::json!({
+                            "file": d.file,
+                            "line": d.line,
+                            "text": d.text,
+                        })).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+                    "stale_docs": cli.stale_docs.iter().map(|s| serde_json::json!({
+                        "file": s.file,
+                        "line": s.line,
+                        "subcommand": s.subcommand,
+                        "text": s.text,
+                    })).collect::<Vec<_>>(),
+                })),
             }))
             .map_err(|e| e.to_string())?
         );
@@ -7089,6 +7109,43 @@ fn run_impact(file: &str, limit: usize, format: OutputFormat) -> Result<(), Stri
     match &impact.crate_name {
         Some(name) => println!("  crate: {name}"),
         None => println!("  crate: (this file is not inside a workspace crate)"),
+    }
+
+    if let Some(cli) = &impact.cli_impact {
+        println!(
+            "\n  CLI commands defined ({} clap variant(s) in {}):",
+            cli.commands.len(),
+            cli.source_file
+        );
+        for cmd in cli.commands.iter().take(limit) {
+            println!(
+                "    {} — Commands::{} (line {})",
+                cmd.subcommand, cmd.variant, cmd.line
+            );
+            if cmd.doc_refs.is_empty() {
+                println!("      manuals: (none)");
+            } else {
+                println!("      manuals:");
+                for doc in &cmd.doc_refs {
+                    println!("        {}:{} — {}", doc.file, doc.line, doc.text);
+                }
+            }
+        }
+        if cli.commands.len() > limit {
+            println!("    … {} more", cli.commands.len() - limit);
+        }
+
+        if !cli.stale_docs.is_empty() {
+            println!("\n  stale manual references (documented subcommands not in Commands enum):");
+            for stale in &cli.stale_docs {
+                println!(
+                    "    {}:{} — `{}` not in Commands ({})",
+                    stale.file, stale.line, stale.subcommand, stale.text
+                );
+            }
+        } else {
+            println!("\n  stale manual references: none — all documented subcommands match active variants");
+        }
     }
 
     println!("\n  crates that depend on it — exact, from cargo metadata:");
