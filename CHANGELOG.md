@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AF-5`: competing candidate implementations on isolated branches
+
+A question with two or three defensible answers can now be handed to the machine as competing
+arms: each candidate is built in its own git worktree on its own branch, put through the same
+verification checklist, and reported as `{ran, skipped, failed, evidence-ref}` rows — with no
+composite score, no grade and no arm declared the winner. Choosing is a person's action:
+
+- Added `xencode-analysis-rs::compete` with `run_competing_arms`, `format_competing_table`,
+  `pick_arm`, and save/load/list over `.xencode/compete/<run-id>.json`. Two arms are required and
+  four are refused, because every arm pays for its own checkout and its own toolchain run.
+- Added `xencode compete run|list|show|pick`. `run` takes the arms as `--arm ID[=LABEL]` and gives
+  each one its own code through `--edit ARM PATH CONTENT` and `--command ARM CMD`; `pick` checks the
+  chosen arm's branch out and leaves the other candidate branches and all evidence directories on
+  disk, then names what it preserved.
+- An `--edit` path that climbs out of the arm's worktree, an edit naming an arm that was never
+  declared, a duplicated arm id, and a `--skip` of a check that is not on the checklist are all
+  refused before any worktree is created.
+- Skipped slots are reported as skipped and carry no evidence, never folded into a pass; a run
+  whose arms have no code of their own says so on standard error instead of printing an
+  identical-looking table.
+- A formatting failure now leaves the evidence a person can act on: the `fmt` slot stores
+  rustfmt's own report in `verify-fmt.log` and `xencode toolchain fmt` prints it, instead of
+  letting `cargo fmt --check` write straight through onto standard output — which put rustfmt's
+  diff in front of the JSON document whenever `--format json` was asked for.
+
 ### Added — `AF-4`: computer registry and agent binding to compute environments
 
 A registry of execution computers is now available with support for Google Colab, OpenSSH, and Docker environments, and agent runs record which computer they are bound to:

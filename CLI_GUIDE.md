@@ -4061,9 +4061,15 @@ xencode toolchain lint               # clippy diagnostics, grouped by lint
 xencode toolchain lint --format json # the same as a machine-readable document
 xencode toolchain fix                # apply clippy fixes (refuses a dirty tree)
 xencode toolchain fix --allow-dirty  # accept the overwrite risk explicitly
-xencode toolchain fmt                # fail unless formatting is clean
+xencode toolchain fmt                # fail unless formatting is clean, showing the diff
 xencode toolchain shear              # unused or misplaced dependencies
 ```
+
+**`fmt` captures rustfmt's report.** A bare "formatting differs" is not
+actionable, so the text output repeats rustfmt's own diff (up to 40 lines) with
+the file and line it objected to. In `--format json` mode the diff is dropped
+and only `{"clean": …}` is printed, because `cargo fmt --check` writes its diff
+to stdout and anything that inherits it would corrupt the document.
 
 **`fix` refuses a dirty tree.** `cargo clippy --fix` rewrites files, and an
 overwrite of uncommitted work looks exactly like your own edit afterwards. The
@@ -4151,6 +4157,42 @@ nothing here is graded by a model — and each leaves a ledger row plus an
 artifact the verdict points at. Skipped slots are reported alongside, never
 counted as passed. `--session` files the verification rows under a specific
 conversation session (defaulting to the active session or `cli`).
+
+### `xencode compete run <prompt> [--arm ID[=LABEL]] [--edit ARM PATH CONTENT] [--command ARM CMD] [--skip test|lint|fmt] [--timeout 1800] [--format text|json]`
+
+Two or three candidate implementations of the same question, each built in its
+own git worktree on its own branch `compete/<run-id>/<arm-id>`, each put through
+the `verify` checklist. The output is one table of `{ran, skipped, failed,
+evidence-ref}` rows per arm and nothing else: no composite number, no grade, no
+arm declared the better one. A fourth arm is refused, and so is a first — the
+run is bounded by design because each arm pays for its own checkout and its own
+toolchain.
+
+Give each arm its own code with `--edit` (a file written inside that arm's
+worktree, path relative to the arm's own tree — a path that climbs out is
+refused before any worktree is made) and `--command` (a shell command run there
+afterwards). Omit both and each branch only gets a candidate note, so the arms
+verify identically; the CLI says so on stderr.
+
+```
+xencode compete run "Token bucket or leaky bucket for the limiter?" \
+  --arm token=Token\ bucket --arm leaky=Leaky\ bucket \
+  --edit token src/limiter.rs "$(cat candidate-token.rs)" \
+  --edit leaky src/limiter.rs "$(cat candidate-leaky.rs)" \
+  --skip test
+```
+
+### `xencode compete list|show|pick`
+
+`list` prints every recorded run newest-first with how many arms it has and
+whether anyone has picked yet; `show <run-id>` re-prints that run's table from
+the report saved under `.xencode/compete/`, in text or `--format json`.
+
+`pick <run-id> <arm-id>` is the human's half of the job: it checks that arm's
+branch out in the current repository and unlinks its worktree, and it leaves
+every other candidate branch and both arms' evidence directories on disk, then
+names what it preserved. Picking an arm the run does not have is refused with
+the list of arms it does.
 
 ### `xencode test --isolate <substring> [--base HEAD] [--repeat 3]`
 

@@ -316,6 +316,13 @@ enum Commands {
         json: bool,
     },
 
+    /// Compete candidate implementations on isolated branches, verify each, and
+    /// let a person pick one (AF-5)
+    Compete {
+        #[command(subcommand)]
+        action: CompeteAction,
+    },
+
     /// Repository insights from the .xencode snapshot: broken imports,
     /// import cycles, hub files and orphans
     Advise {
@@ -1209,6 +1216,72 @@ enum ComputersAction {
 }
 
 #[derive(Subcommand)]
+enum CompeteAction {
+    /// Build each candidate arm in its own worktree and branch, run the
+    /// verification checklist on every one of them, and print the table.
+    Run {
+        /// The question the candidate implementations compete on
+        prompt: String,
+
+        /// A candidate arm as `id` or `id=label`. Give it twice for two arms,
+        /// or three times for three. Omit it to compete `arm-a` against `arm-b`.
+        #[arg(long = "arm", value_name = "ID[=LABEL]")]
+        arms: Vec<String>,
+
+        /// Write content into a file inside one arm's worktree: the arm id, the
+        /// path relative to that worktree, then the file's full text. Repeat it
+        /// once per file per arm.
+        #[arg(long = "edit", num_args = 3, value_names = ["ARM", "PATH", "CONTENT"])]
+        edits: Vec<String>,
+
+        /// Run a shell command inside one arm's worktree after its edits: the
+        /// arm id, then the command.
+        #[arg(long = "command", num_args = 2, value_names = ["ARM", "CMD"])]
+        commands: Vec<String>,
+
+        /// Skip a check by name (repeatable): test, lint, or fmt. A skipped
+        /// check is reported as skipped, never as passed.
+        #[arg(long)]
+        skip: Vec<String>,
+
+        /// Wall-clock ceiling in seconds for each check
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// List recorded competing runs, newest first
+    List {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Re-print the verification table of a recorded run, from its saved report
+    Show {
+        /// Which run to print
+        run_id: String,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Switch the repository onto one arm's branch, leaving every other
+    /// candidate branch and all evidence files on disk untouched.
+    Pick {
+        /// Which run
+        run_id: String,
+
+        /// Which arm of it to take
+        arm_id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum ModelAction {
     /// List all installed Ollama models
     List,
@@ -1859,6 +1932,7 @@ async fn main() {
         Commands::Colab { action } => run_colab(action).await,
         Commands::Remote { action } => run_remote(action),
         Commands::Computers { action, json } => run_computers(action, json).await,
+        Commands::Compete { action } => run_compete(action),
         Commands::Bootstrap {
             path,
             check,
@@ -4242,6 +4316,255 @@ async fn run_computers(action: Option<ComputersAction>, json: bool) -> Result<()
     }
 }
 
+/// Turn `--arm`, `--edit` and `--command` into candidate arm specs, refusing an
+/// edit that names an unknown arm or tries to write outside its worktree.
+fn build_candidate_arms(
+    arms: &[String],
+    edits: &[String],
+    commands: &[String],
+) -> Result<Vec<xencode_analysis_rs::CandidateArmSpec>, String> {
+    use std::path::Component;
+    use xencode_analysis_rs::CandidateArmSpec;
+
+    let mut specs: Vec<CandidateArmSpec> = if arms.is_empty() {
+        [
+            ("arm-a", "Candidate Approach A"),
+            ("arm-b", "Candidate Approach B"),
+        ]
+        .iter()
+        .map(|(id, label)| CandidateArmSpec {
+            arm_id: id.to_string(),
+            label: label.to_string(),
+            branch: None,
+            command: None,
+            file_edits: Vec::new(),
+        })
+        .collect()
+    } else {
+        arms.iter()
+            .map(|raw| {
+                let (arm_id, label) = match raw.split_once('=') {
+                    Some((id, label)) => (id.trim().to_string(), label.trim().to_string()),
+                    None => (raw.trim().to_string(), String::new()),
+                };
+                if arm_id.is_empty() {
+                    return Err(format!(
+                        "arm `{raw}` has no id: use `--arm id` or `--arm id=label`"
+                    ));
+                }
+                let label = if label.is_empty() {
+                    arm_id.clone()
+                } else {
+                    label
+                };
+                Ok(CandidateArmSpec {
+                    arm_id,
+                    label,
+                    branch: None,
+                    command: None,
+                    file_edits: Vec::new(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?
+    };
+
+    let ids: Vec<String> = specs.iter().map(|s| s.arm_id.clone()).collect();
+    for id in &ids {
+        if ids.iter().filter(|other| *other == id).count() > 1 {
+            return Err(format!(
+                "arm id `{id}` given twice: every arm needs its own id"
+            ));
+        }
+    }
+    let known = || format!("known arms: {}", ids.join(", "));
+
+    for chunk in edits.chunks(3) {
+        let [arm, path, content] = chunk else {
+            return Err("`--edit` needs three values: the arm, the path, the content".to_string());
+        };
+        let spec = specs
+            .iter_mut()
+            .find(|s| s.arm_id == *arm)
+            .ok_or_else(|| format!("`--edit {arm}` names no arm — {}", known()))?;
+        let rel = std::path::Path::new(path);
+        if rel.is_absolute()
+            || rel
+                .components()
+                .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+        {
+            return Err(format!(
+                "`--edit` path `{path}` escapes the worktree: give it relative to the arm's own tree"
+            ));
+        }
+        spec.file_edits
+            .push((std::path::PathBuf::from(path), content.clone()));
+    }
+
+    for chunk in commands.chunks(2) {
+        let [arm, cmd] = chunk else {
+            return Err("`--command` needs two values: the arm, the shell command".to_string());
+        };
+        let spec = specs
+            .iter_mut()
+            .find(|s| s.arm_id == *arm)
+            .ok_or_else(|| format!("`--command {arm}` names no arm — {}", known()))?;
+        if spec.command.is_some() {
+            return Err(format!(
+                "arm `{arm}` already has a command — give one per arm"
+            ));
+        }
+        spec.command = Some(cmd.clone());
+    }
+
+    Ok(specs)
+}
+
+/// Print one run's table, or its JSON, and — for a fresh run — how to pick.
+fn print_competing_report(
+    report: &xencode_analysis_rs::CompetingReport,
+    format: OutputFormat,
+    fresh: bool,
+) -> Result<(), String> {
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(report).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    println!("{}", xencode_analysis_rs::format_competing_table(report));
+    if fresh {
+        println!("\nWorktrees kept for inspection:");
+        for arm in &report.arms {
+            println!("  {:<10} {}", arm.arm_id, arm.worktree_path.display());
+        }
+        println!(
+            "\nThe rows above are only what the machine observed: nothing is computed over them \
+             and nothing is declared the better arm. Choose with\n  xencode compete pick {} <arm-id>",
+            report.run_id
+        );
+    }
+    Ok(())
+}
+
+fn run_compete(action: CompeteAction) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    match action {
+        CompeteAction::Run {
+            prompt,
+            arms,
+            edits,
+            commands,
+            skip,
+            timeout,
+            format,
+        } => {
+            for name in &skip {
+                if !["test", "lint", "fmt"].contains(&name.as_str()) {
+                    return Err(format!(
+                        "cannot skip {name:?}: the checklist is test, lint, fmt"
+                    ));
+                }
+            }
+            let arm_specs = build_candidate_arms(&arms, &edits, &commands)?;
+            if arm_specs
+                .iter()
+                .all(|s| s.file_edits.is_empty() && s.command.is_none())
+            {
+                eprintln!(
+                    "warning: no arm has any code of its own, so both branches carry the same \
+                     candidate note and will verify identically. Describe each arm with `--edit` \
+                     or `--command` to actually compete two implementations."
+                );
+            }
+            // A competing run is synchronous and pays for the toolchain once per
+            // arm, so the cost is stated before it starts, not after.
+            let planned: Vec<&str> = ["fmt", "lint", "test"]
+                .iter()
+                .copied()
+                .filter(|check| !skip.iter().any(|s| s == *check))
+                .collect();
+            let planned = if planned.is_empty() {
+                "nothing — every check is skipped".to_string()
+            } else {
+                planned.join(", ")
+            };
+            eprintln!(
+                "compete: {} arms, each checked by [{}] in its own worktree beside {}; the \
+                 toolchain runs once per arm with a {timeout}s ceiling per check.",
+                arm_specs.len(),
+                planned,
+                root.display(),
+            );
+            let config = xencode_analysis_rs::CompetingConfig {
+                prompt,
+                arm_specs,
+                skip_checks: skip,
+                timeout_secs: timeout,
+            };
+            let report = xencode_analysis_rs::run_competing_arms(&root, &config)?;
+            print_competing_report(&report, format, true)
+        }
+        CompeteAction::List { format } => {
+            let runs = xencode_analysis_rs::list_competing_runs(&root)?;
+            if matches!(format, OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&runs).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+            if runs.is_empty() {
+                println!(
+                    "No competing runs recorded under {}.",
+                    root.join(".xencode").join("compete").display()
+                );
+                return Ok(());
+            }
+            println!("{:<24} {:<5} {:<8} PROMPT", "RUN", "ARMS", "PICKED");
+            for run in &runs {
+                println!(
+                    "{:<24} {:<5} {:<8} {}",
+                    run.run_id,
+                    run.arms.len(),
+                    run.picked_arm.clone().unwrap_or_else(|| "-".to_string()),
+                    run.prompt
+                );
+            }
+            println!("\nRe-print any of them: xencode compete show <run-id>");
+            Ok(())
+        }
+        CompeteAction::Show { run_id, format } => {
+            let report = xencode_analysis_rs::load_competing_run(&root, &run_id)?;
+            print_competing_report(&report, format, false)
+        }
+        CompeteAction::Pick { run_id, arm_id } => {
+            let outcome = xencode_analysis_rs::pick_arm(&root, &run_id, &arm_id)?;
+            println!(
+                "Checked out arm `{}` on branch `{}`.",
+                outcome.picked_arm_id, outcome.picked_branch
+            );
+            if outcome.other_branches.is_empty() {
+                println!("No other candidate branch survived this run to preserve.");
+            } else {
+                println!("Candidate branches left on disk:");
+                for branch in &outcome.other_branches {
+                    println!("  {branch}");
+                }
+            }
+            if outcome.preserved_evidence.is_empty() {
+                println!("No evidence directory was preserved for the other arms.");
+            } else {
+                println!("Evidence left on disk:");
+                for evidence in &outcome.preserved_evidence {
+                    println!("  {}", evidence.display());
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 fn run_cache(action: CacheAction) -> Result<(), String> {
     match action {
         CacheAction::Stats => {
@@ -6221,18 +6544,19 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
             Ok(())
         }
         "fmt" => {
-            let clean = kit::fmt_check(&manifest)?;
+            let (clean, report) = kit::fmt_check_output(&manifest)?;
             if as_json {
                 println!("{}", serde_json::json!({ "clean": clean }));
+            } else if clean {
+                println!("\n  formatting is clean");
             } else {
-                println!(
-                    "{}",
-                    if clean {
-                        "\n  formatting is clean"
-                    } else {
-                        "\n  formatting differs — run `cargo fmt`"
+                println!("\n  formatting differs — run `cargo fmt`");
+                if !report.is_empty() {
+                    println!();
+                    for line in report.lines().take(40) {
+                        println!("    {line}");
                     }
-                );
+                }
             }
             if clean {
                 Ok(())
@@ -11947,5 +12271,192 @@ mod tests {
             vec!["config.json would not change".to_string()],
             "an up that changes nothing says that, instead of printing a diff of nothing"
         );
+    }
+
+    #[test]
+    fn compete_run_parses_arms_edits_and_commands() {
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "compete",
+            "run",
+            "Loop or recurse?",
+            "--arm",
+            "loop=Iterative",
+            "--arm",
+            "recur",
+            "--edit",
+            "loop",
+            "src/lib.rs",
+            "pub fn a() { while false {} }",
+            "--command",
+            "recur",
+            "touch READY",
+            "--skip",
+            "test",
+            "--timeout",
+            "30",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Compete {
+                action:
+                    super::CompeteAction::Run {
+                        prompt,
+                        arms,
+                        edits,
+                        commands,
+                        skip,
+                        timeout,
+                        format,
+                    },
+            }) => {
+                assert_eq!(prompt, "Loop or recurse?");
+                assert_eq!(arms, ["loop=Iterative", "recur"]);
+                assert_eq!(
+                    edits,
+                    ["loop", "src/lib.rs", "pub fn a() { while false {} }"]
+                );
+                assert_eq!(commands, ["recur", "touch READY"]);
+                assert_eq!(skip, ["test"]);
+                assert_eq!(timeout, 30);
+                assert!(matches!(format, OutputFormat::Text));
+            }
+            _ => panic!("expected compete run"),
+        }
+
+        let specs = super::build_candidate_arms(
+            &["loop=Iterative".to_string(), "recur".to_string()],
+            &[
+                "loop".to_string(),
+                "src/lib.rs".to_string(),
+                "fn a() {}".to_string(),
+            ],
+            &["recur".to_string(), "touch READY".to_string()],
+        )
+        .unwrap();
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0].arm_id, "loop");
+        assert_eq!(specs[0].label, "Iterative");
+        assert_eq!(
+            specs[0].file_edits[0].0,
+            std::path::PathBuf::from("src/lib.rs")
+        );
+        assert_eq!(specs[1].arm_id, "recur");
+        // An arm named without a label is called by its id, not left blank.
+        assert_eq!(specs[1].label, "recur");
+        assert_eq!(specs[1].command.as_deref(), Some("touch READY"));
+
+        // Omitting --arm competes the two default arms.
+        let defaults = super::build_candidate_arms(&[], &[], &[]).unwrap();
+        assert_eq!(
+            defaults
+                .iter()
+                .map(|s| s.arm_id.as_str())
+                .collect::<Vec<_>>(),
+            ["arm-a", "arm-b"]
+        );
+    }
+
+    /// An edit is a write into a worktree, so the paths it names are checked
+    /// before anything is built: no escaping the arm's own tree, no writing to
+    /// an arm nobody declared.
+    #[test]
+    fn compete_refuses_edits_that_escape_or_name_no_arm() {
+        let escape = super::build_candidate_arms(
+            &["a".to_string(), "b".to_string()],
+            &[
+                "a".to_string(),
+                "../escape.txt".to_string(),
+                "x".to_string(),
+            ],
+            &[],
+        )
+        .unwrap_err();
+        assert!(escape.contains("escapes the worktree"), "{escape}");
+
+        let absolute = super::build_candidate_arms(
+            &["a".to_string(), "b".to_string()],
+            &["a".to_string(), "/etc/passwd".to_string(), "x".to_string()],
+            &[],
+        )
+        .unwrap_err();
+        assert!(absolute.contains("escapes the worktree"), "{absolute}");
+
+        let unknown = super::build_candidate_arms(
+            &["a".to_string(), "b".to_string()],
+            &["c".to_string(), "src/lib.rs".to_string(), "x".to_string()],
+            &[],
+        )
+        .unwrap_err();
+        assert!(unknown.contains("known arms: a, b"), "{unknown}");
+
+        let dupe = super::build_candidate_arms(
+            &["a".to_string(), "a".to_string()],
+            &[],
+            &["a".to_string(), "true".to_string()],
+        )
+        .unwrap_err();
+        assert!(dupe.contains("given twice"), "{dupe}");
+
+        let two_cmds = super::build_candidate_arms(
+            &["a".to_string(), "b".to_string()],
+            &[],
+            &[
+                "a".to_string(),
+                "touch one".to_string(),
+                "a".to_string(),
+                "touch two".to_string(),
+            ],
+        )
+        .unwrap_err();
+        assert!(two_cmds.contains("already has a command"), "{two_cmds}");
+
+        let blank = super::build_candidate_arms(&["=no id".to_string(), "b".to_string()], &[], &[])
+            .unwrap_err();
+        assert!(blank.contains("has no id"), "{blank}");
+    }
+
+    #[test]
+    fn compete_list_show_and_pick_parse_their_ids() {
+        let cli = Cli::try_parse_from(["xencode", "compete", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Compete {
+                action: super::CompeteAction::List { .. }
+            })
+        ));
+
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "compete",
+            "show",
+            "compete-1",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Compete {
+                action: super::CompeteAction::Show { run_id, format },
+            }) => {
+                assert_eq!(run_id, "compete-1");
+                assert!(matches!(format, OutputFormat::Json));
+            }
+            _ => panic!("expected compete show"),
+        }
+
+        let cli = Cli::try_parse_from(["xencode", "compete", "pick", "compete-1", "loop"]).unwrap();
+        match cli.command {
+            Some(Commands::Compete {
+                action: super::CompeteAction::Pick { run_id, arm_id },
+            }) => {
+                assert_eq!(run_id, "compete-1");
+                assert_eq!(arm_id, "loop");
+            }
+            _ => panic!("expected compete pick"),
+        }
+
+        // `run` cannot be invoked without the question it is answering.
+        assert!(Cli::try_parse_from(["xencode", "compete", "run"]).is_err());
     }
 }

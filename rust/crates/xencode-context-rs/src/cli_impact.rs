@@ -583,7 +583,8 @@ Run `xencode agents` to inspect agents.
         .unwrap();
 
         let parsed = parse_commands_enum(&std::fs::read_to_string(&main_rs).unwrap());
-        let (commands, stale) = scan_manuals_for_commands(root, &[manual.clone()], &parsed);
+        let (commands, stale) =
+            scan_manuals_for_commands(root, std::slice::from_ref(&manual), &parsed);
 
         // Scan is documented:
         let scan_cmd = commands.iter().find(|c| c.subcommand == "scan").unwrap();

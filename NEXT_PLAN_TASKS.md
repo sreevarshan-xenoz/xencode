@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2503 tests passing, zero warnings (re-verified 2026-10-06, after `EV-4`; 19 ignored, so 2522 in the run)
+- [x] Workspace gates green — 16 crates, 2591 tests passing, zero warnings (re-verified 2026-10-07, after `AF-5`; 19 ignored, so 2610 in the run)
 
 ## Model Catalog Honesty
 
@@ -15763,6 +15763,20 @@ Three corrections the brief did not carry, each of which changes what should be 
   verification rows, printed as a table of `{ran, skipped, failed, evidence-ref}` per arm with
   **no** composite score, and picking an arm is a person's action that leaves the other branch
   and its evidence on disk.
+  *Shipped:* `xencode-analysis-rs::compete` builds each candidate in its own git worktree on a
+  branch named `compete/<run-id>/<arm-id>`, runs the same fmt → lint → test checklist per arm, and
+  writes the run to `.xencode/compete/<run-id>.json`. `xencode compete run` prints one
+  `{ran, skipped, failed, evidence-ref}` table per arm — verified live that a misformatted arm is
+  reported as failed while its well-formatted rival passes, and that the printed table contains no
+  score, grade, winner, rank or percentage. `xencode compete list|show` read a recorded run back
+  in text and JSON; `xencode compete pick` checks the chosen branch out and names the rival
+  branches and evidence directories it left on disk. Refusals, all before any worktree is created:
+  one arm, four arms, a duplicated arm id, an edit path that climbs out of the worktree, an edit
+  for an arm that was never declared, and a `--skip` naming a check that isn't on the checklist.
+  A candidate command that exits non-zero stops the run and records nothing, and an arm that
+  cannot be committed is reported rather than verified empty — otherwise both arms would check the
+  same base tree and look compared. The evidence each row points at is real: the fmt slot now
+  stores rustfmt's own report instead of a verdict word. 2591 tests passing; clippy clean.
 
 - **AF-6 — show the resulting diff before the write, not after.** *Effort: M.* The approval
   prompt currently shows the tool, its class and the argument

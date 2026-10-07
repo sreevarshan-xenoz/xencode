@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2503 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2591 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -348,6 +348,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Advise** | `xencode advise [FILTER] [--json] [--limit 40]` | Repo insights from the `.xencode` snapshot |
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
 | **Worktree** | `xencode worktree list` | List/add/remove git worktrees |
+| **Compete** | `xencode compete run "<question>" --arm a --arm b` | Two or three candidate implementations, each built on its own branch in its own worktree and put through the verification checklist, printed as `{ran, skipped, failed, evidence-ref}` per arm with no composite score; `xencode compete pick <run> <arm>` is the human's choice and leaves the other branch and its evidence on disk |
 | **Cache** | `xencode cache stats` | Show cache statistics |
 | **Audit** | `xencode audit verify [PATH]` | Check the server's audit log was not edited afterwards |
 | **Server** | `xencode server` | Start collaboration server (local-first: `127.0.0.1:8765`; TLS opt-in) |
@@ -765,7 +766,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2576 passing)
+cargo test                          # Full workspace suite (2591 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

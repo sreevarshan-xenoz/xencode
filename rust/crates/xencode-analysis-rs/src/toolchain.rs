@@ -260,14 +260,28 @@ pub fn cargo_fix(
     })
 }
 
-/// Check formatting without changing anything.
-pub fn fmt_check(manifest_dir: &Path) -> Result<bool, String> {
-    let status = std::process::Command::new("cargo")
+/// Check formatting without changing anything, and return rustfmt's own
+/// report. The report is captured rather than inherited so it can be written
+/// to an evidence file: `cargo fmt --check` prints its diff on stdout, which
+/// would corrupt the stdout of anything that asked for JSON.
+pub fn fmt_check_output(manifest_dir: &Path) -> Result<(bool, String), String> {
+    let output = std::process::Command::new("cargo")
         .current_dir(manifest_dir)
         .args(["fmt", "--check"])
-        .status()
+        .output()
         .map_err(|e| format!("could not start cargo fmt: {e}"))?;
-    Ok(status.success())
+    let mut report = String::new();
+    report.push_str(&String::from_utf8_lossy(&output.stdout));
+    report.push_str(&String::from_utf8_lossy(&output.stderr));
+    while report.ends_with('\n') {
+        report.pop();
+    }
+    Ok((output.status.success(), report))
+}
+
+/// Check formatting without changing anything.
+pub fn fmt_check(manifest_dir: &Path) -> Result<bool, String> {
+    Ok(fmt_check_output(manifest_dir)?.0)
 }
 
 /// Apply formatting.
@@ -446,20 +460,21 @@ pub fn run_checklist_for_session(
     if skipped("fmt") {
         record("fmt", false, None, "");
     } else {
-        let clean = fmt_check(&manifest)?;
-        let evidence = artifacts::write_artifact(
-            &xencode_dir,
-            session_tag,
-            "verify-fmt.log",
-            if clean {
-                "fmt: clean\n"
-            } else {
-                "fmt: differs\n"
-            },
-        )
-        .ok()
-        .map(|p| display_relative(root, &p))
-        .unwrap_or_default();
+        let (clean, report) = fmt_check_output(&manifest)?;
+        let mut evidence_text = if clean {
+            String::from("fmt: clean\n")
+        } else {
+            String::from("fmt: differs\n")
+        };
+        for line in report.lines().take(100) {
+            evidence_text.push_str(line);
+            evidence_text.push('\n');
+        }
+        let evidence =
+            artifacts::write_artifact(&xencode_dir, session_tag, "verify-fmt.log", &evidence_text)
+                .ok()
+                .map(|p| display_relative(root, &p))
+                .unwrap_or_default();
         record("fmt", true, Some(i32::from(!clean)), &evidence);
     }
 
@@ -620,12 +635,38 @@ mod tests {
         .unwrap();
         assert_eq!(list.checks.len(), 3);
         let xencode = dir.join(".xencode");
-        let session_rows = xencode_context_rs::ledger::ledger_for_session(&xencode, "session_abc123");
+        let session_rows =
+            xencode_context_rs::ledger::ledger_for_session(&xencode, "session_abc123");
         assert_eq!(session_rows.len(), 3);
         assert_eq!(session_rows[0].session.as_deref(), Some("session_abc123"));
         assert!(session_rows[0].log_ref.contains("session_abc123"));
         // An unrelated session query returns none
         assert!(xencode_context_rs::ledger::ledger_for_session(&xencode, "other_sess").is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fmt_evidence_holds_rustfmts_own_report() {
+        // The evidence-ref column is only useful if it points at output a person
+        // can act on. A bare "fmt: differs" says nothing about which file.
+        let dir = std::env::temp_dir().join(format!("xe-verify-fmt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"vfmt\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src").join("lib.rs"), "pub fn a()->u32{42}\n").unwrap();
+        let list = run_checklist(&dir, &["lint".to_string(), "test".to_string()], 60).unwrap();
+        let fmt = list.checks.iter().find(|c| c.name == "fmt").unwrap();
+        assert_eq!(fmt.exit_code, Some(1), "a messy tree fails the fmt slot");
+        let evidence = std::fs::read_to_string(dir.join(&fmt.evidence_ref))
+            .unwrap_or_else(|e| panic!("{}: {e}", fmt.evidence_ref));
+        assert!(
+            evidence.contains("src/lib.rs"),
+            "the log names the file rustfmt objected to: {evidence}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
