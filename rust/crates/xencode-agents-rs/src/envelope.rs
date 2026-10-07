@@ -311,6 +311,17 @@ fn redact_event(event: &AgentEvent) -> AgentEvent {
             call_id: call_id.as_deref().map(redact),
             origin: *origin,
         },
+        AgentEvent::PermissionDenied {
+            tool,
+            call_id,
+            reason,
+            origin,
+        } => AgentEvent::PermissionDenied {
+            tool: redact(tool),
+            call_id: call_id.as_deref().map(redact),
+            reason: reason.as_deref().map(redact),
+            origin: *origin,
+        },
         AgentEvent::Error { message, origin } => AgentEvent::Error {
             message: redact(message),
             origin: *origin,

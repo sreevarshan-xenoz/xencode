@@ -19,6 +19,9 @@ use crate::focus::{
 use crate::widgets::{gauge, panel_border_set, spinner};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    // AF-2: drain queued agent events and reduce into UI state before drawing.
+    app.drain_agent_events();
+
     // Full-screen themed background
     let bg = Block::default().style(Style::default().bg(app.theme.bg).fg(app.theme.fg));
     f.render_widget(bg, f.area());
@@ -470,7 +473,14 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .map(|snapshot| format!("{}  ", snapshot.line))
         .unwrap_or_default();
 
-    let status_text = format!("{}{}{}", left_parts, spend_str, hints);
+    // AF-2: permission denial status indicator from reduced events.
+    let denied_str = app
+        .last_permission_denied
+        .as_ref()
+        .map(|d| format!("[{d}]  "))
+        .unwrap_or_default();
+
+    let status_text = format!("{}{}{}{}", left_parts, spend_str, denied_str, hints);
 
     let bar = Paragraph::new(status_text).style(
         Style::default()
