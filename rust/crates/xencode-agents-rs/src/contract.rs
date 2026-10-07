@@ -49,6 +49,50 @@ pub struct ClaimResult {
     pub verdict: Verdict,
 }
 
+impl ClaimResult {
+    /// What this one claim is worth to a reader, in one line: the verdict, the
+    /// screens it was read from, and the tokens that carried it. It says nothing
+    /// about *which* claim that is — the name travels with the line wherever it is
+    /// quoted, so this does not repeat it. Routing prints it beside a capability so
+    /// a reason can be checked rather than trusted.
+    pub fn evidence_line(&self) -> String {
+        let read = if self.sources.is_empty() {
+            "no help screen could be read".to_string()
+        } else {
+            format!(
+                "read from {}",
+                self.sources
+                    .iter()
+                    .map(|s| format!("`{} {}`", self.agent, s))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            )
+        };
+        match (&self.verdict, self.expected) {
+            (Verdict::Confirmed, true) if !self.found.is_empty() => format!(
+                "confirmed by {} ({read})",
+                self.found
+                    .iter()
+                    .map(|t| format!("`{t}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            (Verdict::Confirmed, true) => {
+                format!("the roster asserts it and nothing contradicted it ({read})")
+            }
+            (Verdict::Confirmed, false) => {
+                format!("not advertised — no token for it appeared ({read})")
+            }
+            (Verdict::Contradicted(detail), _) => {
+                format!("contradicted, {detail} ({read})")
+            }
+            (Verdict::Untestable(detail), _) => {
+                format!("could not be tested here, {detail}")
+            }
+        }
+    }
+}
+
 /// Evidence tokens per (agent, claim), taken from the roster comments and
 /// verified against live `--help` on 2026-09-28. A token here is a promise:
 /// the probe fails the claim if any one of them stops appearing.
@@ -311,11 +355,14 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Extract confirmed probed capabilities per agent from probe results.
 ///
 /// Under AR-3's rule, "the router cannot see a capability that no probe recorded".
-/// Only claims with `Verdict::Confirmed` are included in the returned capabilities set.
+/// Only a claim the roster asserts *and* the probe confirms counts: a Confirmed
+/// verdict on a claim the roster denies is a confirmed absence, which is the
+/// opposite fact, and a router handed absences as abilities would route an `acp`
+/// task to an agent whose help output never mentioned `acp`.
 pub fn confirmed_capabilities(claims: &[ClaimResult]) -> BTreeMap<String, BTreeSet<String>> {
     let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for claim in claims {
-        if claim.verdict == Verdict::Confirmed {
+        if claim.expected && claim.verdict == Verdict::Confirmed {
             map.entry(claim.agent.to_string())
                 .or_default()
                 .insert(claim.claim.to_string());
@@ -324,9 +371,128 @@ pub fn confirmed_capabilities(claims: &[ClaimResult]) -> BTreeMap<String, BTreeS
     map
 }
 
+/// Per agent, per claim: the one line saying what the probe read. Built from the
+/// same results [`confirmed_capabilities`] uses, so a routing reason and
+/// `xencode agents --contract` can never disagree about what was seen.
+pub fn evidence_by_agent(claims: &[ClaimResult]) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for claim in claims {
+        out.entry(claim.agent.to_string())
+            .or_default()
+            .insert(claim.claim.to_string(), claim.evidence_line());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_evidence_line_names_the_screen_the_claim_was_read_from() {
+        let confirmed = ClaimResult {
+            agent: "opencode",
+            claim: "stream",
+            expected: true,
+            found: vec!["--format".to_string()],
+            missing: vec![],
+            sources: vec!["--help".to_string(), "run --help".to_string()],
+            verdict: Verdict::Confirmed,
+        };
+        let line = confirmed.evidence_line();
+        assert!(line.contains("confirmed by `--format`"), "{line}");
+        assert!(
+            line.contains("read from `opencode --help` and `opencode run --help`"),
+            "{line}"
+        );
+
+        let absent = ClaimResult {
+            agent: "claude",
+            claim: "acp",
+            expected: false,
+            found: vec![],
+            missing: vec!["acp".to_string()],
+            sources: vec!["--help".to_string()],
+            verdict: Verdict::Confirmed,
+        };
+        let line = absent.evidence_line();
+        assert!(line.contains("not advertised"), "{line}");
+
+        let contradicted = ClaimResult {
+            agent: "codex",
+            claim: "daemon",
+            expected: true,
+            found: vec![],
+            missing: vec!["app-server".to_string()],
+            sources: vec!["--help".to_string()],
+            verdict: Verdict::Contradicted("missing from help: app-server".to_string()),
+        };
+        let line = contradicted.evidence_line();
+        assert!(line.contains("contradicted, missing from help"), "{line}");
+
+        let untestable = ClaimResult {
+            agent: "kilo",
+            claim: "(help unreadable)",
+            expected: true,
+            found: vec![],
+            missing: vec![],
+            sources: vec![],
+            verdict: Verdict::Untestable("`--help` produced nothing usable".to_string()),
+        };
+        let line = untestable.evidence_line();
+        assert!(line.contains("could not be tested here"), "{line}");
+
+        // And the grouping keeps every claim of an agent reachable by name.
+        let grouped = evidence_by_agent(&[confirmed, absent, contradicted, untestable]);
+        assert_eq!(
+            grouped["opencode"]["stream"],
+            "confirmed by `--format` (read from `opencode --help` and `opencode run --help`)"
+        );
+        assert!(grouped["kilo"]["(help unreadable)"].contains("could not be tested"));
+        // Every caller quotes a line beside the claim it describes, so the line must
+        // not start with the claim's own name or the reader gets `acp: acp:`.
+        for (claim, line) in [
+            ("stream", grouped["opencode"]["stream"].clone()),
+            ("acp", grouped["claude"]["acp"].clone()),
+            ("daemon", grouped["codex"]["daemon"].clone()),
+        ] {
+            assert!(!line.starts_with(&format!("{claim}: ")), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_confirmed_absence_is_not_a_capability() {
+        let claims = vec![
+            ClaimResult {
+                agent: "agy",
+                claim: "stream",
+                expected: true,
+                found: vec!["--output-format".to_string()],
+                missing: vec![],
+                sources: vec!["--help".to_string()],
+                verdict: Verdict::Confirmed,
+            },
+            ClaimResult {
+                agent: "agy",
+                claim: "acp",
+                expected: false,
+                found: vec![],
+                missing: vec!["acp".to_string()],
+                sources: vec!["--help".to_string()],
+                verdict: Verdict::Confirmed,
+            },
+        ];
+        let caps = confirmed_capabilities(&claims);
+        assert!(caps["agy"].contains("stream"));
+        assert!(
+            !caps["agy"].contains("acp"),
+            "the probe confirmed that acp is *not* advertised; handing that to a router as an \
+             ability would send an acp task to an agent that cannot take it"
+        );
+        // The evidence map keeps both, because a refusal needs the line saying why.
+        let evidence = evidence_by_agent(&claims);
+        assert!(evidence["agy"]["acp"].contains("not advertised"));
+    }
 
     #[test]
     fn confirmed_capabilities_only_includes_confirmed_claims() {

@@ -21,8 +21,8 @@ pub use result_envelope::{
     Claim, Evidence, FinishStatus, Handoff, RanCommand, ResultEnvelope, ReviewerView,
 };
 pub use routing::{
-    CandidateEvaluation, CapabilityRouter, RejectionReason, RoutingDecision, TaskRequirement,
-    WorkerCandidate,
+    CandidateEvaluation, CapabilityRouter, Fact, Provenance, RejectionReason, RoutingDecision,
+    StepNote, TaskRequirement, WorkerCandidate,
 };
 pub use rustc_json::{
     cargo_json_command, parse as parse_rustc_json, BuildReport, Diagnostic, Suggestion,
@@ -39,8 +39,7 @@ pub use tasks::{
 };
 pub use tasks_file::{FileTask, FileTaskRegistry};
 pub use team::{
-    load_recipes, Capacity, RecipeError, RecipeFile, RoleSpec, TeamRecipe, GATE_CHECKS,
-    RECIPES_DIR,
+    load_recipes, Capacity, RecipeError, RecipeFile, RoleSpec, TeamRecipe, GATE_CHECKS, RECIPES_DIR,
 };
 pub use team_runs::{
     estimate as estimate_from_runs, fingerprint as recipe_fingerprint, load_runs, Estimate,

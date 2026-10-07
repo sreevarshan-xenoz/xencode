@@ -14,14 +14,14 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-07, after `OR-10`: it lists 53 subcommands — the
+  (verified against `xencode --help` on 2026-10-07, after `OR-11`: it lists 53 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2700 tests passing, zero warnings (re-verified 2026-10-07, after `OR-10`; 19 ignored, so 2719 in the run)
+- [x] Workspace gates green — 16 crates, 2718 tests passing, zero warnings (re-verified 2026-10-07, after `OR-11`; 19 ignored, so 2737 in the run)
 
 ## Model Catalog Honesty
 
@@ -12388,13 +12388,52 @@ worker, `OR-` for the thing that decides what workers to talk to.
       the tariff through `xencode config set` in a sandboxed home and re-derives the price from the
       recorded watt-hours. Scope stated plainly: `xencode compete run` already names its cost before
       it starts and is not converted here, the fabricated `estimated_cost: 0.05` in `agents --route`
-      is `OR-11`'s to explain, and the `/orchestrator` surface is `OR-14`. Completions and the man
+      was `OR-11`'s to explain and now is, and the `/orchestrator` surface is `OR-14`. Completions
+      and the man
       page regenerated from the clap definition; the CLI's byte-equality tests pass.
       2700 tests passing over 16 crates, 19 ignored, zero clippy warnings.
-- [ ] **OR-11 — explainable routing.** Print the reasons behind every worker choice, and
+- [x] **OR-11 — explainable routing.** Print the reasons behind every worker choice, and
       say plainly when a reason came from a measurement that does not exist yet.
       **Done-when:** each choice lists the facts behind it, and a `CX-4`-style estimate is
       labelled as an estimate.
+      **Shipped:** `xencode agents --route` printed `load: 0/5, cost: $0.05` for every worker in
+      the roster, and the `0`, the `5` and the `0.05` were literals written twice in the command —
+      nothing measured any of them, so every agent looked idle and cheap at once. Load, capacity
+      and price now travel as `Fact`s that carry how they were known — `measured (what was
+      watched)`, `estimated (what it was worked out from)`, `not measured (why nothing measures
+      it)` — and an unmeasured fact holds no number, so there is nothing left to print as though
+      there were one.
+      Three rules fall out of that and each has a test: only a measured number may rule a worker
+      out (an estimate can break a tie, never reject, so `--max-cost 0.0001` prints `the ceiling of
+      0.00$ was not applied to 9 workers (opencode, cline, …)` instead of refusing everybody on an
+      unpriced hunch); a worker nobody probed is refused for a *missing measurement* rather than a
+      missing ability, and the two sentences differ (`xencode never probed on this machine` against
+      `no probe of this worker confirmed — acp: not advertised — no token for it appeared (read
+      from `codex --help` and `codex exec --help`)`); and a comparison that could not run is said
+      out loud, so when neither load nor price separates the field the reason reads `settled by the
+      order of their names, because nothing measurable separated them` and the step line adds `a
+      convention, not a finding about agy`.
+      A capability the probe confirmed *absent* was being handed to the router as an ability —
+      `confirmed_capabilities` accepted any confirmed verdict, and the probe confirms both that a
+      flag is there and that it is not. That made `codex`, `claude`, `crush`, `agy` and
+      `cursor-agent` eligible for `--require-cap acp` against their own help output; only a claim
+      the roster asserts *and* the probe finds now counts, and the live command rules those five
+      out by name.
+      The capability lines print with the evidence `AR-3` read: `contract.rs` gained
+      `evidence_line()` and `evidence_by_agent()`, so a reason cites the screen (`cline --help`,
+      `codex exec --help`) and the token that carried it, and `xencode agents --contract` cannot
+      disagree with `--route` about what was seen. `--format json` carries `steps`, `facts` and
+      `not_checked` rather than the flat `explanation` string.
+      13 tests in `xencode-core-rs/src/routing.rs`, 7 in `xencode-agents-rs/src/contract.rs`, and 8
+      end-to-end against the real binary in `xencode-cli/tests/agents_routing_cli.rs` — the old
+      cost-ceiling test there asserted the invented behaviour and was replaced. Two of the new
+      guards were watched to fail before being kept: restoring the absence-as-ability filter fails
+      `a_confirmed_absence_is_not_counted_as_an_ability` with `a confirmed absence was used as an
+      ability: acp: not advertised … (read from `codex --help` and `codex exec --help`)`, and
+      silencing the unchecked-ceiling line fails `a_cost_ceiling_that_cannot_be_applied_is_said_as_
+      not_applied`. Help text for `--route` and `--max-cost` changed, so completions and the man
+      page were regenerated from the clap definition.
+      2718 tests passing over 16 crates, 19 ignored, zero clippy warnings, `cargo fmt --check` clean.
 - [ ] **OR-12 — the worker panel.** Agents, tasks, graph, costs, logs and pending
       approvals as `FocusArea` panels over `AR-6`/`EVd-1` state.
       **Done-when:** every number shown traces to a real row, and a worker xencode cannot

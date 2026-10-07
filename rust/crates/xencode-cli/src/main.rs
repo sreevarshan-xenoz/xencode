@@ -603,7 +603,8 @@ enum Commands {
         #[arg(long = "test-cmd")]
         test_cmds: Vec<String>,
 
-        /// Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)
+        /// Route a task on capabilities the probe confirmed here, printing how each
+        /// number behind the choice was known
         #[arg(long = "route")]
         route_task: Option<String>,
 
@@ -611,7 +612,8 @@ enum Commands {
         #[arg(long = "require-cap")]
         require_caps: Vec<String>,
 
-        /// Maximum cost ceiling allowed for the routed task (OR-6)
+        /// Maximum cost ceiling allowed for the routed task; applied only where a
+        /// price was measured, and reported as unchecked where it was not
         #[arg(long = "max-cost")]
         max_cost: Option<f64>,
 
@@ -8896,41 +8898,56 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
     }
 
     if let Some(task_id) = args.route_task {
+        // Everything the router is allowed to use was read off this machine a few
+        // seconds ago, and the line of evidence behind each capability travels with
+        // it, so a choice can be checked rather than believed (`OR-11`).
         let claims = xencode_agents_rs::probe_contract();
         let confirmed_caps_by_agent = xencode_agents_rs::confirmed_capabilities(&claims);
+        let evidence_by_agent = xencode_agents_rs::evidence_by_agent(&claims);
+        let probed: std::collections::BTreeSet<String> =
+            claims.iter().map(|claim| claim.agent.to_string()).collect();
 
         let installed = xencode_agents_rs::inventory();
-        let mut candidates = Vec::new();
-
-        if installed.is_empty() {
-            for spec in xencode_agents_rs::ROSTER {
-                let caps = confirmed_caps_by_agent
-                    .get(spec.name)
-                    .cloned()
-                    .unwrap_or_default();
-                candidates.push(xencode_core_rs::WorkerCandidate {
-                    id: spec.name.to_string(),
-                    probed_capabilities: caps,
-                    current_load: 0,
-                    max_load: 5,
-                    estimated_cost: 0.05,
-                });
-            }
+        let names: Vec<String> = if installed.is_empty() {
+            // Nothing on `PATH` matched the roster. Its names are still listed, so a
+            // person asking who could take a task sees what was considered — each one
+            // marked as never probed, which is not the same answer as probing it.
+            xencode_agents_rs::ROSTER
+                .iter()
+                .map(|spec| spec.name.to_string())
+                .collect()
         } else {
-            for agent in &installed {
-                let caps = confirmed_caps_by_agent
-                    .get(agent.name)
+            installed
+                .iter()
+                .map(|agent| agent.name.to_string())
+                .collect()
+        };
+
+        let candidates: Vec<xencode_core_rs::WorkerCandidate> = names
+            .iter()
+            .map(|name| xencode_core_rs::WorkerCandidate {
+                id: name.clone(),
+                probed_capabilities: confirmed_caps_by_agent
+                    .get(name)
                     .cloned()
-                    .unwrap_or_default();
-                candidates.push(xencode_core_rs::WorkerCandidate {
-                    id: agent.name.to_string(),
-                    probed_capabilities: caps,
-                    current_load: 0,
-                    max_load: 5,
-                    estimated_cost: 0.05,
-                });
-            }
-        }
+                    .unwrap_or_default(),
+                probed: probed.contains(name),
+                capability_evidence: evidence_by_agent.get(name).cloned().unwrap_or_default(),
+                load: xencode_core_rs::Fact::unknown(
+                    "xencode cannot see what another process has given this worker to do; the \
+                     only work it counts is what a team of its own has leased, and this question \
+                     leased nothing",
+                ),
+                capacity: xencode_core_rs::Fact::unknown(
+                    "nobody measured how many tasks this worker runs at once; the roster records \
+                     what its help output says, and help does not say this",
+                ),
+                cost: xencode_core_rs::Fact::unknown(
+                    "no price is known for this worker: xencode's price documents name models, \
+                     and these agents bill their own accounts",
+                ),
+            })
+            .collect();
 
         let mut required_caps = std::collections::BTreeSet::new();
         for cap in args.require_caps {
@@ -8951,45 +8968,81 @@ fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
                 serde_json::to_string_pretty(&decision).map_err(|e| e.to_string())?
             );
         } else {
-            println!(
-                "Capability Routing Decision for task '{}':",
-                decision.task_id
-            );
-            if let Some(worker) = &decision.selected_worker {
-                println!("  Selected worker: {}", worker);
-            } else {
-                println!("  Selected worker: NONE (no candidate satisfied requirements)");
+            println!("Routing decision for task '{}':", decision.task_id);
+            println!();
+            match &decision.selected_worker {
+                Some(worker) => println!("  chosen: {worker}"),
+                None => println!("  chosen: nothing — no candidate could take this task"),
             }
-            println!("  Explanation: {}", decision.explanation);
-            println!(
-                "\n  Evaluated Candidates ({}):",
-                decision.candidate_evaluations.len()
-            );
-            for ev in &decision.candidate_evaluations {
-                let status = if ev.eligible { "ELIGIBLE" } else { "REJECTED" };
-                println!("    - Worker '{}': {}", ev.worker_id, status);
-                println!("      Probed capabilities: {:?}", ev.probed_capabilities);
-                if let Some(rej) = &ev.rejection {
-                    match rej {
-                        xencode_core_rs::RejectionReason::MissingCapabilities(missing) => {
-                            println!(
-                                "      Rejection reason: missing required capabilities {:?}",
-                                missing
-                            );
-                        }
-                        xencode_core_rs::RejectionReason::LoadExceeded { current, max } => {
-                            println!(
-                                "      Rejection reason: load capacity exceeded ({current}/{max})"
-                            );
-                        }
-                        xencode_core_rs::RejectionReason::CostCeilingExceeded { cost, ceiling } => {
-                            println!(
-                                "      Rejection reason: cost ${cost:.2} exceeds ceiling ${ceiling:.2}"
-                            );
-                        }
-                    }
+            println!("  why:    {}", decision.explanation);
+
+            println!("\n  What the router asked, in the order it asked it:");
+            for step in &decision.steps {
+                let standing = if !step.ran {
+                    "not asked"
+                } else if step.decided {
+                    "decided it"
+                } else {
+                    "asked, settled nothing"
+                };
+                println!("    {:14} {:20} {}", step.check, standing, step.words);
+            }
+
+            // The chosen worker gets its facts in full, because that is the list a
+            // reader is being asked to check. The others are listed with what the
+            // probe found on them and why any was refused. A check that did not run
+            // is said once, with how many candidates it did not run for.
+            let considered = decision.candidate_evaluations.len();
+            let mut not_asked: std::collections::BTreeMap<&String, usize> =
+                std::collections::BTreeMap::new();
+            for evaluation in &decision.candidate_evaluations {
+                for line in &evaluation.not_checked {
+                    *not_asked.entry(line).or_insert(0) += 1;
                 }
             }
+
+            if let Some(chosen) = decision
+                .candidate_evaluations
+                .iter()
+                .find(|e| decision.selected_worker.as_deref() == Some(e.worker_id.as_str()))
+            {
+                println!("\n  The facts behind the choice — {}:", chosen.worker_id);
+                for fact in &chosen.facts {
+                    println!("      {fact}");
+                }
+            }
+
+            println!("\n  Every worker considered ({considered}):");
+            for evaluation in &decision.candidate_evaluations {
+                println!(
+                    "    {} {:<13} probed here as: {}",
+                    if evaluation.eligible { "▸" } else { "✗" },
+                    evaluation.worker_id,
+                    if evaluation.probed_capabilities.is_empty() {
+                        "nothing this machine could see".to_string()
+                    } else {
+                        evaluation.probed_capabilities.join(", ")
+                    }
+                );
+                if let Some(reason) = &evaluation.rejection {
+                    println!("      why not: {}", reason.words());
+                }
+            }
+
+            if !not_asked.is_empty() {
+                println!(
+                    "\n  Checks that did not run, and how many candidates they would have covered:"
+                );
+                for (line, count) in &not_asked {
+                    println!("      for {count} of {considered}: {line}");
+                }
+            }
+            println!(
+                "\n  Nothing above was inferred from a name or a document: the capability lines \
+                came from the help output of the binaries on this machine, read during this \
+                command. Where a line says `not measured`, that is the whole of what xencode \
+                knows, and no worker was accepted or refused because of it."
+            );
         }
         return Ok(());
     }
