@@ -544,6 +544,9 @@ _xencode() {
             xencode__subcmd__help__subcmd__memory,evidence)
                 cmd="xencode__subcmd__help__subcmd__memory__subcmd__evidence"
                 ;;
+            xencode__subcmd__help__subcmd__memory,fork)
+                cmd="xencode__subcmd__help__subcmd__memory__subcmd__fork"
+                ;;
             xencode__subcmd__help__subcmd__memory,gc)
                 cmd="xencode__subcmd__help__subcmd__memory__subcmd__gc"
                 ;;
@@ -751,6 +754,9 @@ _xencode() {
             xencode__subcmd__memory,evidence)
                 cmd="xencode__subcmd__memory__subcmd__evidence"
                 ;;
+            xencode__subcmd__memory,fork)
+                cmd="xencode__subcmd__memory__subcmd__fork"
+                ;;
             xencode__subcmd__memory,gc)
                 cmd="xencode__subcmd__memory__subcmd__gc"
                 ;;
@@ -768,6 +774,9 @@ _xencode() {
                 ;;
             xencode__subcmd__memory__subcmd__help,evidence)
                 cmd="xencode__subcmd__memory__subcmd__help__subcmd__evidence"
+                ;;
+            xencode__subcmd__memory__subcmd__help,fork)
+                cmd="xencode__subcmd__memory__subcmd__help__subcmd__fork"
                 ;;
             xencode__subcmd__memory__subcmd__help,gc)
                 cmd="xencode__subcmd__memory__subcmd__help__subcmd__gc"
@@ -2871,7 +2880,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__memory)
-            opts="list show prune gc evidence"
+            opts="list show fork prune gc evidence"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2885,6 +2894,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__memory__subcmd__evidence)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__memory__subcmd__fork)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -4377,7 +4400,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__memory)
-            opts="-h --help list show prune gc evidence help"
+            opts="-h --help list show fork prune gc evidence help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4408,6 +4431,28 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__memory__subcmd__fork)
+            opts="-h --as-id --prefix --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --as-id)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --prefix)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__memory__subcmd__gc)
             opts="-h --apply --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -4423,7 +4468,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__memory__subcmd__help)
-            opts="list show prune gc evidence help"
+            opts="list show fork prune gc evidence help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4437,6 +4482,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__memory__subcmd__help__subcmd__evidence)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__memory__subcmd__help__subcmd__fork)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -4549,7 +4608,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__memory__subcmd__show)
-            opts="-h --help"
+            opts="-h --first --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

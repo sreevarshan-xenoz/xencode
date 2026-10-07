@@ -443,9 +443,19 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (show)
 _arguments "${_arguments_options[@]}" : \
+'--first[Print only the first message recorded in the session'\''s event log]' \
 '-h[Print help]' \
 '--help[Print help]' \
 ':session -- Session ID:_default' \
+&& ret=0
+;;
+(fork)
+_arguments "${_arguments_options[@]}" : \
+'--as-id=[New session ID (defaults to <session>_fork_<timestamp>)]:AS_ID:_default' \
+'--prefix=[Prefix length\: number of parent events to inherit (defaults to all)]:PREFIX:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':session -- Source session ID:_default' \
 && ret=0
 ;;
 (prune)
@@ -485,6 +495,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(fork)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -2039,6 +2053,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(fork)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (prune)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3379,6 +3397,7 @@ _xencode__subcmd__help__subcmd__memory_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'fork:Fork a conversation session into a child holding an exact event prefix' \
 'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
@@ -3389,6 +3408,11 @@ _xencode__subcmd__help__subcmd__memory_commands() {
 _xencode__subcmd__help__subcmd__memory__subcmd__evidence_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help memory evidence commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__fork_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__fork_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory fork commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__gc_commands] )) ||
 _xencode__subcmd__help__subcmd__memory__subcmd__gc_commands() {
@@ -3971,6 +3995,7 @@ _xencode__subcmd__memory_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'fork:Fork a conversation session into a child holding an exact event prefix' \
 'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
@@ -3983,6 +4008,11 @@ _xencode__subcmd__memory__subcmd__evidence_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory evidence commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__memory__subcmd__fork_commands] )) ||
+_xencode__subcmd__memory__subcmd__fork_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory fork commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__memory__subcmd__gc_commands] )) ||
 _xencode__subcmd__memory__subcmd__gc_commands() {
     local commands; commands=()
@@ -3993,6 +4023,7 @@ _xencode__subcmd__memory__subcmd__help_commands() {
     local commands; commands=(
 'list:List all conversation sessions' \
 'show:Show transcript of a session' \
+'fork:Fork a conversation session into a child holding an exact event prefix' \
 'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
@@ -4004,6 +4035,11 @@ _xencode__subcmd__memory__subcmd__help_commands() {
 _xencode__subcmd__memory__subcmd__help__subcmd__evidence_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory help evidence commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__fork_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__fork_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help fork commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__gc_commands] )) ||
 _xencode__subcmd__memory__subcmd__help__subcmd__gc_commands() {

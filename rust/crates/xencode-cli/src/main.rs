@@ -1380,6 +1380,20 @@ enum MemoryAction {
     Show {
         /// Session ID
         session: String,
+        /// Print only the first message recorded in the session's event log
+        #[arg(long)]
+        first: bool,
+    },
+    /// Fork a conversation session into a child holding an exact event prefix
+    Fork {
+        /// Source session ID
+        session: String,
+        /// New session ID (defaults to <session>_fork_<timestamp>)
+        #[arg(long)]
+        as_id: Option<String>,
+        /// Prefix length: number of parent events to inherit (defaults to all)
+        #[arg(long)]
+        prefix: Option<usize>,
     },
     /// Delete conversation sessions that have no messages
     Prune,
@@ -5173,10 +5187,24 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
             }
             Ok(())
         }
-        MemoryAction::Show { session } => {
+        MemoryAction::Show { session, first } => {
             if let Some(sess) = mem.get_session(&session) {
-                if sess.messages.is_empty() {
+                if first {
+                    if let Some(msg) = sess.first_message() {
+                        let role = msg.role.to_uppercase();
+                        println!("[{}] {}", role, msg.timestamp);
+                        println!("{}\n", msg.content);
+                    } else {
+                        println!("Session {} has no messages.", session);
+                    }
+                } else if sess.messages.is_empty() && sess.events.is_empty() {
                     println!("Session {} is empty (0 messages).", session);
+                } else if !sess.events.is_empty() {
+                    for ev in &sess.events {
+                        let role = ev.message.role.to_uppercase();
+                        println!("[{}] {}", role, ev.timestamp);
+                        println!("{}\n", ev.message.content);
+                    }
                 } else {
                     for msg in &sess.messages {
                         let role = msg.role.to_uppercase();
@@ -5187,6 +5215,17 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
             } else {
                 println!("Session not found: {}", session);
             }
+            Ok(())
+        }
+        MemoryAction::Fork {
+            session,
+            as_id,
+            prefix,
+        } => {
+            let child_id = mem
+                .fork_session(&session, as_id, prefix)
+                .map_err(|e| e.to_string())?;
+            println!("Forked session {} into {}", session, child_id);
             Ok(())
         }
         MemoryAction::Prune => {

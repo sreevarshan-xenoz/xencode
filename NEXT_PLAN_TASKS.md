@@ -15686,6 +15686,7 @@ Three corrections the brief did not carry, each of which changes what should be 
   child holding an exact prefix of the parent's events and nothing after it, and the fork's own
   entries are distinguishable from the inherited ones — the `Origin` distinction already settled
   for the vendor case, applied to ours.
+  *Shipped:* Durable conversation backed by an append-only event log (`ConversationEvent`) with `Origin::{Observed, Synthesised}`. Compaction bounds the active context projection without deleting past turns. Secret scrubbing applied before event insertion; torn trailing lines dropped gracefully on read. `first_message` retrieves initial turns on demand even after compaction. `fork_session` produces child sessions holding exact event prefixes with inherited turns tagged `Origin::Synthesised` and new turns tagged `Origin::Observed`. Added CLI options `xencode memory show --first` and `xencode memory fork`. 2558 tests passing; clippy clean.
 
 - **AF-2 — our own engine publishes the typed events, and the UI becomes a reducer over them.**
   *Effort: L.* The vocabulary and one pure consumer already exist and this row does not pretend
