@@ -23,7 +23,9 @@ use xencode_providers_rs::{
     MessageContent, OllamaRequest, ProviderManager, RoutingFacts,
 };
 
-pub use crate::focus::{navigate_feature, FocusArea, InputMode, Mode, FEATURE_LIST};
+pub use crate::focus::{
+    navigate_feature, DisclosureLevel, FocusArea, InputMode, Mode, DESTINATIONS, FEATURE_LIST,
+};
 pub use crate::theme::ThemeColors;
 use crate::ui;
 
@@ -112,6 +114,8 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/agents",
     "/trust",
     "/egress",
+    "/goto",
+    "/level",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -2049,6 +2053,53 @@ fn fold_lines(report: &xencode_context_rs::FoldReport) -> Vec<String> {
 }
 
 impl<'a> App<'a> {
+    /// Active progressive disclosure level (AE-5).
+    pub fn active_disclosure_level(&self) -> crate::focus::DisclosureLevel {
+        crate::focus::DisclosureLevel::from_u8(self.config.disclosure_level)
+    }
+
+    /// Set progressive disclosure level and save configuration (AE-5).
+    pub fn set_disclosure_level(&mut self, level: crate::focus::DisclosureLevel) {
+        self.config.disclosure_level = level.rank();
+        self.save_config();
+        let max_idx = self.palette_items().len().saturating_sub(1);
+        if self.feature_nav_selected > max_idx {
+            self.feature_nav_selected = max_idx;
+        }
+    }
+
+    /// Palette / feature navigator items filtered by active disclosure level (AE-5).
+    pub fn palette_items(&self) -> Vec<(&'static str, &'static str, FocusArea)> {
+        crate::focus::feature_items_for_level(self.active_disclosure_level())
+    }
+
+    /// FocusArea for the currently highlighted palette row (AE-5).
+    pub fn selected_palette_area(&self) -> Option<FocusArea> {
+        let items = self.palette_items();
+        items
+            .get(self.feature_nav_selected)
+            .map(|(_, _, area)| *area)
+    }
+
+    /// Switch focus to a destination by name, label, or slash command (AE-5).
+    /// All destinations remain reachable by name regardless of disclosure level.
+    pub fn navigate_to_destination_by_name(&mut self, name: &str) -> bool {
+        if let Some(dest) = crate::focus::find_destination_by_name(name) {
+            self.focus = dest.area;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Append a system message to the chat transcript.
+    pub fn push_system_message(&mut self, text: impl Into<String>) {
+        self.messages.push(UiMessage {
+            role: "system".to_string(),
+            content: text.into(),
+        });
+    }
+
     /// Whether a spinner-showing operation is running. The renderer draws
     /// spinner frames from `spinner_tick` in several panels, so while any of
     /// these holds the loop must keep drawing — freezing mid-spin would report
@@ -3357,6 +3408,64 @@ impl<'a> App<'a> {
         // turn's prompt would actually go and what redaction would hold back.
         if prompt == "/egress" || prompt.starts_with("/egress ") {
             self.handle_egress_command(&prompt);
+            return;
+        }
+
+        // /goto [destination] or /nav [destination] (AE-5)
+        if prompt.starts_with("/goto ") || prompt.starts_with("/nav ") {
+            let target = prompt
+                .strip_prefix("/goto ")
+                .or_else(|| prompt.strip_prefix("/nav "))
+                .unwrap_or("")
+                .trim();
+            if self.navigate_to_destination_by_name(target) {
+                self.push_system_message(format!(
+                    "Switched focus to {}",
+                    self.focus.display_name()
+                ));
+            } else {
+                self.push_system_message(format!(
+                    "Unknown destination: '{}'. Use Ctrl+F or Settings.",
+                    target
+                ));
+            }
+            return;
+        }
+
+        // /level [1-4]: progressive disclosure tier (AE-5)
+        if prompt == "/level" || prompt.starts_with("/level ") {
+            let arg = prompt.strip_prefix("/level").unwrap_or("").trim();
+            if arg.is_empty() {
+                let lvl = self.active_disclosure_level();
+                self.push_system_message(format!(
+                    "Current disclosure level: {} ({})",
+                    lvl.rank(),
+                    lvl.label()
+                ));
+            } else if let Ok(n) = arg.parse::<u8>() {
+                if (1..=4).contains(&n) {
+                    let lvl = crate::focus::DisclosureLevel::from_u8(n);
+                    self.set_disclosure_level(lvl);
+                    self.push_system_message(format!(
+                        "Disclosure level set to {} ({})",
+                        lvl.rank(),
+                        lvl.label()
+                    ));
+                } else {
+                    self.push_system_message("Disclosure level must be between 1 and 4.");
+                }
+            } else {
+                self.push_system_message("Usage: /level [1-4]");
+            }
+            return;
+        }
+
+        // Direct slash-command navigation to any destination name (AE-5)
+        if prompt.starts_with('/')
+            && !prompt.contains(' ')
+            && self.navigate_to_destination_by_name(&prompt)
+        {
+            self.push_system_message(format!("Switched focus to {}", self.focus.display_name()));
             return;
         }
 
@@ -5223,7 +5332,8 @@ impl<'a> App<'a> {
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
-                    let days = xencode_context_rs::anchor_age_days(anchor_meta.proved_at_unix_s, now_s);
+                    let days =
+                        xencode_context_rs::anchor_age_days(anchor_meta.proved_at_unix_s, now_s);
                     if days >= xencode_context_rs::ANCHOR_STALE_AGE_DAYS {
                         let _ = tx.send(format!(
                             "[CTX]⚓ anchor proved {days} days ago; run `xencode anchor` to re-check"
@@ -5695,11 +5805,15 @@ impl<'a> App<'a> {
                         }
                     ));
                 }
-                let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let root =
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                 let xencode_dir = root.join(".xencode");
                 let history = crate::reprogate::read_repro_history(&root, &xencode_dir);
                 if !history.is_empty() {
-                    self.system_line(&format!("   reproduction history ({} fixed):", history.len()));
+                    self.system_line(&format!(
+                        "   reproduction history ({} fixed):",
+                        history.len()
+                    ));
                     for item in history.iter().rev().take(5) {
                         let red_exit_str = item
                             .red_exit
@@ -11214,7 +11328,7 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                         }
                         FocusArea::FeatureNavigator => {
                             app.feature_nav_selected = (app.feature_nav_selected + 3)
-                                .min(FEATURE_LIST.len().saturating_sub(1));
+                                .min(app.palette_items().len().saturating_sub(1));
                         }
                         FocusArea::ProviderHealth => {
                             app.provider_health_scroll += 3;
