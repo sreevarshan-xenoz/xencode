@@ -1259,6 +1259,78 @@ esac
     ;;
 esac
 ;;
+(team)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__team_commands" \
+"*::: :->team" \
+&& ret=0
+
+    case $state in
+    (team)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-team-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- The recipe'\''s `name`, as written in the file:_default' \
+&& ret=0
+;;
+(plan)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- The recipe'\''s `name`, as written in the file:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__team__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-team-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(plan)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[Maximum findings to show (0 shows all)]:LIMIT:_default' \
@@ -2723,6 +2795,34 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(team)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__team_commands" \
+"*::: :->team" \
+&& ret=0
+
+    case $state in
+    (team)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-team-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(plan)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3135,6 +3235,7 @@ _xencode_commands() {
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
+'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it (OR-9)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3713,6 +3814,7 @@ _xencode__subcmd__help_commands() {
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
+'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it (OR-9)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -4501,6 +4603,30 @@ _xencode__subcmd__help__subcmd__tasks__subcmd__start_commands() {
 _xencode__subcmd__help__subcmd__tasks__subcmd__stop_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help tasks stop commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team_commands] )) ||
+_xencode__subcmd__help__subcmd__team_commands() {
+    local commands; commands=(
+'list:List the team recipes this project keeps, and say what each one is' \
+'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
+'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path and what limits it. Nothing is launched and no check is run' \
+    )
+    _describe -t commands 'xencode help team commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__list_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__plan_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__plan_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__test_commands] )) ||
 _xencode__subcmd__help__subcmd__test_commands() {
@@ -5568,6 +5694,61 @@ _xencode__subcmd__tasks__subcmd__start_commands() {
 _xencode__subcmd__tasks__subcmd__stop_commands() {
     local commands; commands=()
     _describe -t commands 'xencode tasks stop commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team_commands] )) ||
+_xencode__subcmd__team_commands() {
+    local commands; commands=(
+'list:List the team recipes this project keeps, and say what each one is' \
+'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
+'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path and what limits it. Nothing is launched and no check is run' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode team commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help_commands] )) ||
+_xencode__subcmd__team__subcmd__help_commands() {
+    local commands; commands=(
+'list:List the team recipes this project keeps, and say what each one is' \
+'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
+'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path and what limits it. Nothing is launched and no check is run' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode team help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__list_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__plan_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__plan_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__list_commands] )) ||
+_xencode__subcmd__team__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__plan_commands] )) ||
+_xencode__subcmd__team__subcmd__plan_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__show_commands] )) ||
+_xencode__subcmd__team__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__test_commands] )) ||
 _xencode__subcmd__test_commands() {

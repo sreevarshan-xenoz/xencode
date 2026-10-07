@@ -74,7 +74,10 @@ crush/
 *.sqlite3
 *.db-shm
 *.db-wal
-.xencode/
+# Everything xencode writes for itself stays local — except the team recipes,
+# which are hand-written project data a person commits and diffs like AGENTS.md.
+.xencode/*
+!/.xencode/teams/
 
 # Build artifacts
 *.tgz

@@ -330,6 +330,13 @@ enum Commands {
         action: MergeAction,
     },
 
+    /// Read the team recipes this project keeps in `.xencode/teams`: the roles,
+    /// who plays each one, and which checks gate it (OR-9)
+    Team {
+        #[command(subcommand)]
+        action: TeamAction,
+    },
+
     /// Repository insights from the .xencode snapshot: broken imports,
     /// import cycles, hub files and orphans
     Advise {
@@ -1271,6 +1278,34 @@ enum ComputersAction {
 }
 
 #[derive(Subcommand)]
+enum TeamAction {
+    /// List the team recipes this project keeps, and say what each one is
+    List {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Print one recipe's roles, workers, gates and capacity as it was written
+    Show {
+        /// The recipe's `name`, as written in the file
+        name: String,
+    },
+
+    /// Compile one recipe into the task graph the scheduler would run, and show
+    /// the order, the critical path and what limits it. Nothing is launched and
+    /// no check is run.
+    Plan {
+        /// The recipe's `name`, as written in the file
+        name: String,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Subcommand)]
 enum CompeteAction {
     /// Build each candidate arm in its own worktree and branch, run the
     /// verification checklist on every one of them, and print the table.
@@ -2113,6 +2148,7 @@ async fn main() {
         Commands::Computers { action, json } => run_computers(action, json).await,
         Commands::Compete { action } => run_compete(action),
         Commands::Merge { action } => run_merge(action),
+        Commands::Team { action } => run_team(action),
         Commands::Bootstrap {
             path,
             check,
@@ -4626,6 +4662,367 @@ fn print_competing_report(
         );
     }
     Ok(())
+}
+
+/// Where this project keeps its team recipes: `<project>/.xencode/teams`.
+fn team_recipes_dir() -> std::path::PathBuf {
+    xencode_context_rs::default_root()
+        .join(xencode_context_rs::XENCODE_DIR)
+        .join(xencode_core_rs::RECIPES_DIR)
+}
+
+/// `OR-9` — read the team recipes. Listing, showing and planning are all reads:
+/// this command never launches a role and never runs a gate's checks.
+fn run_team(action: TeamAction) -> Result<(), String> {
+    let dir = team_recipes_dir();
+    let files = xencode_core_rs::load_recipes(&dir)
+        .map_err(|e| format!("cannot read the team recipes in {}: {e}", dir.display()))?;
+    match action {
+        TeamAction::List { format } => {
+            if matches!(format, OutputFormat::Json) {
+                let out = serde_json::json!({
+                    "dir": dir.display().to_string(),
+                    "recipes": files.iter().map(recipe_file_json).collect::<Vec<_>>(),
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+            if files.is_empty() {
+                println!("No team recipes in {}.", dir.display());
+                println!(
+                    "A recipe is one TOML file in that directory naming the roles on a team, \
+                     which worker plays each one, and which checks gate it."
+                );
+                return Ok(());
+            }
+            let runnable: Vec<&xencode_core_rs::RecipeFile> =
+                files.iter().filter(|f| recipe_status(f).is_ok()).collect();
+            let faulty: Vec<&xencode_core_rs::RecipeFile> =
+                files.iter().filter(|f| recipe_status(f).is_err()).collect();
+            if !runnable.is_empty() {
+                println!("{:<16} {:>5}  {:>7}  FILE", "RECIPE", "ROLES", "AT MOST");
+                for file in runnable.iter() {
+                    let recipe = file.recipe.as_ref().unwrap();
+                    println!(
+                        "{:<16} {:>5}  {:>7}  {}",
+                        recipe.name,
+                        recipe.roles.len(),
+                        recipe.scheduler().capacity(),
+                        file.path.display()
+                    );
+                }
+                println!(
+                    "\n`AT MOST` is the smaller of the recipe's own worker and verification \
+                     numbers — the depth the queue actually runs at."
+                );
+            }
+            if !faulty.is_empty() {
+                if !runnable.is_empty() {
+                    println!();
+                }
+                println!(
+                    "Files in {} that are not a team that could schedule:",
+                    dir.display()
+                );
+                for file in &faulty {
+                    println!("  {}", recipe_status(file).err().unwrap());
+                }
+            }
+            if !runnable.is_empty() {
+                println!("\nShow one as written:  xencode team show <name>");
+                println!("Compile one to a schedule:  xencode team plan <name>");
+            }
+            Ok(())
+        }
+        TeamAction::Show { name } => {
+            let file = find_recipe(&files, &dir, &name)?;
+            let recipe = file.recipe.as_ref().unwrap();
+            println!(
+                "{}  —  {} {}",
+                recipe.name,
+                recipe.roles.len(),
+                if recipe.roles.len() == 1 {
+                    "role"
+                } else {
+                    "roles"
+                }
+            );
+            println!("{}", file.path.display());
+            for role in &recipe.roles {
+                println!("\n  {}", role.name);
+                println!("    worker:   {}", role.worker);
+                println!("    gate:     {}", gate_words(role));
+                println!("    needs:    {}", needs_words(role));
+                println!("    command:  {}", role.command);
+            }
+            println!(
+                "\n  capacity: {} workers, {} verifications at once — the queue runs {} at a \
+                 time, limited by {}",
+                recipe.capacity.workers,
+                recipe.capacity.verification_throughput,
+                recipe.scheduler().capacity(),
+                recipe.scheduler().binding().label(),
+            );
+            // Showing a recipe is a read of the file, so a recipe that cannot
+            // schedule is still shown as written — and said out loud at the end.
+            if let Err(problem) = recipe.validate() {
+                println!("\n  …but this recipe would not schedule: {problem}");
+            }
+            Ok(())
+        }
+        TeamAction::Plan { name, format } => {
+            let file = find_recipe(&files, &dir, &name)?;
+            let recipe = file.recipe.as_ref().unwrap();
+            let graph = recipe
+                .to_task_graph()
+                .map_err(|e| format!("{e}\nnothing was launched"))?;
+            let scheduler = recipe.scheduler();
+            let waves = readiness_waves(&graph);
+            let critical = graph.longest_chain().unwrap_or_default();
+            let bottleneck = graph.bottleneck().map(|node| node.id.clone());
+            if matches!(format, OutputFormat::Json) {
+                let out = serde_json::json!({
+                    "recipe": recipe.name,
+                    "file": file.path.display().to_string(),
+                    "capacity": scheduler.capacity(),
+                    "binding": scheduler.binding().label(),
+                    "launches": false,
+                    "waves": waves,
+                    "critical_path": critical,
+                    "bottleneck": bottleneck,
+                    "roles": recipe.roles.iter().map(|role| serde_json::json!({
+                        "name": role.name,
+                        "worker": role.worker,
+                        "worker_status": worker_status(role),
+                        "gate": role.gate,
+                        "needs": role.needs,
+                        "command": role.command,
+                    })).collect::<Vec<_>>(),
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+            println!(
+                "Recipe {} would run {} roles at most {} at once, limited by {}.",
+                recipe.name,
+                recipe.roles.len(),
+                scheduler.capacity(),
+                scheduler.binding().label(),
+            );
+            println!("Nothing was launched and no check was run — this is the plan only.");
+            for (n, wave) in waves.iter().enumerate() {
+                for (i, id) in wave.iter().enumerate() {
+                    let role = recipe
+                        .roles
+                        .iter()
+                        .find(|r| &r.name == id)
+                        .expect("the graph was built from these roles");
+                    println!(
+                        "\n  {} wave {}  {}",
+                        if i == 0 { "▸" } else { " " },
+                        n + 1,
+                        role.name
+                    );
+                    println!("      worker:   {}", worker_status(role));
+                    println!("      gate:     {}", gate_words(role));
+                    println!("      needs:    {}", needs_words(role));
+                    println!("      command:  {}", role.command);
+                }
+            }
+            println!();
+            if critical.is_empty() {
+                println!("  critical path: none");
+            } else {
+                println!(
+                    "  critical path: {} ({} roles) — the shortest wall clock no number of \
+                     workers can beat",
+                    critical.join(" → "),
+                    critical.len()
+                );
+            }
+            match bottleneck {
+                Some(id) => println!(
+                    "  serial bottleneck: {id} — it waits on more than one role and sits on \
+                     that path, so it is where the branches are forced back into one line"
+                ),
+                None => println!(
+                    "  serial bottleneck: none — no role waits on more than one other role on \
+                     the longest path"
+                ),
+            }
+            println!(
+                "\n  The gates above are named, not run. xencode verify is what runs those \
+                 three checks."
+            );
+            Ok(())
+        }
+    }
+}
+
+/// A file's recipe, or the reason it is not a team that could schedule — the
+/// read first, then what a recipe has to get right on its own. Planning checks
+/// this through `TaskGraph`, which adds the dependency faults; this is the part
+/// that is true before the graph is built.
+fn recipe_status(
+    file: &xencode_core_rs::RecipeFile,
+) -> Result<&xencode_core_rs::TeamRecipe, xencode_core_rs::RecipeError> {
+    let recipe = file.recipe.as_ref().map_err(Clone::clone)?;
+    recipe.validate()?;
+    Ok(recipe)
+}
+
+/// One recipe file in JSON form, including the files that are not schedulable —
+/// a typing mistake in one recipe must not delete the others from the answer.
+fn recipe_file_json(file: &xencode_core_rs::RecipeFile) -> serde_json::Value {
+    let path = file.path.display().to_string();
+    let recipe = match recipe_status(file) {
+        Ok(recipe) => recipe,
+        Err(problem) => {
+            let name = file
+                .recipe
+                .as_ref()
+                .ok()
+                .map(|r| serde_json::Value::String(r.name.clone()))
+                .unwrap_or(serde_json::Value::Null);
+            return serde_json::json!({
+                "file": path,
+                "name": name,
+                "schedulable": false,
+                "problem": problem.to_string(),
+            });
+        }
+    };
+    serde_json::json!({
+        "file": path,
+        "name": recipe.name,
+        "schedulable": true,
+        "roles": recipe.roles.iter().map(|role| serde_json::json!({
+            "name": role.name,
+            "worker": role.worker,
+            "gate": role.gate,
+            "needs": role.needs,
+            "command": role.command,
+        })).collect::<Vec<_>>(),
+        "capacity": {
+            "workers": recipe.capacity.workers,
+            "verification_throughput": recipe.capacity.verification_throughput,
+            "at_most": recipe.scheduler().capacity(),
+            "binding": recipe.scheduler().binding().label(),
+        },
+    })
+}
+
+/// Find one recipe by the name written inside it. Two files claiming the same
+/// name is refused by path rather than resolved by taking the first, because the
+/// one that gets picked would then be whichever the directory walk happened to
+/// read first.
+fn find_recipe<'a>(
+    files: &'a [xencode_core_rs::RecipeFile],
+    dir: &std::path::Path,
+    name: &str,
+) -> Result<&'a xencode_core_rs::RecipeFile, String> {
+    let matches: Vec<&xencode_core_rs::RecipeFile> = files
+        .iter()
+        .filter(|f| f.recipe.as_ref().is_ok_and(|r| r.name == name))
+        .collect();
+    match matches.len() {
+        1 => Ok(matches[0]),
+        0 => {
+            // A recipe that parses but would not schedule is named here too: the
+            // person asking has a name in mind, and hiding the one that is
+            // broken is the opposite of what a lookup should do.
+            let named: Vec<&str> = files
+                .iter()
+                .filter_map(|f| f.recipe.as_ref().ok())
+                .map(|r| r.name.as_str())
+                .collect();
+            if named.is_empty() {
+                return Err(format!(
+                    "no team recipe named `{name}`: {} holds no recipe that reads",
+                    dir.display()
+                ));
+            }
+            Err(format!(
+                "no team recipe named `{name}`. {} has: {}",
+                dir.display(),
+                named.join(", ")
+            ))
+        }
+        _ => Err(format!(
+            "{} team recipes are all named `{name}`: {}; give them different recipe names, \
+             because picking one by directory order would schedule a team you did not read",
+            matches.len(),
+            matches
+                .iter()
+                .map(|f| f.path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// What a role's gate means, said the way it actually is: an empty gate is not
+/// a passing gate.
+fn gate_words(role: &xencode_core_rs::RoleSpec) -> String {
+    if role.gate.is_empty() {
+        "none — no check gates this role's output".to_string()
+    } else {
+        role.gate.join(", ")
+    }
+}
+
+fn needs_words(role: &xencode_core_rs::RoleSpec) -> String {
+    if role.needs.is_empty() {
+        "nothing (it can start at once)".to_string()
+    } else {
+        role.needs.join(", ")
+    }
+}
+
+/// Whether the worker a role names is on this machine — a roster lookup and a
+/// `PATH` walk. The agent is never started, which is what keeps planning a read.
+fn worker_status(role: &xencode_core_rs::RoleSpec) -> String {
+    match xencode_agents_rs::roster::find(&role.worker) {
+        None => format!(
+            "{} (not an agent xencode has a roster row for; nothing here checks whether it exists)",
+            role.worker
+        ),
+        Some(spec) => {
+            let installed = spec
+                .binaries
+                .iter()
+                .find_map(|b| xencode_agents_rs::roster::which(b));
+            match installed {
+                Some(path) => format!("{} (installed at {})", role.worker, path.display()),
+                None => format!(
+                    "{} (a known agent, but not installed on this machine)",
+                    role.worker
+                ),
+            }
+        }
+    }
+}
+
+/// Which roles could start together, in the order the scheduler would launch
+/// them: every role ready now forms one wave, and the next wave is what becomes
+/// ready once that whole wave is done. `TaskGraph::validate` already refused a
+/// cycle, so a wave is never empty while roles remain.
+fn readiness_waves(graph: &xencode_core_rs::TaskGraph) -> Vec<Vec<xencode_core_rs::NodeId>> {
+    let mut done = std::collections::BTreeSet::new();
+    let mut waves = Vec::new();
+    while done.len() < graph.nodes().len() {
+        let wave: Vec<xencode_core_rs::NodeId> =
+            graph.ready(&done).iter().map(|n| n.id.clone()).collect();
+        done.extend(wave.iter().cloned());
+        waves.push(wave);
+    }
+    waves
 }
 
 fn run_compete(action: CompeteAction) -> Result<(), String> {

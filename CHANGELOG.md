@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-9`: a team written down as a file
+
+A team can now be described without running it. One TOML file under `.xencode/teams/` names the roles, which agent plays each one, which checks gate that role's output, and how wide the team may run at once — read it with `xencode team list`, `xencode team show <name>`, or `xencode team plan <name>`.
+
+- The file is the feature. Every field in it is one a person wrote, and a key that is not part of a recipe is refused rather than ignored, so `[[role]]` typed for `[[roles]]` reports itself instead of quietly becoming a team of nobody. `.xencode/teams/` is the one place under `.xencode/` that git tracks, because a recipe is meant to be committed and diffed.
+- Recipes are independent of each other. Each is its own file; one that cannot be read is listed beside the good ones with the reason it cannot; a project with no such directory is a normal reading rather than a failure; and deleting one recipe leaves the others reading byte for byte as they did before.
+- Nothing is executed. `xencode team plan` compiles the roles into the task graph the scheduler runs and prints which roles start together, the longest dependency chain, the join where the branches are forced back into one line, and whether each role's worker is installed on this machine — the graph is walked and the workers looked up on `PATH`, and no agent and no role's own command is started. One test proves it: a role whose command writes a marker file leaves no marker behind after `team list`, `team show`, `team plan`, and `team plan --format json`.
+- Gates use the real vocabulary. A gate names `fmt`, `lint` or `test` — the three checks `xencode verify` runs — and a gate naming anything else is refused with that list. An empty gate prints as `none — no check gates this role's output` rather than looking like a pass.
+- The team's width comes from the file rather than a guess: the queue runs the smaller of the two numbers in `[capacity]`, and names which of the two limited it. A `0` in either number is refused, because the queue floors at one role at a time and a file reading `workers = 0` would otherwise be reported as a team of one.
+
 ### Fixed — a refused dependency cycle named the wrong tasks
 
 The task scheduler (`rust/crates/xencode-core-rs/src/scheduler.rs`) checks a task graph before
