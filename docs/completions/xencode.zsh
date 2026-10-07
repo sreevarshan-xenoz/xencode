@@ -1340,6 +1340,9 @@ _arguments "${_arguments_options[@]}" : \
 '--build-package=[Build a worker continuation package from workspace diff and test runs (AR-7)]:BUILD_PACKAGE:_default' \
 '--package=[Path to inspect or load a worker continuation package (AR-7)]:PACKAGE:_files' \
 '*--test-cmd=[Test commands to execute for package verification (defaults to '\''cargo test'\'')]:TEST_CMDS:_default' \
+'--route=[Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)]:ROUTE_TASK:_default' \
+'*--require-cap=[Capabilities required for the routed task (e.g. stream, acp, mcp, resume, daemon, approval) (OR-6)]:REQUIRE_CAPS:_default' \
+'--max-cost=[Maximum cost ceiling allowed for the routed task (OR-6)]:MAX_COST:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
 '--contract[Verify each roster claim against the agent'\''s live --help]' \
 '--health[Report worker health (installed, version, authenticated, responsive, rate-limited) (AR-8)]' \

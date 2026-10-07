@@ -594,6 +594,18 @@ enum Commands {
         #[arg(long = "test-cmd")]
         test_cmds: Vec<String>,
 
+        /// Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)
+        #[arg(long = "route")]
+        route_task: Option<String>,
+
+        /// Capabilities required for the routed task (e.g. stream, acp, mcp, resume, daemon, approval) (OR-6)
+        #[arg(long = "require-cap")]
+        require_caps: Vec<String>,
+
+        /// Maximum cost ceiling allowed for the routed task (OR-6)
+        #[arg(long = "max-cost")]
+        max_cost: Option<f64>,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -1899,6 +1911,9 @@ async fn main() {
             package,
             resume,
             test_cmds,
+            route_task,
+            require_caps,
+            max_cost,
             format,
         } => run_agents(AgentsArgs {
             contract,
@@ -1908,6 +1923,9 @@ async fn main() {
             package_path: package.as_deref(),
             resume,
             test_cmds: &test_cmds,
+            route_task: route_task.as_deref(),
+            require_caps: &require_caps,
+            max_cost,
             format,
         }),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
@@ -7823,10 +7841,112 @@ struct AgentsArgs<'a> {
     package_path: Option<&'a std::path::Path>,
     resume: bool,
     test_cmds: &'a [String],
+    route_task: Option<&'a str>,
+    require_caps: &'a [String],
+    max_cost: Option<f64>,
     format: OutputFormat,
 }
 
 fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
+    if let Some(task_id) = args.route_task {
+        let claims = xencode_agents_rs::probe_contract();
+        let confirmed_caps_by_agent = xencode_agents_rs::confirmed_capabilities(&claims);
+
+        let installed = xencode_agents_rs::inventory();
+        let mut candidates = Vec::new();
+
+        if installed.is_empty() {
+            for spec in xencode_agents_rs::ROSTER {
+                let caps = confirmed_caps_by_agent
+                    .get(spec.name)
+                    .cloned()
+                    .unwrap_or_default();
+                candidates.push(xencode_core_rs::WorkerCandidate {
+                    id: spec.name.to_string(),
+                    probed_capabilities: caps,
+                    current_load: 0,
+                    max_load: 5,
+                    estimated_cost: 0.05,
+                });
+            }
+        } else {
+            for agent in &installed {
+                let caps = confirmed_caps_by_agent
+                    .get(agent.name)
+                    .cloned()
+                    .unwrap_or_default();
+                candidates.push(xencode_core_rs::WorkerCandidate {
+                    id: agent.name.to_string(),
+                    probed_capabilities: caps,
+                    current_load: 0,
+                    max_load: 5,
+                    estimated_cost: 0.05,
+                });
+            }
+        }
+
+        let mut required_caps = std::collections::BTreeSet::new();
+        for cap in args.require_caps {
+            required_caps.insert(cap.to_string());
+        }
+
+        let task = xencode_core_rs::TaskRequirement {
+            task_id: task_id.to_string(),
+            required_capabilities: required_caps,
+            cost_ceiling: args.max_cost,
+        };
+
+        let decision = xencode_core_rs::CapabilityRouter::route(&task, &candidates)?;
+
+        if matches!(args.format, OutputFormat::Json) {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&decision).map_err(|e| e.to_string())?
+            );
+        } else {
+            println!(
+                "Capability Routing Decision for task '{}':",
+                decision.task_id
+            );
+            if let Some(worker) = &decision.selected_worker {
+                println!("  Selected worker: {}", worker);
+            } else {
+                println!("  Selected worker: NONE (no candidate satisfied requirements)");
+            }
+            println!("  Explanation: {}", decision.explanation);
+            println!(
+                "\n  Evaluated Candidates ({}):",
+                decision.candidate_evaluations.len()
+            );
+            for ev in &decision.candidate_evaluations {
+                let status = if ev.eligible { "ELIGIBLE" } else { "REJECTED" };
+                println!("    - Worker '{}': {}", ev.worker_id, status);
+                println!("      Probed capabilities: {:?}", ev.probed_capabilities);
+                if let Some(rej) = &ev.rejection {
+                    match rej {
+                        xencode_core_rs::RejectionReason::MissingCapabilities(missing) => {
+                            println!(
+                                "      Rejection reason: missing required capabilities {:?}",
+                                missing
+                            );
+                        }
+                        xencode_core_rs::RejectionReason::LoadExceeded { current, max } => {
+                            println!(
+                                "      Rejection reason: load capacity exceeded ({current}/{max})"
+                            );
+                        }
+                        xencode_core_rs::RejectionReason::CostCeilingExceeded { cost, ceiling } => {
+                            println!(
+                                "      Rejection reason: cost ${cost:.2} exceeds ceiling ${ceiling:.2}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
     if let Some(task_id) = args.build_package {
         let repo_dir = std::env::current_dir().map_err(|e| e.to_string())?;
         let default_cmd = "cargo test".to_string();
@@ -11265,6 +11385,36 @@ mod tests {
                 ..
             }) if p.to_str() == Some("pkg.json") && a == "claude"
         ));
+    }
+
+    #[test]
+    fn agents_route_parses() {
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "agents",
+            "--route",
+            "task-456",
+            "--require-cap",
+            "acp",
+            "--require-cap",
+            "stream",
+            "--max-cost",
+            "1.50",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Agents {
+                route_task: Some(ref t),
+                ref require_caps,
+                max_cost: Some(cost),
+                ..
+            }) => {
+                assert_eq!(t, "task-456");
+                assert_eq!(require_caps, &["acp", "stream"]);
+                assert_eq!(cost, 1.50);
+            }
+            _ => panic!("expected agents --route"),
+        }
     }
 
     #[test]

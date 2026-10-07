@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap` — and clap's
   built-in `help`, 50 entries in the list)
-- [x] Workspace gates green — 16 crates, 2629 tests passing, zero warnings (re-verified 2026-10-07, after `OR-5`; 19 ignored, so 2648 in the run)
+- [x] Workspace gates green — 16 crates, 2636 tests passing, zero warnings (re-verified 2026-10-07, after `OR-6`; 19 ignored, so 2655 in the run)
 
 ## Model Catalog Honesty
 
@@ -12252,7 +12252,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **Done-when:** nothing merges without a decision a named human made, and a clean
       four-branch merge still shows which tests were re-run after integration (never the
       worker's own run).
-- [ ] **OR-6 — capability-gated routing.** Choose a worker only from probed capabilities
+- [x] **OR-6 — capability-gated routing.** Choose a worker only from probed capabilities
       (`AR-3`) plus current load and cost ceiling — never a vendor name.
       **Done-when:** a task requiring a capability exactly one agent has cannot be routed
       to the others even when they are idle.

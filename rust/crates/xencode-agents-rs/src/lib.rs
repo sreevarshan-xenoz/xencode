@@ -38,7 +38,7 @@ pub mod worker_package;
 pub use capture::{
     find_captures, read_capture, write_capture, Capture, Metadata, RawLine, StoredEvent,
 };
-pub use contract::{probe_contract, ClaimResult, Verdict};
+pub use contract::{confirmed_capabilities, probe_contract, ClaimResult, Verdict};
 pub use envelope::{
     envelopes_for_capture, read_envelopes, write_envelopes, AgentId, Envelope, EnvelopeRead, Field,
     SessionId, TaskId, WorkerId,

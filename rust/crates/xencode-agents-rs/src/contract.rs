@@ -306,9 +306,66 @@ pub fn probe_contract() -> Vec<ClaimResult> {
     out
 }
 
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Extract confirmed probed capabilities per agent from probe results.
+///
+/// Under AR-3's rule, "the router cannot see a capability that no probe recorded".
+/// Only claims with `Verdict::Confirmed` are included in the returned capabilities set.
+pub fn confirmed_capabilities(claims: &[ClaimResult]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for claim in claims {
+        if claim.verdict == Verdict::Confirmed {
+            map.entry(claim.agent.to_string())
+                .or_default()
+                .insert(claim.claim.to_string());
+        }
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confirmed_capabilities_only_includes_confirmed_claims() {
+        let claims = vec![
+            ClaimResult {
+                agent: "agent-a",
+                claim: "acp",
+                expected: true,
+                found: vec!["acp".to_string()],
+                missing: vec![],
+                sources: vec!["--help".to_string()],
+                verdict: Verdict::Confirmed,
+            },
+            ClaimResult {
+                agent: "agent-a",
+                claim: "daemon",
+                expected: true,
+                found: vec![],
+                missing: vec!["serve".to_string()],
+                sources: vec!["--help".to_string()],
+                verdict: Verdict::Contradicted("missing from help".to_string()),
+            },
+            ClaimResult {
+                agent: "agent-b",
+                claim: "stream",
+                expected: true,
+                found: vec!["--json".to_string()],
+                missing: vec![],
+                sources: vec!["--help".to_string()],
+                verdict: Verdict::Confirmed,
+            },
+        ];
+
+        let caps = confirmed_capabilities(&claims);
+        assert_eq!(caps.get("agent-a").unwrap().len(), 1);
+        assert!(caps.get("agent-a").unwrap().contains("acp"));
+        assert!(!caps.get("agent-a").unwrap().contains("daemon"));
+        assert!(caps.get("agent-b").unwrap().contains("stream"));
+    }
 
     #[test]
     fn short_tokens_need_word_boundaries() {

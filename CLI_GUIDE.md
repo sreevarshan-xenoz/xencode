@@ -3941,7 +3941,7 @@ from a dry run, advisory state from the local corpus. Offline reads as
 "unknown", never "clean"; a dry run that never ran says so. Exits non-zero on
 any vulnerable dependency.
 
-### `xencode agents [--format text|json] [--contract] [--health] [--agent <name>] [--build-package <id>] [--package <path>] [--resume] [--test-cmd <cmd>]`
+### `xencode agents [--format text|json] [--contract] [--health] [--agent <name>] [--build-package <id>] [--package <path>] [--resume] [--test-cmd <cmd>] [--route <task>] [--require-cap <cap>] [--max-cost <cost>]`
 
 List installed roster agents with versions and how each was installed
 (`mise:<tool>`, cargo, npm, system, user-local, unknown — only what the path
@@ -3968,6 +3968,11 @@ worker needs to know as actionable resumption context.
 
 `--resume` executes task resumption from a package using the designated worker
 (`--agent <name>`), re-running test commands to observe completion based on exit codes.
+
+`--route <task-id>` performs capability-gated worker routing across candidates based
+strictly on probed capabilities, current load capacity, and cost ceilings
+(`--require-cap <cap>`, `--max-cost <cost>`), never by vendor name. A task requiring an
+exclusive capability cannot route to other candidates even when they are idle.
 
 
 

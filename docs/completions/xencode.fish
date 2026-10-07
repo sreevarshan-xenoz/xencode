@@ -432,6 +432,9 @@ complete -c xencode -n "__fish_xencode_using_subcommand agents" -l agent -d 'Spe
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l build-package -d 'Build a worker continuation package from workspace diff and test runs (AR-7)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l package -d 'Path to inspect or load a worker continuation package (AR-7)' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l test-cmd -d 'Test commands to execute for package verification (defaults to \'cargo test\')' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l route -d 'Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l require-cap -d 'Capabilities required for the routed task (e.g. stream, acp, mcp, resume, daemon, approval) (OR-6)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l max-cost -d 'Maximum cost ceiling allowed for the routed task (OR-6)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l contract -d 'Verify each roster claim against the agent\'s live --help'

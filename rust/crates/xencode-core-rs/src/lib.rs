@@ -2,6 +2,7 @@ pub mod atomic;
 pub mod jsonl;
 pub mod lease;
 pub mod result_envelope;
+pub mod routing;
 pub mod rustc_json;
 pub mod scheduler;
 pub mod task_contract;
@@ -16,6 +17,10 @@ pub use lease::{
 };
 pub use result_envelope::{
     Claim, Evidence, FinishStatus, Handoff, RanCommand, ResultEnvelope, ReviewerView,
+};
+pub use routing::{
+    CandidateEvaluation, CapabilityRouter, RejectionReason, RoutingDecision, TaskRequirement,
+    WorkerCandidate,
 };
 pub use rustc_json::{
     cargo_json_command, parse as parse_rustc_json, BuildReport, Diagnostic, Suggestion,
