@@ -36,3 +36,6 @@ similar = "2"
 regex = "1"
 rmcp = { version = "3.5.0", default-features = false, features = ["server", "transport-io"] }
 
+[dev-dependencies]
+sha2 = "0.10"
+

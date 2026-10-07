@@ -121,13 +121,15 @@ impl ApprovalAnswer {
 
 /// What the approval overlay shows for one pending call. `preview` carries
 /// the proposed unified diff (file edits) or the exact command line (shell),
-/// already size-capped by [`approval_preview`].
+/// already size-capped by [`approval_preview`], and `draft` holds the file
+/// bytes that diff was worked out from.
 #[derive(Debug, Clone)]
 pub struct ApprovalRequest {
     pub tool: String,
     pub class: ToolClass,
     pub summary: String,
     pub preview: String,
+    pub draft: ApprovalDraft,
 }
 
 impl ApprovalRequest {
@@ -135,6 +137,84 @@ impl ApprovalRequest {
         self.class.overlay_label()
     }
 }
+
+/// The file contents the shown preview was computed from.
+///
+/// `Approved` is consent to *that* change. A file that moves while the prompt
+/// is open means the executor's re-read would write something the person never
+/// saw, so the gate checks these bytes again before spending the approval —
+/// see [`ApprovalDraft::stale_paths`]. A tool whose preview reads no file (a
+/// command line, a URL) holds nothing here, and there is nothing to re-check.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ApprovalDraft {
+    /// `(absolute path, workspace-relative path, hash of its bytes then)`,
+    /// with `None` for a file the preview found absent — a new file.
+    files: Vec<(PathBuf, String, Option<u64>)>,
+}
+
+impl ApprovalDraft {
+    /// Fingerprint these files as they stand at this moment. A file that is
+    /// absent hashes to `None`, which is how "this would create it" stays
+    /// distinct from "this would change it".
+    pub(crate) fn bind(files: &[(PathBuf, String)]) -> Self {
+        ApprovalDraft {
+            files: files
+                .iter()
+                .map(|(full, display)| (full.clone(), display.clone(), bytes_hash(full, display)))
+                .collect(),
+        }
+    }
+
+    /// The bound files whose bytes differ now, by workspace-relative path.
+    /// Empty means every file still holds what the person was shown.
+    pub fn stale_paths(&self) -> Vec<String> {
+        self.files
+            .iter()
+            .filter(|(full, display, then)| bytes_hash(full, display).ne(then))
+            .map(|(_, display, _)| display.clone())
+            .collect()
+    }
+
+    /// True when nothing the preview read has moved, including when it read
+    /// no file at all.
+    pub fn is_current(&self) -> bool {
+        self.stale_paths().is_empty()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
+/// Hash of a file's bytes, or `None` if it does not exist. Only ever compared
+/// against another hash taken in the same process a moment earlier, so it
+/// needs no strength beyond saying "these are not the same bytes".
+fn bytes_hash(full: &Path, display: &str) -> Option<u64> {
+    let data = std::fs::read(full).ok()?;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // The path is hashed with the bytes: an edit approved for `src/a.rs` must
+    // not pass its re-check because the same content turned up under a
+    // different name.
+    display.hash(&mut hasher);
+    data.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+/// The files the overlay's diff was worked out from, for this call. Every call
+/// whose preview is built from file contents is bound here — a single-file
+/// write or edit, and the multi-file `ast_edit`/`rename`/`codemod` plans, whose
+/// preview is a real diff per file. A preview that comes from the arguments
+/// alone (a command line, a URL) binds nothing, so it cannot go stale under the
+/// person answering it.
+pub fn approval_draft(root: &Path, call: &ToolCall) -> ApprovalDraft {
+    approval_shown(root, call).draft
+}
+
+/// How many times one call may be re-shown because the file kept moving while
+/// the person was answering. Past that, the write is refused: a file being
+/// edited faster than it can be reviewed is not a reason to stop reviewing it.
+const MAX_DRAFT_REVIEWS: usize = 2;
 
 /// How long the approval preview waits for ast-grep. Shorter than the
 /// executor's budget on purpose: a preview that blocks the prompt is worse than
@@ -708,18 +788,33 @@ fn read_text(path: &Path, display: &str) -> Result<String, String> {
 /// Capped unified diff between old and new content ("" for a new file).
 fn unified_diff(old: &str, new: &str) -> String {
     use similar::TextDiff;
-    let mut out = String::new();
-    let mut lines = 0usize;
-    for hunk in TextDiff::from_lines(old, new).unified_diff().iter_hunks() {
-        for line in hunk.to_string().lines() {
-            if lines >= DIFF_MAX_LINES {
-                out.push_str("… diff truncated\n");
-                return out;
-            }
-            out.push_str(line);
-            out.push('\n');
-            lines += 1;
-        }
+    // The whole diff is counted before anything is cut, so a change too big to
+    // read in a terminal pane still says how big it is: the person is deciding
+    // on a summary they can weigh, not on a truncated window they might take
+    // for the lot.
+    let shown: Vec<String> = TextDiff::from_lines(old, new)
+        .unified_diff()
+        .iter_hunks()
+        .flat_map(|hunk| {
+            hunk.to_string()
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let added = shown.iter().filter(|l| l.starts_with('+')).count();
+    let removed = shown.iter().filter(|l| l.starts_with('-')).count();
+    let mut out: String = shown
+        .iter()
+        .take(DIFF_MAX_LINES)
+        .map(|l| format!("{l}\n"))
+        .collect();
+    if shown.len() > DIFF_MAX_LINES {
+        out.push_str(&format!(
+            "… diff truncated ({} of {} lines shown; {added} added, {removed} removed in all)\n",
+            DIFF_MAX_LINES,
+            shown.len()
+        ));
     }
     out
 }
@@ -1675,37 +1770,73 @@ pub fn approval_summary(call: &ToolCall) -> String {
     }
 }
 
+/// What the overlay shows for one pending call: the body text, and the files
+/// whose bytes that text was worked out from.
+pub struct ApprovalShown {
+    pub preview: String,
+    pub draft: ApprovalDraft,
+}
+
+/// The shown diff and the bound bytes, taken in one pass over the tree. They
+/// have to come from the same pass: a preview read at one moment and a
+/// fingerprint read at another can describe two different changes, and then the
+/// re-check would be comparing the approval against bytes nobody was shown.
+pub fn approval_shown(root: &Path, call: &ToolCall) -> ApprovalShown {
+    let (preview, bound) = preview_and_bound_files(root, call);
+    ApprovalShown {
+        preview,
+        draft: ApprovalDraft::bind(&bound),
+    }
+}
+
 /// The overlay's body: the concrete bytes at stake. File writes/edits get
-/// the exact unified diff of the proposed change (computed on a snapshot of
-/// the current file — the call re-reads at execution, so the real change
-/// could differ if the file is edited mid-prompt); shell tools get the
+/// the exact unified diff of the proposed change (worked out from the file as
+/// it stands when the prompt is raised — [`approval_draft`] binds the approval
+/// to those bytes, so a file edited mid-prompt is re-shown rather than
+/// overwritten); shell tools get the
 /// literal command line; everything else gets the argument summary.
 pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
+    approval_shown(root, call).preview
+}
+
+/// The preview text plus, for the calls whose text is a diff of file contents,
+/// exactly which files it is a diff of.
+fn preview_and_bound_files(root: &Path, call: &ToolCall) -> (String, Vec<(PathBuf, String)>) {
     let args = call.arguments_object();
-    let diff_for = |path: &str, new_text: &str| -> String {
+    let diff_for = |path: &str, new_text: &str| -> (String, Vec<(PathBuf, String)>) {
         let (full, display) = match workspace_path(root, path) {
             Ok(ok) => ok,
-            Err(e) => return e,
+            Err(e) => return (e, Vec::new()),
         };
-        let old = if full.exists() {
+        let exists = full.exists();
+        let old = if exists {
             match read_text(&full, &display) {
                 Ok(t) => t,
-                Err(e) => return e,
+                Err(e) => return (e, Vec::new()),
             }
         } else {
             String::new()
         };
-        let header = if full.exists() {
+        let header = if exists {
             format!("target: {display}")
         } else {
             format!("target: {display} (new file)")
         };
-        format!("{header}\n{}", unified_diff(&old, new_text).trim_end())
+        (
+            format!("{header}\n{}", unified_diff(&old, new_text).trim_end()),
+            vec![(full, display)],
+        )
+    };
+    let files_of = |rewrites: &[PlannedRewrite]| -> Vec<(PathBuf, String)> {
+        rewrites
+            .iter()
+            .map(|r| (r.full.clone(), r.display.clone()))
+            .collect()
     };
     match call.name.as_str() {
         "write_file" => match (arg_str(&args, "path"), arg_str(&args, "content")) {
             (Some(p), Some(c)) => diff_for(p, c),
-            _ => summarize_call(call),
+            _ => (summarize_call(call), Vec::new()),
         },
         "edit_file" => {
             let (Some(p), Some(old), Some(new)) = (
@@ -1713,17 +1844,17 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                 arg_str(&args, "old"),
                 arg_str(&args, "new"),
             ) else {
-                return summarize_call(call);
+                return (summarize_call(call), Vec::new());
             };
             if old.is_empty() {
-                return summarize_call(call);
+                return (summarize_call(call), Vec::new());
             }
             let (full, _) = match workspace_path(root, p) {
                 Ok(ok) => ok,
-                Err(e) => return e,
+                Err(e) => return (e, Vec::new()),
             };
             let Ok(current) = read_text(&full, p) else {
-                return summarize_call(call);
+                return (summarize_call(call), Vec::new());
             };
             let count = current.matches(old).count();
             let updated = if arg_bool(&args, "all") {
@@ -1731,66 +1862,79 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
             } else {
                 current.replacen(old, new, 1)
             };
-            let mut preview = diff_for(p, &updated);
+            let (mut preview, bound) = diff_for(p, &updated);
             if count != 1 && !arg_bool(&args, "all") {
                 preview.push_str(&format!(
                     "\n(note: \"old\" currently matches {count} times — the edit \
                      would fail unless all=true)"
                 ));
             }
-            preview
+            (preview, bound)
         }
         "edit_symbol" => match planned_symbol_edit(root, &args) {
-            Err(reason) => reason,
-            Ok((_, display, current, updated)) => {
+            Err(reason) => (reason, Vec::new()),
+            Ok((full, display, current, updated)) => (
                 format!(
                     "target: {display}\n{}",
                     unified_diff(&current, &updated).trim_end()
-                )
-            }
+                ),
+                vec![(full, display)],
+            ),
         },
         "ast_edit" => match plan_ast_edit(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
             // The same planner the executor uses, so the preview cannot describe
             // a different edit from the one that lands.
-            Err(reason) => reason,
-            Ok(plan) if plan.replacement.is_none() => format!(
-                "ast_edit would report {} site(s) and change nothing:\n{}",
-                plan.sites.len(),
-                plan.sites.join("\n")
+            Err(reason) => (reason, Vec::new()),
+            Ok(plan) if plan.replacement.is_none() => (
+                format!(
+                    "ast_edit would report {} site(s) and change nothing:\n{}",
+                    plan.sites.len(),
+                    plan.sites.join("\n")
+                ),
+                Vec::new(),
             ),
             Ok(plan) => {
+                let bound = files_of(&plan.rewrites);
                 let mut out = format!(
                     "ast_edit would rewrite {} site(s) across {} file(s):",
                     plan.rewrites.iter().map(|r| r.sites).sum::<usize>(),
                     plan.rewrites.len()
                 );
                 out.push_str(&describe_rewrites(&plan.rewrites));
-                out
+                (out, bound)
             }
         },
         "rename" => match plan_rename(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
-            Err(reason) => reason,
+            Err(reason) => (reason, Vec::new()),
             Ok(plan) => {
+                let bound = files_of(&plan.rewrites);
                 let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
-                format!(
-                    "rename would turn `{}` ({} in {}) into `{}` at {total} site(s) across {} file(s):{}",
-                    plan.symbol,
-                    plan.kind,
-                    plan.definition,
-                    plan.new_name,
-                    plan.rewrites.len(),
-                    describe_rewrites(&plan.rewrites)
+                (
+                    format!(
+                        "rename would turn `{}` ({} in {}) into `{}` at {total} site(s) across {} file(s):{}",
+                        plan.symbol,
+                        plan.kind,
+                        plan.definition,
+                        plan.new_name,
+                        plan.rewrites.len(),
+                        describe_rewrites(&plan.rewrites)
+                    ),
+                    bound,
                 )
             }
         },
         "codemod" => match plan_codemod(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
-            Err(reason) => reason,
-            Ok(plan) if !plan.rewrites_code => format!(
-                "codemod would report {} site(s) and change nothing:\n{}",
-                plan.sites.len(),
-                plan.sites.join("\n")
+            Err(reason) => (reason, Vec::new()),
+            Ok(plan) if !plan.rewrites_code => (
+                format!(
+                    "codemod would report {} site(s) and change nothing:\n{}",
+                    plan.sites.len(),
+                    plan.sites.join("\n")
+                ),
+                Vec::new(),
             ),
             Ok(plan) => {
+                let bound = files_of(&plan.rewrites);
                 let mut out = format!(
                     "codemod would rewrite {} site(s) across {} file(s):",
                     plan.rewrites.iter().map(|r| r.sites).sum::<usize>(),
@@ -1804,12 +1948,14 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                         plan.entangled.join(", ")
                     ));
                 }
-                out
+                (out, bound)
             }
         },
         "background_start" | "run_command" => match arg_str(&args, "command") {
-            Some(command) if !command.trim().is_empty() => format!("command: sh -c {command:?}"),
-            _ => summarize_call(call),
+            Some(command) if !command.trim().is_empty() => {
+                (format!("command: sh -c {command:?}"), Vec::new())
+            }
+            _ => (summarize_call(call), Vec::new()),
         },
         // The one call whose entire consequence is its argument, so the preview
         // can say more than what will happen — it can say whether it is allowed
@@ -1831,9 +1977,9 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                         .to_string(),
                     Err(e) => format!("  — this one would be refused: {e}"),
                 });
-                out
+                (out, Vec::new())
             }
-            _ => summarize_call(call),
+            _ => (summarize_call(call), Vec::new()),
         },
         // RS-2: where a fetch's whole consequence is one address, a search's is
         // the question and the engine it goes to. The engine is a config value
@@ -1841,15 +1987,18 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
         // instead of pretending to know it, and says plainly that the answer is a
         // list of links — not those links read.
         "web_search" => match arg_str(&args, "query") {
-            Some(query) if !query.trim().is_empty() => format!(
-                "search: {}\n  (the question is sent to the search provider named in the \
-                 config — `xencode config show` says which one that is — and what comes back \
-                 is titles, addresses and short snippets. Nothing in that list is read.)",
-                truncate_one_line(query, 200)
+            Some(query) if !query.trim().is_empty() => (
+                format!(
+                    "search: {}\n  (the question is sent to the search provider named in the \
+                     config — `xencode config show` says which one that is — and what comes back \
+                     is titles, addresses and short snippets. Nothing in that list is read.)",
+                    truncate_one_line(query, 200)
+                ),
+                Vec::new(),
             ),
-            _ => summarize_call(call),
+            _ => (summarize_call(call), Vec::new()),
         },
-        _ => summarize_call(call),
+        _ => (summarize_call(call), Vec::new()),
     }
 }
 
@@ -2060,8 +2209,10 @@ fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
 /// Shared by the tool and the approval overlay on purpose: what a person is shown
 /// before approving has to be the same computation that produces the bytes, or the
 /// approval is for one change and the write is another. Both read the file when
-/// asked, so an edit made while a prompt is open is caught by the re-read the tool
-/// does at execution rather than by a stale preview.
+/// asked, so an edit made while a prompt is open is caught twice over: the gate
+/// re-checks the bytes the preview was worked out from ([`approval_draft`]) before
+/// spending the approval, and the tool works the change out again from what it
+/// finds.
 fn planned_symbol_edit(
     root: &Path,
     args: &serde_json::Map<String, serde_json::Value>,
@@ -3999,54 +4150,90 @@ pub async fn execute_tool_call_approved(
         Permission::Allow => run_and_checkpoint(rt, root, call, ctx, mcp).await,
         Permission::Ask => {
             let class = tool_class(&call.name);
-            let request = ApprovalRequest {
-                tool: call.name.clone(),
-                class,
-                summary: approval_summary(call),
-                preview: approval_preview(root, call),
-            };
-            let (responder, answer) = oneshot::channel();
-            // Built here because `request` moves into the prompt, and the
-            // draft is only wanted once the person has answered.
-            let refusal_event = denied_event(&request);
-            if ctx.prompts.send((request, responder)).is_err() {
-                // Nothing is listening — no TUI attached. The strictest
-                // possible answer is the only honest one, and it is an answer:
-                // the run went ahead having been refused, so the ledger says so.
-                ctx.record_approval(&call.name, class, ApprovalAnswer::Denied);
-                return DENIED_RESULT.to_string();
-            }
-            let decision = match answer.await {
-                Ok(answer) => {
-                    // A fetch is approved one address at a time. An "always allow"
-                    // answer on one page is not a standing permission to reach the
-                    // next, so this is recorded as the weaker thing it now is —
-                    // otherwise the run's own history would claim a consent the
-                    // gate refuses to honour, and `xencode runs` would show it.
-                    let answer = if class == ToolClass::Network {
-                        ApprovalAnswer::Approved
-                    } else {
-                        answer
-                    };
-                    ctx.record_approval(&call.name, class, answer);
-                    if answer == ApprovalAnswer::Denied {
-                        draft_denied_call(root, refusal_event);
-                    }
-                    answer
-                }
-                // A dropped responder means the prompt vanished with the app.
-                Err(_) => {
+            // The prompt is rebuilt each time round, so what the person is
+            // reading is what the file holds now. `Approved` is consent to the
+            // change that was shown: if the file moved while the prompt was
+            // open, the approval is not spent, it is asked again.
+            let mut reshown = 0usize;
+            loop {
+                // One pass over the files for both halves, so the bytes the
+                // person is shown and the bytes the approval is later checked
+                // against are read together.
+                let shown_all = approval_shown(root, call);
+                let request = ApprovalRequest {
+                    tool: call.name.clone(),
+                    class,
+                    summary: approval_summary(call),
+                    preview: shown_all.preview,
+                    draft: shown_all.draft,
+                };
+                let (responder, answer) = oneshot::channel();
+                // Held out of the request, which moves into the prompt: the bytes
+                // are only wanted once the person has answered, and the refusal is
+                // drafted from the line the overlay was showing.
+                let shown = request.draft.clone();
+                let refusal_event = denied_event(&request);
+                if ctx.prompts.send((request, responder)).is_err() {
+                    // Nothing is listening — no TUI attached. The strictest
+                    // possible answer is the only honest one, and it is an answer:
+                    // the run went ahead having been refused, so the ledger says so.
                     ctx.record_approval(&call.name, class, ApprovalAnswer::Denied);
-                    ApprovalAnswer::Denied
+                    return DENIED_RESULT.to_string();
                 }
-            };
-            match decision {
-                ApprovalAnswer::Approved => run_and_checkpoint(rt, root, call, ctx, mcp).await,
-                ApprovalAnswer::ApprovedForSession => {
-                    ctx.grant(class);
-                    run_and_checkpoint(rt, root, call, ctx, mcp).await
+                let decision = match answer.await {
+                    Ok(answer) => {
+                        // A fetch is approved one address at a time. An "always allow"
+                        // answer on one page is not a standing permission to reach the
+                        // next, so this is recorded as the weaker thing it now is —
+                        // otherwise the run's own history would claim a consent the
+                        // gate refuses to honour, and `xencode runs` would show it.
+                        let answer = if class == ToolClass::Network {
+                            ApprovalAnswer::Approved
+                        } else {
+                            answer
+                        };
+                        ctx.record_approval(&call.name, class, answer);
+                        if answer == ApprovalAnswer::Denied {
+                            draft_denied_call(root, refusal_event);
+                        }
+                        answer
+                    }
+                    // A dropped responder means the prompt vanished with the app.
+                    Err(_) => {
+                        ctx.record_approval(&call.name, class, ApprovalAnswer::Denied);
+                        ApprovalAnswer::Denied
+                    }
+                };
+                match decision {
+                    ApprovalAnswer::Approved => {
+                        let moved = shown.stale_paths();
+                        if moved.is_empty() {
+                            return run_and_checkpoint(rt, root, call, ctx, mcp).await;
+                        }
+                        // The change that was agreed to is gone: writing now would land
+                        // a different one. Nothing has been touched, and the person is
+                        // asked again about the bytes that are actually there — until
+                        // the file proves it cannot be held still.
+                        if reshown >= MAX_DRAFT_REVIEWS {
+                            return err(format!(
+                                "not written: {} changed while the approval prompt was \
+                                 open, and kept changing on every re-review. The change \
+                                 that was approved is not the change that would land — \
+                                 re-issue the call against the file as it stands now.",
+                                moved.join(", ")
+                            ));
+                        }
+                        reshown += 1;
+                    }
+                    // "Always allow everything like this" is the person waiving the
+                    // per-change review, so there is no review left to invalidate: the
+                    // grant covers the write however the file has moved.
+                    ApprovalAnswer::ApprovedForSession => {
+                        ctx.grant(class);
+                        return run_and_checkpoint(rt, root, call, ctx, mcp).await;
+                    }
+                    ApprovalAnswer::Denied => return DENIED_RESULT.to_string(),
                 }
-                ApprovalAnswer::Denied => DENIED_RESULT.to_string(),
             }
         }
     }
@@ -7752,6 +7939,338 @@ patched = ["{fixed}"]
         .await;
         assert_eq!(shell, DENIED_RESULT);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Drive one gated call while answering every prompt it raises, in order,
+    /// running `on_prompt` just before each answer. `gated` answers one prompt
+    /// and cannot touch the file in between, which is the whole point here.
+    async fn gated_drift(
+        rt: TaskRuntime,
+        root: PathBuf,
+        tool: ToolCall,
+        ctx: ApprovalCtx,
+        prompts: &mut mpsc::UnboundedReceiver<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
+        answers: &[ApprovalAnswer],
+        on_prompt: &mut dyn FnMut(&ApprovalRequest, usize),
+    ) -> (Vec<String>, String) {
+        let running =
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &tool, &ctx, None).await },
+            );
+        tokio::pin!(running);
+        let mut previews = Vec::new();
+        for (i, answer) in answers.iter().enumerate() {
+            let arrived = tokio::select! {
+                maybe = prompts.recv() => maybe,
+                finished = &mut running => panic!(
+                    "the call finished after {i} prompt(s): {}",
+                    finished.unwrap()
+                ),
+            };
+            let (request, responder) = arrived.expect("a prompt should arrive");
+            previews.push(request.preview.clone());
+            on_prompt(&request, i);
+            responder.send(*answer).unwrap();
+        }
+        let result = running.await.unwrap();
+        (previews, result)
+    }
+
+    #[tokio::test]
+    async fn a_file_that_moved_while_the_prompt_was_open_is_shown_again_not_overwritten() {
+        let root = temp_root("gate-drift");
+        std::fs::write(root.join("d.txt"), "one\n").unwrap();
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+
+        let (previews, result) = gated_drift(
+            rt.clone(),
+            root.clone(),
+            write_call("d.txt", "two\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            &[ApprovalAnswer::Approved, ApprovalAnswer::Approved],
+            &mut |request: &ApprovalRequest, seen| {
+                if seen == 0 {
+                    // The file moves after the person has been shown the change
+                    // and before they answer — a save in their own editor, say.
+                    assert!(
+                        request.preview.contains("-one"),
+                        "the first review shows the file as it was: {}",
+                        request.preview
+                    );
+                    std::fs::write(root.join("d.txt"), "ZERO\n").unwrap();
+                }
+            },
+        )
+        .await;
+
+        // Two reviews, and the second one is about the bytes on disk now.
+        assert_eq!(previews.len(), 2, "the approval was re-asked: {previews:?}");
+        assert!(
+            previews[1].contains("-ZERO"),
+            "the re-review must show the file as it actually stands: {}",
+            previews[1]
+        );
+        assert!(
+            result.starts_with("updated d.txt"),
+            "the second approval is a real one: {result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("d.txt")).unwrap(),
+            "two\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Everything in the workspace except `.xencode`, which is where a refusal
+    /// is *supposed* to leave its lesson draft (EV-7). The claim being tested is
+    /// that declining touches none of the person's own files.
+    fn visible_entries(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .filter(|n| n != ".xencode")
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn declining_writes_nothing_and_leaves_no_checkpoint_behind() {
+        let root = temp_root("gate-decline");
+        std::fs::write(root.join("keep.txt"), "untouched\n").unwrap();
+        // The checksum is the proof: what the file held before the prompt is
+        // compared with what it holds after the refusal, byte for byte.
+        let before = std::fs::read(root.join("keep.txt")).unwrap();
+        let files_before = visible_entries(&root);
+
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let (previews, result) = gated_drift(
+            rt.clone(),
+            root.clone(),
+            write_call("keep.txt", "rewritten\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            &[ApprovalAnswer::Denied],
+            &mut |_, _| {},
+        )
+        .await;
+        assert_eq!(result, DENIED_RESULT);
+        assert!(
+            previews[0].contains("+rewritten"),
+            "the person was shown the change they refused: {}",
+            previews[0]
+        );
+        assert_eq!(std::fs::read(root.join("keep.txt")).unwrap(), before);
+        assert_eq!(
+            visible_entries(&root),
+            files_before,
+            "a refusal must not create, delete or rename any of the person's files"
+        );
+        assert_eq!(
+            h.ctx.checkpoints.turns(),
+            0,
+            "nothing was snapshotted, so /rewind has nothing to claim"
+        );
+
+        // A refused new file is not created at all.
+        let result = gated(
+            rt.clone(),
+            root.clone(),
+            write_call("never.txt", "x\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(result, DENIED_RESULT);
+        assert!(!root.join("never.txt").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_file_is_reviewed_once_and_then_written() {
+        let root = temp_root("gate-still");
+        std::fs::write(root.join("s.txt"), "one\n").unwrap();
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let (previews, result) = gated_drift(
+            rt.clone(),
+            root.clone(),
+            write_call("s.txt", "two\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            &[ApprovalAnswer::Approved],
+            &mut |_, _| {},
+        )
+        .await;
+        assert_eq!(previews.len(), 1, "no re-review without a move");
+        assert!(result.starts_with("updated s.txt"), "{result}");
+        assert!(
+            prompts.try_recv().is_err(),
+            "an approved, unwobbled change is written, not asked about again"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_file_that_keeps_moving_is_refused_rather_than_written_unseen() {
+        let root = temp_root("gate-flap");
+        std::fs::write(root.join("f.txt"), "one\n").unwrap();
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let (previews, result) = gated_drift(
+            rt.clone(),
+            root.clone(),
+            write_call("f.txt", "two\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            &[
+                ApprovalAnswer::Approved,
+                ApprovalAnswer::Approved,
+                ApprovalAnswer::Approved,
+            ],
+            &mut |_, seen| {
+                std::fs::write(root.join("f.txt"), format!("edit-{seen}\n")).unwrap();
+            },
+        )
+        .await;
+        assert_eq!(
+            previews.len(),
+            MAX_DRAFT_REVIEWS + 1,
+            "reviewed once plus the re-reviews the budget allows"
+        );
+        assert!(
+            result.starts_with("error: not written:") && result.contains("f.txt"),
+            "the refusal says why: {result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("f.txt")).unwrap(),
+            "edit-2\n",
+            "the file holds the last outside edit, never the unreviewed write"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The multi-file preview is a real diff per file, not a list of names, so
+    /// an approval of it goes stale on any one of those files. Binding only the
+    /// single-file writes would leave the widest edits — an `ast_edit` across a
+    /// directory — free to land bytes nobody reviewed.
+    #[tokio::test]
+    async fn an_ast_edit_over_two_files_is_re_reviewed_when_either_one_moves() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("gate-drift-ast");
+        for name in ["a.rs", "b.rs"] {
+            std::fs::write(root.join(name), "fn main() {\n    let v = compute();\n}\n").unwrap();
+        }
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+
+        let (previews, result) = gated_drift(
+            rt.clone(),
+            root.clone(),
+            call(
+                "ast_edit",
+                serde_json::json!({
+                    "pattern": "let $NAME = compute();",
+                    "replacement": "let $NAME = compute(2);",
+                    "path": ".",
+                    "language": "rust"
+                }),
+            ),
+            h.ctx.clone(),
+            &mut prompts,
+            &[ApprovalAnswer::Approved, ApprovalAnswer::Approved],
+            &mut |request, i| {
+                if i == 0 {
+                    assert_eq!(
+                        request.draft.stale_paths(),
+                        Vec::<String>::new(),
+                        "both files are bound and hold what the preview showed"
+                    );
+                    // The person edits one of the two files themselves, while
+                    // the prompt is still open, in a way that removes the
+                    // pattern from it. An approval spent on the first review
+                    // would write that file back over their work.
+                    std::fs::write(root.join("b.rs"), "fn main() {}\n").unwrap();
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(
+            previews.len(),
+            2,
+            "the file that moved makes the whole edit re-reviewed:\n{previews:#?}"
+        );
+        assert!(
+            previews[0].contains("across 2 file(s)"),
+            "the first review covers both files: {}",
+            previews[0]
+        );
+        assert!(
+            previews[1].contains("across 1 file(s)"),
+            "the second review is of the tree as it now stands: {}",
+            previews[1]
+        );
+        assert!(result.contains("rewrote"), "{result}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("b.rs")).unwrap(),
+            "fn main() {}\n",
+            "the person's own edit survives the re-review instead of being written back"
+        );
+        assert!(
+            std::fs::read_to_string(root.join("a.rs"))
+                .unwrap()
+                .contains("compute(2)"),
+            "the reviewed edit lands on the file that was left alone"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn only_a_preview_that_read_a_file_can_go_stale() {
+        let root = temp_root("draft-inputs");
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        let write = approval_draft(&root, &write_call("a.txt", "two\n"));
+        assert!(!write.is_empty(), "a file write binds the bytes it showed");
+        assert!(write.is_current());
+        // Same bytes, different write: nothing was reviewed away.
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        assert!(approval_draft(&root, &write_call("a.txt", "two\n")).is_current());
+        std::fs::write(root.join("a.txt"), "moved\n").unwrap();
+        assert_eq!(write.stale_paths(), vec!["a.txt".to_string()]);
+        // A deleted target is as much a move as an edited one: the preview said
+        // what the file held, and it no longer holds it.
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        assert_eq!(write.stale_paths(), vec!["a.txt".to_string()]);
+
+        // A command line is its own preview, so there are no bytes to wobble.
+        assert!(approval_draft(&root, &cmd_call("true")).is_empty());
+        assert!(approval_draft(&root, &cmd_call("true")).is_current());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_diff_too_big_for_the_pane_says_how_big_it_is() {
+        let old: String = (0..200).map(|i| format!("line {i}\n")).collect();
+        let new: String = (0..200).map(|i| format!("line {i} changed\n")).collect();
+        let diff = unified_diff(&old, &new);
+        assert_eq!(diff.lines().count(), DIFF_MAX_LINES + 1, "{diff}");
+        assert!(
+            diff.contains("; 200 added, 200 removed in all)"),
+            "the truncated tail counts the whole change: {diff}"
+        );
     }
 
     #[tokio::test]
