@@ -82,12 +82,15 @@ pub trait Backend: Send + Sync {
 /// Pinned boxed future for dynamic dispatch on backends.
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
-/// Object-safe companion of [`Backend`] for engine composition (AF-3).
+/// Object-safe companion of [`Backend`] for engine composition (AF-3, AF-4).
 ///
 /// Enables polymorphic selection and invocation of computer backends
 /// without hardcoded `match` branches in the execution loops.
 pub trait ComputerBackend: std::fmt::Debug + Send + Sync {
     fn id(&self) -> &'static str;
+    fn kind(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+    fn is_available(&self) -> (bool, String);
     fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>>;
     fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>>;
     fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>>;
@@ -102,6 +105,24 @@ pub trait ComputerBackend: std::fmt::Debug + Send + Sync {
 impl ComputerBackend for crate::colab::ColabBackend {
     fn id(&self) -> &'static str {
         <Self as Backend>::id(self)
+    }
+
+    fn kind(&self) -> &'static str {
+        "colab"
+    }
+
+    fn description(&self) -> &'static str {
+        "Google Colab cloud GPU compute backend"
+    }
+
+    fn is_available(&self) -> (bool, String) {
+        if !self.bins.colab.is_file() {
+            (false, "google-colab-cli not found on PATH".to_string())
+        } else if !self.bins.ssh.is_file() {
+            (false, "OpenSSH client not found on PATH".to_string())
+        } else {
+            (true, "google-colab-cli and OpenSSH available".to_string())
+        }
     }
 
     fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>> {
@@ -139,6 +160,16 @@ impl ComputerBackend for crate::colab::ColabBackend {
     }
 }
 
+/// Metadata and status report of a registered computer backend (AF-4).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ComputerInfo {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+    pub available: bool,
+    pub detail: String,
+}
+
 /// Constructor for dynamically mounted computer backends.
 pub type BackendConstructor = Box<
     dyn Fn(&crate::orchestrate::Binaries, &std::path::Path) -> Box<dyn ComputerBackend>
@@ -146,7 +177,7 @@ pub type BackendConstructor = Box<
         + Sync,
 >;
 
-/// Statically linked mount point for computer backends (AF-3).
+/// Statically linked mount point for computer backends (AF-3, AF-4).
 pub struct BackendRegistry {
     entries: std::collections::BTreeMap<&'static str, BackendConstructor>,
 }
@@ -158,6 +189,18 @@ impl Default for BackendRegistry {
             "colab",
             Box::new(|bins, key| {
                 Box::new(crate::colab::ColabBackend::new(bins.clone(), key.to_path_buf()))
+            }),
+        );
+        reg.register(
+            "ssh",
+            Box::new(|bins, key| {
+                Box::new(crate::ssh::SshBackend::new(bins.clone(), key.to_path_buf()))
+            }),
+        );
+        reg.register(
+            "docker",
+            Box::new(|_bins, _key| {
+                Box::new(crate::docker::DockerBackend::default())
             }),
         );
         reg
@@ -177,6 +220,26 @@ impl BackendRegistry {
 
     pub fn available_backends(&self) -> Vec<&'static str> {
         self.entries.keys().copied().collect()
+    }
+
+    pub fn list_computers(
+        &self,
+        bins: &crate::orchestrate::Binaries,
+        key: &std::path::Path,
+    ) -> Vec<ComputerInfo> {
+        let mut infos = Vec::new();
+        for (id, ctor) in &self.entries {
+            let backend = ctor(bins, key);
+            let (available, detail) = backend.is_available();
+            infos.push(ComputerInfo {
+                id: (*id).to_string(),
+                kind: backend.kind().to_string(),
+                description: backend.description().to_string(),
+                available,
+                detail,
+            });
+        }
+        infos
     }
 
     pub fn resolve(
@@ -279,20 +342,70 @@ mod tests {
     #[test]
     fn backend_registry_resolves_statically_registered_backends() {
         let reg = BackendRegistry::default();
-        assert_eq!(reg.available_backends(), vec!["colab"]);
+        assert_eq!(reg.available_backends(), vec!["colab", "docker", "ssh"]);
 
         let bins = crate::orchestrate::Binaries {
             colab: std::path::PathBuf::from("/bin/colab"),
             ssh: std::path::PathBuf::from("/bin/ssh"),
         };
         let key = std::path::Path::new("/tmp/id_test");
-        let backend = reg.resolve("colab", &bins, key).expect("must resolve colab");
-        assert_eq!(backend.id(), "colab");
+        let colab_backend = reg.resolve("colab", &bins, key).expect("must resolve colab");
+        assert_eq!(colab_backend.id(), "colab");
+        assert_eq!(colab_backend.kind(), "colab");
 
-        let err = match reg.resolve("docker", &bins, key) {
+        let ssh_backend = reg.resolve("ssh", &bins, key).expect("must resolve ssh");
+        assert_eq!(ssh_backend.id(), "ssh");
+        assert_eq!(ssh_backend.kind(), "ssh");
+
+        let docker_backend = reg.resolve("docker", &bins, key).expect("must resolve docker");
+        assert_eq!(docker_backend.id(), "docker");
+        assert_eq!(docker_backend.kind(), "docker");
+
+        let err = match reg.resolve("virsh-vm", &bins, key) {
             Err(e) => e,
-            Ok(_) => panic!("docker should not be registered"),
+            Ok(_) => panic!("virsh-vm should not be registered"),
         };
-        assert!(err.contains("unknown computer backend `docker`"), "{err}");
+        assert!(err.contains("unknown computer backend `virsh-vm`"), "{err}");
+
+        let computers = reg.list_computers(&bins, key);
+        assert_eq!(computers.len(), 3);
+        assert_eq!(computers[0].id, "colab");
+        assert_eq!(computers[0].kind, "colab");
+        assert_eq!(computers[1].id, "docker");
+        assert_eq!(computers[1].kind, "docker");
+        assert_eq!(computers[2].id, "ssh");
+        assert_eq!(computers[2].kind, "ssh");
+    }
+
+    #[tokio::test]
+    async fn unreachable_ssh_backend_answers_honestly_that_it_cannot_connect() {
+        let bins = crate::orchestrate::Binaries {
+            colab: std::path::PathBuf::from("/bin/colab"),
+            ssh: std::path::PathBuf::from("/usr/bin/ssh"),
+        };
+        let key = std::path::PathBuf::from("/tmp/nonexistent_test_key");
+        // Target an unreachable non-routable address / unused port
+        let backend = crate::ssh::SshBackend::new(bins, key)
+            .with_destination("192.0.2.1") // RFC 5737 TEST-NET-1 (unreachable)
+            .with_port(9999);
+
+        let res = Backend::provision(&backend, "test-session", "none").await;
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert!(err.contains("cannot reach ssh host `192.0.2.1`"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn docker_backend_answers_honestly_when_daemon_unreachable() {
+        let backend = crate::docker::DockerBackend::new(
+            std::path::PathBuf::from("/usr/bin/docker"),
+            "alpine:latest".to_string(),
+        );
+        let res = Backend::provision(&backend, "test-session", "none").await;
+        // On this host, docker daemon is not accessible to non-root, or daemon is not running
+        // It must answer honestly with an error, not panic or mock green
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert!(err.contains("docker engine unreachable"), "{err}");
     }
 }

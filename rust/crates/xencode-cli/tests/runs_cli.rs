@@ -59,6 +59,7 @@ fn runs_show_joins_session_checks_and_reports_unverified_honestly() {
         approvals: Vec::new(),
         recording: None,
         note: String::new(),
+        computer: Some("colab".to_string()),
     };
     xencode_context_rs::append_run(&xencode_dir, &run1).unwrap();
 
@@ -87,6 +88,7 @@ fn runs_show_joins_session_checks_and_reports_unverified_honestly() {
         approvals: Vec::new(),
         recording: None,
         note: String::new(),
+        computer: None,
     };
     xencode_context_rs::append_run(&xencode_dir, &run2).unwrap();
 

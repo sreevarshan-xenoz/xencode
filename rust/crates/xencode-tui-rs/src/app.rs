@@ -304,6 +304,8 @@ pub(crate) struct AgentRun {
     /// output whole — that is what makes it replayable — so it only exists
     /// while `session_recording` is on.
     pub(crate) session: Option<xencode_context_rs::SessionWriter>,
+    /// Which computer backend this run was bound to (AF-4).
+    pub(crate) computer: Option<String>,
 }
 
 /// A pane-boundary divider the mouse is holding (`V-7`).
@@ -3933,6 +3935,7 @@ impl<'a> App<'a> {
             resume_history: Vec::new(),
             round_hook: None,
             stop_flag: None,
+            computer: Some(self.config.computer_backend.clone()),
         }
     }
 
@@ -10284,6 +10287,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         resume_history,
         round_hook,
         stop_flag,
+        computer,
     } = run;
     let turn_started = std::time::Instant::now();
     // Open the power window beside the clock, so both cover the same span: what
@@ -10813,6 +10817,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         approvals,
         recording,
         note: String::new(),
+        computer,
     };
     let _ = xencode_context_rs::append_run(&trace_dir, &run_record);
     // QTR-4: record this turn's writes on the checkpoint branch, so `/rewind`

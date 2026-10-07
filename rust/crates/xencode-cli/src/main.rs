@@ -307,6 +307,15 @@ enum Commands {
         action: RemoteAction,
     },
 
+    /// Manage and inspect registered computer backends (AF-4)
+    Computers {
+        #[command(subcommand)]
+        action: Option<ComputersAction>,
+        /// Output results as JSON
+        #[arg(long, global = true)]
+        json: bool,
+    },
+
     /// Repository insights from the .xencode snapshot: broken imports,
     /// import cycles, hub files and orphans
     Advise {
@@ -1178,6 +1187,27 @@ enum RemoteAction {
     },
 }
 
+#[derive(Subcommand, Debug, Clone)]
+enum ComputersAction {
+    /// List all registered computer backends (default)
+    List,
+    /// Show details of a specific computer backend
+    Show {
+        /// Computer backend identifier (colab, ssh, docker)
+        name: String,
+    },
+    /// Set the active computer backend
+    Use {
+        /// Computer backend identifier (colab, ssh, docker)
+        name: String,
+    },
+    /// Probe connectivity to a computer backend
+    Probe {
+        /// Computer backend identifier (colab, ssh, docker)
+        name: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum ModelAction {
     /// List all installed Ollama models
@@ -1828,6 +1858,7 @@ async fn main() {
         Commands::History { action } => run_history(action),
         Commands::Colab { action } => run_colab(action).await,
         Commands::Remote { action } => run_remote(action),
+        Commands::Computers { action, json } => run_computers(action, json).await,
         Commands::Bootstrap {
             path,
             check,
@@ -4070,6 +4101,143 @@ fn run_remote(action: RemoteAction) -> Result<(), String> {
             };
             println!("  remote port: {rport}");
             Ok(())
+        }
+    }
+}
+
+async fn run_computers(action: Option<ComputersAction>, json: bool) -> Result<(), String> {
+    let bins = match xencode_colab_rs::resolve_binaries() {
+        Ok(b) => b,
+        Err(_) => {
+            let colab_path = xencode_colab_rs::which("colab")
+                .unwrap_or_else(|| std::path::PathBuf::from("colab"));
+            let ssh_path = xencode_colab_rs::which("ssh")
+                .unwrap_or_else(|| std::path::PathBuf::from("ssh"));
+            xencode_colab_rs::Binaries {
+                colab: colab_path,
+                ssh: ssh_path,
+            }
+        }
+    };
+    let config = XencodeConfig::load().map_err(|e| e.to_string())?;
+    let key_path = XencodeConfig::config_dir()
+        .map_err(|e| e.to_string())?
+        .join(xencode_colab_rs::KEY_FILENAME);
+    let registry = xencode_colab_rs::BackendRegistry::default();
+
+    match action.unwrap_or(ComputersAction::List) {
+        ComputersAction::List => {
+            let list = registry.list_computers(&bins, &key_path);
+            if json {
+                let mut json_items = Vec::new();
+                for c in &list {
+                    json_items.push(serde_json::json!({
+                        "id": c.id,
+                        "kind": c.kind,
+                        "description": c.description,
+                        "available": c.available,
+                        "detail": c.detail,
+                        "active": c.id == config.computer_backend,
+                    }));
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json_items).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+
+            println!("Registered computer backends:");
+            for c in &list {
+                let marker = if c.id == config.computer_backend {
+                    "* "
+                } else {
+                    "  "
+                };
+                let status = if c.available {
+                    "available"
+                } else {
+                    "unavailable"
+                };
+                println!(
+                    "{marker}{:<8} ({:<6}) — {} [{}: {}]",
+                    c.id, c.kind, c.description, status, c.detail
+                );
+            }
+            Ok(())
+        }
+        ComputersAction::Show { name } => {
+            let list = registry.list_computers(&bins, &key_path);
+            let item = list.into_iter().find(|c| c.id == name).ok_or_else(|| {
+                format!(
+                    "unknown computer backend `{name}`; available: {}",
+                    registry.available_backends().join(", ")
+                )
+            })?;
+            if json {
+                let doc = serde_json::json!({
+                    "id": item.id,
+                    "kind": item.kind,
+                    "description": item.description,
+                    "available": item.available,
+                    "detail": item.detail,
+                    "active": item.id == config.computer_backend,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?
+                );
+                return Ok(());
+            }
+            let active_str = if item.id == config.computer_backend {
+                " (active)"
+            } else {
+                ""
+            };
+            println!("Computer `{}`{active_str}:", item.id);
+            println!("  kind:        {}", item.kind);
+            println!("  description: {}", item.description);
+            println!(
+                "  status:      {}",
+                if item.available {
+                    "available"
+                } else {
+                    "unavailable"
+                }
+            );
+            println!("  detail:      {}", item.detail);
+            Ok(())
+        }
+        ComputersAction::Use { name } => {
+            if !registry.available_backends().contains(&name.as_str()) {
+                return Err(format!(
+                    "unknown computer backend `{name}`; available backends: {}",
+                    registry.available_backends().join(", ")
+                ));
+            }
+            let mut cfg = config;
+            cfg.computer_backend = name.clone();
+            cfg.save().map_err(|e| e.to_string())?;
+            println!("Active computer backend set to `{name}`.");
+            Ok(())
+        }
+        ComputersAction::Probe { name } => {
+            let backend = registry.resolve(&name, &bins, &key_path)?;
+            println!(
+                "Probing computer backend `{name}` (kind: {})...",
+                backend.kind()
+            );
+            let (avail, detail) = backend.is_available();
+            if !avail {
+                return Err(format!("computer `{name}` cannot be reached: {detail}"));
+            }
+            match backend.provision("probe-test", "none").await {
+                Ok(()) => {
+                    println!("Successfully connected to computer backend `{name}`.");
+                    Ok(())
+                }
+                Err(e) => Err(format!("computer `{name}` cannot be reached: {e}")),
+            }
         }
     }
 }
@@ -8953,14 +9121,19 @@ fn run_runs(action: Option<RunsAction>) -> Result<(), String> {
                     .filter(|a| a.decision.granted())
                     .count();
                 let denied = row.approvals.len() - granted;
+                let comp_info = match &row.computer {
+                    Some(c) => format!("  [{c}]"),
+                    None => String::new(),
+                };
                 println!(
-                    "{}  {}  {} asked ({} allowed, {} denied)  {}",
+                    "{}  {}  {} asked ({} allowed, {} denied)  {}{}",
                     row.run_id,
                     row.model.as_deref().unwrap_or("model ?"),
                     row.approvals.len(),
                     granted,
                     denied,
                     row.recording.as_deref().unwrap_or("no recording"),
+                    comp_info,
                 );
             }
             Ok(())
@@ -8987,6 +9160,9 @@ fn run_runs(action: Option<RunsAction>) -> Result<(), String> {
             }
             println!("run {}", row.run_id);
             println!("  model: {}", row.model.as_deref().unwrap_or("?"));
+            if let Some(c) = &row.computer {
+                println!("  computer: {c}");
+            }
             println!(
                 "  session: {}",
                 row.session.as_deref().unwrap_or("(none open)")

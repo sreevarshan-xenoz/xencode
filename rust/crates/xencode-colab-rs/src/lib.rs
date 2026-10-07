@@ -21,17 +21,23 @@
 pub mod backend;
 pub mod bootstrap;
 pub mod colab;
+pub mod docker;
 pub mod lifecycle;
 pub mod orchestrate;
 pub mod preflight;
+pub mod ssh;
 pub mod state;
 
-pub use backend::{Backend, BackendRegistry, BoxFuture, ComputerBackend, TransportCmd};
+pub use backend::{
+    Backend, BackendRegistry, BoxFuture, ComputerBackend, ComputerInfo, TransportCmd,
+};
 pub use bootstrap::bootstrap_script;
 pub use colab::{
     colab_new_argv, colab_sessions_argv, colab_stop_argv, exec_ssh_argv, forward_argv,
     parse_sessions, proxy_argv, proxy_command_opt, ColabBackend, SSH_USER,
 };
+pub use docker::DockerBackend;
+pub use ssh::SshBackend;
 pub use lifecycle::{
     point_config_at_forward, run_colab_down, run_colab_reconnect, run_colab_status, run_colab_up,
     UpOptions,
