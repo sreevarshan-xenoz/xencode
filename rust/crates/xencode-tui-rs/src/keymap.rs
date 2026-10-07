@@ -2446,12 +2446,13 @@ mod tests {
         tool: &str,
         class: crate::agent_tools::ToolClass,
     ) -> tokio::sync::oneshot::Receiver<crate::agent_tools::ApprovalAnswer> {
-        use crate::agent_tools::ApprovalRequest;
+        use crate::agent_tools::{ApprovalDraft, ApprovalRequest};
         let (responder, answer) = tokio::sync::oneshot::channel();
         app.approval_queue.push_back((
             ApprovalRequest {
                 tool: tool.into(),
                 class,
+                draft: ApprovalDraft::default(),
                 summary: format!("{tool} src/lib.rs"),
                 preview: "+fn hello() {}\n".into(),
             },

@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2591 tests passing, zero warnings (re-verified 2026-10-07, after `AF-5`; 19 ignored, so 2610 in the run)
+- [x] Workspace gates green — 16 crates, 2600 tests passing, zero warnings (re-verified 2026-10-07, after `AF-6`; 19 ignored, so 2619 in the run)
 
 ## Model Catalog Honesty
 
@@ -15657,7 +15657,7 @@ Three corrections the brief did not carry, each of which changes what should be 
 | A `Coworker` object with role, prompt, model policy, tool policy, memory scope, permissions | **rejected as written** in the P-10 register ("six named agent roles, each with own context/tools/model/worktree — the review's framing, not a measured need") and "`[agent.role]` policy tables — CAP-3: no role exists today that can act without the human"; `14 per-agent permission profiles` narrowed to `CAP-1`; recipes as data at `OR-9`; memory scope at `OR-8` | the role is a prompt and a policy, not a new type; only the **computer binding** and the **schedule** are missing → **AF-4** |
 | Persistent conversations, background work, activity history | Milestone `D`, `tasks_file.rs`, `run --detach`, `OR-2` (done), `AR-4`, `Session` naming/resume (`main.rs:487`) | shipped or planned as-is |
 | Human takeover of an agent's session | S item 29 → `OR-10`, narrowed on measured grounds: one ratatui surface cannot host a rival TUI in-process, so take-over means suspend ours and hand the terminal over | planned |
-| Review before saving | the approval prompt shows the tool and its argument; `Checkpoints` at `agent_tools.rs:3643` is record-**after**-approval | the resulting diff is never shown before the write → **AF-6** |
+| Review before saving | the approval overlay already shows the resulting diff (`I1-03`, `approval_preview`); what it did not do was bind the answer to the bytes it showed | the diff is shown; consent is now invalidated when the draft moves → **AF-6** (done) |
 | Per-agent budgets, fallback, health | `CX-7`/`CX-5`/`CX-4`, `OR-7`, `AR-8` | planned |
 | A knowledge graph built from the repo | P-10 register: a standalone persisted code-knowledge graph is declined because `CI-2` + `LSP-2` produce the same edges on demand | stays derived |
 | Personas, simulation, trajectories, competing scenarios | S item 33 "simulation mode" narrowed into `OR-10`; `QD-5` is the code-graph simulator; the README "ensemble reasoning" claim was deleted at `I4-02` for having no substance; agent voting is `QM-4` (report, never resolve) | nothing runs several candidate *implementations* and compares them → **AF-5** |
@@ -15792,6 +15792,27 @@ Three corrections the brief did not carry, each of which changes what should be 
   declining writes nothing anywhere — watched by checking the file's checksum before and after —
   and the review is invalidated when the draft changes, so an approval cannot be spent on a
   different edit than the one shown.
+  *Shipped:* the row's premise was half wrong, and the wrong half was the expensive part. The
+  overlay already painted a real unified diff — `approval_preview` computes it through
+  `similar::TextDiff` for `write_file`, `edit_file` and `edit_symbol`, and `describe_rewrites`
+  gives `ast_edit`, `rename` and `codemod` a per-file diff of the same shape (`I1-03`). What was
+  missing was that the approval was never bound to what it showed: `Approved` consented to a diff,
+  and the executor then wrote against the file as it happened to be. The preview and the
+  fingerprint of the files it was worked out from are now produced in one pass (`approval_shown`),
+  because a preview read at one moment and bytes hashed at another can describe two different
+  changes — and `Approved` re-checks the hash before spending itself. A file that moved is not
+  written over: the prompt is rebuilt from the contents as they now stand and asked again, up to
+  two re-reviews, after which the call is refused with the reason instead of landing unseen.
+  Verified live: an `ast_edit` shown `across 2 file(s)`, one of which the person edits while the
+  prompt is open, re-reviews as `across 1 file(s)` and leaves the edited file alone; with the
+  multi-file binding removed the same call finishes on one prompt. Declining writes nothing of
+  yours — a SHA-256 of every file outside `.xencode/` is taken before the prompt and after the
+  refusal and compared, and nothing moves and no checkpoint is recorded (the lesson draft a
+  refusal has always left under `.xencode/` for `/lesson` is the one file it does write, and the
+  checksum walk excludes it on purpose); with a denial made to fall through to the write, that
+  check fails by moving `a.txt` from `2c8b08da…` to `27dd8ed4…`. A diff too wide for the pane
+  is now counted whole before it is cut, so it says `80 of 401 lines shown; 200 added, 200 removed
+  in all` rather than ending silently. 2600 tests passing; clippy clean.
 
 ### Counting
 

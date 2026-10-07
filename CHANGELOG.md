@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `AF-6`: an approval is consent to the change it showed
+
+The approval prompt already painted the real diff of the proposed edit. What it did not do was
+hold that answer to the bytes it had just displayed: if the file changed while the prompt was
+open — a second editor, a formatter, the agent's own earlier step — `y` was spent on a review of a
+change that no longer existed, and the write landed whatever the file looked like at that moment.
+
+- The shown diff and the fingerprint of the files it was computed from are now taken in one pass
+  over the tree, so the two cannot describe different versions of the same change.
+- Answering `y` re-checks those files first. A file that moved is not written over: the prompt is
+  rebuilt from the contents as they now stand and asked again, so what is agreed to is what lands.
+- A file that keeps moving is stopped rather than worn down — after two re-reviews the call is
+  refused with the reason, and nothing is written.
+- `a` (allow everything like this) is the person waiving the per-change review, so it grants and
+  writes; there is no review left to invalidate.
+- Multi-file changes are covered, not just single-file writes: an `ast_edit`, `rename` or
+  `codemod` is shown as a diff per file, and every one of those files is re-checked. An edit
+  offered across two files where the person then edits one of them is re-reviewed as one file,
+  and the edited file is left as they left it.
+- Declining writes nothing of yours. This is watched by checksumming every file in the tree before
+  the prompt and after the refusal: the digests are identical, no new file appears, and no undo
+  record is created for a change that never happened. The one thing a refusal still writes is the
+  lesson draft under `.xencode/` that `n` has always left for `/lesson` — nothing outside it moves.
+- A diff too large for the terminal pane is counted whole before it is shortened, so it reports
+  `80 of 401 lines shown; 200 added, 200 removed in all` instead of stopping without saying so.
+
 ### Added — `AF-5`: competing candidate implementations on isolated branches
 
 A question with two or three defensible answers can now be handed to the machine as competing

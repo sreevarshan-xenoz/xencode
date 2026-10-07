@@ -280,6 +280,8 @@ fn queue_prompt(app: &mut App<'static>, tool: &str, class: xencode_tui_rs::agent
             class,
             summary: format!("{tool} src/lib.rs"),
             preview: "@@ -1,2 +1,3 @@\n-fn old() {}\n+fn hello() {}\n+fn world() {}\n".into(),
+            // A rendered stub, not a gated call: nothing is bound to re-check.
+            draft: Default::default(),
         },
         responder,
     ));
