@@ -2023,7 +2023,7 @@ fn advise_detail_text(app: &App) -> String {
     };
     let (icon, _) = advise_kind_style(a.kind, app);
     format!(
-        "{icon} {}\nkind: {:?}\nfile: {}\n\nPress o to open the file in the editor, Enter/Esc back to the list.",
+        "{icon} {}\nkind: {:?}\nfile: {}\n\nPress o to open the file in the editor, p to propose as goal/task, Enter/Esc back to the list.",
         a.message, a.kind, a.file
     )
 }

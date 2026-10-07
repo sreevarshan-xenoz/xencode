@@ -95,7 +95,7 @@ const COMMANDS: &[Binding] = &[
         "blast radius of one file (crates · files · churn)",
     ),
     ("/bytebot <task>", "autonomous task execution"),
-    ("/plan [clear]", "expand or clear the agent's todo list"),
+    ("/plan [clear|accept|decline]", "expand, clear, or respond to proposed plan tasks"),
     (
         "/rewind [turns] [--force]",
         "undo the agent's file changes (session-only), refusing files edited by hand",

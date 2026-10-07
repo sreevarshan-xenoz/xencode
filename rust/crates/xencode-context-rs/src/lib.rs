@@ -73,7 +73,8 @@ pub mod worktree;
 
 pub use advise::{
     advise, advise_from_snapshot, affected_dependents, broken_imports, find_cycles, hub_files,
-    orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
+    orphan_files, Advice, AdviceKind, FailingCheckObservation, ProposedTask, AFFECTED_MAX_HOPS,
+    HUB_MIN_OUT,
 };
 pub use anchor::{
     discover, is_current, prove, render, write_anchor, AnchorMeta, ANCHOR_META_FILE,

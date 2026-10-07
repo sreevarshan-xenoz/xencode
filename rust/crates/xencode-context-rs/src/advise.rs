@@ -302,6 +302,104 @@ pub fn advise_from_snapshot(root: &Path) -> Result<Vec<Advice>, crate::ContextEr
     Ok(advise(&rust_files, &symbols, &graph))
 }
 
+/// An observation derived from a failing check, test, or dependency (AE-6).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FailingCheckObservation {
+    /// Name of the check, test, or dependency that failed.
+    pub check_name: String,
+    /// Target execution command for the check.
+    pub target_command: String,
+    /// Number of runs across which the failure was observed.
+    pub run_count: u32,
+    /// Failure class (e.g. "Introduced", "PreExisting", or "Flaky").
+    pub failure_class: String,
+    /// Detailed observation sentence.
+    pub observation: String,
+}
+
+/// A proposed goal / task offered by an observation (AE-6).
+/// Each failing check observation offers exactly one task.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProposedTask {
+    pub name: String,
+    pub command: String,
+    pub source: String,
+}
+
+impl FailingCheckObservation {
+    pub fn new(
+        check_name: impl Into<String>,
+        target_command: impl Into<String>,
+        run_count: u32,
+        failure_class: impl Into<String>,
+    ) -> Self {
+        let name = check_name.into();
+        let cmd = target_command.into();
+        let class = failure_class.into();
+        let observation = format!(
+            "check `{name}` failed across {run_count} run(s) (class: {class})"
+        );
+        Self {
+            check_name: name,
+            target_command: cmd,
+            run_count,
+            failure_class: class,
+            observation,
+        }
+    }
+
+    /// One failing-check observation offers exactly one task (AE-6).
+    pub fn offer_task(&self) -> ProposedTask {
+        ProposedTask {
+            name: format!("fix failing check: {}", self.check_name),
+            command: self.target_command.clone(),
+            source: self.observation.clone(),
+        }
+    }
+}
+
+impl ProposedTask {
+    /// Question presented to the user before starting work.
+    pub fn question(&self) -> String {
+        format!(
+            "Observation: {}. Would you like to create task '{}' (`{}`)?",
+            self.source, self.name, self.command
+        )
+    }
+
+    /// Accept the proposed task: puts it into `tasks_file` with the observation as its source.
+    pub fn accept(
+        &self,
+        registry: &xencode_core_rs::tasks_file::FileTaskRegistry,
+    ) -> Result<xencode_core_rs::tasks_file::FileTask, xencode_core_rs::tasks::TaskError> {
+        registry.record_task(&self.name, &self.command, Some(&self.source))
+    }
+
+    /// Accept and start the proposed task, executing it and recording the observation source.
+    pub fn accept_and_start(
+        &self,
+        registry: &xencode_core_rs::tasks_file::FileTaskRegistry,
+    ) -> Result<xencode_core_rs::tasks_file::FileTask, xencode_core_rs::tasks::TaskError> {
+        registry.start_with_source(&self.name, &self.command, Some(&self.source))
+    }
+
+    /// Decline the proposed task, leaving the repository byte-identical.
+    pub fn decline(&self) {
+        // Intentionally does nothing. No file creation, no side effects.
+    }
+}
+
+impl Advice {
+    /// Convert repository insight into a proposed task offer (AE-6).
+    pub fn offer_task(&self) -> ProposedTask {
+        ProposedTask {
+            name: format!("resolve insight in {}", self.file),
+            command: format!("cargo check --file {}", self.file),
+            source: self.message.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,5 +571,79 @@ mod tests {
             .unwrap()
             .message
             .contains("src/a.rs"));
+    }
+
+    #[test]
+    fn one_failing_check_observation_offers_exactly_one_task() {
+        let obs = FailingCheckObservation::new(
+            "auth::tests::token_expiry",
+            "cargo test --test auth",
+            3,
+            "Introduced",
+        );
+        let task = obs.offer_task();
+        assert_eq!(task.name, "fix failing check: auth::tests::token_expiry");
+        assert_eq!(task.command, "cargo test --test auth");
+        assert_eq!(
+            task.source,
+            "check `auth::tests::token_expiry` failed across 3 run(s) (class: Introduced)"
+        );
+        assert!(task.question().contains("Would you like to create task"));
+    }
+
+    #[test]
+    fn accepting_puts_task_in_tasks_file_and_declining_leaves_repo_byte_identical() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("xencode-ae6-test-{}-{}", std::process::id(), nonce));
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 1. Initial state
+        let dummy_file = root.join("marker.txt");
+        std::fs::write(&dummy_file, "clean repo bytes\n").unwrap();
+        let read_dir_bytes = || {
+            let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+            for e in std::fs::read_dir(&root).unwrap() {
+                let e = e.unwrap();
+                let path = e.path();
+                if path.is_file() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let content = std::fs::read(&path).unwrap();
+                    entries.push((name, content));
+                }
+            }
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            entries
+        };
+        let before_bytes = read_dir_bytes();
+
+        let obs = FailingCheckObservation::new(
+            "network::timeout",
+            "cargo test --test network",
+            3,
+            "PreExisting",
+        );
+        let proposal = obs.offer_task();
+
+        // 2. Declining leaves repository byte-identical
+        proposal.decline();
+        let after_decline_bytes = read_dir_bytes();
+        assert_eq!(before_bytes, after_decline_bytes, "Declining must leave repo byte-identical");
+
+        // 3. Accepting puts task into tasks_file with observation as source
+        let registry = xencode_core_rs::tasks_file::FileTaskRegistry::new(&root);
+        let accepted = proposal.accept(&registry).expect("accept proposal");
+        assert_eq!(accepted.name, "fix failing check: network::timeout");
+        assert_eq!(accepted.command, "cargo test --test network");
+        assert_eq!(accepted.source.as_deref(), Some(obs.observation.as_str()));
+
+        // Check persisted tasks on disk
+        let listed = registry.list().expect("list tasks");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].source.as_deref(), Some(obs.observation.as_str()));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

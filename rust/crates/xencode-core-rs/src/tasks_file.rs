@@ -30,6 +30,9 @@ pub struct FileTask {
     /// Set when `stop` was requested; wins over the exit file so a killed
     /// task reads as `Killed` even though the wrapper reports a code.
     pub killed: bool,
+    /// Originating observation source (e.g. failing check or advice) (AE-6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// Registry backed by `<root>/tasks.json` plus per-task side files.
@@ -84,8 +87,42 @@ impl FileTaskRegistry {
         crate::atomic::write_atomic(&self.tasks_file(), json.as_bytes()).map_err(TaskError::Spawn)
     }
 
-    /// Spawn `command` detached from this process and record it.
-    pub fn start(&self, name: &str, command: &str) -> Result<FileTask, TaskError> {
+    /// Record a task with an optional observation source without immediately running it (AE-6).
+    pub fn record_task(
+        &self,
+        name: &str,
+        command: &str,
+        source: Option<&str>,
+    ) -> Result<FileTask, TaskError> {
+        let mut tasks = self.list()?;
+        let id = tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+        fs::create_dir_all(&self.root).map_err(TaskError::Spawn)?;
+
+        let task = FileTask {
+            id,
+            name: if name.is_empty() {
+                command.to_string()
+            } else {
+                name.to_string()
+            },
+            command: command.to_string(),
+            pid: 0,
+            started_at: unix_now_secs(),
+            killed: false,
+            source: source.map(|s| s.to_string()),
+        };
+        tasks.push(task.clone());
+        self.save(&tasks)?;
+        Ok(task)
+    }
+
+    /// Spawn `command` detached from this process with an optional observation source and record it (AE-6).
+    pub fn start_with_source(
+        &self,
+        name: &str,
+        command: &str,
+        source: Option<&str>,
+    ) -> Result<FileTask, TaskError> {
         let mut tasks = self.list()?;
         let id = tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
         fs::create_dir_all(&self.root).map_err(TaskError::Spawn)?;
@@ -123,6 +160,7 @@ impl FileTaskRegistry {
             pid: child.id(),
             started_at: unix_now_secs(),
             killed: false,
+            source: source.map(|s| s.to_string()),
         };
         // std::process::Child leaves the child running when dropped, which
         // is exactly what we want here.
@@ -130,6 +168,11 @@ impl FileTaskRegistry {
         tasks.push(task.clone());
         self.save(&tasks)?;
         Ok(task)
+    }
+
+    /// Spawn `command` detached from this process and record it.
+    pub fn start(&self, name: &str, command: &str) -> Result<FileTask, TaskError> {
+        self.start_with_source(name, command, None)
     }
 
     fn find<'a>(&self, tasks: &'a [FileTask], id: u64) -> Result<&'a FileTask, TaskError> {
@@ -151,6 +194,7 @@ impl FileTaskRegistry {
         match self.exit_code(task.id) {
             Some(_) if task.killed => TaskStatus::Killed,
             Some(code) => TaskStatus::Exited(code),
+            None if task.pid == 0 => TaskStatus::Running,
             None if pid_alive(task.pid) => TaskStatus::Running,
             None => TaskStatus::Killed,
         }
@@ -371,6 +415,7 @@ mod tests {
             pid: u32::MAX,
             started_at: unix_now_secs(),
             killed: false,
+            source: None,
         };
         reg.save(std::slice::from_ref(&ghost)).unwrap();
         assert_eq!(reg.status(&ghost), TaskStatus::Killed);
