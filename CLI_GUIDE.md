@@ -3941,7 +3941,7 @@ from a dry run, advisory state from the local corpus. Offline reads as
 "unknown", never "clean"; a dry run that never ran says so. Exits non-zero on
 any vulnerable dependency.
 
-### `xencode agents [--format text|json] [--contract] [--health] [--agent <name>]`
+### `xencode agents [--format text|json] [--contract] [--health] [--agent <name>] [--build-package <id>] [--package <path>] [--resume] [--test-cmd <cmd>]`
 
 List installed roster agents with versions and how each was installed
 (`mise:<tool>`, cargo, npm, system, user-local, unknown — only what the path
@@ -3957,6 +3957,18 @@ when `--agent <name>` is provided). Probes are strictly read-only and never
 modify files, credentials, or agent configurations. When authentication is
 expired, it reports the expiration details and the exact terminal command a
 developer can run to log in.
+
+`--build-package <task-id>` builds a worker continuation package from the current
+repository diff, test exit codes, and recent event stream. The package is saved to
+`.xencode/packages/<task-id>.json` and contains strictly observed facts; any
+self-reported progress percentages or completion assertions are rejected.
+
+`--package <path>` inspects a saved continuation package and formats what the next
+worker needs to know as actionable resumption context.
+
+`--resume` executes task resumption from a package using the designated worker
+(`--agent <name>`), re-running test commands to observe completion based on exit codes.
+
 
 
 ### `xencode impact <file> [--limit 15] [--format text|json]`

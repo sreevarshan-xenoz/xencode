@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2612 tests passing, zero warnings (re-verified 2026-10-07, after `AR-8`; 19 ignored, so 2631 in the run)
+- [x] Workspace gates green — 16 crates, 2621 tests passing, zero warnings (re-verified 2026-10-07, after `AR-7`; 19 ignored, so 2640 in the run)
 
 ## Model Catalog Honesty
 
@@ -12120,7 +12120,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       `xencode tasks` remains a separate registry and is not part of AR-6.
       **Done-when:** bounded execution and descendant cleanup are verified by the
       subprocess checks in `xencode-core-rs`.
-- [ ] **AR-7 — the handoff package.** Build "what the next worker needs to know" purely
+- [x] **AR-7 — the handoff package.** Build "what the next worker needs to know" purely
       from observed facts: the diff, the tests xencode itself ran and their exit codes,
       the last normalised events, and why the previous worker stopped.
       **Done-when:** a second worker resumes a real task from this package alone, and the
@@ -14837,7 +14837,7 @@ Checked against what exists today, clause by clause, rather than asserted:
 `AR-` series: `AR-1`, `AR-2`, `AR-4`, `AR-5` and `AR-10` are done and `AR-9`'s
 protocol is built, but it carries two variants nothing has produced yet
 (`PermissionRequested`, `Error`), which §X-4 still lists as open evidence gaps;
-`AR-3`, `AR-7` are unchecked (`AR-8` is done). So this clause is *mostly* true of the code.
+`AR-3` is unchecked (`AR-7`, `AR-8` are done). So this clause is *mostly* true of the code.
 **Context explainable** is true of one part only: `QD-1` and `QD-2` ship today and
 explain a change's blast radius, while `GH-2`'s `/why <file>:<line>` is planned in
 W10. **Actions policy-bound** is W7 (`CAP-*`, `SE-*`, `PR-*`), planned.

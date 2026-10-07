@@ -33,6 +33,7 @@ pub mod health;
 pub mod probe;
 pub mod protocol;
 pub mod roster;
+pub mod worker_package;
 
 pub use capture::{
     find_captures, read_capture, write_capture, Capture, Metadata, RawLine, StoredEvent,
@@ -52,4 +53,8 @@ pub use protocol::{AgentEvent, Origin};
 pub use roster::{
     inventory, provenance_of_help_cell, AgentSpec, InstallSource, InstalledAgent, Provenance,
     ROSTER,
+};
+pub use worker_package::{
+    resume_task_from_package, ObservedDiff, ResumptionOutcome, VerifiedTestRun, WorkerPackage,
+    WorkerStopReason,
 };
