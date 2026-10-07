@@ -540,4 +540,81 @@ mod tests {
             SERVER_NAME
         );
     }
+
+    #[test]
+    fn worker_adapter_registry_resolves_mcp_adapter() {
+        let registry = WorkerAdapterRegistry::default();
+        assert!(registry.available().contains(&"mcp"));
+        let adapter = registry.get("mcp").expect("mcp adapter must be mounted");
+        assert_eq!(adapter.id(), "mcp");
+        assert_eq!(adapter.protocol(), "mcp-stdio-v1");
+        assert_eq!(adapter.exposed_tools().len(), 6);
+    }
+}
+
+/// A worker adapter interface exposing tool execution capabilities (M-5, AF-3).
+pub trait WorkerAdapter: Send + Sync {
+    /// Identifier of the adapter (e.g. "mcp").
+    fn id(&self) -> &'static str;
+    /// Description of the adapter.
+    fn description(&self) -> &'static str;
+    /// Protocol used by the adapter.
+    fn protocol(&self) -> &'static str;
+    /// List tools exposed by this adapter.
+    fn exposed_tools(&self) -> Vec<String>;
+}
+
+/// Statically linked MCP stdio worker adapter (M-5).
+#[derive(Debug, Default, Clone)]
+pub struct McpWorkerAdapter;
+
+impl WorkerAdapter for McpWorkerAdapter {
+    fn id(&self) -> &'static str {
+        "mcp"
+    }
+
+    fn description(&self) -> &'static str {
+        "Model Context Protocol stdio server exposing workspace tools"
+    }
+
+    fn protocol(&self) -> &'static str {
+        "mcp-stdio-v1"
+    }
+
+    fn exposed_tools(&self) -> Vec<String> {
+        exposed_tool_names()
+    }
+}
+
+/// Statically linked mount point for worker adapters (AF-3).
+pub struct WorkerAdapterRegistry {
+    adapters: std::collections::BTreeMap<&'static str, Box<dyn WorkerAdapter>>,
+}
+
+impl Default for WorkerAdapterRegistry {
+    fn default() -> Self {
+        let mut reg = Self::new();
+        reg.register(Box::new(McpWorkerAdapter));
+        reg
+    }
+}
+
+impl WorkerAdapterRegistry {
+    pub fn new() -> Self {
+        Self {
+            adapters: std::collections::BTreeMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, adapter: Box<dyn WorkerAdapter>) {
+        self.adapters.insert(adapter.id(), adapter);
+    }
+
+    pub fn get(&self, id: &str) -> Option<&dyn WorkerAdapter> {
+        self.adapters.get(id).map(|a| a.as_ref())
+    }
+
+    pub fn available(&self) -> Vec<&'static str> {
+        self.adapters.keys().copied().collect()
+    }
 }

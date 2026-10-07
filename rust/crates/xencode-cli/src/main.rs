@@ -146,6 +146,10 @@ mod query_stream {
 #[derive(Parser)]
 #[command(name = "xencode", version, about, long_about = None)]
 struct Cli {
+    /// Dump the engine composition and resolved configuration as JSON (AF-3)
+    #[arg(long)]
+    dump_config: bool,
+
     /// Defaults to the TUI when omitted
     #[command(subcommand)]
     command: Option<Commands>,
@@ -1041,7 +1045,13 @@ enum McpAction {
 #[derive(Subcommand)]
 enum ConfigAction {
     /// Display current configuration
-    Show,
+    Show {
+        /// Include full engine composition summary
+        #[arg(long)]
+        composition: bool,
+    },
+    /// Dump the engine composition and resolved configuration as JSON (AF-3)
+    Dump,
     /// Set a configuration value
     Set {
         /// Configuration key (e.g., default_model, ollama_url). A key naming a
@@ -1577,6 +1587,14 @@ enum TaskAction {
 async fn main() {
     let cli = Cli::parse();
 
+    if cli.dump_config {
+        if let Err(e) = run_dump_config() {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // Bare `xencode` launches the TUI, as documented in the README
     let result = match cli.command.unwrap_or(Commands::Tui) {
         Commands::Scan {
@@ -2090,14 +2108,29 @@ fn run_migrate(dry_run: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn run_dump_config() -> Result<(), String> {
+    let config = XencodeConfig::load().map_err(|e| e.to_string())?;
+    let summary = config.composition_summary();
+    let json = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?;
+    println!("{json}");
+    Ok(())
+}
+
 fn run_config(action: ConfigAction) -> Result<(), String> {
     match action {
-        ConfigAction::Show => {
+        ConfigAction::Show { composition } => {
             let config = XencodeConfig::load().map_err(|e| e.to_string())?;
-            let json = config.to_json().map_err(|e| e.to_string())?;
-            println!("{json}");
+            if composition {
+                let summary = config.composition_summary();
+                let json = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?;
+                println!("{json}");
+            } else {
+                let json = config.to_json().map_err(|e| e.to_string())?;
+                println!("{json}");
+            }
             Ok(())
         }
+        ConfigAction::Dump => run_dump_config(),
         ConfigAction::Set {
             key,
             value,
@@ -2436,6 +2469,28 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 }
                 "colab_quant" => config.colab.quant = value.clone(),
                 "colab_auto_connect" => config.colab.auto_connect = parse_bool(&value)?,
+                "composition_profile" => {
+                    let trimmed = value.trim();
+                    if xencode_config_rs::CompositionProfile::for_name(trimmed).is_none() {
+                        let known = xencode_config_rs::CompositionProfile::known_profiles().join(", ");
+                        return Err(format!("composition_profile must be one of: {known}"));
+                    }
+                    config.composition_profile = trimmed.to_string();
+                }
+                "computer_backend" => {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        return Err("computer_backend cannot be empty".to_string());
+                    }
+                    config.computer_backend = trimmed.to_string();
+                }
+                "worker_adapter" => {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        return Err("worker_adapter cannot be empty".to_string());
+                    }
+                    config.worker_adapter = trimmed.to_string();
+                }
                 _ => return Err(format!("unknown config key: {key}")),
             }
             if dry_run {

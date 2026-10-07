@@ -394,6 +394,18 @@ pub struct XencodeConfig {
     #[serde(default = "default_disclosure_level")]
     pub disclosure_level: u8,
 
+    /// Engine composition profile over CAP-1 capabilities: "coding", "minimal", "autonomous", "research", "local-only" (AF-3).
+    #[serde(default = "default_composition_profile")]
+    pub composition_profile: String,
+
+    /// Statically-linked computer backend for remote compute: "colab", "ssh", "docker" (AF-3, AF-4).
+    #[serde(default = "default_computer_backend")]
+    pub computer_backend: String,
+
+    /// Statically-linked worker adapter: "mcp" (AF-3).
+    #[serde(default = "default_worker_adapter")]
+    pub worker_adapter: String,
+
     /// Agent tool-approval mode: "ask", "edit-allow", "all-allow", "plan"
     /// (read-only, enforced) or "autonomous" (local writes free, off-box denied).
     /// Unknown values fall back to "ask" at decision time.
@@ -926,6 +938,18 @@ fn default_hardware_profile() -> String {
     "auto".to_string()
 }
 
+fn default_composition_profile() -> String {
+    "coding".to_string()
+}
+
+fn default_computer_backend() -> String {
+    "colab".to_string()
+}
+
+fn default_worker_adapter() -> String {
+    "mcp".to_string()
+}
+
 fn default_agent_approval() -> String {
     "ask".to_string()
 }
@@ -1007,6 +1031,9 @@ impl Default for XencodeConfig {
             show_line_numbers: true,
             mouse_capture: true,
             disclosure_level: default_disclosure_level(),
+            composition_profile: default_composition_profile(),
+            computer_backend: default_computer_backend(),
+            worker_adapter: default_worker_adapter(),
             agent_approval: default_agent_approval(),
             agent_max_rounds: default_agent_max_rounds(),
             agent_command_timeout: default_agent_command_timeout(),
@@ -1155,6 +1182,26 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl XencodeConfig {
+    /// Composition summary of the configured engine and statically mounted subsystems (AF-3).
+    pub fn composition_summary(&self) -> crate::composition::CompositionSummary {
+        let profile = crate::composition::CompositionProfile::for_name(&self.composition_profile)
+            .unwrap_or_else(|| {
+                crate::composition::CompositionProfile::for_name("coding")
+                    .expect("coding profile must exist")
+            });
+
+        crate::composition::CompositionSummary {
+            config_version: self.config_version,
+            profile: profile.name,
+            capabilities: profile.capabilities,
+            computer_backend: self.computer_backend.clone(),
+            available_computer_backends: vec!["colab".to_string(), "ssh".to_string(), "docker".to_string()],
+            worker_adapter: self.worker_adapter.clone(),
+            available_worker_adapters: vec!["mcp".to_string()],
+            known_plugin_permissions: vec!["prompt".to_string(), "hooks".to_string()],
+        }
+    }
+
     /// Returns the directory the settings file lives in: `$XCODE_CONFIG_DIR`
     /// when set (tests and portable installs), else the location
     /// [`crate::paths`] resolves for settings — `~/.config/xencode`, or

@@ -40,3 +40,4 @@ pub mod worker_bridge;
 pub use app::{
     run_agent, run_app, serve_scripted_answers, AgentRunError, AgentRunOptions, AgentRunOutput,
 };
+pub use mcp_serve::{McpWorkerAdapter, WorkerAdapter, WorkerAdapterRegistry};

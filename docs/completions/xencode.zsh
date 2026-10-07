@@ -15,6 +15,7 @@ _xencode() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" : \
+'--dump-config[Dump the engine composition and resolved configuration as JSON (AF-3)]' \
 '-h[Print help]' \
 '--help[Print help]' \
 '-V[Print version]' \
@@ -54,6 +55,13 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (show)
 _arguments "${_arguments_options[@]}" : \
+'--composition[Include full engine composition summary]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(dump)
+_arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0
@@ -86,6 +94,10 @@ _arguments "${_arguments_options[@]}" : \
         curcontext="${curcontext%:*:*}:xencode-config-help-command-$line[1]:"
         case $line[1] in
             (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(dump)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -1901,6 +1913,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(dump)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (set)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2903,21 +2919,33 @@ _xencode__subcmd__colab__subcmd__up_commands() {
 _xencode__subcmd__config_commands() {
     local commands; commands=(
 'show:Display current configuration' \
+'dump:Dump the engine composition and resolved configuration as JSON (AF-3)' \
 'set:Set a configuration value' \
 'reset:Reset configuration to defaults' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode config commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__config__subcmd__dump_commands] )) ||
+_xencode__subcmd__config__subcmd__dump_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode config dump commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__config__subcmd__help_commands] )) ||
 _xencode__subcmd__config__subcmd__help_commands() {
     local commands; commands=(
 'show:Display current configuration' \
+'dump:Dump the engine composition and resolved configuration as JSON (AF-3)' \
 'set:Set a configuration value' \
 'reset:Reset configuration to defaults' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode config help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__config__subcmd__help__subcmd__dump_commands] )) ||
+_xencode__subcmd__config__subcmd__help__subcmd__dump_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode config help dump commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__config__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__config__subcmd__help__subcmd__help_commands() {
@@ -3208,10 +3236,16 @@ _xencode__subcmd__help__subcmd__colab__subcmd__up_commands() {
 _xencode__subcmd__help__subcmd__config_commands() {
     local commands; commands=(
 'show:Display current configuration' \
+'dump:Dump the engine composition and resolved configuration as JSON (AF-3)' \
 'set:Set a configuration value' \
 'reset:Reset configuration to defaults' \
     )
     _describe -t commands 'xencode help config commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__config__subcmd__dump_commands] )) ||
+_xencode__subcmd__help__subcmd__config__subcmd__dump_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help config dump commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__config__subcmd__reset_commands] )) ||
 _xencode__subcmd__help__subcmd__config__subcmd__reset_commands() {

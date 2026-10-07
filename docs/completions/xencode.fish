@@ -1,6 +1,6 @@
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_xencode_global_optspecs
-    string join \n h/help V/version
+    string join \n dump-config h/help V/version
 end
 
 function __fish_xencode_needs_command
@@ -24,6 +24,7 @@ function __fish_xencode_using_subcommand
     contains -- $cmd[1] $argv
 end
 
+complete -c xencode -n "__fish_xencode_needs_command" -l dump-config -d 'Dump the engine composition and resolved configuration as JSON (AF-3)'
 complete -c xencode -n "__fish_xencode_needs_command" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_needs_command" -s V -l version -d 'Print version'
 complete -c xencode -n "__fish_xencode_needs_command" -f -a "scan" -d 'Scan a workspace and list all entries'
@@ -81,16 +82,20 @@ complete -c xencode -n "__fish_xencode_using_subcommand scan" -l format -d 'Outp
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand scan" -l hidden -d 'Include hidden files and directories'
 complete -c xencode -n "__fish_xencode_using_subcommand scan" -s h -l help -d 'Print help'
-complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -s h -l help -d 'Print help'
-complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -f -a "show" -d 'Display current configuration'
-complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -f -a "set" -d 'Set a configuration value'
-complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -f -a "reset" -d 'Reset configuration to defaults'
-complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show set reset help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show dump set reset help" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show dump set reset help" -f -a "show" -d 'Display current configuration'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show dump set reset help" -f -a "dump" -d 'Dump the engine composition and resolved configuration as JSON (AF-3)'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show dump set reset help" -f -a "set" -d 'Set a configuration value'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show dump set reset help" -f -a "reset" -d 'Reset configuration to defaults'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and not __fish_seen_subcommand_from show dump set reset help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from show" -l composition -d 'Include full engine composition summary'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from show" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from dump" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from set" -l dry-run -d 'Validate and report the change without writing config.json'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from set" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from reset" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "show" -d 'Display current configuration'
+complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "dump" -d 'Dump the engine composition and resolved configuration as JSON (AF-3)'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "set" -d 'Set a configuration value'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "reset" -d 'Reset configuration to defaults'
 complete -c xencode -n "__fish_xencode_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
@@ -638,6 +643,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand help; and not __fish_see
 complete -c xencode -n "__fish_xencode_using_subcommand help; and not __fish_seen_subcommand_from scan config models cache audit advisories deps query memory tasks worktree colab remote advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help" -f -a "tui" -d 'Launch the Terminal User Interface'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and not __fish_seen_subcommand_from scan config models cache audit advisories deps query memory tasks worktree colab remote advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "show" -d 'Display current configuration'
+complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "dump" -d 'Dump the engine composition and resolved configuration as JSON (AF-3)'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "set" -d 'Set a configuration value'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "reset" -d 'Reset configuration to defaults'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from models" -f -a "list" -d 'List all installed Ollama models'

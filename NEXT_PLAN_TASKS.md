@@ -15728,6 +15728,7 @@ Three corrections the brief did not carry, each of which changes what should be 
   entirely from config with no `match` on its identity in the loop, a manifest that asks for a
   permission it does not have still refuses the load, and `xencode --dump-config`-equivalent
   prints the resulting composition so a person can diff it.
+  *Shipped:* Engine composition discipline implemented via statically linked subsystems selected by configuration without conditional matching on identity. `CompositionProfile` and `CompositionSummary` in `xencode-config-rs` map capability grants (`filesystem.read`, `filesystem.write`, `shell.execute`, `network.request`, `external.mcp`). `ComputerBackend` trait and `BackendRegistry` in `xencode-colab-rs` provide dynamically dispatched mount point. `WorkerAdapter` trait and `WorkerAdapterRegistry` in `xencode-tui-rs` mount tool exposing adapters. `xencode --dump-config` and `xencode config dump` output resolved composition JSON for inspection and diffing. 2569 tests passing; clippy clean.
 
 - **AF-4 — a computer registry, and an agent bound to one.** *Effort: M.* `xencode-colab-rs`
   already has the right shape: a `Backend` trait with provision, `forward_command` and
