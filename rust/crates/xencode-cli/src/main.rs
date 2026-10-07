@@ -606,6 +606,18 @@ enum Commands {
         #[arg(long = "max-cost")]
         max_cost: Option<f64>,
 
+        /// Re-dispatch a killed or failed worker's task onto another agent (OR-7)
+        #[arg(long = "redispatch")]
+        redispatch_task: Option<String>,
+
+        /// Replacement agent to resume the re-dispatched task (OR-7)
+        #[arg(long = "replacement-agent")]
+        replacement_agent: Option<String>,
+
+        /// Process stop reason for the killed worker (e.g. signal:9, exit:137, timeout:300) (OR-7)
+        #[arg(long = "stop-reason")]
+        stop_reason: Option<String>,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -1914,6 +1926,9 @@ async fn main() {
             route_task,
             require_caps,
             max_cost,
+            redispatch_task,
+            replacement_agent,
+            stop_reason,
             format,
         } => run_agents(AgentsArgs {
             contract,
@@ -1926,6 +1941,9 @@ async fn main() {
             route_task: route_task.as_deref(),
             require_caps: &require_caps,
             max_cost,
+            redispatch_task: redispatch_task.as_deref(),
+            replacement_agent: replacement_agent.as_deref(),
+            stop_reason: stop_reason.as_deref(),
             format,
         }),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
@@ -7844,10 +7862,109 @@ struct AgentsArgs<'a> {
     route_task: Option<&'a str>,
     require_caps: &'a [String],
     max_cost: Option<f64>,
+    redispatch_task: Option<&'a str>,
+    replacement_agent: Option<&'a str>,
+    stop_reason: Option<&'a str>,
     format: OutputFormat,
 }
 
 fn run_agents(args: AgentsArgs<'_>) -> Result<(), String> {
+    if let Some(task_id) = args.redispatch_task {
+        let repo_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+        let initial_worker = args.target_agent.unwrap_or("failed-worker");
+        let replacement_worker = args.replacement_agent.unwrap_or("replacement-worker");
+
+        // Parse process stop reason
+        let stop_reason = if let Some(reason_str) = args.stop_reason {
+            if let Some(sig) = reason_str.strip_prefix("signal:") {
+                let code = sig
+                    .parse::<i32>()
+                    .map_err(|_| format!("invalid signal in '{reason_str}'"))?;
+                xencode_agents_rs::WorkerStopReason::Signal { signal: code }
+            } else if let Some(exit) = reason_str.strip_prefix("exit:") {
+                let code = exit
+                    .parse::<i32>()
+                    .map_err(|_| format!("invalid exit code in '{reason_str}'"))?;
+                xencode_agents_rs::WorkerStopReason::ExitCode { code }
+            } else if let Some(secs) = reason_str.strip_prefix("timeout:") {
+                let dur = secs
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid duration in '{reason_str}'"))?;
+                xencode_agents_rs::WorkerStopReason::TimedOut { duration_secs: dur }
+            } else {
+                xencode_agents_rs::WorkerStopReason::Signal { signal: 9 }
+            }
+        } else {
+            xencode_agents_rs::WorkerStopReason::Signal { signal: 9 }
+        };
+
+        let default_cmd = "cargo test".to_string();
+        let test_cmd_refs: Vec<&str> = if args.test_cmds.is_empty() {
+            vec![default_cmd.as_str()]
+        } else {
+            args.test_cmds.iter().map(String::as_str).collect()
+        };
+
+        let ledger_path = repo_dir.join(".xencode").join("task_ledger.jsonl");
+
+        let outcome = xencode_agents_rs::redispatch_failed_worker(
+            &repo_dir,
+            task_id,
+            initial_worker,
+            replacement_worker,
+            stop_reason,
+            &test_cmd_refs,
+            &ledger_path,
+            |context, _dir| {
+                if matches!(args.format, OutputFormat::Text) {
+                    println!(
+                        "Re-dispatching task '{task_id}' onto worker '{replacement_worker}'..."
+                    );
+                    println!("{context}");
+                }
+                Ok(0)
+            },
+        )?;
+
+        if matches!(args.format, OutputFormat::Json) {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&outcome).map_err(|e| e.to_string())?
+            );
+        } else {
+            println!("Task Re-dispatch Completed for '{}':", outcome.task_id);
+            println!(
+                "  Initial worker: {} ({})",
+                outcome.initial_worker,
+                outcome.initial_stop_reason.summary()
+            );
+            println!("  Replacement worker: {}", outcome.replacement_worker);
+            println!("  Verification tests passed: {}", outcome.all_tests_passed);
+            println!(
+                "  Preserved diff files ({}):",
+                outcome.preserved_diff.changed_files.len()
+            );
+            for f in &outcome.preserved_diff.changed_files {
+                println!("    * {f}");
+            }
+            println!(
+                "  Ledger entries logged ({}) to {}:",
+                outcome.ledger_entries.len(),
+                ledger_path.display()
+            );
+            for entry in &outcome.ledger_entries {
+                println!(
+                    "    - Attempt {}: worker '{}' -> passed: {}, stop reason: {}",
+                    entry.attempt,
+                    entry.worker,
+                    entry.passed,
+                    entry.stop_reason.summary()
+                );
+            }
+        }
+        return Ok(());
+    }
+
     if let Some(task_id) = args.route_task {
         let claims = xencode_agents_rs::probe_contract();
         let confirmed_caps_by_agent = xencode_agents_rs::confirmed_capabilities(&claims);
@@ -11414,6 +11531,42 @@ mod tests {
                 assert_eq!(cost, 1.50);
             }
             _ => panic!("expected agents --route"),
+        }
+    }
+
+    #[test]
+    fn agents_redispatch_parses() {
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "agents",
+            "--redispatch",
+            "task-789",
+            "--agent",
+            "initial-worker",
+            "--replacement-agent",
+            "second-worker",
+            "--stop-reason",
+            "signal:9",
+            "--test-cmd",
+            "cargo test",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Agents {
+                redispatch_task: Some(ref t),
+                agent: Some(ref a),
+                replacement_agent: Some(ref rep),
+                stop_reason: Some(ref s),
+                ref test_cmds,
+                ..
+            }) => {
+                assert_eq!(t, "task-789");
+                assert_eq!(a, "initial-worker");
+                assert_eq!(rep, "second-worker");
+                assert_eq!(s, "signal:9");
+                assert_eq!(test_cmds, &["cargo test"]);
+            }
+            _ => panic!("expected agents --redispatch"),
         }
     }
 

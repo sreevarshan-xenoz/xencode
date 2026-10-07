@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-7`: worker failure re-dispatch using continuation packages
+
+Tasks from terminated or failed workers can now be re-dispatched onto another worker agent (`xencode agents --redispatch <task> [--replacement-agent <worker>] [--stop-reason <reason>]`):
+
+- Preserves the uncommitted repository modifications and diffs when a worker process terminates, avoiding lost work.
+- Captures the failure reason directly from the process status (signal termination, exit code, timeout) rather than conversational prose.
+- Automatically logs both the initial failed run and the subsequent retry attempt into the task attempt ledger (`.xencode/task_ledger.jsonl`).
+
 ### Added — `OR-6`: capability-gated routing over probed contracts
 
 Task routing now selects workers strictly from probed capabilities, load capacity, and cost ceilings rather than vendor names (`xencode agents --route <task> [--require-cap <cap>...] [--max-cost <cost>]`):

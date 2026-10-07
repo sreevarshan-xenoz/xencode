@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap` — and clap's
   built-in `help`, 50 entries in the list)
-- [x] Workspace gates green — 16 crates, 2636 tests passing, zero warnings (re-verified 2026-10-07, after `OR-6`; 19 ignored, so 2655 in the run)
+- [x] Workspace gates green — 16 crates, 2640 tests passing, zero warnings (re-verified 2026-10-07, after `OR-7`; 19 ignored, so 2659 in the run)
 
 ## Model Catalog Honesty
 
@@ -12256,7 +12256,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       (`AR-3`) plus current load and cost ceiling — never a vendor name.
       **Done-when:** a task requiring a capability exactly one agent has cannot be routed
       to the others even when they are idle.
-- [ ] **OR-7 — re-dispatch on failure.** When a worker dies, re-queue it on another
+- [x] **OR-7 — re-dispatch on failure.** When a worker dies, re-queue it on another
       agent using `AR-7`'s package, with the failure reason recorded from the process, not
       from prose.
       **Done-when:** a killed worker's task completes elsewhere without losing the diff,

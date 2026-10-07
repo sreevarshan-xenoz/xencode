@@ -80,7 +80,7 @@ impl ObservedDiff {
         let status_output = std::process::Command::new("git")
             .arg("-C")
             .arg(repo_dir)
-            .args(["status", "--porcelain"])
+            .args(["status", "--porcelain", "-uall"])
             .output()
             .map_err(|e| format!("git status failed in {}: {e}", repo_dir.display()))?;
 
