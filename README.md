@@ -366,6 +366,8 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Colab** | `xencode colab status` / `down` | Forward/session/endpoint health, then kill the forward and release the VM |
 | **Remote** | `xencode remote add` / `list` | Store and list remote inference host profiles reached over SSH (`L-2`) |
 | **Remote** | `xencode remote use` / `show` / `forget` | Select active profile, display configuration, or remove profile |
+| **Computers** | `xencode computers list` / `show` | List registered compute backends (`colab`, `ssh`, `docker`) and display configuration |
+| **Computers** | `xencode computers use` / `probe` | Set active compute backend or probe connectivity honestly (`AF-4`) |
 | **Plugin** | `xencode plugin list` | Report each plugin, whether it loads, what it contributes, and the commit a git install is pinned to |
 | **Plugin** | `xencode plugin install <git-url> \| <path>` | Install from a git URL or a local path — shows what the plugin declares before copying it in, and names the commit a git install was pinned to (`--rev` picks the branch, tag or commit) |
 | **Plugin** | `xencode plugin update <name>` | Fetch the plugin's own repository again and show a diff of what changed; an update that alters the prompt or hooks is only applied with `--yes` |

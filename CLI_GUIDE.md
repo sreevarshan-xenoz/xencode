@@ -2356,6 +2356,28 @@ Safety rules:
 - Overwriting an existing profile requires `--force`.
 - The active host is a pointer (`remotes/active`), never a duplicate copy.
 
+### `xencode computers <action>`
+Inspect registered execution computer backends (`colab`, `ssh`, `docker`) and bind execution environments (`AF-4`). Each run in the run ledger records the bound computer backend.
+
+```bash
+# List all registered computer backends with kind and availability
+xencode computers list
+# Machine-readable output
+xencode computers list --json
+
+# Show details of a specific computer backend
+xencode computers show colab
+xencode computers show docker
+xencode computers show ssh
+
+# Switch the active computer backend
+xencode computers use docker
+
+# Probe connectivity to a computer backend (reports real reachable or unreachable status)
+xencode computers probe ssh
+xencode computers probe docker
+```
+
 ### Where xencode keeps its files
 Four kinds of file, in four directories, so that clearing one of them cannot
 take the others with it:
