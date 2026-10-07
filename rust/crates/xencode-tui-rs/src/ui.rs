@@ -69,6 +69,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         FocusArea::AdvisePanel => draw_advise_panel(f, app, f.area()),
         FocusArea::ImpactPanel => draw_impact_panel(f, app, f.area()),
         FocusArea::LayoutPanel => draw_layout_panel(f, app, f.area()),
+        FocusArea::WorkerPanel => draw_worker_panel(f, app, f.area()),
         _ => {}
     }
 
@@ -440,6 +441,13 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                     "↑↓:scroll  Enter:back to list  Esc:close"
                 } else {
                     "↑↓:select  Enter:from and to  Esc:close"
+                }
+            }
+            FocusArea::WorkerPanel => {
+                if app.workers_detail {
+                    "↑↓:scroll  Enter:back to list  r:re-read  Esc:close the record"
+                } else {
+                    "↑↓:select  Enter:where each figure came from  r:re-read  Esc:close"
                 }
             }
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
@@ -1637,27 +1645,40 @@ fn task_panel_inner_height(area_height: u16) -> u16 {
         .height
 }
 
+/// The task panel's heading (`OR-12`). A registry a running turn is holding
+/// cannot be counted this frame, and the heading says so in words: printing
+/// `0 running / 0 total` would report work that may be happening as absent,
+/// which is the same false claim the worker panel was built to stop making.
+fn task_manager_title(locked: bool, running: usize, total: usize) -> String {
+    if locked {
+        "unknown: a turn holds the registry".to_string()
+    } else {
+        format!("{running} running / {total} total")
+    }
+}
+
 fn draw_task_manager(f: &mut Frame, app: &App, area: Rect) {
     use xencode_core_rs::TaskStatus;
 
     let popup_area = centered_rect(85, 75, area);
     f.render_widget(Clear, popup_area);
 
-    // Registry read without blocking; `None` only during a tool call, and
-    // an empty list is the honest fallback for that one frame.
-    let tasks = app.tasks_snapshot().unwrap_or_default();
+    // Registry read without blocking. `None` means a turn holds the lock, so
+    // the counts are unknown for this frame — printing them as zero would
+    // report tasks that may be running as absent (`OR-12` honesty rule).
+    let snapshot = app.tasks_snapshot();
+    let locked = snapshot.is_none();
+    let tasks = snapshot.unwrap_or_default();
     let running = tasks
         .iter()
         .filter(|t| matches!(t.status, TaskStatus::Running))
         .count();
+    let title = task_manager_title(locked, running, tasks.len());
     let outer = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(format!(
-            " ⏳ Background Tasks — {running} running / {} total ",
-            tasks.len()
-        ));
+        .title(format!(" ⏳ Background Tasks — {title} "));
     f.render_widget(outer, popup_area);
     let inner = popup_area.inner(ratatui::layout::Margin {
         horizontal: 1,
@@ -1681,7 +1702,23 @@ fn draw_task_manager(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let rows: Vec<Line> = if tasks.is_empty() {
+    let rows: Vec<Line> = if locked {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Unknown: a tool call holds the registry this frame.",
+                Style::default().fg(app.theme.fg),
+            )),
+            Line::from(Span::styled(
+                "  Nothing is counted from here — press r once the turn returns it,",
+                Style::default().fg(app.theme.border),
+            )),
+            Line::from(Span::styled(
+                "  or read the same state in the worker panel (/workers).",
+                Style::default().fg(app.theme.border),
+            )),
+        ]
+    } else if tasks.is_empty() {
         vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -2009,6 +2046,76 @@ fn layout_detail_text(app: &App) -> String {
         row.before,
         row.after,
     )
+}
+
+/// Worker panel (`OR-12`): six readings, each naming the row its figures came
+/// from. The list is the answer to "what is running and what is it costing";
+/// the detail under `Enter` is the answer to "how do you know".
+fn draw_worker_panel(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(88, 76, area);
+    f.render_widget(Clear, popup_area);
+
+    let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(format!(
+            " ⚙ Workers — {} row(s) · Enter shows where each was read from ",
+            app.workers_rows.len()
+        ));
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    let selected = app
+        .workers_selected
+        .min(app.workers_rows.len().saturating_sub(1));
+    if app.workers_detail {
+        let body = app
+            .workers_rows
+            .get(selected)
+            .map(crate::worker_panel::PanelRow::detail)
+            .unwrap_or_default();
+        let rows = body.lines().count();
+        let text = Paragraph::new(body)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false })
+            .scroll((
+                (app.workers_scroll as u16).min(clamp_scroll(rows, inner.height)),
+                0,
+            ));
+        f.render_widget(text, inner);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .workers_rows
+        .iter()
+        .map(|row| {
+            let style = if row.is_header {
+                Style::default()
+                    .fg(app.theme.message_system)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.fg)
+            };
+            ListItem::new(Line::from(Span::styled(row.line.clone(), style)))
+        })
+        .collect();
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(app.theme.highlight_fg)
+            .bg(app.theme.highlight)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    f.render_stateful_widget(list, inner, &mut state);
 }
 
 fn advise_kind_style(
@@ -2866,6 +2973,28 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         let rows = layout_detail_text(app).lines().count();
         app.layout_scroll = app
             .layout_scroll
+            .min(clamp_scroll(rows, inner.height) as usize);
+    }
+
+    // Worker panel detail (`OR-12`): one row's provenance text, same viewport
+    // the draw function gives it.
+    if app.workers_detail {
+        let inner = centered_rect(88, 76, area).inner(ratatui::layout::Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let selected = app
+            .workers_selected
+            .min(app.workers_rows.len().saturating_sub(1));
+        let rows = app
+            .workers_rows
+            .get(selected)
+            .map(crate::worker_panel::PanelRow::detail)
+            .unwrap_or_default()
+            .lines()
+            .count();
+        app.workers_scroll = app
+            .workers_scroll
             .min(clamp_scroll(rows, inner.height) as usize);
     }
 }
@@ -4983,6 +5112,28 @@ mod tests {
     }
 
     #[test]
+    fn a_registry_held_by_a_turn_titles_the_task_panel_without_counts() {
+        // `OR-12`: the task panel and the worker panel read the same registry,
+        // so both must answer the same way when it cannot be read — in words,
+        // with no number that would read as a measurement nobody took.
+        let locked = super::task_manager_title(true, 0, 0);
+        assert!(locked.contains("unknown"), "{locked}");
+        assert!(
+            !locked.chars().any(|c| c.is_ascii_digit()),
+            "{locked}: a locked registry is not a counted empty one"
+        );
+        // The other branch still counts, because that read did happen.
+        assert_eq!(
+            super::task_manager_title(false, 1, 4),
+            "1 running / 4 total"
+        );
+        assert_eq!(
+            super::task_manager_title(false, 0, 0),
+            "0 running / 0 total"
+        );
+    }
+
+    #[test]
     fn centered_rect_lifts_useless_popups_but_not_designed_ones() {
         use super::centered_rect;
         use ratatui::layout::Rect;
@@ -5084,5 +5235,38 @@ mod tests {
         }
         // Everything fits in a 200x100 terminal.
         assert_eq!(grown, [0; 5]);
+    }
+
+    /// `OR-12`: the worker panel's detail view is one row's provenance text,
+    /// which is longer than any terminal, so its stored scroll has to survive a
+    /// resize the same way the other panels' do.
+    #[test]
+    fn the_worker_panel_detail_scroll_clamps_on_resize() {
+        use super::clamp_scrolls_on_resize;
+        use crate::worker_panel::{PanelRow, PanelSection};
+
+        let mut app = App::for_tests();
+        app.workers_rows = vec![PanelRow {
+            section: PanelSection::Agents,
+            is_header: false,
+            line: "codex — survey: unknown, not idle".to_string(),
+            sources: (0..40)
+                .map(|i| format!("source {i}: the record this figure was read from"))
+                .collect(),
+        }];
+        app.workers_detail = true;
+        app.workers_scroll = 9999;
+
+        clamp_scrolls_on_resize(&mut app, 60, 12);
+        let shrunk = app.workers_scroll;
+        assert!(shrunk < 9999, "oversized scroll survived a shrink");
+        assert!(shrunk > 0, "40 wrapped sources cannot fit a 12-row screen");
+
+        clamp_scrolls_on_resize(&mut app, 200, 100);
+        assert!(
+            app.workers_scroll <= shrunk,
+            "re-inflated on grow: {} > {shrunk}",
+            app.workers_scroll
+        );
     }
 }

@@ -412,6 +412,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::AdvisePanel
                 | FocusArea::ImpactPanel
                 | FocusArea::LayoutPanel
+                | FocusArea::WorkerPanel
                 | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
                 | FocusArea::Settings => {
@@ -459,6 +460,17 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 app.focus = FocusArea::WorktreePanel;
             }
         }
+        KeyCode::Char('a') => {
+            // The worker panel (`OR-12`): re-reads the streams, the registry and
+            // the records on disk on every open, because a panel of numbers that
+            // is quietly stale is worse than one that says it has not looked.
+            if app.focus == FocusArea::WorkerPanel {
+                app.focus = FocusArea::ChatInput;
+            } else {
+                app.refresh_worker_panel();
+                app.focus = FocusArea::WorkerPanel;
+            }
+        }
         KeyCode::Char('l') => {
             // Insights panel (F2-01): re-runs the deterministic analyses on
             // every open — they're pure and the snapshot is kept live.
@@ -476,9 +488,9 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
         }
         KeyCode::Char('t') => {
-            app.show_terminal = !app.show_terminal;
             // V-9: the strip is a pane the screen gains or loses, asked for by
             // one chord, so it is a change worth the same kind of row.
+            app.show_terminal = !app.show_terminal;
             app.note_layout_change(crate::transitions::Trigger::TerminalStrip {
                 shown: app.show_terminal,
             });
@@ -609,6 +621,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::AdvisePanel => key_advise_panel(app, key),
         FocusArea::ImpactPanel => key_impact_panel(app, key),
         FocusArea::LayoutPanel => key_layout_panel(app, key),
+        FocusArea::WorkerPanel => key_worker_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key, tx),
         FocusArea::CustomModels => key_custom_models(app, key, tx),
@@ -713,6 +726,17 @@ fn on_esc(app: &mut App) {
             if app.layout_detail {
                 app.layout_detail = false;
                 app.layout_scroll = 0;
+            } else {
+                app.focus = FocusArea::ChatInput;
+            }
+        }
+        FocusArea::WorkerPanel => {
+            // The same two stages: a row's trace closes before the panel does,
+            // and closing the panel leaves every worker where it was. Reading
+            // the fleet changes nothing about it (`OR-12`).
+            if app.workers_detail {
+                app.workers_detail = false;
+                app.workers_scroll = 0;
             } else {
                 app.focus = FocusArea::ChatInput;
             }
@@ -1643,6 +1667,37 @@ fn key_layout_panel(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::Enter if count > 0 => {
             app.layout_detail = !app.layout_detail;
             app.layout_scroll = 0;
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn key_worker_panel(app: &mut App, key: KeyEvent) -> bool {
+    let count = app.workers_rows.len();
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if app.workers_detail => {
+            app.workers_scroll = app.workers_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.workers_detail => {
+            app.workers_scroll += 1;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.workers_selected = app.workers_selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.workers_selected + 1 < count {
+                app.workers_selected += 1;
+            }
+        }
+        KeyCode::Enter if count > 0 => {
+            // The row's own trace opens: which record, event or file each
+            // figure on the line came from.
+            app.workers_detail = !app.workers_detail;
+            app.workers_scroll = 0;
+        }
+        KeyCode::Char('r') => {
+            app.refresh_worker_panel();
         }
         _ => return false,
     }

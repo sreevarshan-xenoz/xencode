@@ -218,9 +218,9 @@ fn turning_disclosure_off_restores_plain_xencode_identically() {
     app.set_disclosure_level(DisclosureLevel::Level4);
 
     // All destinations are present
-    assert_eq!(DESTINATIONS.len(), 26);
+    assert_eq!(DESTINATIONS.len(), 27);
     let palette = app.palette_items();
-    // Excludes FeatureNavigator itself (26 - 7 Level 1/2 workflow/core panes not in feature palette)
+    // Excludes FeatureNavigator itself (27 - 7 Level 1/2 workflow/core panes not in feature palette)
     assert!(palette
         .iter()
         .any(|(_, _, a)| *a == FocusArea::ByteBotPanel));
@@ -230,6 +230,9 @@ fn turning_disclosure_off_restores_plain_xencode_identically() {
     assert!(palette
         .iter()
         .any(|(_, _, a)| *a == FocusArea::SecurityAuditor));
+    // `OR-12`: the worker panel is a Level 3 destination, so turning
+    // disclosure off reaches it from the palette like every other pane.
+    assert!(palette.iter().any(|(_, _, a)| *a == FocusArea::WorkerPanel));
 
     // Welcome shortcuts line includes /bytebot=agent
     let shortcuts = xencode_tui_rs::focus::first_run_shortcuts_line(DisclosureLevel::Level4);

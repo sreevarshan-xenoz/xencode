@@ -21,7 +21,7 @@
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2718 tests passing, zero warnings (re-verified 2026-10-07, after `OR-11`; 19 ignored, so 2737 in the run)
+- [x] Workspace gates green — 16 crates, 2743 tests passing, zero warnings (re-verified 2026-10-07, after `OR-12`; 19 ignored, so 2762 in the run)
 
 ## Model Catalog Honesty
 
@@ -12434,10 +12434,55 @@ worker, `OR-` for the thing that decides what workers to talk to.
       not_applied`. Help text for `--route` and `--max-cost` changed, so completions and the man
       page were regenerated from the clap definition.
       2718 tests passing over 16 crates, 19 ignored, zero clippy warnings, `cargo fmt --check` clean.
-- [ ] **OR-12 — the worker panel.** Agents, tasks, graph, costs, logs and pending
+- [x] **OR-12 — the worker panel.** Agents, tasks, graph, costs, logs and pending
       approvals as `FocusArea` panels over `AR-6`/`EVd-1` state.
       **Done-when:** every number shown traces to a real row, and a worker xencode cannot
       observe renders as unknown rather than as idle.
+      **Delivered 2026-10-07** as `xencode-tui-rs/src/worker_panel.rs` plus one
+      `FocusArea::WorkerPanel` reached by `Ctrl+A` or `/workers`. It is one panel with six
+      sections — the workers this session launched, the roles the recipes in
+      `.xencode/teams/` name, the background task registry, one row per recorded run in
+      `.xencode/team-runs/`, the newest events, the waiting approvals — because the six
+      readings share a cursor, a detail view and a re-read key, and splitting them into six
+      areas would have bought nothing but six places to remember the same rules. Each row
+      carries the list of records it was read from; `Enter` prints them under `Read from`,
+      and a section heading answers the same question for the section.
+      The state was already there and was being said wrongly, which is most of what this
+      change fixed. The agent stack claimed `idle — try /spawn <task>` when nothing had been
+      spawned — `idle` is a statement about a worker that exists and is not busy, and there
+      was no worker — so it now says `nothing spawned — try /spawn <task>`, and the ByteBot
+      pane says `no ByteBot run recorded`. The background task panel printed
+      `0 running / 0 total` on frames where a running tool call held the registry lock,
+      reporting work that may have been happening as though it were absent; it now reads
+      `unknown: a turn holds the registry`, because the registry is read with a non-blocking
+      lock on purpose rather than waited on. A role that lives only in a recipe is a worker
+      xencode did not launch and cannot observe: it renders `opencode — survey: unknown, not
+      idle` with no figures at all, since `0 file(s)` there would read as a measurement
+      nobody took, and the row still gives the recipe's own `gate` and `needs` lists cited
+      to the file they were read from. A recipe that has never run here is quoted as
+      `docs-sweep: no quote — never run on this machine`; one that has is labelled
+      `a next run quoted at 900ms from rust-fix-1` with its first source reading `an
+      estimate, not a measurement`. With no recorded runs the graph section names the
+      directory it found nothing under, and an unreadable recipe or directory stays on
+      screen as its own row instead of leaving a section looking complete.
+      Verified by driving the real binary in a scratch project holding one recipe: the panel
+      listed its two roles as unknown, `graph: nothing measured`, `this session: nothing on
+      record yet` and `approvals: nothing is waiting`; `Enter` printed the absolute recipe
+      path each figure came from; a second recipe added on disk showed its role after `r`,
+      and deleting it dropped the row without closing the panel. `Ctrl+A` was confirmed to
+      reach the app as a raw `0x01`, which the `tmux` chord does not send by name.
+      13 unit tests in `worker_panel.rs`, 8 behavior tests in `tests/worker_panel.rs`
+      (one of which writes a team recipe to disk and reads it back through the real loader,
+      `[capacity]` table required), 2 new `ui.rs` tests for the resize clamp and the locked
+      registry title, and the panel is in the small-terminal render sweep, which gained a
+      test that every `FocusArea` is in that sweep rather than relying on someone to add it.
+      Two guards were watched to fail before being kept: printing an unlaunched role as
+      `idle` fails `a_recipe_role_xencode_did_not_launch_is_unknown_and_carries_no_figures`
+      with `left: "codex — survey: idle"`, and printing a locked registry as a counted zero
+      fails `a_locked_registry_reads_unknown_and_an_empty_one_reads_a_counted_zero`.
+      `DESTINATIONS` is 27 now, so `tests/disclosure_level.rs` counts were updated.
+      2743 tests passing over 16 crates, 19 ignored, zero clippy warnings,
+      `cargo fmt --check` clean.
 - [ ] **OR-13 — the Local-Only profile.** A profile that refuses every external worker and
       keeps only local providers, with the refusal explained on screen.
       **Done-when:** the profile is the documented default posture, and `LF-8`'s conformance

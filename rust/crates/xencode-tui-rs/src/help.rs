@@ -94,6 +94,10 @@ const COMMANDS: &[Binding] = &[
         "/impact <file>",
         "blast radius of one file (crates · files · churn)",
     ),
+    (
+        "/workers",
+        "workers, tasks, graph, costs, logs and approvals — each figure names its source",
+    ),
     ("/bytebot <task>", "autonomous task execution"),
     ("/plan [clear|accept|decline]", "expand, clear, or respond to proposed plan tasks"),
     (
@@ -295,6 +299,18 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "open/close what the change moved from and to"),
             ("Esc", "back to list · close panel"),
         ],
+        WorkerPanel => &[
+            ("↑ ↓ / j k", "select a row · scroll its detail"),
+            (
+                "Enter",
+                "open/close the record, event or file each figure was read from",
+            ),
+            (
+                "r",
+                "re-read the streams, the registry and the records on disk",
+            ),
+            ("Esc", "back to list · close panel"),
+        ],
     }
 }
 
@@ -362,6 +378,7 @@ mod tests {
             WorktreePanel,
             AdvisePanel,
             LayoutPanel,
+            WorkerPanel,
         ] {
             assert!(!panel_bindings(f).is_empty(), "{f:?} has no help rows");
         }

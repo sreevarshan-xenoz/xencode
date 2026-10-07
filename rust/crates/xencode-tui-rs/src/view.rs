@@ -670,7 +670,7 @@ pub struct AgentPane {
     pub kind: PaneKind,
     /// Header line, e.g. `Subagents (2)`.
     pub title: String,
-    /// State rows, visible without input. Never empty: an idle pane says so.
+    /// State rows, visible without input. Never empty: an empty source says so.
     pub rows: Vec<String>,
 }
 
@@ -678,8 +678,10 @@ pub struct AgentPane {
 ///
 /// `spawns` are `(branch, state line)` per subagent, `bytebot` are
 /// `(step, status)` pairs, `approvals` are one line per queued request. Empty
-/// sources yield idle rows rather than missing panes, so the stack shape is
-/// stable and switching never lands on nothing.
+/// sources yield a row saying what is absent rather than missing panes, so the
+/// stack shape is stable and switching never lands on nothing. An empty source
+/// is not an idle worker: `idle` would claim something exists that is merely
+/// not busy, when the honest reading is that xencode spawned nothing (`OR-12`).
 pub fn agent_panes(
     spawns: &[(String, String)],
     bytebot: &[(String, String)],
@@ -690,14 +692,14 @@ pub fn agent_panes(
         .map(|(branch, state)| format!("{branch} — {state}"))
         .collect();
     if subagents.is_empty() {
-        subagents.push("idle — try `/spawn <task>`".to_string());
+        subagents.push("nothing spawned — try `/spawn <task>`".to_string());
     }
     let mut steps: Vec<String> = bytebot
         .iter()
         .map(|(step, status)| format!("{step}: {status}"))
         .collect();
     if steps.is_empty() {
-        steps.push("idle — no ByteBot run".to_string());
+        steps.push("no ByteBot run recorded".to_string());
     }
     let mut pending: Vec<String> = approvals.to_vec();
     if pending.is_empty() {
@@ -1269,8 +1271,17 @@ mod tests {
         let panes = agent_panes(&[], &[], &[]);
         assert_eq!(panes.len(), 3);
         for pane in &panes {
-            assert!(!pane.rows.is_empty(), "an idle pane says so");
+            assert!(!pane.rows.is_empty(), "an empty pane says so");
+            // Nothing was spawned, so nothing can be reported as merely idle.
+            for row in &pane.rows {
+                assert!(
+                    !row.contains("idle"),
+                    "{row} claims a worker that isn't there"
+                );
+            }
         }
+        assert_eq!(panes[0].rows[0], "nothing spawned — try `/spawn <task>`");
+        assert_eq!(panes[1].rows[0], "no ByteBot run recorded");
         let panes = agent_panes(
             &[("feat".to_string(), "1/2 call(s) completed".to_string())],
             &[("fetch".to_string(), "done".to_string())],

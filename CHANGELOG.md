@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-12`: one screen for the fleet, and every figure on it names the row it came from
+
+`/workers` (or `Ctrl+A`) opens the worker panel: six sections laid end to end — the workers this
+session launched, every role the recipes in `.xencode/teams/` name, the background task registry,
+one row per recorded run in `.xencode/team-runs/`, the newest events across the streams, and the
+approvals waiting on you. `Enter` on a row prints where each figure on it came from — the event, the
+record, or the file — and a section heading answers the same question for the section. `r` re-reads;
+the panel reads when it opens and when asked, never on redraw.
+
+The panel exists because the state it shows was already there and was being said wrongly:
+
+- The agent stack reported `idle — try /spawn <task>` when nothing had been spawned. `idle` is a
+  claim about a worker that exists and is not busy; the honest reading is that there is no worker,
+  so the row now says `nothing spawned — try /spawn <task>`, and the ByteBot pane says
+  `no ByteBot run recorded`.
+- The background task panel printed `0 running / 0 total` on the frames a running tool call held the
+  registry lock — work that may have been happening, reported as absent. It now reads
+  `unknown: a turn holds the registry`, and the list says which lock it could not read.
+- A role that lives only in a recipe is a worker xencode did not launch and cannot observe. It shows
+  as `opencode — survey: unknown, not idle` with no figures at all, because a `0 file(s)` on that row
+  would read as a measurement nobody took; the row still gives the recipe's own `gate` and `needs`
+  lists, cited to the file they were read from.
+- A recipe that has never run here is quoted as `docs-sweep: no quote — never run on this machine`
+  rather than with a typical number, and one that has is labelled what it is: `a next run quoted at
+  900ms from rust-fix-1`, its first source reading `an estimate, not a measurement`.
+- With no recorded runs the graph section says `graph: nothing measured — no run recorded under
+  <directory>`, and an unreadable record or directory stays on screen naming itself instead of
+  leaving the section looking like it had seen everything there was.
+
+Verified by driving the real TUI in a scratch project holding one recipe: the panel listed the
+recipe's two roles as unknown, `graph: nothing measured`, `this session: nothing on record yet`, and
+`approvals: nothing is waiting`; `Enter` printed the recipe file each figure came from; adding a
+second recipe and reopening showed its role, and `r` with the file deleted dropped it again without
+closing the panel. Thirteen unit tests in `xencode-tui-rs/src/worker_panel.rs`, eight behavior tests
+in `xencode-tui-rs/tests/worker_panel.rs` — including one that writes a team recipe to disk and reads
+it back through the real loader — and the panel is in the small-terminal render sweep, which now
+carries a test that every `FocusArea` is in that sweep rather than relying on someone remembering to
+add it. Two of the guards were watched to fail before being kept: printing an unlaunched role as
+`idle` fails `a_recipe_role_xencode_did_not_launch_is_unknown_and_carries_no_figures` with
+`left: "codex — survey: idle"`, and printing a locked registry as a counted zero fails
+`a_locked_registry_reads_unknown_and_an_empty_one_reads_a_counted_zero`.
+
 ### Changed — `OR-11`: every routing choice now shows the facts behind it
 
 `xencode agents --route` used to print a decision that looked like arithmetic it had never done:

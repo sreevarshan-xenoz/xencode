@@ -36,6 +36,7 @@ pub mod views;
 pub mod voice;
 pub mod widgets;
 pub mod worker_bridge;
+pub mod worker_panel;
 
 pub use app::{
     run_agent, run_app, serve_scripted_answers, AgentRunError, AgentRunOptions, AgentRunOutput,
