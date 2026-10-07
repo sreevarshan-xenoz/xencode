@@ -41,7 +41,7 @@ enum GenerateShell {
 }
 
 /// Output format for analysis results
-#[derive(clap::ValueEnum, Clone)]
+#[derive(clap::ValueEnum, Clone, Debug)]
 enum OutputFormat {
     Text,
     Json,
@@ -321,6 +321,12 @@ enum Commands {
     Compete {
         #[command(subcommand)]
         action: CompeteAction,
+    },
+
+    /// Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)
+    Merge {
+        #[command(subcommand)]
+        action: MergeAction,
     },
 
     /// Repository insights from the .xencode snapshot: broken imports,
@@ -1305,6 +1311,51 @@ enum CompeteAction {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum MergeAction {
+    /// Speculatively precheck a candidate branch against a base branch using git merge-tree
+    Precheck {
+        /// Candidate branch to evaluate
+        branch: String,
+        /// Target base branch
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+    /// Build a multi-branch merge plan with conflict prechecks and worker checks
+    Plan {
+        /// Candidate branches to evaluate
+        #[arg(long = "branch", required = true)]
+        branches: Vec<String>,
+        /// Target base branch
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+    /// Land branches into base branch guarded by a named human decision
+    Land {
+        /// Candidate branches to merge
+        #[arg(long = "branch", required = true)]
+        branches: Vec<String>,
+        /// Target base branch
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Full name of the human approving the merge (required gate)
+        #[arg(long = "approved-by")]
+        approved_by: String,
+        /// Post-integration test commands to re-run on the integrated tree
+        #[arg(long = "test-cmd")]
+        test_cmds: Vec<String>,
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+}
+
 #[derive(Subcommand)]
 enum ModelAction {
     /// List all installed Ollama models
@@ -1975,6 +2026,7 @@ async fn main() {
         Commands::Remote { action } => run_remote(action),
         Commands::Computers { action, json } => run_computers(action, json).await,
         Commands::Compete { action } => run_compete(action),
+        Commands::Merge { action } => run_merge(action),
         Commands::Bootstrap {
             path,
             check,
@@ -4601,6 +4653,195 @@ fn run_compete(action: CompeteAction) -> Result<(), String> {
                 println!("Evidence left on disk:");
                 for evidence in &outcome.preserved_evidence {
                     println!("  {}", evidence.display());
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_merge(action: MergeAction) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    match action {
+        MergeAction::Precheck {
+            branch,
+            base,
+            format,
+        } => {
+            let precheck = xencode_analysis_rs::precheck_branch(&root, &base, &branch)?;
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&precheck).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    if precheck.clean {
+                        println!("Precheck for branch '{branch}' against base '{base}': CLEAN (no merge conflicts)");
+                    } else {
+                        println!("Precheck for branch '{branch}' against base '{base}': CONFLICT");
+                        println!("Conflicting files ({}):", precheck.conflict_files.len());
+                        for f in &precheck.conflict_files {
+                            println!("  - {f}");
+                        }
+                        if let Some(diff) = &precheck.rendered_conflict {
+                            println!("\nRendered conflict diff:\n{diff}");
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        MergeAction::Plan {
+            branches,
+            base,
+            format,
+        } => {
+            let mut specs = Vec::new();
+            for b in &branches {
+                let verify = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(["rev-parse", "--verify", b])
+                    .output();
+                let (passed, sha) = match verify {
+                    Ok(out) if out.status.success() => (
+                        true,
+                        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                    ),
+                    _ => (false, String::new()),
+                };
+                specs.push(xencode_analysis_rs::BranchSpec {
+                    branch: b.clone(),
+                    worker: "worker".to_string(),
+                    task_id: format!("task-{}", b),
+                    checks: vec![xencode_analysis_rs::BranchCheck {
+                        name: "branch-commit-verified".to_string(),
+                        exit_code: if passed { 0 } else { 1 },
+                        passed,
+                        evidence_ref: if passed {
+                            format!("sha:{}", sha)
+                        } else {
+                            "git rev-parse failed".to_string()
+                        },
+                    }],
+                });
+            }
+            let plan = xencode_analysis_rs::build_merge_plan(&root, &base, &specs)?;
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    println!("Merge Plan for base branch '{}':", plan.base_branch);
+                    println!("  Overall clean: {}", plan.all_clean);
+                    println!(
+                        "  All worker checks passed: {}",
+                        plan.all_worker_checks_passed
+                    );
+                    println!("  Candidate branches ({}):", plan.branches.len());
+                    for bv in &plan.branches {
+                        let short_sha = if bv.commit_sha.len() >= 8 {
+                            &bv.commit_sha[..8]
+                        } else {
+                            &bv.commit_sha
+                        };
+                        println!(
+                            "    - branch '{}' (sha: {}, clean: {}, checks: {}, eligible: {})",
+                            bv.branch,
+                            short_sha,
+                            bv.precheck.clean,
+                            bv.worker_checks.iter().all(|c| c.passed),
+                            bv.eligible
+                        );
+                        if !bv.precheck.clean {
+                            println!("      Conflicts: {:?}", bv.precheck.conflict_files);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        MergeAction::Land {
+            branches,
+            base,
+            approved_by,
+            test_cmds,
+            format,
+        } => {
+            let mut specs = Vec::new();
+            for b in &branches {
+                let verify = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(["rev-parse", "--verify", b])
+                    .output();
+                let (passed, sha) = match verify {
+                    Ok(out) if out.status.success() => (
+                        true,
+                        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                    ),
+                    _ => (false, String::new()),
+                };
+                specs.push(xencode_analysis_rs::BranchSpec {
+                    branch: b.clone(),
+                    worker: "worker".to_string(),
+                    task_id: format!("task-{}", b),
+                    checks: vec![xencode_analysis_rs::BranchCheck {
+                        name: "branch-commit-verified".to_string(),
+                        exit_code: if passed { 0 } else { 1 },
+                        passed,
+                        evidence_ref: if passed {
+                            format!("sha:{}", sha)
+                        } else {
+                            "git rev-parse failed".to_string()
+                        },
+                    }],
+                });
+            }
+            let plan = xencode_analysis_rs::build_merge_plan(&root, &base, &specs)?;
+
+            let approval = xencode_analysis_rs::HumanMergeApproval::new(
+                &approved_by,
+                !approved_by.trim().is_empty(),
+                format!("Land requested via CLI by {}", approved_by),
+            );
+
+            let test_cmd_refs: Vec<&str> = test_cmds.iter().map(|s| s.as_str()).collect();
+            let outcome =
+                xencode_analysis_rs::execute_merge(&root, &plan, &approval, &test_cmd_refs)?;
+
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&outcome).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    println!("Merge Landed Successfully!");
+                    println!("  Base branch: {}", outcome.base_branch);
+                    println!("  Merged branches: {:?}", outcome.merged_branches);
+                    println!("  Approved by: {}", outcome.approved_by);
+                    if let Some(sha) = &outcome.integration_commit {
+                        println!("  Integration commit: {}", sha);
+                    }
+                    println!(
+                        "  Post-integration checks ({}):",
+                        outcome.post_integration_checks.len()
+                    );
+                    for chk in &outcome.post_integration_checks {
+                        println!(
+                            "    - `{}`: {} (exit code {})",
+                            chk.command,
+                            if chk.passed { "PASSED" } else { "FAILED" },
+                            chk.exit_code
+                        );
+                    }
                 }
             }
             Ok(())
@@ -12693,5 +12934,75 @@ mod tests {
 
         // `run` cannot be invoked without the question it is answering.
         assert!(Cli::try_parse_from(["xencode", "compete", "run"]).is_err());
+    }
+
+    #[test]
+    fn cli_merge_parsing() {
+        use super::MergeAction;
+
+        // Precheck
+        let cli =
+            Cli::try_parse_from(["xencode", "merge", "precheck", "feat-1", "--base", "master"])
+                .unwrap();
+        match cli.command {
+            Some(Commands::Merge {
+                action: MergeAction::Precheck { branch, base, .. },
+            }) => {
+                assert_eq!(branch, "feat-1");
+                assert_eq!(base, "master");
+            }
+            _ => panic!("expected merge precheck"),
+        }
+
+        // Plan
+        let cli = Cli::try_parse_from([
+            "xencode", "merge", "plan", "--branch", "feat-1", "--branch", "feat-2", "--base",
+            "master",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Merge {
+                action: MergeAction::Plan { branches, base, .. },
+            }) => {
+                assert_eq!(branches, vec!["feat-1", "feat-2"]);
+                assert_eq!(base, "master");
+            }
+            _ => panic!("expected merge plan"),
+        }
+
+        // Land
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "merge",
+            "land",
+            "--branch",
+            "feat-1",
+            "--branch",
+            "feat-2",
+            "--approved-by",
+            "Alice",
+            "--test-cmd",
+            "cargo test",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Merge {
+                action:
+                    MergeAction::Land {
+                        branches,
+                        approved_by,
+                        test_cmds,
+                        ..
+                    },
+            }) => {
+                assert_eq!(branches, vec!["feat-1", "feat-2"]);
+                assert_eq!(approved_by, "Alice");
+                assert_eq!(test_cmds, vec!["cargo test"]);
+            }
+            _ => panic!("expected merge land"),
+        }
+
+        // Land without approved-by fails (required human gate)
+        assert!(Cli::try_parse_from(["xencode", "merge", "land", "--branch", "feat-1",]).is_err());
     }
 }

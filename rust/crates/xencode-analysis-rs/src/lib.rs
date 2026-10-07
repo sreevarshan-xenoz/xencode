@@ -6,6 +6,7 @@ pub mod deps;
 pub mod envdrift;
 pub mod images;
 pub mod issues;
+pub mod merge_decision;
 pub mod mutation;
 #[cfg(test)]
 pub mod property_eval;
@@ -21,6 +22,10 @@ pub use compete::{
     format_competing_table, list_competing_runs, load_competing_run, pick_arm, run_competing_arms,
     save_competing_run, ArmCheckRow, ArmResult, CandidateArmSpec, CompetingConfig, CompetingReport,
     PickOutcome,
+};
+pub use merge_decision::{
+    build_merge_plan, execute_merge, precheck_branch, BranchCheck, BranchSpec, BranchVerdict,
+    HumanMergeApproval, IntegrationCheck, MergeOutcome, MergePlan, MergePrecheck,
 };
 
 pub use analyzer::CodeAnalyzer;

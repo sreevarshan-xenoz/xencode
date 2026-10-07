@@ -4236,6 +4236,18 @@ every other candidate branch and both arms' evidence directories on disk, then
 names what it preserved. Picking an arm the run does not have is refused with
 the list of arms it does.
 
+### `xencode merge precheck <branch> [--base <base>] [--format text|json]`
+
+Speculatively inspect whether a candidate branch merges cleanly into the target base branch using `git merge-tree`, without modifying the working tree or index. Outputs clean status or conflicting files with diff conflict markers.
+
+### `xencode merge plan --branch <branch> [--branch <branch2>...] [--base <base>] [--format text|json]`
+
+Build an evidence-backed integration plan evaluating candidate branches, checking commit validation and conflict status before presenting integration readiness.
+
+### `xencode merge land --branch <branch>... --approved-by <name> [--base <base>] [--test-cmd <cmd>...] [--format text|json]`
+
+Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
+
 ### `xencode test --isolate <substring> [--base HEAD] [--repeat 3]`
 
 Classify one failing test instead of running the suite: the same filtered

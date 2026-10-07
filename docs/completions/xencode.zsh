@@ -1069,6 +1069,85 @@ esac
     ;;
 esac
 ;;
+(merge)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__merge_commands" \
+"*::: :->merge" \
+&& ret=0
+
+    case $state in
+    (merge)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-merge-command-$line[1]:"
+        case $line[1] in
+            (precheck)
+_arguments "${_arguments_options[@]}" : \
+'--base=[Target base branch]:BASE:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':branch -- Candidate branch to evaluate:_default' \
+&& ret=0
+;;
+(plan)
+_arguments "${_arguments_options[@]}" : \
+'*--branch=[Candidate branches to evaluate]:BRANCHES:_default' \
+'--base=[Target base branch]:BASE:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(land)
+_arguments "${_arguments_options[@]}" : \
+'*--branch=[Candidate branches to merge]:BRANCHES:_default' \
+'--base=[Target base branch]:BASE:_default' \
+'--approved-by=[Full name of the human approving the merge (required gate)]:APPROVED_BY:_default' \
+'*--test-cmd=[Post-integration test commands to re-run on the integrated tree]:TEST_CMDS:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__merge__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-merge-help-command-$line[1]:"
+        case $line[1] in
+            (precheck)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(plan)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(land)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[Maximum findings to show (0 shows all)]:LIMIT:_default' \
@@ -2467,6 +2546,34 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(merge)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__merge_commands" \
+"*::: :->merge" \
+&& ret=0
+
+    case $state in
+    (merge)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-merge-command-$line[1]:"
+        case $line[1] in
+            (precheck)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(plan)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(land)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2878,6 +2985,7 @@ _xencode_commands() {
 'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
+'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3455,6 +3563,7 @@ _xencode__subcmd__help_commands() {
 'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
+'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3911,6 +4020,30 @@ _xencode__subcmd__help__subcmd__memory__subcmd__prune_commands() {
 _xencode__subcmd__help__subcmd__memory__subcmd__show_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help memory show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge_commands] )) ||
+_xencode__subcmd__help__subcmd__merge_commands() {
+    local commands; commands=(
+'precheck:Speculatively precheck a candidate branch against a base branch using git merge-tree' \
+'plan:Build a multi-branch merge plan with conflict prechecks and worker checks' \
+'land:Land branches into base branch guarded by a named human decision' \
+    )
+    _describe -t commands 'xencode help merge commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__land_commands] )) ||
+_xencode__subcmd__help__subcmd__merge__subcmd__land_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help merge land commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__plan_commands] )) ||
+_xencode__subcmd__help__subcmd__merge__subcmd__plan_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help merge plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__precheck_commands] )) ||
+_xencode__subcmd__help__subcmd__merge__subcmd__precheck_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help merge precheck commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__migrate_commands] )) ||
 _xencode__subcmd__help__subcmd__migrate_commands() {
@@ -4558,6 +4691,61 @@ _xencode__subcmd__memory__subcmd__prune_commands() {
 _xencode__subcmd__memory__subcmd__show_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge_commands] )) ||
+_xencode__subcmd__merge_commands() {
+    local commands; commands=(
+'precheck:Speculatively precheck a candidate branch against a base branch using git merge-tree' \
+'plan:Build a multi-branch merge plan with conflict prechecks and worker checks' \
+'land:Land branches into base branch guarded by a named human decision' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode merge commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help_commands] )) ||
+_xencode__subcmd__merge__subcmd__help_commands() {
+    local commands; commands=(
+'precheck:Speculatively precheck a candidate branch against a base branch using git merge-tree' \
+'plan:Build a multi-branch merge plan with conflict prechecks and worker checks' \
+'land:Land branches into base branch guarded by a named human decision' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode merge help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__land_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__land_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help land commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__plan_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__plan_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__precheck_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__precheck_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help precheck commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__land_commands] )) ||
+_xencode__subcmd__merge__subcmd__land_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge land commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__plan_commands] )) ||
+_xencode__subcmd__merge__subcmd__plan_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__precheck_commands] )) ||
+_xencode__subcmd__merge__subcmd__precheck_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge precheck commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__migrate_commands] )) ||
 _xencode__subcmd__migrate_commands() {
