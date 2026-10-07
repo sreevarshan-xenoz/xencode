@@ -6,8 +6,8 @@
 //!
 //! Composition can be inspected and diffed via `xencode --dump-config`.
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Statically known capability names from CAP-1 vocabulary.
 pub const KNOWN_CAPABILITIES: &[&str] = &[
@@ -31,7 +31,8 @@ impl CompositionProfile {
         match name {
             "minimal" => Some(Self {
                 name: "minimal".to_string(),
-                description: "Read-only inspection without file mutations or network egress".to_string(),
+                description: "Read-only inspection without file mutations or network egress"
+                    .to_string(),
                 capabilities: BTreeMap::from([
                     ("filesystem.read".to_string(), "allow".to_string()),
                     ("filesystem.write".to_string(), "deny".to_string()),
@@ -42,7 +43,8 @@ impl CompositionProfile {
             }),
             "coding" => Some(Self {
                 name: "coding".to_string(),
-                description: "Standard local development with file edits and test execution".to_string(),
+                description: "Standard local development with file edits and test execution"
+                    .to_string(),
                 capabilities: BTreeMap::from([
                     ("filesystem.read".to_string(), "allow".to_string()),
                     ("filesystem.write".to_string(), "allow".to_string()),
@@ -64,7 +66,9 @@ impl CompositionProfile {
             }),
             "research" => Some(Self {
                 name: "research".to_string(),
-                description: "Repository exploration and network search without local file mutation".to_string(),
+                description:
+                    "Repository exploration and network search without local file mutation"
+                        .to_string(),
                 capabilities: BTreeMap::from([
                     ("filesystem.read".to_string(), "allow".to_string()),
                     ("filesystem.write".to_string(), "deny".to_string()),

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AR-8`: external agent worker health monitoring and terminal authentication guidance
+
+External coding agents can now be probed for worker health (`xencode agents --health`, optionally targeting an individual agent with `--agent <name>`):
+
+- Reports installation status, detected version, authentication status, responsiveness, and rate limits across coding agent CLI tools.
+- All checks are strictly read-only and never modify credentials or local configuration files.
+- When an agent's credentials have expired or are missing, the status report clearly marks authentication as expired and provides the exact terminal command for the human developer to run in their own terminal. No automated authentication actions or silent workarounds are attempted.
+
 ### Changed — `AF-6`: an approval is consent to the change it showed
 
 The approval prompt already painted the real diff of the proposed edit. What it did not do was

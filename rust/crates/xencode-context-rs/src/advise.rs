@@ -336,9 +336,8 @@ impl FailingCheckObservation {
         let name = check_name.into();
         let cmd = target_command.into();
         let class = failure_class.into();
-        let observation = format!(
-            "check `{name}` failed across {run_count} run(s) (class: {class})"
-        );
+        let observation =
+            format!("check `{name}` failed across {run_count} run(s) (class: {class})");
         Self {
             check_name: name,
             target_command: cmd,
@@ -597,7 +596,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("xencode-ae6-test-{}-{}", std::process::id(), nonce));
+        let root =
+            std::env::temp_dir().join(format!("xencode-ae6-test-{}-{}", std::process::id(), nonce));
         std::fs::create_dir_all(&root).unwrap();
 
         // 1. Initial state
@@ -630,7 +630,10 @@ mod tests {
         // 2. Declining leaves repository byte-identical
         proposal.decline();
         let after_decline_bytes = read_dir_bytes();
-        assert_eq!(before_bytes, after_decline_bytes, "Declining must leave repo byte-identical");
+        assert_eq!(
+            before_bytes, after_decline_bytes,
+            "Declining must leave repo byte-identical"
+        );
 
         // 3. Accepting puts task into tasks_file with observation as source
         let registry = xencode_core_rs::tasks_file::FileTaskRegistry::new(&root);

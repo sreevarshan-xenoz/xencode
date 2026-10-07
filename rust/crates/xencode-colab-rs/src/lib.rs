@@ -37,7 +37,6 @@ pub use colab::{
     parse_sessions, proxy_argv, proxy_command_opt, ColabBackend, SSH_USER,
 };
 pub use docker::DockerBackend;
-pub use ssh::SshBackend;
 pub use lifecycle::{
     point_config_at_forward, run_colab_down, run_colab_reconnect, run_colab_status, run_colab_up,
     UpOptions,
@@ -47,6 +46,7 @@ pub use orchestrate::{
     spawn_forward_cmd, terminate, Binaries,
 };
 pub use preflight::{preflight, which, Check, PreflightReport, KEY_FILENAME};
+pub use ssh::SshBackend;
 pub use state::{remove_state, save_state, ColabState, STATE_FILENAME};
 
 #[cfg(test)]

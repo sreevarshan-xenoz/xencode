@@ -1361,12 +1361,16 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__agents)
-            opts="-h --contract --format --help"
+            opts="-h --contract --health --agent --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --agent)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0

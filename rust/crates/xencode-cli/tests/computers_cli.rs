@@ -35,7 +35,11 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 fn computers_list_shows_all_three_arms_with_what_each_is() {
     let tmp = temp_dir("list");
     let out = xencode(&tmp, &["computers"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     assert!(stdout.contains("Registered computer backends:"), "{stdout}");
@@ -85,7 +89,10 @@ fn computers_use_updates_active_computer_backend() {
     let use_out = xencode(&tmp, &["computers", "use", "ssh"]);
     assert!(use_out.status.success());
     let stdout = String::from_utf8_lossy(&use_out.stdout);
-    assert!(stdout.contains("Active computer backend set to `ssh`."), "{stdout}");
+    assert!(
+        stdout.contains("Active computer backend set to `ssh`."),
+        "{stdout}"
+    );
 
     // Verify it is active in list
     let list_out = xencode(&tmp, &["computers"]);

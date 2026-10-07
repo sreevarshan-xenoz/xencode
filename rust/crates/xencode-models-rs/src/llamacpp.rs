@@ -2634,7 +2634,11 @@ mod tests {
 
         let h2 = client.check_health("TOTALLY-FAKE-MODEL").await.unwrap();
         assert_eq!(h2.status, HealthStatus::Unavailable);
-        assert!(h2.error_message.as_ref().unwrap().contains("TOTALLY-FAKE-MODEL"));
+        assert!(h2
+            .error_message
+            .as_ref()
+            .unwrap()
+            .contains("TOTALLY-FAKE-MODEL"));
 
         let h3 = client.check_health("").await.unwrap();
         assert_eq!(h3.status, HealthStatus::Healthy);

@@ -66,9 +66,12 @@ fn master_only_repository_reviews_cleanly_without_base() {
 
     // JSON output: includes base and base_source
     let (json_out, ok) = run(&root, &["review", "--format", "json"]);
-    assert!(ok, "xencode review --format json should succeed: {json_out}");
-    let v: serde_json::Value = serde_json::from_str(&json_out)
-        .expect("review json output should be valid json");
+    assert!(
+        ok,
+        "xencode review --format json should succeed: {json_out}"
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&json_out).expect("review json output should be valid json");
     assert_eq!(v["base"], "master");
     assert_eq!(v["base_source"], "init.defaultBranch");
     assert_eq!(v["files_changed"], 0);
@@ -114,12 +117,18 @@ fn origin_head_is_reported_when_present() {
         assert!(out.status.success());
     };
     git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ]);
 
     let (out, ok) = run(&root, &["review"]);
     assert!(ok, "xencode review should succeed with origin/HEAD: {out}");
     assert!(
-        out.contains("Review of diff origin/main...HEAD (0 files) [base resolved from origin/HEAD]"),
+        out.contains(
+            "Review of diff origin/main...HEAD (0 files) [base resolved from origin/HEAD]"
+        ),
         "unexpected output: {out}"
     );
 

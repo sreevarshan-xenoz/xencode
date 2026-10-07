@@ -726,18 +726,33 @@ mod tests {
     fn sanitize_not_running_drops_leaked_routes() {
         let raw_show = "error sending request for url (http://localhost:11434/api/show): tcp connect error: Connection refused (os error 111)";
         let prose_show = sanitize_not_running(raw_show);
-        assert!(!prose_show.contains("/api/show"), "prose should not contain /api/show: {prose_show}");
-        assert!(prose_show.contains("nothing is listening on http://localhost:11434"), "{prose_show}");
+        assert!(
+            !prose_show.contains("/api/show"),
+            "prose should not contain /api/show: {prose_show}"
+        );
+        assert!(
+            prose_show.contains("nothing is listening on http://localhost:11434"),
+            "{prose_show}"
+        );
 
         let err = OllamaError::NotRunning(raw_show.to_string());
         assert_eq!(err.raw_message(), raw_show);
         let displayed = err.to_string();
-        assert!(!displayed.contains("/api/show"), "Display should not contain /api/show: {displayed}");
-        assert!(displayed.contains("nothing is listening on http://localhost:11434"), "{displayed}");
+        assert!(
+            !displayed.contains("/api/show"),
+            "Display should not contain /api/show: {displayed}"
+        );
+        assert!(
+            displayed.contains("nothing is listening on http://localhost:11434"),
+            "{displayed}"
+        );
 
         let raw_generate = "error sending request for url (http://localhost:11434/api/generate): tcp connect error: Connection refused";
         let prose_generate = sanitize_not_running(raw_generate);
-        assert!(!prose_generate.contains("/api/generate"), "{prose_generate}");
+        assert!(
+            !prose_generate.contains("/api/generate"),
+            "{prose_generate}"
+        );
 
         let raw_version = "error sending request for url (http://localhost:11434/api/version): tcp connect error: Connection refused";
         let prose_version = sanitize_not_running(raw_version);

@@ -55,7 +55,13 @@ mod tests {
 
         let received = rx.try_recv().expect("event delivered");
         assert_eq!(received.name(), "permission_denied");
-        if let AgentEvent::PermissionDenied { tool, reason, origin, .. } = received {
+        if let AgentEvent::PermissionDenied {
+            tool,
+            reason,
+            origin,
+            ..
+        } = received
+        {
             assert_eq!(tool, "write_file");
             assert_eq!(reason, Some("write_file src/lib.rs".to_string()));
             assert_eq!(origin, Origin::Observed);

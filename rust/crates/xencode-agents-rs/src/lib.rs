@@ -29,6 +29,7 @@
 pub mod capture;
 pub mod contract;
 pub mod envelope;
+pub mod health;
 pub mod probe;
 pub mod protocol;
 pub mod roster;
@@ -40,6 +41,11 @@ pub use contract::{probe_contract, ClaimResult, Verdict};
 pub use envelope::{
     envelopes_for_capture, read_envelopes, write_envelopes, AgentId, Envelope, EnvelopeRead, Field,
     SessionId, TaskId, WorkerId,
+};
+pub use health::{
+    check_all_worker_health, check_worker_health, default_login_command,
+    format_worker_health_table, inspect_local_auth_files, is_expired_auth, is_missing_auth,
+    is_rate_limited, AuthStatus, Responsiveness, WorkerHealth,
 };
 pub use probe::{FanOut, ProbeOptions, ProbeReport, RunCapture, Usage};
 pub use protocol::{AgentEvent, Origin};

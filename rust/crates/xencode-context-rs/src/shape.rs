@@ -162,8 +162,7 @@ pub fn shape_of(prompt: &str) -> ShapeRead {
     ShapeRead {
         shape: TaskShape::General,
         reasons: vec![
-            "no word for broken code in the prompt, so standard retrieval is used"
-                .to_string(),
+            "no word for broken code in the prompt, so standard retrieval is used".to_string(),
         ],
     }
 }

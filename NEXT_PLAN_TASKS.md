@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2600 tests passing, zero warnings (re-verified 2026-10-07, after `AF-6`; 19 ignored, so 2619 in the run)
+- [x] Workspace gates green — 16 crates, 2612 tests passing, zero warnings (re-verified 2026-10-07, after `AR-8`; 19 ignored, so 2631 in the run)
 
 ## Model Catalog Honesty
 
@@ -12125,7 +12125,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       the last normalised events, and why the previous worker stopped.
       **Done-when:** a second worker resumes a real task from this package alone, and the
       package contains no self-reported progress or completion claim.
-- [ ] **AR-8 — worker health.** Report installed / version / authenticated / responsive /
+- [x] **AR-8 — worker health.** Report installed / version / authenticated / responsive /
       rate-limited per agent, read-only, and never silently fix anything.
       **Done-when:** an expired auth is *shown* as an expired auth, and the only offered
       next step is a command the human runs in their own terminal.
@@ -14837,7 +14837,7 @@ Checked against what exists today, clause by clause, rather than asserted:
 `AR-` series: `AR-1`, `AR-2`, `AR-4`, `AR-5` and `AR-10` are done and `AR-9`'s
 protocol is built, but it carries two variants nothing has produced yet
 (`PermissionRequested`, `Error`), which §X-4 still lists as open evidence gaps;
-`AR-3`, `AR-7`, `AR-8` are unchecked. So this clause is *mostly* true of the code.
+`AR-3`, `AR-7` are unchecked (`AR-8` is done). So this clause is *mostly* true of the code.
 **Context explainable** is true of one part only: `QD-1` and `QD-2` ship today and
 explain a change's blast radius, while `GH-2`'s `/why <file>:<line>` is planned in
 W10. **Actions policy-bound** is W7 (`CAP-*`, `SE-*`, `PR-*`), planned.

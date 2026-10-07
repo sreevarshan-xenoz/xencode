@@ -77,9 +77,9 @@ pub use advise::{
     HUB_MIN_OUT,
 };
 pub use anchor::{
-    discover, is_current, prove, render, write_anchor, AnchorMeta, ANCHOR_META_FILE,
-    ANCHOR_STALE_AGE_DAYS, anchor_age_days, read_anchor_meta, read_anchor_meta_from_dir,
-    write_anchor_meta, Discovery, Kind, Provenance, Recipe, Verdict,
+    anchor_age_days, discover, is_current, prove, read_anchor_meta, read_anchor_meta_from_dir,
+    render, write_anchor, write_anchor_meta, AnchorMeta, Discovery, Kind, Provenance, Recipe,
+    Verdict, ANCHOR_META_FILE, ANCHOR_STALE_AGE_DAYS,
 };
 pub use bootstrap::{
     bootstrap, offered_files, BootstrapEntry, BootstrapKind, BootstrapReport, OfferedFile,

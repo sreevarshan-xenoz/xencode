@@ -8,9 +8,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::backend::{
-    first_line, run_capture, Backend, BoxFuture, ComputerBackend, TransportCmd,
-};
+use crate::backend::{first_line, run_capture, Backend, BoxFuture, ComputerBackend, TransportCmd};
 use crate::preflight::which;
 
 const DOCKER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -55,7 +53,8 @@ impl DockerBackend {
         let out = run_capture(&self.docker_bin, &argv, Duration::from_secs(4)).await?;
         if !out.status {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            let err = first_line(&stderr).unwrap_or_else(|| "docker info exited with failure".to_string());
+            let err = first_line(&stderr)
+                .unwrap_or_else(|| "docker info exited with failure".to_string());
             return Err(format!("docker engine unreachable: {err}"));
         }
         Ok(())
@@ -232,22 +231,20 @@ impl ComputerBackend for DockerBackend {
         }
     }
 
-    fn provision<'a>(&'a self, session: &'a str, gpu: &'a str) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            <Self as Backend>::provision(self, session, gpu).await
-        })
+    fn provision<'a>(
+        &'a self,
+        session: &'a str,
+        gpu: &'a str,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move { <Self as Backend>::provision(self, session, gpu).await })
     }
 
     fn list_sessions<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, String>> {
-        Box::pin(async move {
-            <Self as Backend>::list_sessions(self).await
-        })
+        Box::pin(async move { <Self as Backend>::list_sessions(self).await })
     }
 
     fn deprovision<'a>(&'a self, session: &'a str) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            <Self as Backend>::deprovision(self, session).await
-        })
+        Box::pin(async move { <Self as Backend>::deprovision(self, session).await })
     }
 
     fn forward_command(&self, session: &str, local_port: u16, remote_port: u16) -> TransportCmd {

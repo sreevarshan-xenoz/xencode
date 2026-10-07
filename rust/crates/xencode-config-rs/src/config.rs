@@ -1195,7 +1195,11 @@ impl XencodeConfig {
             profile: profile.name,
             capabilities: profile.capabilities,
             computer_backend: self.computer_backend.clone(),
-            available_computer_backends: vec!["colab".to_string(), "ssh".to_string(), "docker".to_string()],
+            available_computer_backends: vec![
+                "colab".to_string(),
+                "ssh".to_string(),
+                "docker".to_string(),
+            ],
             worker_adapter: self.worker_adapter.clone(),
             available_worker_adapters: vec!["mcp".to_string()],
             known_plugin_permissions: vec!["prompt".to_string(), "hooks".to_string()],
