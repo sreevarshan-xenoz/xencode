@@ -471,9 +471,9 @@ complete -c xencode -n "__fish_xencode_using_subcommand agents" -l agent -d 'Spe
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l build-package -d 'Build a worker continuation package from workspace diff and test runs (AR-7)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l package -d 'Path to inspect or load a worker continuation package (AR-7)' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l test-cmd -d 'Test commands to execute for package verification (defaults to \'cargo test\')' -r
-complete -c xencode -n "__fish_xencode_using_subcommand agents" -l route -d 'Route a task based strictly on probed capabilities, load, and cost ceiling (OR-6)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l route -d 'Route a task on capabilities the probe confirmed here, printing how each number behind the choice was known' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l require-cap -d 'Capabilities required for the routed task (e.g. stream, acp, mcp, resume, daemon, approval) (OR-6)' -r
-complete -c xencode -n "__fish_xencode_using_subcommand agents" -l max-cost -d 'Maximum cost ceiling allowed for the routed task (OR-6)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l max-cost -d 'Maximum cost ceiling allowed for the routed task; applied only where a price was measured, and reported as unchecked where it was not' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l redispatch -d 'Re-dispatch a killed or failed worker\'s task onto another agent (OR-7)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l replacement-agent -d 'Replacement agent to resume the re-dispatched task (OR-7)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l stop-reason -d 'Process stop reason for the killed worker (e.g. signal:9, exit:137, timeout:300) (OR-7)' -r

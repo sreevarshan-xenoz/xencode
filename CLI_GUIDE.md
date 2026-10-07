@@ -4040,10 +4040,55 @@ worker needs to know as actionable resumption context.
 `--resume` executes task resumption from a package using the designated worker
 (`--agent <name>`), re-running test commands to observe completion based on exit codes.
 
-`--route <task-id>` performs capability-gated worker routing across candidates based
-strictly on probed capabilities, current load capacity, and cost ceilings
-(`--require-cap <cap>`, `--max-cost <cost>`), never by vendor name. A task requiring an
-exclusive capability cannot route to other candidates even when they are idle.
+`--route <task-id>` chooses a worker from capabilities the probe confirmed on this
+machine (`--require-cap <cap>`), never from a vendor name, and prints the facts
+behind the choice. A task requiring an exclusive capability cannot route to the other
+candidates even when they are idle, and a worker whose `--help` never mentioned the
+capability is refused for that reason — a capability the probe confirmed *absent* is
+not an ability.
+
+Load, capacity and price are printed as what they are. Nothing on this machine measures
+what another vendor's agent has been given to do, xencode's leases count only work its
+own team handed out, and its price documents name models rather than agents, so those
+lines read `not measured` with the reason beside them. That has consequences the output
+states rather than hides: a `--max-cost <cost>` ceiling is reported as **not applied**
+to a worker xencode cannot price instead of counting as a pass, and when neither load
+nor price could be compared the decision says it fell on the order of the names.
+
+```
+$ xencode agents --route task-1 --require-cap acp
+Routing decision for task 'task-1':
+
+  chosen: cline
+  why:    Routed task 'task-1' to 'cline'. It was settled by the order of their names, because nothing measurable separated them. Required: acp. Probed here as able to do all of it: 5 of 10 candidates.
+
+  What the router asked, in the order it asked it:
+    capabilities   decided it           acp was required of every worker, and 5 of 10 were probed here as able to do it; 5 workers were ruled out: codex, claude, crush, agy, cursor-agent
+    load           not asked            no worker was ruled out on load, because nothing on this machine counts the tasks a vendor's own agent has been given
+    cost ceiling   not asked            no ceiling was set, so price was never a question
+    load ranking   not asked            no candidate left has a counted load, so there was nothing to order here
+    cost ranking   not asked            xencode has no price for every candidate left, and comparing some of them on cost would leave the rest unranked rather than cheap
+    name           decided it           5 of 10 candidates were eligible and nothing measurable separated them, so the choice fell on the first name in order — a convention, not a finding about cline
+
+  The facts behind the choice — cline:
+      acp: confirmed by `acp` (read from `cline --help`)
+      load: not measured (xencode cannot see what another process has given this worker to do; the only work it counts is what a team of its own has leased, and this question leased nothing)
+      capacity: not measured (nobody measured how many tasks this worker runs at once; the roster records what its help output says, and help does not say this)
+      cost: not measured (no price is known for this worker: xencode's price documents name models, and these agents bill their own accounts)
+
+  Every worker considered (10):
+    ▸ opencode      probed here as: acp, approval, daemon, mcp, resume, stream
+    ▸ cline         probed here as: acp, approval, daemon, mcp, resume, stream
+    ✗ codex         probed here as: approval, daemon, mcp, resume, stream
+      why not: needs acp, which no probe of this worker confirmed — acp: not advertised — no token for it appeared (read from `codex --help` and `codex exec --help`)
+```
+
+A step that did not run is listed with the others, because an absent check is the
+finding: `not asked` means the router had nothing to compare, `decided it` names the
+check that settled the choice. `--format json` prints the same decision as data —
+`steps` in order, each candidate's `facts`, and `not_checked` for the checks that
+could not run against it — so a caller can tell that a number was never measured
+instead of assuming it was.
 
 `--redispatch <task-id>` re-queues a failed or terminated worker task onto a replacement
 worker (`--replacement-agent <worker>`) using a continuation package, capturing the failure

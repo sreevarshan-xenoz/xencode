@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `OR-11`: every routing choice now shows the facts behind it
+
+`xencode agents --route` used to print a decision that looked like arithmetic it had never done:
+
+```
+Explanation: Routed task 'task-1' to worker 'agy' (capabilities: {"acp", "approval", "daemon", "mcp", "resume", "stream"}, load: 0/5, cost: $0.05)
+```
+
+The `0`, the `5` and the `0.05` were literals in the source, written twice. Nothing on this machine
+measures what another vendor's agent has been given to do, xencode's own leases count only work a
+team of its own handed out, and its price documents name models rather than agents — so those three
+numbers were invented, and every worker in the roster looked idle and cheap at the same time.
+
+- Load, capacity and price now arrive as facts carrying how they were known: `measured (what was
+  watched)`, `estimated (what it was worked out from)`, or `not measured (why nothing measures
+  it)`. A fact nobody measured holds no number at all, so there is nothing left to print as though
+  there were one.
+- Only a measured number may rule a worker out. An estimate can break a tie and never rejects
+  anybody, and a `--max-cost` ceiling that cannot be checked is printed as unchecked — `the ceiling
+  of 2.00$ was not applied to 9 workers (opencode, cline, codex, …) — xencode has no measured price
+  for a vendor's agent` — instead of quietly counting as a pass.
+- The decision lists what the router asked, in the order it asked it, and what each answer settled:
+  `capabilities decided it`, `load not asked`, `name decided it`. When neither load nor price could
+  be compared, the reason says the choice fell on the order of the workers' names — `a convention,
+  not a finding about agy` — which is the truth the printed decision owed the reader.
+- A worker the probe could not reach is refused for a missing measurement rather than a missing
+  ability, and the two read differently: `needs acp, which xencode never probed on this machine —
+  the word for what an uninstalled worker can do is unknown, not absent` against `needs acp, which
+  no probe of this worker confirmed — acp: not advertised — no token for it appeared (read from
+  `codex --help` and `codex exec --help`)`.
+- `--format json` carries the same structure — the ordered steps, every candidate's facts, and the
+  checks that did not run — so a script can tell that a number was never measured rather than
+  assuming it was.
+
+### Fixed — an agent that does not advertise a capability was being offered for it
+
+The contract probe confirms two opposite things: that a flag is in an agent's `--help`, and that it
+is not. Routing counted both as abilities, so a confirmed absence of `acp` made `codex`, `claude`,
+`crush`, `agy` and `cursor-agent` eligible for an `acp` task — five of the ten agents installed
+here, each one refused by its own help output. Only a claim the roster asserts *and* the probe
+confirms counts now: `xencode agents --route <task> --require-cap acp` rules those five out by
+name and cites the screen that says so. The end-to-end test that covered cost ceilings asserted the
+invented behaviour — an impossible ceiling reported as refusing every worker on the strength of a
+price nobody had measured — and has been replaced by one that requires the ceiling to be printed as
+not applied.
+
 ### Added — `OR-10`: a team run you approve by name, with an estimate you can check
 
 `xencode team run <name>` shows what would happen and stops there. The plan — the waves, each role's worker, gate, needs and command, the critical path, the serial bottleneck, the estimated wall clock and the estimated cost — is the default answer, and getting past it takes `--approved-by <your name>`. Nothing is launched and nothing is written until that name is on the command line, and a blank name is refused: the record of a run says who agreed to it.
