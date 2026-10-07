@@ -50,7 +50,8 @@ error: the interactive screen needs a terminal to draw on, and standard output h
 That is the live output of the command above, and it exits non-zero: the screen
 was asked for and cannot be shown. Every other subcommand is unaffected — the
 whole CLI works headless, and `xencode run --detach` is built for the case where
-the terminal may disappear mid-task.
+the terminal may disappear mid-task (directly invoking the worker via `run_agent` without re-executing binaries).
+Programs can also drive the agent loop directly as a library call through `xencode_tui_rs::run_agent`.
 
 TUI keys — press `?` (or `F1`) in the TUI for the live, panel-aware
 keybinding overlay; the authoritative list lives there. Essentials:

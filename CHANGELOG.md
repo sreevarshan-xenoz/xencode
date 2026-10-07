@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AE-7`: public headless entry to the agent loop
+
+A public library entry point for driving the agent loop headlessly is now available in `xencode-tui-rs`:
+
+- Added `run_agent` public asynchronous function in `xencode-tui-rs` with `AgentRunOptions`, `AgentRunOutput`, and `AgentRunError`.
+- `run_agent` requires explicit permission input: it accepts an approval mode, a headless policy, or both, and strictly refuses to start if neither is supplied.
+- Added `headless_policy` inspection in tool execution so policies filter and prevent disallowed calls without interactive prompts.
+- Updated detached process worker creation in `xencode-tui-rs::detached` to invoke the worker function directly via process fork instead of re-executing binaries with hidden child flags.
+- Exported loopback test helper `serve_scripted_answers` for external test suites.
+- Added integration test in `xencode-cli` verifying library-driven turns, checking produced diffs and persisted ledger rows.
+
+
 ### Added — `AE-6`: propose goals from failing check observations and insights
 
 Observations of failing checks and repository insights can now be offered as proposed tasks that convert into file-backed tasks:

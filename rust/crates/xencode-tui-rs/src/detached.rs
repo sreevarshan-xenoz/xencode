@@ -697,39 +697,45 @@ pub fn read_log_tail(dir: &Path, lines: usize) -> Vec<String> {
 /// runs with its working directory in the run's tree — re-deriving it there
 /// would point at the tree's own `.xencode`, not the project's.
 pub fn spawn_child(
-    exe: &Path,
+    _exe: &Path,
     run_id: &str,
     xencode_dir: &Path,
     cwd: &Path,
     log: &Path,
 ) -> std::io::Result<u32> {
-    use std::os::unix::process::CommandExt;
+    use std::os::fd::AsRawFd;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log)?;
-    // SAFETY: `pre_exec` runs after the fork in the child, where only
-    // async-signal-safe work is allowed — `setsid` is exactly that.
-    let child = unsafe {
-        std::process::Command::new(exe)
-            .arg("run")
-            .arg("--child")
-            .arg(run_id)
-            .arg("--xencode-dir")
-            .arg(xencode_dir)
-            .current_dir(cwd)
-            .stdin(std::process::Stdio::null())
-            .stdout(file.try_clone()?)
-            .stderr(file)
-            .pre_exec(|| {
-                // A new session: the child keeps going after the terminal that
-                // started it is gone, which is the whole point of detaching.
-                libc::setsid();
-                Ok(())
-            })
-            .spawn()?
-    };
-    Ok(child.id())
+    let log_fd = file.as_raw_fd();
+    let xencode_dir_buf = xencode_dir.to_path_buf();
+    let run_id_str = run_id.to_string();
+    let cwd_buf = cwd.to_path_buf();
+
+    // SAFETY: fork creates a detached worker child without re-executing this binary (AE-7).
+    // The child sets sid, redirects stdout/stderr, and calls run_child directly in tokio.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if pid == 0 {
+        unsafe {
+            libc::setsid();
+            libc::dup2(log_fd, libc::STDOUT_FILENO);
+            libc::dup2(log_fd, libc::STDERR_FILENO);
+        }
+        let _ = std::env::set_current_dir(&cwd_buf);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("detached worker tokio runtime");
+        rt.block_on(async move {
+            let _ = run_child(&xencode_dir_buf, &run_id_str).await;
+        });
+        std::process::exit(0);
+    }
+    Ok(pid as u32)
 }
 
 /// Send the run's child a `SIGTERM` and wait briefly for it to die. The
