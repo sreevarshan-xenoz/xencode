@@ -14,14 +14,14 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-07, after `OR-9`: it lists 53 subcommands — the
+  (verified against `xencode --help` on 2026-10-07, after `OR-10`: it lists 53 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2676 tests passing, zero warnings (re-verified 2026-10-07, after `OR-9`; 19 ignored, so 2695 in the run)
+- [x] Workspace gates green — 16 crates, 2700 tests passing, zero warnings (re-verified 2026-10-07, after `OR-10`; 19 ignored, so 2719 in the run)
 
 ## Model Catalog Honesty
 
@@ -12337,11 +12337,60 @@ worker, `OR-` for the thing that decides what workers to talk to.
       made exactly that test fail, and was reverted. Completions and the man page
       regenerated from the clap definition, and the CLI's byte-equality test passes.
       2676 tests passing over 16 crates, 19 ignored, zero clippy warnings.
-- [ ] **OR-10 — plan, simulate, dry-run-first.** Every orchestrator entry point renders
+- [x] **OR-10 — plan, simulate, dry-run-first.** Every orchestrator entry point renders
       agents, tasks, parallel groups, estimated wall-clock and estimated cost, and
       launches nothing until approved.
       **Done-when:** the plan view is the default, "no changes will be made" is true and
       provable, and the estimate is checked against the run afterwards.
+      *Shipped:* `xencode team run <name>` is the entry point that has a task graph to
+      launch, and its default answer is the plan. With no approval on the command line it
+      prints the waves, each role's worker/gate/needs/command, the critical path, the serial
+      bottleneck, the estimated wall clock and the estimated cost — and returns, having
+      started no role and written no record. Launching needs `--approved-by <name>`, and a
+      blank or whitespace-only name is refused, because the record of a run says who agreed
+      to it. Both halves of "no changes will be made" are proven rather than asserted: one
+      test runs `team run` with no approval against a recipe whose role would `touch` a
+      marker file and fails if the marker exists or if a `.xencode/team-runs` directory
+      appears; forcing the unapproved branch to launch anyway made exactly that test fail,
+      and was reverted. A recipe that cannot be scheduled is refused with the fault and the
+      line `nothing was launched`, and writes no record either.
+      The estimate is a measurement, never an invented number. Each recipe gets a fingerprint
+      — FNV-1a 64 over length-prefixed fields (recipe name, both capacity numbers, then per
+      role its name, worker, command, gates and needs) — and the estimate is the newest
+      recorded run whose fingerprint matches, so the wall clock printed is `measured from run
+      quick-… (approved by …, 3 roles)`. Edit any one of those fields and the fingerprint
+      changes, the estimate is gone, and the plan says `unknown — this recipe has never run
+      here, so there is no measurement to quote` instead of carrying on with the old number;
+      that too was checked by mutation, by freezing the fingerprint to a constant, which fails
+      exactly the one test that says an edited command retires the estimate. The fingerprint is
+      cache identity, not a security digest, and says so in the code.
+      The cost is measured the same way. A run is wrapped in the machine's own power window and
+      records the package watt-hours it drew, priced at the user's `power_cents_per_kwh`; no
+      tariff set leaves the record holding energy and no price rather than reporting free work,
+      and a machine publishing no power counter prints `energy unknown — this machine reports no
+      power counter to read`. Every estimate is checked against the run it was made for, in the
+      same output: `wall clock:`, `this run cost:`, `the estimate was`, `checked:` with the
+      difference in milliseconds, and where the record went.
+      Records live in `.xencode/team-runs/`, ignored by git while `.xencode/teams/` stays
+      tracked — recipes are what a team agrees on, measurements are one machine's, and a tariff
+      or a laptop change makes them somebody else's numbers. File names come from the recipe
+      name through a slug that keeps letters, digits, `_` and `-`; dots were in the allowed set
+      until a test found `../../escape` recorded as `..-..-escape-…`, which was harmless on disk
+      and read like a way out. A role that fails is recorded with its real status (`exited(3)`)
+      and the command still exits non-zero, so a failed run is evidence rather than a lost one.
+      Live on this machine, three roles at capacity 2: `survey` ran 0→204 ms and `harden` 1→204 ms
+      — the two branch heads genuinely overlapped — `integrate` started at 205 ms and the run
+      took 616 ms at peak 2, drawing 0.001464 Wh at 12 cents/kWh; the next `team plan` quoted
+      that run as its estimate. 12 unit tests in `xencode-core-rs/src/team_runs.rs` (fingerprint
+      stability and sensitivity, a field-boundary case, real `sh -c` timings through the scheduler,
+      a broken sibling record reported not hidden, an estimate not crossing projects or fingerprints,
+      the slug, unpriced energy) plus 12 end-to-end tests against the real binary, one of which sets
+      the tariff through `xencode config set` in a sandboxed home and re-derives the price from the
+      recorded watt-hours. Scope stated plainly: `xencode compete run` already names its cost before
+      it starts and is not converted here, the fabricated `estimated_cost: 0.05` in `agents --route`
+      is `OR-11`'s to explain, and the `/orchestrator` surface is `OR-14`. Completions and the man
+      page regenerated from the clap definition; the CLI's byte-equality tests pass.
+      2700 tests passing over 16 crates, 19 ignored, zero clippy warnings.
 - [ ] **OR-11 — explainable routing.** Print the reasons behind every worker choice, and
       say plainly when a reason came from a measurement that does not exist yet.
       **Done-when:** each choice lists the facts behind it, and a `CX-4`-style estimate is

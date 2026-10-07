@@ -4330,7 +4330,7 @@ Build an evidence-backed integration plan evaluating candidate branches, checkin
 
 Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
 
-### `xencode team [list|show|plan] [--format text|json]`
+### `xencode team [list|show|plan|run] [--format text|json]`
 
 A **team recipe** is one TOML file under `.xencode/teams/` naming the roles on a
 team, which worker plays each one, and which checks gate that role's output. That
@@ -4388,10 +4388,45 @@ a team of nobody.
 - `xencode team plan <name> [--format text|json]` — compile the roles into the task
   graph the scheduler runs and print what that graph says: which roles start
   together (wave 1, wave 2, …), the longest dependency chain, the join where the
-  branches are forced back into one line, and whether each role's worker is
-  installed on this machine. **Nothing is launched and no check is run** — planning
-  reads the file, walks the graph, and looks the workers up on `PATH`. The gates it
-  prints are named, not executed; `xencode verify` is what runs those three checks.
+  branches are forced back into one line, whether each role's worker is
+  installed on this machine, and the estimated wall clock and cost. **Nothing is
+  launched and no check is run** — planning reads the files, walks the graph, and
+  looks the workers up on `PATH`. The gates it prints are named, not executed;
+  `xencode verify` is what runs those three checks.
+- `xencode team run <name> [--approved-by <your name>] [--format text|json]` — the
+  plan view first, and the run only under a name. Without `--approved-by` this is
+  `xencode team plan` again, plus the line saying what would change that: no role
+  child is started, no record is written, and not even the `.xencode/team-runs/`
+  directory is created. With `--approved-by <name>` the same plan prints, and then
+  every role runs as its own real `sh -c` child through the queue, at most
+  `min(workers, verification_throughput)` at once. A blank `--approved-by ""` is
+  refused: the record of a run says who agreed to it, and a blank is nobody. A role
+  that does not exit 0 makes the command exit non-zero — and is still recorded,
+  because the next plan needs those numbers too.
+
+**Where an estimate comes from.** `estimated wall clock` and `estimated cost` are one
+thing: the most recent recorded run of *the same recipe*, matched by a fingerprint over
+its role names, workers, gates, commands, `needs` and both `[capacity]` numbers. Edit one
+command and the fingerprint moves, and the plan goes back to `unknown — this recipe has
+never run here` rather than quoting a run that measured a different team. Records are one
+JSON file per run under `.xencode/team-runs/`, holding the launch order, each role's
+start and finish in milliseconds, the peak concurrency the queue observed, the watt-hours
+this machine's own package energy counter saw, and the tariff that was set when it ran.
+That directory is gitignored on purpose: the seconds and the electricity belong to one
+machine, and a copied record would be somebody else's measurement. Cost is that measured
+energy priced at `power_cents_per_kwh`; with no tariff set the line reads `no $/kWh set`
+rather than looking free. An approved run prints the estimate it ran against and the
+difference:
+
+```
+  wall clock:      0.61 s (615 ms), peak concurrency 2 of 2 at once
+  this run cost:   ≈ 1.30 mWh · ≈ under $0.000001 · this machine only
+  the estimate was 0.62 s · ≈ 1.34 mWh · ≈ under $0.000001 · this machine only
+  checked:         615 ms against an estimated 621 ms: 1% shorter than the estimate
+```
+
+A plan says it in one line too: both figures are measurements of one past run on this
+machine, not a promise.
 
 Two files claiming the same `name` are refused by path, because picking one by
 directory order would schedule a team nobody read.

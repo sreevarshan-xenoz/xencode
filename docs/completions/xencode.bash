@@ -793,6 +793,9 @@ _xencode() {
             xencode__subcmd__help__subcmd__team,plan)
                 cmd="xencode__subcmd__help__subcmd__team__subcmd__plan"
                 ;;
+            xencode__subcmd__help__subcmd__team,run)
+                cmd="xencode__subcmd__help__subcmd__team__subcmd__run"
+                ;;
             xencode__subcmd__help__subcmd__team,show)
                 cmd="xencode__subcmd__help__subcmd__team__subcmd__show"
                 ;;
@@ -1240,6 +1243,9 @@ _xencode() {
             xencode__subcmd__team,plan)
                 cmd="xencode__subcmd__team__subcmd__plan"
                 ;;
+            xencode__subcmd__team,run)
+                cmd="xencode__subcmd__team__subcmd__run"
+                ;;
             xencode__subcmd__team,show)
                 cmd="xencode__subcmd__team__subcmd__show"
                 ;;
@@ -1251,6 +1257,9 @@ _xencode() {
                 ;;
             xencode__subcmd__team__subcmd__help,plan)
                 cmd="xencode__subcmd__team__subcmd__help__subcmd__plan"
+                ;;
+            xencode__subcmd__team__subcmd__help,run)
+                cmd="xencode__subcmd__team__subcmd__help__subcmd__run"
                 ;;
             xencode__subcmd__team__subcmd__help,show)
                 cmd="xencode__subcmd__team__subcmd__help__subcmd__show"
@@ -4578,7 +4587,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__team)
-            opts="list show plan"
+            opts="list show plan run"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4606,6 +4615,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__team__subcmd__plan)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__team__subcmd__run)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -7586,7 +7609,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__team)
-            opts="-h --help list show plan help"
+            opts="-h --help list show plan run help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -7600,7 +7623,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__team__subcmd__help)
-            opts="list show plan help"
+            opts="list show plan run help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -7655,6 +7678,20 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__team__subcmd__help__subcmd__run)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__team__subcmd__help__subcmd__show)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
@@ -7694,6 +7731,28 @@ _xencode() {
                 return 0
             fi
             case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__team__subcmd__run)
+            opts="-h --approved-by --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --approved-by)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0
