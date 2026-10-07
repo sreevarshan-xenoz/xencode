@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AF-1`: append-only event log for durable conversation memory
+
+Conversation memory is now backed by an append-only event log, preserving full conversation history while deriving compacted message projections for active context:
+
+- Added `Origin` enum distinguishing between `Origin::Observed` (turns received during direct interaction) and `Origin::Synthesised` (turns inherited via session fork or reconstructed from stored state).
+- Added `ConversationEvent` and converted `ConversationSession` to store an append-only log of events (`events: Vec<ConversationEvent>`).
+- Implemented `first_message` on sessions and memory to retrieve initial turns on demand even after active message projections exceed caps and compact.
+- Added session forking (`fork_session` and `ConversationSession::fork`) which creates child sessions holding an exact prefix of parent events, marking inherited turns as synthesised and new subsequent turns as observed.
+- Applied secret scrubbing (`SE-5`) to messages before event logging and implemented tolerant JSONL reading that discards torn trailing lines from interrupted writes (`DB-5`).
+- Added CLI options `xencode memory show --first` to view a session's initial message and `xencode memory fork` to branch sessions.
+
 ### Added — `AE-7`: public headless entry to the agent loop
 
 A public library entry point for driving the agent loop headlessly is now available in `xencode-tui-rs`:

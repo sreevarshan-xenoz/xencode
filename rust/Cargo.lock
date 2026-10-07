@@ -4163,6 +4163,7 @@ dependencies = [
  "serde",
  "serde_json",
  "xencode-config-rs",
+ "xencode-context-rs",
  "xencode-core-rs",
 ]
 

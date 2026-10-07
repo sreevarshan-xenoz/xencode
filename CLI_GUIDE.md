@@ -3152,16 +3152,21 @@ that contains its own grader, so the expected values are readable by it; nothing
 here stops a model from reading them, and the diff check is what notices.
 
 ### `xencode memory <action>`
-Conversation memory (kept as `conversation_memory.json` in the state directory):
-`list [--all]`, `show <session>`, `prune`. `gc` and `evidence` work on a different file — the
+Conversation memory (backed by an append-only event log and saved as `conversation_memory.json` in the state directory):
+`list [--all]`, `show <session> [--first]`, `fork <session> [--as-id <id>] [--prefix <n>]`, `prune`. `gc` and `evidence` work on a different file — the
 project's own `.xencode/state.md` — and are described below. Sessions with 0 messages are
 never persisted to disk and are filtered from `xencode memory list` by default (`--all`
 shows them). `xencode memory prune` deletes any empty sessions stored on disk.
+`show --first` retrieves the initial message recorded in the session's event log on demand,
+even when the active window has compacted away earlier turns. `fork` branches a session into
+a child holding an exact prefix of events, marking inherited turns as synthesised.
 
 ```bash
 xencode memory list
 xencode memory list --all
 xencode memory show <session-id>
+xencode memory show <session-id> --first
+xencode memory fork <session-id> [--as-id <new-id>] [--prefix <n>]
 xencode memory prune
 xencode memory gc [--apply]
 xencode memory evidence [--format text|json]
