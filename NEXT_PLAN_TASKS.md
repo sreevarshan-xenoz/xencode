@@ -18,9 +18,9 @@
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
-  `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
-  built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2623 tests passing, zero warnings (re-verified 2026-10-07, after `OR-4`; 19 ignored, so 2642 in the run)
+  `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap` — and clap's
+  built-in `help`, 50 entries in the list)
+- [x] Workspace gates green — 16 crates, 2629 tests passing, zero warnings (re-verified 2026-10-07, after `OR-5`; 19 ignored, so 2648 in the run)
 
 ## Model Catalog Honesty
 
@@ -12247,7 +12247,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       time.
       **Done-when:** two workers asked for the same file and the second was told to wait
       before it was launched, not after it had written.
-- [ ] **OR-5 — the merge decision.** `git merge-tree` detection, a rendered conflict, an
+- [x] **OR-5 — the merge decision.** `git merge-tree` detection, a rendered conflict, an
       evidence-backed verdict per branch, and a human gate to land anything.
       **Done-when:** nothing merges without a decision a named human made, and a clean
       four-branch merge still shows which tests were re-run after integration (never the

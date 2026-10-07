@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-5`: git merge conflict detection and human approval for branch integration
+
+Candidate branches can now be evaluated and merged under human supervision (`xencode merge precheck`, `xencode merge plan`, `xencode merge land`):
+
+- Detects candidate branch conflicts speculatively with `git merge-tree` without altering the working tree or index, extracting conflicting files and conflict diff markers.
+- Evaluates branch readiness and evidence-backed checks before proposing an integration plan across candidate branches.
+- Enforces a mandatory human approval requirement: merges require a named person who approved the decision, rejecting integration if the approver name is empty or unapproved.
+- Re-runs post-integration test commands on the newly integrated tree and reports results separately from worker test executions.
+
 ### Added — `OR-4`: dedicated worker leases and scheduling-time file conflict detection
 
 Workers now execute within dedicated worktree leases with declared file sets (`LeaseRegistry`, `WorkerLease`):
