@@ -20,7 +20,7 @@
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `bootstrap` — and clap's
   built-in `help`, 49 entries in the list)
-- [x] Workspace gates green — 16 crates, 2621 tests passing, zero warnings (re-verified 2026-10-07, after `AR-7`; 19 ignored, so 2640 in the run)
+- [x] Workspace gates green — 16 crates, 2623 tests passing, zero warnings (re-verified 2026-10-07, after `OR-4`; 19 ignored, so 2642 in the run)
 
 ## Model Catalog Honesty
 
@@ -12242,7 +12242,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       path and worker panel wire in (`X-3`, `OR-12`); the actual end-to-end spawn of a
       live Claude through the prompt tool is a paid call and is **not** claimed here —
       the two done-when clauses are met at xencode's gate, which is what they ask.
-- [ ] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
+- [x] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
       file set, and a conflict refused at scheduling time rather than discovered at merge
       time.
       **Done-when:** two workers asked for the same file and the second was told to wait
