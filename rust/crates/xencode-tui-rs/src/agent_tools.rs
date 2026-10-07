@@ -3648,6 +3648,8 @@ fn env_dump_command(command: &str) -> bool {
 #[derive(Clone)]
 pub struct ApprovalCtx {
     pub mode: ApprovalMode,
+    /// Explicit headless policy gating calls when running headlessly (AE-7).
+    pub headless_policy: Option<HeadlessPolicy>,
     pub grants: Arc<std::sync::Mutex<Vec<ToolClass>>>,
     pub prompts: mpsc::UnboundedSender<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
     /// Where writes get snapshotted before they land (I2-01 checkpoints).
@@ -3972,6 +3974,15 @@ pub async fn execute_tool_call_approved(
             .unwrap_or_default();
         if let crate::reprogate::WriteVerdict::Refused(reason) = ctx.repro.check_write(&target) {
             return err(reason);
+        }
+    }
+    if let Some(headless) = &ctx.headless_policy {
+        match headless.decide(root, &call.name, &args) {
+            Headless::Refused { reason } => {
+                ctx.record_approval(&call.name, tool_class(&call.name), ApprovalAnswer::Denied);
+                return format!("error: {reason}");
+            }
+            Headless::Allow => {}
         }
     }
     match classify(
@@ -7250,6 +7261,7 @@ patched = ["{fixed}"]
         Harness {
             ctx: ApprovalCtx {
                 mode,
+                headless_policy: None,
                 grants: Arc::new(std::sync::Mutex::new(Vec::new())),
                 prompts: tx,
                 checkpoints,
@@ -7835,6 +7847,7 @@ patched = ["{fixed}"]
             };
             let ctx = ApprovalCtx {
                 mode: ApprovalMode::AllAllow,
+                headless_policy: None,
                 grants: Arc::new(std::sync::Mutex::new(Vec::new())),
                 prompts: mpsc::unbounded_channel().0,
                 checkpoints: store.clone(),

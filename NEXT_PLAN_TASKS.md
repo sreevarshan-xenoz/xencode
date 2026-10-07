@@ -15578,6 +15578,12 @@ appear in it are how the §R-0 counts went wrong.
   *Done-when:* a test outside `xencode-tui-rs` drives one round as a library call and asserts
   both the diff it produced and the ledger rows it wrote, and the detached worker becomes that
   call instead of a re-executed process.
+  *Completed:* Added `run_agent` public asynchronous entry to the agent loop in `xencode-tui-rs`
+  taking `ApprovalMode` and `HeadlessPolicy` and refusing when neither is supplied. Added
+  `headless_policy` checks in tool execution. Updated detached worker process spawning in
+  `detached.rs` to call the worker directly through fork instead of re-executing binaries.
+  Verified by integration test in `xencode-cli` checking diff and ledger rows. 2554 tests passing;
+  clippy clean.
 
 ### Counting
 

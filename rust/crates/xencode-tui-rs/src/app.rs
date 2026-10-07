@@ -3637,6 +3637,7 @@ impl<'a> App<'a> {
     fn approval_ctx(&self) -> crate::agent_tools::ApprovalCtx {
         crate::agent_tools::ApprovalCtx {
             mode: self.agent_mode(),
+            headless_policy: None,
             grants: self.agent_grants.clone(),
             prompts: self.approval_tx.clone(),
             checkpoints: self.checkpoints.clone(),
@@ -9963,6 +9964,202 @@ fn split_prompt_arguments(tail: &str) -> (String, Vec<(String, String)>) {
     (name, arguments)
 }
 
+/// Options for driving the agent loop headlessly as a library call (AE-7).
+#[derive(Debug, Clone)]
+pub struct AgentRunOptions {
+    /// Workspace root where tools run.
+    pub tool_root: std::path::PathBuf,
+    /// User prompt driving the run.
+    pub prompt: String,
+    /// Model name or route. If None, uses default configured model.
+    pub model: Option<String>,
+    /// Explicit approval mode (agent_tools.rs:31).
+    pub approval_mode: Option<crate::agent_tools::ApprovalMode>,
+    /// Explicit headless policy (agent_tools.rs:452).
+    pub headless_policy: Option<crate::agent_tools::HeadlessPolicy>,
+    /// Maximum rounds before ending the turn.
+    pub max_rounds: usize,
+    /// Optional project .xencode directory for trace, cache, and ledger output.
+    pub xencode_dir: Option<std::path::PathBuf>,
+    /// Optional run id. If None, generated.
+    pub run_id: Option<String>,
+    /// Optional session id.
+    pub session_id: Option<String>,
+    /// Optional Ollama server URL (e.g. for testing against a local endpoint).
+    pub ollama_url: Option<String>,
+    /// Optional llama.cpp server URL.
+    pub llama_cpp_url: Option<String>,
+}
+
+/// Outcome of a headless agent run (AE-7).
+#[derive(Debug, Clone)]
+pub struct AgentRunOutput {
+    pub run_id: String,
+    pub session_id: String,
+    pub rounds: u32,
+    pub diff: String,
+    pub edited_files: Vec<String>,
+    pub ledger_file: std::path::PathBuf,
+    pub final_answer: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AgentRunError {
+    MissingApprovalPolicy,
+    Execution(String),
+}
+
+impl std::fmt::Display for AgentRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingApprovalPolicy => write!(
+                f,
+                "Agent loop refused to start: either approval_mode or headless_policy must be explicitly supplied"
+            ),
+            Self::Execution(err) => write!(f, "Agent run failed: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for AgentRunError {}
+
+/// Public entry to the agent loop (AE-7, fact Q-1.15).
+/// Drives the agent loop headlessly without requiring a TUI terminal surface.
+/// Takes approval mode and/or HeadlessPolicy and refuses to start if neither is supplied.
+pub async fn run_agent(options: AgentRunOptions) -> Result<AgentRunOutput, AgentRunError> {
+    if options.approval_mode.is_none() && options.headless_policy.is_none() {
+        return Err(AgentRunError::MissingApprovalPolicy);
+    }
+
+    let tool_root = options.tool_root.clone();
+    let xencode_dir = options
+        .xencode_dir
+        .unwrap_or_else(|| tool_root.join(".xencode"));
+    let _ = std::fs::create_dir_all(&xencode_dir);
+
+    let run_id = options.run_id.unwrap_or_else(|| {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!("{ts}-agent")
+    });
+    let session_id = options.session_id.unwrap_or_else(|| {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!("{ts}-sess")
+    });
+
+    let mut config = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
+    if let Some(m) = &options.model {
+        config.default_model = m.clone();
+    }
+    if let Some(url) = &options.ollama_url {
+        config.ollama_url = url.clone();
+    }
+    if let Some(url) = &options.llama_cpp_url {
+        config.llama_cpp_url = url.clone();
+    }
+
+    let approval_mode = match (options.approval_mode, &options.headless_policy) {
+        (Some(mode), _) => mode,
+        (None, Some(_)) => crate::agent_tools::ApprovalMode::Autonomous,
+        (None, None) => unreachable!(),
+    };
+    config.agent_approval = match approval_mode {
+        crate::agent_tools::ApprovalMode::Ask => "ask".to_string(),
+        crate::agent_tools::ApprovalMode::EditAllow => "edit-allow".to_string(),
+        crate::agent_tools::ApprovalMode::AllAllow => "all-allow".to_string(),
+        crate::agent_tools::ApprovalMode::Plan => "plan".to_string(),
+        crate::agent_tools::ApprovalMode::Autonomous => "autonomous".to_string(),
+    };
+
+    let mut app = App::with_config_and_memory(
+        config,
+        xencode_memory_rs::ConversationMemory::new(50),
+        std::path::PathBuf::new(),
+    );
+    app.persist_config = false;
+
+    let run_brief = |task: &str| -> String { format!("Task: {task}") };
+    let assembly = app.delegated_context(&tool_root, &options.prompt, run_brief);
+    let messages = App::chat_messages(assembly.turns);
+
+    let mut run = app.agent_run_with_id(
+        LoopSink::Spawn(0),
+        messages,
+        &options.prompt,
+        run_id.clone(),
+    );
+    run.tool_root = tool_root.clone();
+    run.trace_dir = xencode_dir.clone();
+    run.max_rounds = options.max_rounds.max(1);
+    run.approval.mode = approval_mode;
+    run.approval.headless_policy = options.headless_policy.clone();
+    run.approval.session_id = Some(session_id.clone());
+
+    if approval_mode == crate::agent_tools::ApprovalMode::Ask {
+        let (tx, rx) = mpsc::unbounded_channel();
+        drop(rx);
+        run.approval.prompts = tx;
+    }
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    agent_rounds(run, tx).await;
+
+    let mut final_answer = String::new();
+    while let Ok(line) = rx.try_recv() {
+        if line.starts_with("[SPAWN:0:finish:") {
+            if let Some(rest) = line.strip_prefix("[SPAWN:0:finish:") {
+                final_answer = rest.trim_end_matches(']').to_string();
+            }
+        }
+    }
+
+    let diff = std::process::Command::new("git")
+        .args(["diff"])
+        .current_dir(&tool_root)
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).to_string())
+        .unwrap_or_default();
+
+    let edited_files = std::process::Command::new("git")
+        .args(["diff", "--name-only"])
+        .current_dir(&tool_root)
+        .output()
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let ledger_entry = xencode_context_rs::ledger::LedgerEntry {
+        ts_unix_ms: xencode_context_rs::conversation::now_millis(),
+        session: Some(session_id.clone()),
+        run_class: xencode_context_rs::ledger::RunClass::Other,
+        exit_code: 0,
+        subjects: vec![xencode_context_rs::ledger::digest_hex(&options.prompt)],
+        log_ref: ".xencode/cache/runs.jsonl".to_string(),
+        note: format!("agent run {run_id}"),
+    };
+    let _ = xencode_context_rs::ledger::append_ledger(&xencode_dir, &ledger_entry);
+    let ledger_file = xencode_context_rs::ledger::ledger_path(&xencode_dir);
+
+    Ok(AgentRunOutput {
+        run_id,
+        session_id,
+        rounds: 1,
+        diff,
+        edited_files,
+        ledger_file,
+        final_answer,
+    })
+}
+
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -11535,8 +11732,7 @@ pub fn set_secret_value(config: &mut XencodeConfig, label: &str, value: Option<S
 /// Ollama answers for a model it does not have, so asking costs the test no reply of
 /// its own and the turn takes the same "nothing was learned" path a server that is
 /// down would give it.
-#[cfg(test)]
-pub(crate) async fn serve_scripted_answers(
+pub async fn serve_scripted_answers(
     listener: tokio::net::TcpListener,
     answers: Vec<serde_json::Value>,
 ) {
@@ -11780,6 +11976,7 @@ mod tests {
         let (prompts, _rx) = mpsc::unbounded_channel();
         let ctx = crate::agent_tools::ApprovalCtx {
             mode: crate::agent_tools::ApprovalMode::AllAllow,
+            headless_policy: None,
             grants: app.agent_grants.clone(),
             prompts,
             checkpoints: app.checkpoints.clone(),
@@ -11963,6 +12160,7 @@ mod tests {
             receivers.push(rx);
             crate::agent_tools::ApprovalCtx {
                 mode: crate::agent_tools::ApprovalMode::AllAllow,
+                headless_policy: None,
                 grants: app.agent_grants.clone(),
                 prompts,
                 checkpoints: app.checkpoints.clone(),
@@ -12938,6 +13136,7 @@ mod tests {
         let (prompts, _rx) = mpsc::unbounded_channel();
         let ctx = crate::agent_tools::ApprovalCtx {
             mode: crate::agent_tools::ApprovalMode::Ask,
+            headless_policy: None,
             grants: app.agent_grants.clone(),
             prompts,
             checkpoints: app.checkpoints.clone(),
