@@ -1,5 +1,6 @@
 pub mod atomic;
 pub mod jsonl;
+pub mod lease;
 pub mod result_envelope;
 pub mod rustc_json;
 pub mod scheduler;
@@ -10,6 +11,9 @@ pub mod workspace;
 
 pub use atomic::write_atomic;
 pub use jsonl::{read_jsonl_tolerant, JsonlRead};
+pub use lease::{
+    LeaseConflict, LeaseDecision, LeaseRegistry, ScheduleOutcome, WaitingRequest, WorkerLease,
+};
 pub use result_envelope::{
     Claim, Evidence, FinishStatus, Handoff, RanCommand, ResultEnvelope, ReviewerView,
 };

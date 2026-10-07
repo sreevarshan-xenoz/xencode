@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-4`: dedicated worker leases and scheduling-time file conflict detection
+
+Workers now execute within dedicated worktree leases with declared file sets (`LeaseRegistry`, `WorkerLease`):
+
+- Each active worker is allocated an isolated git worktree rather than sharing a single working tree checkout.
+- Conflicts between workers' declared target files are evaluated at scheduling time prior to process launch: when two workers declare overlapping files, the second worker is told to wait before it is launched.
+- Releasing a completed lease automatically unblocks the next waiting worker in the queue.
+- Rejects invalid path components that attempt to climb outside the workspace.
+
 ### Added — `AR-7`: worker task continuation package built from observed diffs and test results
 
 A worker task continuation package now preserves what the next worker needs to know purely from observed facts (`xencode agents --build-package <id>`, `xencode agents --package <path>`, and `xencode agents --package <path> --resume --agent <worker>`):
