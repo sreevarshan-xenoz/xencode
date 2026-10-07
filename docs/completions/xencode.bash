@@ -1400,7 +1400,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__agents)
-            opts="-h --contract --health --agent --build-package --package --resume --test-cmd --format --help"
+            opts="-h --contract --health --agent --build-package --package --resume --test-cmd --route --require-cap --max-cost --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1419,6 +1419,18 @@ _xencode() {
                     return 0
                     ;;
                 --test-cmd)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --route)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --require-cap)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-cost)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

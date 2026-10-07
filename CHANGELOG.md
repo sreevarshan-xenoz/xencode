@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-6`: capability-gated routing over probed contracts
+
+Task routing now selects workers strictly from probed capabilities, load capacity, and cost ceilings rather than vendor names (`xencode agents --route <task> [--require-cap <cap>...] [--max-cost <cost>]`):
+
+- Evaluates candidates against confirmed capabilities from contract probing (`AR-3`). A task requiring an exclusive capability is never routed to other workers even when they are idle.
+- Enforces worker concurrency limits and cost ceilings, providing detailed explanations for worker selection and candidate rejections.
+- Ranks eligible candidates by lowest current load and lowest estimated cost without factoring in vendor identities.
+
 ### Added — `OR-5`: git merge conflict detection and human approval for branch integration
 
 Candidate branches can now be evaluated and merged under human supervision (`xencode merge precheck`, `xencode merge plan`, `xencode merge land`):
