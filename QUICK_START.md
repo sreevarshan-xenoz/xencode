@@ -297,6 +297,8 @@ xencode remote show
 /agents               - Inventory the coding-agent CLIs installed on PATH
 /trust [status|forget] [path] - Follow an AGENTS.md as instructions — the workspace's, or a directory's like src/auth/AGENTS.md — or report/withdraw (trust is per content hash)
 /egress [text]         - Show where the next turn would send your prompt and what redaction holds back, without sending it
+/goto <destination>    - Switch focus directly to any panel destination by name (also `/nav`); every feature stays reachable whatever disclosure level is set
+/level [1-4]           - Read or set the progressive disclosure tier — 1 Core, 2 Workflow, 3 Advanced, 4 All — which governs what the feature palette (`Ctrl+F`) and welcome line show
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full

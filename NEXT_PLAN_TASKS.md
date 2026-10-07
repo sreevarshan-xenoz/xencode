@@ -14,12 +14,13 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-06, after `QK-9`: it lists 48 subcommands — the
+  (verified against `xencode --help` on 2026-10-07, after `OR-8`: it lists 52 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
-  `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap` — and clap's
-  built-in `help`, 50 entries in the list)
+  `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
+  `computers`, `compete` — and clap's
+  built-in `help`, 53 entries in the list)
 - [x] Workspace gates green — 16 crates, 2651 tests passing, zero warnings (re-verified 2026-10-07, after `OR-8`; 19 ignored, so 2670 in the run)
 
 ## Model Catalog Honesty
@@ -2370,7 +2371,8 @@ never is.
   subcommand including the five added this session (`toolchain`, `test`, `cov`,
   `mutants`, `anchor`), asserted by a test that would fail on the next added
   subcommand only if someone forgets to grow its list — and the man page
-  renders 112 lines of roff. Two tests.
+  renders 181 lines of roff, re-counted 2026-10-07 (it only grew, since the
+  page describes top-level flags and not each subcommand). Two tests.
 - **WF-7 CI watchdog** (`xencode ci watch` over Actions REST feeding failed logs
   into the agent). M. Trap: polling and pagination cost. Done-when: after a push
   the terminal reports pass/fail plus one failed-test summary unaided.
