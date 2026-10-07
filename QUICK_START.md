@@ -64,7 +64,9 @@ images ride as message parts the model actually sees, shrunk first to a
 1568-pixel long edge and recompressed to JPEG when they have no transparency,
 PDFs/DOCXs parse to
 text), `/ctx` retrieval,
-`/advise` repo insights, `/impact <file>` blast-radius fan-out panel, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/lesson` to read the lesson a rewind, a run of failing checks or a refused call drafted and approve your own words into `AGENTS.md`, `/gate bugfix` to hold the agent off a production file until it has reproduced the bug, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/skills` to see which `SKILL.md` skills loaded and what they cost the prompt, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
+`/advise` repo insights, `/impact <file>` blast-radius fan-out panel, `/workers` for the fleet — the workers
+this session launched, the roles your recipes name, the task registry, the recorded runs, the newest
+events and the approvals waiting, each figure naming the row it was read from, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/lesson` to read the lesson a rewind, a run of failing checks or a refused call drafted and approve your own words into `AGENTS.md`, `/gate bugfix` to hold the agent off a production file until it has reproduced the bug, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/skills` to see which `SKILL.md` skills loaded and what they cost the prompt, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
 turns add up to in tokens and money — naming which document each rate was read out
 of, since `.xencode/pricing.json` is yours and a price `xencode prices fetch`
 looked up is somebody else's list with a date on it — and, for an answer from a local model, a `⚡` line saying what the turn drew at the wall in watt-hours and what that costs at your own `$/kWh`, today's usage against any daily caps you set, model picker, and more. Ask about a library
@@ -280,6 +282,7 @@ xencode remote show
 /ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/fold/promote/drop/prompts)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
 /impact <file>        - Blast radius of one file (crates · files · churn, in a fan-out panel)
+/workers              - Worker panel: fleet, recipe roles, tasks, graph, costs, logs, approvals — every figure traces to a real row, and a worker xencode cannot observe reads as unknown, not idle (`Ctrl+A`)
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
 /rewind [turns] [--force] - Undo the agent's file changes for this session (refuses files you edited by hand, unless --force)

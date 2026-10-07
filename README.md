@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2718 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2743 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -285,7 +285,7 @@ xencode --version                # Show version
 
 ### In-chat commands
 
-These seventeen are the only strings the chat input intercepts (`SLASH_COMMANDS` in
+These twenty-four are the only strings the chat input intercepts (`SLASH_COMMANDS` in
 `xencode-tui-rs/src/app.rs`) — anything else is sent to the model as a prompt.
 
 ```
@@ -295,6 +295,9 @@ These seventeen are the only strings the chat input intercepts (`SLASH_COMMANDS`
                             the durable task summary and the prompt files this build sends
 /advise [filter]            Live refactor insights (same report as Ctrl+L)
 /impact <file>              Blast radius of one file — crates, files, churn (fan-out panel)
+/workers                    The fleet, your recipes' roles, tasks, recorded runs, newest events and
+                            waiting approvals (Ctrl+A). Every figure names the row it was read from,
+                            and a worker xencode cannot observe says unknown rather than idle
 /bytebot <task>             Delegate the task to the agent loop and watch its real calls
 /spawn <task> [#branch]     Run the delegated loop in a fresh git worktree
 /spawn status               List registered spawn runs and where they live
@@ -769,7 +772,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2718 passing)
+cargo test                          # Full workspace suite (2743 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

@@ -41,6 +41,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("AdvisePanel", FocusArea::AdvisePanel),
     ("ImpactPanel", FocusArea::ImpactPanel),
     ("LayoutPanel", FocusArea::LayoutPanel),
+    ("WorkerPanel", FocusArea::WorkerPanel),
 ];
 
 /// An app carrying enough content that data-dependent branches actually render
@@ -210,6 +211,54 @@ fn populated(focus: FocusArea) -> App<'static> {
     });
     app.impact_selected = 1;
     app.impact_status.clear();
+    // OR-12: the worker panel is a list of rows plus a provenance detail view,
+    // so the sweep needs rows with several sources and a section that is empty.
+    // The rows are the real projection's output over fixture cards — no fake
+    // renderer is involved.
+    let cards = vec![xencode_tui_rs::control_room::FleetCard {
+        worker: xencode_tui_rs::control_room::WorkerRef {
+            agent: "codex".into(),
+            task: "survey the crate".into(),
+            node: Some("n1".into()),
+        },
+        status: xencode_tui_rs::control_room::CardStatus::Running,
+        messages: 3,
+        files_changed: vec!["src/app.rs".into(), "src/ui.rs".into()],
+        tools_in_flight: 1,
+        needs_approval: xencode_tui_rs::control_room::Trace::Known(true),
+        elapsed_ms: xencode_tui_rs::control_room::Trace::Known(1200),
+        partly_synthesised: true,
+    }];
+    app.workers_rows = xencode_tui_rs::worker_panel::sections([
+        (
+            xencode_tui_rs::worker_panel::PanelSection::Agents,
+            xencode_tui_rs::worker_panel::fleet_rows(&cards),
+        ),
+        (
+            xencode_tui_rs::worker_panel::PanelSection::Tasks,
+            xencode_tui_rs::worker_panel::task_rows(None),
+        ),
+        (
+            xencode_tui_rs::worker_panel::PanelSection::Graph,
+            xencode_tui_rs::worker_panel::graph_rows(
+                &[],
+                std::path::Path::new(".xencode/team-runs"),
+            ),
+        ),
+        (
+            xencode_tui_rs::worker_panel::PanelSection::Costs,
+            xencode_tui_rs::worker_panel::cost_rows(None, &[], &[]),
+        ),
+        (
+            xencode_tui_rs::worker_panel::PanelSection::Logs,
+            xencode_tui_rs::worker_panel::log_rows(&[], 30),
+        ),
+        (
+            xencode_tui_rs::worker_panel::PanelSection::Approvals,
+            xencode_tui_rs::worker_panel::approval_rows(&[], &[]),
+        ),
+    ]);
+    app.workers_selected = 2;
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),
@@ -1370,4 +1419,44 @@ fn a_grabbed_divider_renders_at_any_terminal_size() {
         "{} grabbed-line draws panicked: {failures:#?}",
         failures.len()
     );
+}
+
+/// OR-12: the worker panel has two views and both must survive a tiny
+/// terminal — the sectioned list, and one row's provenance detail, which is
+/// the only place in the TUI that prints several wrapped sentences per row.
+/// An empty panel is swept too, because that is what the first `/workers` of
+/// a session sees.
+#[test]
+fn worker_panel_renders_list_detail_and_empty() {
+    for with_rows in [true, false] {
+        for detail in [true, false] {
+            let mut app = populated(FocusArea::WorkerPanel);
+            if !with_rows {
+                app.workers_rows.clear();
+            }
+            app.workers_detail = detail;
+            app.workers_scroll = 999;
+            for &width in &[20, 61, 80, 120] {
+                for &height in &[8, 16, 24, 30] {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap_or_else(|_| {
+                        panic!("render {width}x{height} detail={detail} rows={with_rows}")
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Every `FocusArea` is in the sweep table, so a panel added later cannot skip
+/// the small-terminal checks by being left out of `FOCI`.
+#[test]
+fn the_sweep_covers_every_focus_area() {
+    for area in FocusArea::ALL {
+        assert!(
+            FOCI.iter().any(|(_, foci)| *foci == area),
+            "{area:?} is not in FOCI"
+        );
+    }
+    assert_eq!(FOCI.len(), FocusArea::ALL.len());
 }

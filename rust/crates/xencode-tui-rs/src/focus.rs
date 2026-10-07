@@ -80,6 +80,10 @@ pub enum FocusArea {
     /// Why the screen is arranged as it is: this session's layout changes,
     /// each with the ask behind it (`V-9`).
     LayoutPanel,
+    /// The worker panel (`OR-12`): the fleet, the tasks, the recorded graph, the
+    /// costs, the events and what is waiting on a person — every row naming the
+    /// record its figures were read from.
+    WorkerPanel,
 }
 
 /// Four levels of progressive disclosure (AE-5).
@@ -129,7 +133,7 @@ impl DisclosureLevel {
 
 impl FocusArea {
     /// All variants of FocusArea.
-    pub const ALL: [FocusArea; 26] = [
+    pub const ALL: [FocusArea; 27] = [
         FocusArea::ChatInput,
         FocusArea::FileExplorer,
         FocusArea::CodeEditor,
@@ -156,6 +160,7 @@ impl FocusArea {
         FocusArea::AdvisePanel,
         FocusArea::ImpactPanel,
         FocusArea::LayoutPanel,
+        FocusArea::WorkerPanel,
     ];
 
     /// Progressive disclosure tier required to see this destination in navigators / palettes.
@@ -180,6 +185,7 @@ impl FocusArea {
             | FocusArea::ReviewDashboard
             | FocusArea::ImpactPanel
             | FocusArea::LayoutPanel
+            | FocusArea::WorkerPanel
             | FocusArea::FeatureNavigator => DisclosureLevel::Level3,
 
             FocusArea::ByteBotPanel
@@ -224,6 +230,7 @@ impl FocusArea {
             FocusArea::AdvisePanel => "Advice",
             FocusArea::ImpactPanel => "Impact",
             FocusArea::LayoutPanel => "Layout",
+            FocusArea::WorkerPanel => "Workers",
         }
     }
 }
@@ -672,6 +679,14 @@ pub const DESTINATIONS: &[Destination] = &[
         command_name: "layout",
     },
     Destination {
+        area: FocusArea::WorkerPanel,
+        name: "Worker Panel",
+        description: "Workers, tasks, graph, costs, logs, approvals — each traced",
+        level: DisclosureLevel::Level3,
+        shortcut: Some("Ctrl+A"),
+        command_name: "workers",
+    },
+    Destination {
         area: FocusArea::FeatureNavigator,
         name: "Feature Navigator",
         description: "Command palette and destination picker",
@@ -920,8 +935,8 @@ mod tests {
     }
 
     #[test]
-    fn destinations_table_has_all_26_focus_areas_uniquely() {
-        assert_eq!(DESTINATIONS.len(), 26);
+    fn destinations_table_has_all_27_focus_areas_uniquely() {
+        assert_eq!(DESTINATIONS.len(), 27);
         let mut seen = std::collections::HashSet::new();
         for dest in DESTINATIONS {
             assert!(

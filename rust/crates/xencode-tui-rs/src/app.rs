@@ -112,6 +112,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/verify",
     "/hotspots",
     "/agents",
+    "/workers",
     "/trust",
     "/egress",
     "/goto",
@@ -470,6 +471,14 @@ pub struct App<'a> {
     pub layout_selected: usize,
     pub layout_detail: bool,
     pub layout_scroll: usize,
+    /// The worker panel's rows (`OR-12`), rebuilt when it opens and when `r` asks
+    /// for it. Each one carries the record, event or file its figures came from,
+    /// which is the whole point of the panel: a number on this list can be
+    /// traced to a row before it can be argued with.
+    pub workers_rows: Vec<crate::worker_panel::PanelRow>,
+    pub workers_selected: usize,
+    pub workers_detail: bool,
+    pub workers_scroll: usize,
     /// Tool classes the user answered "always allow" for this session
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
@@ -2463,6 +2472,18 @@ impl<'a> App<'a> {
         self.note_layout_change(crate::transitions::Trigger::SessionOpened { restored });
     }
 
+    /// How a `/spawn` run is identified to the projections. It is xencode's own
+    /// subagent rather than a vendor's, it works in its own worktree, and nothing
+    /// ties it to a scheduler node — which is exactly why its card carries no
+    /// duration: no node was ever timed.
+    fn spawn_worker_ref(spawn: &SpawnRecord) -> crate::control_room::WorkerRef {
+        crate::control_room::WorkerRef {
+            agent: format!("subagent #{}", spawn.id),
+            task: spawn.task.clone(),
+            node: None,
+        }
+    }
+
     /// Control room projection over active agent event streams (AF-2).
     ///
     /// Reached from the layout tree (`agent_stack_panes`) on every draw pass,
@@ -2472,16 +2493,134 @@ impl<'a> App<'a> {
             .spawns
             .iter()
             .map(|s| crate::control_room::Stream {
-                worker: crate::control_room::WorkerRef {
-                    agent: "subagent".to_string(),
-                    task: s.task.clone(),
-                    node: None,
-                },
+                worker: Self::spawn_worker_ref(s),
                 events: &s.events,
             })
             .collect();
         let room = crate::control_room::ControlRoom::new(streams, None);
         crate::worker_bridge::bridge(&room)
+    }
+
+    /// Rebuild the worker panel (`OR-12`) from the streams, the registry and the
+    /// records on disk. Called when the panel opens and when `r` asks for it, and
+    /// never from a redraw: two of these reads are directories, one is a lock
+    /// attempt, and a row that went stale between keystrokes is worth less than a
+    /// screen that cannot fall over.
+    pub fn refresh_worker_panel(&mut self) {
+        use crate::worker_panel as panel;
+
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let xencode_dir = root.join(".xencode");
+        let teams_dir = xencode_dir.join(xencode_core_rs::RECIPES_DIR);
+        let runs_dir = xencode_dir.join(xencode_core_rs::RUNS_DIR);
+
+        let rows = {
+            let streams: Vec<crate::control_room::Stream<'_>> = self
+                .spawns
+                .iter()
+                .map(|s| crate::control_room::Stream {
+                    worker: Self::spawn_worker_ref(s),
+                    events: &s.events,
+                })
+                .collect();
+            let room = crate::control_room::ControlRoom::new(streams, None);
+            let cards = room.fleet();
+            let entries = room.timeline();
+            let raised = room.pending_approvals();
+            let live_approvals: Vec<String> = self
+                .approval_queue
+                .iter()
+                .map(|(request, _)| format!("{} — {}", request.tool, request.summary))
+                .collect();
+            let tasks = self.tasks_snapshot();
+
+            let recipes = xencode_core_rs::load_recipes(&teams_dir);
+            let runs = xencode_core_rs::load_runs(&runs_dir);
+            // A runs directory that could not be read is carried into the list as
+            // an unreadable record, so the graph section says what failed instead
+            // of reading as "no team has ever run here".
+            let mut recorded: Vec<xencode_core_rs::RunFile> = match &runs {
+                Ok(files) => files.clone(),
+                Err(_) => Vec::new(),
+            };
+            if let Err(problem) = &runs {
+                recorded.push(xencode_core_rs::RunFile {
+                    path: runs_dir.clone(),
+                    run: Err(problem.to_string()),
+                });
+            }
+
+            let mut agents = panel::fleet_rows(&cards);
+            let mut planned = Vec::new();
+            let mut unreadable = Vec::new();
+            let mut quotes = Vec::new();
+            match &recipes {
+                Ok(files) => {
+                    for file in files {
+                        match &file.recipe {
+                            Ok(recipe) => {
+                                for role in &recipe.roles {
+                                    planned.push(panel::PlannedRole {
+                                        recipe: recipe.name.clone(),
+                                        worker: role.worker.clone(),
+                                        role: role.name.clone(),
+                                        path: file.path.display().to_string(),
+                                        gates: role.gate.clone(),
+                                        needs: role.needs.clone(),
+                                    });
+                                }
+                                quotes.push(panel::Quote {
+                                    recipe: recipe.name.clone(),
+                                    path: file.path.display().to_string(),
+                                    estimate: xencode_core_rs::estimate_from_runs(
+                                        &recorded,
+                                        &xencode_core_rs::recipe_fingerprint(recipe),
+                                    ),
+                                });
+                            }
+                            Err(problem) => unreadable.push(panel::unreadable_row(
+                                panel::PanelSection::Agents,
+                                &file.path.display().to_string(),
+                                &problem.to_string(),
+                            )),
+                        }
+                    }
+                }
+                Err(problem) => unreadable.push(panel::unreadable_row(
+                    panel::PanelSection::Agents,
+                    &teams_dir.display().to_string(),
+                    &problem.to_string(),
+                )),
+            }
+            agents.extend(panel::planned_role_rows(&planned));
+            agents.extend(unreadable);
+
+            panel::sections([
+                (panel::PanelSection::Agents, agents),
+                (
+                    panel::PanelSection::Tasks,
+                    panel::task_rows(tasks.as_deref()),
+                ),
+                (
+                    panel::PanelSection::Graph,
+                    panel::graph_rows(&recorded, &runs_dir),
+                ),
+                (
+                    panel::PanelSection::Costs,
+                    panel::cost_rows(self.spend.as_ref(), &recorded, &quotes),
+                ),
+                (panel::PanelSection::Logs, panel::log_rows(&entries, 30)),
+                (
+                    panel::PanelSection::Approvals,
+                    panel::approval_rows(&live_approvals, &raised),
+                ),
+            ])
+        };
+
+        self.workers_rows = rows;
+        self.workers_selected = 0;
+        self.workers_detail = false;
+        self.workers_scroll = 0;
     }
 
     /// The agent stack's panes, rebuilt from live state on every draw: one
@@ -2744,6 +2883,10 @@ impl<'a> App<'a> {
             layout_selected: 0,
             layout_detail: false,
             layout_scroll: 0,
+            workers_rows: Vec::new(),
+            workers_selected: 0,
+            workers_detail: false,
+            workers_scroll: 0,
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             secret_taint: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             repro_gate: Arc::new(crate::reprogate::ReproGate::new()),
@@ -3364,6 +3507,13 @@ impl<'a> App<'a> {
         // three layers. Explicit and file-scoped, never cursor-triggered.
         if prompt.starts_with("/impact") {
             self.handle_impact_command(&prompt);
+            return;
+        }
+
+        // The worker panel (/workers): the fleet, the registry and the run
+        // records, each row naming where its figures were read from (`OR-12`).
+        if prompt == "/workers" || prompt.starts_with("/workers ") {
+            self.handle_workers_command();
             return;
         }
 
@@ -5832,6 +5982,14 @@ impl<'a> App<'a> {
         self.impact_scroll = 0;
         self.refresh_impact_for(file);
         self.focus = FocusArea::ImpactPanel;
+    }
+
+    /// `/workers` — open the worker panel over what is on hand right now
+    /// (`OR-12`). It reads on the way in, the way the worktree list does, so the
+    /// rows a reader sees are the rows the files held at the moment they asked.
+    fn handle_workers_command(&mut self) {
+        self.refresh_worker_panel();
+        self.focus = FocusArea::WorkerPanel;
     }
 
     /// `/rewind [turns] [--force]` — put back the files the agent changed in

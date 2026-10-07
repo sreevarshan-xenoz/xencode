@@ -58,7 +58,7 @@ keybinding overlay; the authoritative list lives there. Essentials:
 `Tab` cycles explorer/editor/chat · `i` edits chat (`Enter` sends,
 `Alt+Enter`/`Ctrl+J` newline, `Alt+↑/↓` history, `Tab` completes `/`
 commands) · `m` model selector · `s` settings · `e` edit focused file ·
-`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+B` ByteBot ·
+`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+A` the worker panel (fleet · recipe roles · tasks · graph · costs · logs · approvals, each figure traced) · `Ctrl+B` ByteBot ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
 `Ctrl+U` cycle the layout · `Ctrl+0` why the screen is arranged as it is
 (session layout history; `Enter` shows the pane widths a change moved between) ·
@@ -4134,6 +4134,58 @@ on cursor motion.
 ```
 /impact crates/xencode-core-rs/src/lib.rs
 ```
+
+### TUI slash: `/workers` (or `Ctrl+A`)
+
+Six readings laid end to end: the workers this session launched, every role the
+recipes in `.xencode/teams/` name, the background task registry, one row per
+recorded run in `.xencode/team-runs/`, the newest events across the streams, and
+the approvals waiting on you. `Enter` opens the row you are on and prints where
+each figure on it came from — the event, the record or the file — and the heading
+of a section answers the same question for the section. `r` re-reads (the panel
+reads on request and on opening, never on redraw), `Esc` closes the record and
+then the panel. Because `/workers` leaves the composer in insert mode, press
+`Esc` once first if you want the arrow keys to reach the panel.
+
+Nothing is estimated to fill a gap. A worker whose stream holds no events reads
+`unknown`, and a role that lives only in a recipe — a worker xencode did not
+launch and so cannot observe — says `unknown, not idle` and carries no figures,
+because a `0 file(s)` on that row would read as a measurement nobody took. The
+task registry is read without waiting for it, so a turn that holds the lock is
+reported as unknown rather than as an empty list. This was the live screen in a
+scratch project holding one recipe, `docs-sweep.toml`, and no recorded run:
+
+```
+⚙ Workers — 12 row(s) · Enter shows where each was read from
+── agents (2) ──
+opencode — survey: unknown, not idle
+claude — integrate: unknown, not idle
+── tasks (1) ──
+tasks: none recorded
+── graph (1) ──
+graph: nothing measured — no run recorded under /tmp/cx-workers-live/project/.xencode/team-runs
+── costs (2) ──
+this session: nothing on record yet
+docs-sweep: no quote — never run on this machine
+── approvals (1) ──
+approvals: nothing is waiting
+```
+
+`Enter` on the `survey` row:
+
+```
+opencode — survey: unknown, not idle
+
+Read from
+  status, duration, messages and cost: unknown — xencode holds no event stream for a role it did not launch, so it prints none of them
+  1 check(s): the `gate` list in /tmp/cx-workers-live/project/.xencode/teams/docs-sweep.toml
+  waits on nothing: the `needs` list in /tmp/cx-workers-live/project/.xencode/teams/docs-sweep.toml
+  recipe `docs-sweep`
+```
+
+A recipe that has run here gets a quote instead of `no quote`, and the row labels
+it as what it is — `a next run quoted at 900ms from rust-fix-1`, its first source
+reading `an estimate, not a measurement`.
 
 ### `xencode removal <file> [--limit 15] [--format text|json]`
 
