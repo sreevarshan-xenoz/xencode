@@ -14,14 +14,14 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-07, after `OR-8`: it lists 52 subcommands — the
+  (verified against `xencode --help` on 2026-10-07, after `OR-9`: it lists 53 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
-  `computers`, `compete` — and clap's
-  built-in `help`, 53 entries in the list)
-- [x] Workspace gates green — 16 crates, 2651 tests passing, zero warnings (re-verified 2026-10-07, after `OR-8`; 19 ignored, so 2670 in the run)
+  `computers`, `compete`, `team` — and clap's
+  built-in `help`, 54 entries in the list)
+- [x] Workspace gates green — 16 crates, 2676 tests passing, zero warnings (re-verified 2026-10-07, after `OR-9`; 19 ignored, so 2695 in the run)
 
 ## Model Catalog Honesty
 
@@ -12300,10 +12300,43 @@ worker, `OR-` for the thing that decides what workers to talk to.
       `can_read` and `can_publish` forced to `true` fails three — the refusals come from
       the capability check, not from argument parsing. Completions and the man page were
       regenerated from the clap definition. 2651 tests passing; clippy clean.
-- [ ] **OR-9 — team recipes as data.** Named role→worker→gate recipes in existing TOML,
+- [x] **OR-9 — team recipes as data.** Named role→worker→gate recipes in existing TOML,
       over `OR-2`. No team engine.
       **Done-when:** a recipe is a file a person can read and diff, and removing it
       removes nothing else.
+      *Shipped:* `xencode-core-rs/src/team.rs` and `xencode team list|show|plan`. One file
+      is one recipe: `name`, `[[roles]]` (`name`, `worker`, `gate`, `command`, `needs`) and
+      a required `[capacity]`, kept in `.xencode/teams/`. `TeamRecipe::to_task_graph()`
+      hands those roles to `OR-2`'s `TaskGraph` and `Scheduler`, so the structural faults —
+      two roles with one name, a `needs` naming no role, a cycle — are detected there and
+      only re-worded here into the words a person writing a recipe used; nothing is
+      re-derived and nothing is launched, because launching under approval is `OR-10`'s.
+      All three structs carry `deny_unknown_fields`, which is what turns a `[[role]]` typed
+      for `[[roles]]` into a refusal instead of a team of nobody; `validate()` also refuses a
+      `0` in either `[capacity]` number, because `Scheduler::capacity` floors at one and the
+      file would otherwise be reported as a team of one; a missing recipes
+      directory is an empty answer, not an error; and `gate` is the verification
+      checklist's own three names (`fmt`, `lint`, `test`) because that is the vocabulary
+      `xencode-analysis-rs::toolchain::run_checklist` takes. `.gitignore` went from
+      `.xencode/` to `.xencode/*` plus `!/.xencode/teams/` — the first attempt, appending
+      the negation below the existing `.xencode/` line, did nothing, because git does not
+      descend into an excluded directory — and both directions were then checked with
+      `git check-ignore -v` and `git add --dry-run`: a file under `.xencode/teams/` is
+      addable while `.xencode/ledger.jsonl` and `.xencode/anchor.md` stay ignored. Live in
+      scratch projects: `team plan` on a three-role recipe printed wave 1 (`survey`,
+      `harden`) then wave 2 (`integrate`), the critical path `survey → integrate`, `serial
+      bottleneck: integrate`, `at most 2 at once, limited by workers and verification
+      (equal)`, and each worker's real location (`opencode (installed at
+      /home/sree/.local/share/mise/installs/node/26.8.1/bin/opencode)`); a recipe whose gate
+      said `bench` was refused with "A gate is made of fmt, lint, test"; two files claiming
+      one `name` were refused by path; and a project with no recipes directory printed
+      "No team recipes in …" and exited 0. 16 unit tests, one of which runs the compiled
+      graph through `Scheduler::run` over real `sh -c` children and asserts every role
+      exited 0, plus 9 end-to-end tests against the real binary. The claim that planning
+      executes nothing was checked by mutation: making `plan` spawn each role's own command
+      made exactly that test fail, and was reverted. Completions and the man page
+      regenerated from the clap definition, and the CLI's byte-equality test passes.
+      2676 tests passing over 16 crates, 19 ignored, zero clippy warnings.
 - [ ] **OR-10 — plan, simulate, dry-run-first.** Every orchestrator entry point renders
       agents, tasks, parallel groups, estimated wall-clock and estimated cost, and
       launches nothing until approved.

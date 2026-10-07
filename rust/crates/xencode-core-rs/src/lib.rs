@@ -8,6 +8,7 @@ pub mod scheduler;
 pub mod task_contract;
 pub mod tasks;
 pub mod tasks_file;
+pub mod team;
 pub mod workspace;
 
 pub use atomic::write_atomic;
@@ -36,4 +37,8 @@ pub use tasks::{
     MAX_OUTPUT_LINES,
 };
 pub use tasks_file::{FileTask, FileTaskRegistry};
+pub use team::{
+    load_recipes, Capacity, RecipeError, RecipeFile, RoleSpec, TeamRecipe, GATE_CHECKS,
+    RECIPES_DIR,
+};
 pub use workspace::{scan_workspace, EntryKind, ScanOptions, WorkspaceEntry, WorkspaceScanError};

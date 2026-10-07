@@ -4330,6 +4330,72 @@ Build an evidence-backed integration plan evaluating candidate branches, checkin
 
 Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
 
+### `xencode team [list|show|plan] [--format text|json]`
+
+A **team recipe** is one TOML file under `.xencode/teams/` naming the roles on a
+team, which worker plays each one, and which checks gate that role's output. That
+directory is the only place a recipe lives: removing the file removes the team and
+nothing else, and a project with no such directory is a normal reading rather than
+an error. Recipes are the one exception to `.xencode/` being gitignored — they are
+hand-written project data, meant to be committed and diffed like `AGENTS.md`.
+
+```toml
+name = "rust-fix"
+
+[[roles]]
+name = "survey"
+worker = "opencode"
+gate = []
+command = "true"
+
+[[roles]]
+name = "harden"
+worker = "claude"
+gate = ["test"]
+command = "true"
+
+[[roles]]
+name = "integrate"
+worker = "opencode"
+gate = ["lint", "test"]
+command = "true"
+needs = ["survey", "harden"]
+
+[capacity]
+workers = 2
+verification_throughput = 2
+```
+
+`gate` names the checks that must pass for that role's output, taken from the three
+the verification checklist actually runs — `fmt`, `lint`, `test`. An empty `gate` is
+legal and prints as `none — no check gates this role's output`, never as a pass.
+`needs` lists the roles this one waits on. `[capacity]` is required, because no
+default would be anybody's guess: the queue runs `min(workers, verification_throughput)`
+roles at once, and the report names which of the two limited it. A `0` in either
+number is refused rather than rounded up to one. A key that is not part of a recipe is
+refused rather than ignored, so a `[[role]]` typed for `[[roles]]` cannot quietly become
+a team of nobody.
+
+- `xencode team list [--format text|json]` — one row per recipe that could schedule
+  (name, role count, how many run at once, which file), then every file in that
+  directory that is not a schedulable team, each with the reason. One broken file
+  never hides the recipes written beside it. A project with no recipes prints where
+  one would go and exits 0.
+- `xencode team show <name>` — the recipe as written: each role's worker, gate,
+  needs and command, then the capacity line. `<name>` is the `name` field inside the
+  file, not the filename. A recipe that would not schedule is still shown, with the
+  fault named at the end.
+- `xencode team plan <name> [--format text|json]` — compile the roles into the task
+  graph the scheduler runs and print what that graph says: which roles start
+  together (wave 1, wave 2, …), the longest dependency chain, the join where the
+  branches are forced back into one line, and whether each role's worker is
+  installed on this machine. **Nothing is launched and no check is run** — planning
+  reads the file, walks the graph, and looks the workers up on `PATH`. The gates it
+  prints are named, not executed; `xencode verify` is what runs those three checks.
+
+Two files claiming the same `name` are refused by path, because picking one by
+directory order would schedule a team nobody read.
+
 ### `xencode test --isolate <substring> [--base HEAD] [--repeat 3]`
 
 Classify one failing test instead of running the suite: the same filtered
