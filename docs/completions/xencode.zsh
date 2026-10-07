@@ -979,6 +979,96 @@ esac
     ;;
 esac
 ;;
+(compete)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__compete_commands" \
+"*::: :->compete" \
+&& ret=0
+
+    case $state in
+    (compete)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-compete-command-$line[1]:"
+        case $line[1] in
+            (run)
+_arguments "${_arguments_options[@]}" : \
+'*--arm=[A candidate arm as \`id\` or \`id=label\`. Give it twice for two arms, or three times for three. Omit it to compete \`arm-a\` against \`arm-b\`]:ID[=LABEL]:_default' \
+'*--edit=[Write content into a file inside one arm'\''s worktree\: the arm id, the path relative to that worktree, then the file'\''s full text. Repeat it once per file per arm]:ARM:_default:ARM:_default:ARM:_default' \
+'*--command=[Run a shell command inside one arm'\''s worktree after its edits\: the arm id, then the command]:ARM:_default:ARM:_default' \
+'*--skip=[Skip a check by name (repeatable)\: test, lint, or fmt. A skipped check is reported as skipped, never as passed]:SKIP:_default' \
+'--timeout=[Wall-clock ceiling in seconds for each check]:TIMEOUT:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':prompt -- The question the candidate implementations compete on:_default' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':run_id -- Which run to print:_default' \
+&& ret=0
+;;
+(pick)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':run_id -- Which run:_default' \
+':arm_id -- Which arm of it to take:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__compete__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-compete-help-command-$line[1]:"
+        case $line[1] in
+            (run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(pick)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[Maximum findings to show (0 shows all)]:LIMIT:_default' \
@@ -2339,6 +2429,38 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(compete)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__compete_commands" \
+"*::: :->compete" \
+&& ret=0
+
+    case $state in
+    (compete)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-compete-command-$line[1]:"
+        case $line[1] in
+            (run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(pick)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -2749,6 +2871,7 @@ _xencode_commands() {
 'colab:Google Colab bridge\: preflight, then up / status / down for a model server running on a Colab VM' \
 'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
 'computers:Manage and inspect registered computer backends (AF-4)' \
+'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3034,6 +3157,73 @@ _xencode__subcmd__colab__subcmd__up_commands() {
     local commands; commands=()
     _describe -t commands 'xencode colab up commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__compete_commands] )) ||
+_xencode__subcmd__compete_commands() {
+    local commands; commands=(
+'run:Build each candidate arm in its own worktree and branch, run the verification checklist on every one of them, and print the table' \
+'list:List recorded competing runs, newest first' \
+'show:Re-print the verification table of a recorded run, from its saved report' \
+'pick:Switch the repository onto one arm'\''s branch, leaving every other candidate branch and all evidence files on disk untouched' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode compete commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__help_commands] )) ||
+_xencode__subcmd__compete__subcmd__help_commands() {
+    local commands; commands=(
+'run:Build each candidate arm in its own worktree and branch, run the verification checklist on every one of them, and print the table' \
+'list:List recorded competing runs, newest first' \
+'show:Re-print the verification table of a recorded run, from its saved report' \
+'pick:Switch the repository onto one arm'\''s branch, leaving every other candidate branch and all evidence files on disk untouched' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode compete help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__compete__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__help__subcmd__list_commands] )) ||
+_xencode__subcmd__compete__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete help list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__help__subcmd__pick_commands] )) ||
+_xencode__subcmd__compete__subcmd__help__subcmd__pick_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete help pick commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__help__subcmd__run_commands] )) ||
+_xencode__subcmd__compete__subcmd__help__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete help run commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__compete__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__list_commands] )) ||
+_xencode__subcmd__compete__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__pick_commands] )) ||
+_xencode__subcmd__compete__subcmd__pick_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete pick commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__run_commands] )) ||
+_xencode__subcmd__compete__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete run commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__compete__subcmd__show_commands] )) ||
+_xencode__subcmd__compete__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode compete show commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__computers_commands] )) ||
 _xencode__subcmd__computers_commands() {
     local commands; commands=(
@@ -3258,6 +3448,7 @@ _xencode__subcmd__help_commands() {
 'colab:Google Colab bridge\: preflight, then up / status / down for a model server running on a Colab VM' \
 'remote:Manage remote inference hosts reached over SSH\: add, list, use, forget' \
 'computers:Manage and inspect registered computer backends (AF-4)' \
+'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3418,6 +3609,36 @@ _xencode__subcmd__help__subcmd__colab__subcmd__status_commands() {
 _xencode__subcmd__help__subcmd__colab__subcmd__up_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help colab up commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__compete_commands] )) ||
+_xencode__subcmd__help__subcmd__compete_commands() {
+    local commands; commands=(
+'run:Build each candidate arm in its own worktree and branch, run the verification checklist on every one of them, and print the table' \
+'list:List recorded competing runs, newest first' \
+'show:Re-print the verification table of a recorded run, from its saved report' \
+'pick:Switch the repository onto one arm'\''s branch, leaving every other candidate branch and all evidence files on disk untouched' \
+    )
+    _describe -t commands 'xencode help compete commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__compete__subcmd__list_commands] )) ||
+_xencode__subcmd__help__subcmd__compete__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help compete list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__compete__subcmd__pick_commands] )) ||
+_xencode__subcmd__help__subcmd__compete__subcmd__pick_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help compete pick commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__compete__subcmd__run_commands] )) ||
+_xencode__subcmd__help__subcmd__compete__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help compete run commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__compete__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__compete__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help compete show commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__computers_commands] )) ||
 _xencode__subcmd__help__subcmd__computers_commands() {

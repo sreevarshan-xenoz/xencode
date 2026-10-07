@@ -24,3 +24,4 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 proptest = "1.11"
+tempfile = "3"
