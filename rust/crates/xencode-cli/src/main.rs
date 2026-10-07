@@ -331,7 +331,8 @@ enum Commands {
     },
 
     /// Read the team recipes this project keeps in `.xencode/teams`: the roles,
-    /// who plays each one, and which checks gate it (OR-9)
+    /// who plays each one, and which checks gate it — and run one, but only under
+    /// a name that approves it (OR-9, OR-10)
     Team {
         #[command(subcommand)]
         action: TeamAction,
@@ -1293,11 +1294,29 @@ enum TeamAction {
     },
 
     /// Compile one recipe into the task graph the scheduler would run, and show
-    /// the order, the critical path and what limits it. Nothing is launched and
-    /// no check is run.
+    /// the order, the critical path, what limits it, and what a previous run of
+    /// the same recipe took. Nothing is launched and no check is run.
     Plan {
         /// The recipe's `name`, as written in the file
         name: String,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Run one recipe's roles as real tasks through the scheduler. Without
+    /// `--approved-by` this prints the plan and launches nothing, and writes
+    /// nothing either. With it, the same plan prints first and then the roles
+    /// run, and what the run took is recorded so the next plan can quote it.
+    Run {
+        /// The recipe's `name`, as written in the file
+        name: String,
+
+        /// Your name, for the record. Required to launch anything: a team that
+        /// runs with no name on it has nobody who agreed to it.
+        #[arg(long = "approved-by")]
+        approved_by: Option<String>,
 
         /// Output format
         #[arg(long, default_value = "text")]
@@ -2148,7 +2167,7 @@ async fn main() {
         Commands::Computers { action, json } => run_computers(action, json).await,
         Commands::Compete { action } => run_compete(action),
         Commands::Merge { action } => run_merge(action),
-        Commands::Team { action } => run_team(action),
+        Commands::Team { action } => run_team(action).await,
         Commands::Bootstrap {
             path,
             check,
@@ -4671,9 +4690,10 @@ fn team_recipes_dir() -> std::path::PathBuf {
         .join(xencode_core_rs::RECIPES_DIR)
 }
 
-/// `OR-9` — read the team recipes. Listing, showing and planning are all reads:
-/// this command never launches a role and never runs a gate's checks.
-fn run_team(action: TeamAction) -> Result<(), String> {
+/// `OR-9` and `OR-10` — read the team recipes, and run one that has been
+/// approved. Listing, showing and planning are reads; `run` launches roles only
+/// under a name, and only after it has printed the same plan the read shows.
+async fn run_team(action: TeamAction) -> Result<(), String> {
     let dir = team_recipes_dir();
     let files = xencode_core_rs::load_recipes(&dir)
         .map_err(|e| format!("cannot read the team recipes in {}: {e}", dir.display()))?;
@@ -4774,95 +4794,440 @@ fn run_team(action: TeamAction) -> Result<(), String> {
             Ok(())
         }
         TeamAction::Plan { name, format } => {
-            let file = find_recipe(&files, &dir, &name)?;
-            let recipe = file.recipe.as_ref().unwrap();
-            let graph = recipe
-                .to_task_graph()
-                .map_err(|e| format!("{e}\nnothing was launched"))?;
-            let scheduler = recipe.scheduler();
-            let waves = readiness_waves(&graph);
-            let critical = graph.longest_chain().unwrap_or_default();
-            let bottleneck = graph.bottleneck().map(|node| node.id.clone());
+            let planned = plan_recipe(&files, &dir, &name)?;
             if matches!(format, OutputFormat::Json) {
-                let out = serde_json::json!({
-                    "recipe": recipe.name,
-                    "file": file.path.display().to_string(),
-                    "capacity": scheduler.capacity(),
-                    "binding": scheduler.binding().label(),
-                    "launches": false,
-                    "waves": waves,
-                    "critical_path": critical,
-                    "bottleneck": bottleneck,
-                    "roles": recipe.roles.iter().map(|role| serde_json::json!({
-                        "name": role.name,
-                        "worker": role.worker,
-                        "worker_status": worker_status(role),
-                        "gate": role.gate,
-                        "needs": role.needs,
-                        "command": role.command,
-                    })).collect::<Vec<_>>(),
-                });
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                    serde_json::to_string_pretty(&plan_json(&planned, false))
+                        .map_err(|e| e.to_string())?
                 );
-                return Ok(());
-            }
-            println!(
-                "Recipe {} would run {} roles at most {} at once, limited by {}.",
-                recipe.name,
-                recipe.roles.len(),
-                scheduler.capacity(),
-                scheduler.binding().label(),
-            );
-            println!("Nothing was launched and no check was run — this is the plan only.");
-            for (n, wave) in waves.iter().enumerate() {
-                for (i, id) in wave.iter().enumerate() {
-                    let role = recipe
-                        .roles
-                        .iter()
-                        .find(|r| &r.name == id)
-                        .expect("the graph was built from these roles");
-                    println!(
-                        "\n  {} wave {}  {}",
-                        if i == 0 { "▸" } else { " " },
-                        n + 1,
-                        role.name
-                    );
-                    println!("      worker:   {}", worker_status(role));
-                    println!("      gate:     {}", gate_words(role));
-                    println!("      needs:    {}", needs_words(role));
-                    println!("      command:  {}", role.command);
-                }
-            }
-            println!();
-            if critical.is_empty() {
-                println!("  critical path: none");
             } else {
-                println!(
-                    "  critical path: {} ({} roles) — the shortest wall clock no number of \
-                     workers can beat",
-                    critical.join(" → "),
-                    critical.len()
-                );
+                print_plan(&planned, false);
             }
-            match bottleneck {
-                Some(id) => println!(
-                    "  serial bottleneck: {id} — it waits on more than one role and sits on \
-                     that path, so it is where the branches are forced back into one line"
-                ),
-                None => println!(
-                    "  serial bottleneck: none — no role waits on more than one other role on \
-                     the longest path"
-                ),
-            }
-            println!(
-                "\n  The gates above are named, not run. xencode verify is what runs those \
-                 three checks."
-            );
             Ok(())
         }
+        TeamAction::Run {
+            name,
+            approved_by,
+            format,
+        } => {
+            let planned = plan_recipe(&files, &dir, &name)?;
+            let approved_by = match approved_by {
+                // The plan view is the default. Asking to run a recipe with no
+                // name on it shows what would happen and changes nothing — not a
+                // role, not a record.
+                None => {
+                    if matches!(format, OutputFormat::Json) {
+                        let mut out = plan_json(&planned, false);
+                        out["approval_required"] = serde_json::Value::Bool(true);
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        print_plan(&planned, true);
+                    }
+                    return Ok(());
+                }
+                Some(who) if who.trim().is_empty() => {
+                    return Err(
+                        "`--approved-by` needs a name: the record of a run says who agreed to \
+                         it, and a blank is nobody"
+                            .to_string(),
+                    );
+                }
+                Some(who) => who,
+            };
+            if !matches!(format, OutputFormat::Json) {
+                // The JSON form prints one document once the run is over — the
+                // plan it ran on and what it took, in the same object.
+                print_plan(&planned, false);
+                println!(
+                    "\n  Launching now, approved by {approved_by}. Each role is a real `sh -c` \
+                     child of this process, at most {} at once.",
+                    planned.scheduler.capacity()
+                );
+            }
+            run_recipe(&planned, &approved_by, format).await
+        }
     }
+}
+
+/// Where the record of what a run took is kept: `<project>/.xencode/team-runs`.
+/// Not inside `.xencode/teams`, which is the committed recipe data — these are
+/// measurements of one machine, and a tariff or a laptop change makes them
+/// somebody else's numbers.
+fn team_runs_dir() -> std::path::PathBuf {
+    xencode_context_rs::default_root()
+        .join(xencode_context_rs::XENCODE_DIR)
+        .join(xencode_core_rs::RUNS_DIR)
+}
+
+/// A recipe read, checked, compiled into the graph `OR-2` schedules, and put
+/// beside the estimate a previous run of this exact recipe left behind. Building
+/// one launches nothing and writes nothing: the runs directory is read, and a
+/// directory that is not there is an empty answer.
+struct PlannedRecipe {
+    recipe: xencode_core_rs::TeamRecipe,
+    file: std::path::PathBuf,
+    graph: xencode_core_rs::TaskGraph,
+    scheduler: xencode_core_rs::Scheduler,
+    waves: Vec<Vec<xencode_core_rs::NodeId>>,
+    critical: Vec<xencode_core_rs::NodeId>,
+    bottleneck: Option<xencode_core_rs::NodeId>,
+    fingerprint: String,
+    estimate: Option<xencode_core_rs::Estimate>,
+    runs_dir: std::path::PathBuf,
+    tariff: Option<f64>,
+}
+
+fn plan_recipe(
+    files: &[xencode_core_rs::RecipeFile],
+    dir: &std::path::Path,
+    name: &str,
+) -> Result<PlannedRecipe, String> {
+    let file = find_recipe(files, dir, name)?;
+    let recipe = file.recipe.as_ref().unwrap();
+    // Every structural fault — a role with no name, a need that names nothing, a
+    // cycle — is caught here, before anything could be launched.
+    let graph = recipe
+        .to_task_graph()
+        .map_err(|e| format!("{e}\nnothing was launched"))?;
+    let runs_dir = team_runs_dir();
+    let runs = xencode_core_rs::load_runs(&runs_dir).map_err(|e| {
+        format!(
+            "cannot read the recorded runs in {}: {e}",
+            runs_dir.display()
+        )
+    })?;
+    let fingerprint = xencode_core_rs::recipe_fingerprint(recipe);
+    let estimate = xencode_core_rs::estimate_from_runs(&runs, &fingerprint);
+    Ok(PlannedRecipe {
+        waves: readiness_waves(&graph),
+        critical: graph.longest_chain().unwrap_or_default(),
+        bottleneck: graph.bottleneck().map(|node| node.id.clone()),
+        scheduler: recipe.scheduler(),
+        fingerprint,
+        estimate,
+        runs_dir,
+        recipe: recipe.clone(),
+        file: file.path.clone(),
+        graph,
+        tariff: XencodeConfig::load()
+            .unwrap_or_default()
+            .power_cents_per_kwh,
+    })
+}
+
+/// The plan view, in the words a person reads. `awaiting_approval` adds the line
+/// that says what would have to be true for any of it to actually run, which is
+/// the only difference between this and `xencode team plan`.
+fn print_plan(planned: &PlannedRecipe, awaiting_approval: bool) {
+    println!(
+        "Recipe {} would run {} roles at most {} at once, limited by {}.",
+        planned.recipe.name,
+        planned.recipe.roles.len(),
+        planned.scheduler.capacity(),
+        planned.scheduler.binding().label(),
+    );
+    println!("Nothing was launched and no check was run — this is the plan only.");
+    for (n, wave) in planned.waves.iter().enumerate() {
+        for (i, id) in wave.iter().enumerate() {
+            let role = planned
+                .recipe
+                .roles
+                .iter()
+                .find(|r| &r.name == id)
+                .expect("the graph was built from these roles");
+            println!(
+                "\n  {} wave {}  {}",
+                if i == 0 { "▸" } else { " " },
+                n + 1,
+                role.name
+            );
+            println!("      worker:   {}", worker_status(role));
+            println!("      gate:     {}", gate_words(role));
+            println!("      needs:    {}", needs_words(role));
+            println!("      command:  {}", role.command);
+        }
+    }
+    println!();
+    if planned.critical.is_empty() {
+        println!("  critical path: none");
+    } else {
+        println!(
+            "  critical path: {} ({} roles) — the shortest wall clock no number of workers can \
+             beat",
+            planned.critical.join(" → "),
+            planned.critical.len()
+        );
+    }
+    match &planned.bottleneck {
+        Some(id) => println!(
+            "  serial bottleneck: {id} — it waits on more than one role and sits on that path, \
+             so it is where the branches are forced back into one line"
+        ),
+        None => println!(
+            "  serial bottleneck: none — no role waits on more than one other role on the \
+             longest path"
+        ),
+    }
+    println!();
+    match &planned.estimate {
+        Some(estimate) => {
+            println!(
+                "  estimated wall clock: {}, at most {} at once — measured from run {} \
+                 (approved by {}, {} roles)",
+                wall_clock_label(estimate.wall_clock_ms),
+                estimate.peak_concurrency,
+                estimate.run_id,
+                estimate.approved_by,
+                estimate.roles,
+            );
+            println!(
+                "  estimated cost:       {}",
+                energy_label(
+                    estimate.watt_hours,
+                    estimate.cost_micros(planned.tariff),
+                    planned.tariff,
+                )
+            );
+            println!(
+                "  Both are measurements of one past run on this machine, not a promise: what \
+                 the roles do from now on is their own."
+            );
+        }
+        None => {
+            println!(
+                "  estimated wall clock: unknown — this recipe has never run here, so there is \
+                 no measurement to quote."
+            );
+            println!(
+                "  estimated cost:       unknown for the same reason. A run records what it \
+                 took; the next plan of this recipe can then quote it."
+            );
+        }
+    }
+    println!(
+        "\n  The gates above are named, not run. xencode verify is what runs those three checks."
+    );
+    if awaiting_approval {
+        println!(
+            "\n  Nothing above has been launched, and nothing will be: run\n     xencode team \
+             run {} --approved-by <your name>\n  to approve it. That prints this plan again, \
+             then runs the roles as written.",
+            planned.recipe.name
+        );
+    }
+}
+
+/// The plan as JSON, including the estimate and the recipe's fingerprint — the
+/// identity an estimate is tied to. `launches` is false for a plan and for an
+/// unapproved run, and true only for a run that really ran.
+fn plan_json(planned: &PlannedRecipe, launches: bool) -> serde_json::Value {
+    serde_json::json!({
+        "recipe": planned.recipe.name,
+        "file": planned.file.display().to_string(),
+        "capacity": planned.scheduler.capacity(),
+        "binding": planned.scheduler.binding().label(),
+        "launches": launches,
+        "waves": planned.waves,
+        "critical_path": planned.critical,
+        "bottleneck": planned.bottleneck,
+        "fingerprint": planned.fingerprint,
+        "estimate": planned.estimate.as_ref().map(|estimate| serde_json::json!({
+            "run_id": estimate.run_id,
+            "approved_by": estimate.approved_by,
+            "started_at_unix_ms": estimate.started_at_unix_ms,
+            "wall_clock_ms": estimate.wall_clock_ms,
+            "peak_concurrency": estimate.peak_concurrency,
+            "roles": estimate.roles,
+            "watt_hours": estimate.watt_hours,
+            "cents_per_kwh": planned.tariff,
+            "cost_micros": estimate.cost_micros(planned.tariff),
+        })),
+        "roles": planned.recipe.roles.iter().map(|role| serde_json::json!({
+            "name": role.name,
+            "worker": role.worker,
+            "worker_status": worker_status(role),
+            "gate": role.gate,
+            "needs": role.needs,
+            "command": role.command,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// Launch the roles for real, price what they took, and record it. Every child
+/// here is an `sh -c` process this command waits on through `OR-2`'s queue, and
+/// every number in the record is one that run produced.
+async fn run_recipe(
+    planned: &PlannedRecipe,
+    approved_by: &str,
+    format: OutputFormat,
+) -> Result<(), String> {
+    let started_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut manager = xencode_core_rs::TaskManager::new();
+    let window = xencode_context_rs::power::PowerWindow::begin();
+    let report = planned
+        .scheduler
+        .run(&planned.graph, &mut manager)
+        .await
+        .map_err(|e| format!("{e}\nnothing was launched"))?;
+    let use_ = window.finish();
+    let record = xencode_core_rs::TeamRun::from_report(
+        &planned.recipe,
+        &report,
+        &xencode_core_rs::RunObservation {
+            recipe_file: &planned.file,
+            fingerprint: &planned.fingerprint,
+            approved_by,
+            started_at_unix_ms,
+            watt_hours: use_.total_watt_hours(),
+            cents_per_kwh: planned.tariff,
+        },
+    );
+    let path = record.write(&planned.runs_dir)?;
+    let failed: Vec<&xencode_core_rs::RoleRun> = record
+        .roles
+        .iter()
+        .filter(|role| role.status != "exited(0)")
+        .collect();
+
+    if matches!(format, OutputFormat::Json) {
+        let mut out = plan_json(planned, true);
+        out["approved_by"] = serde_json::Value::String(approved_by.to_string());
+        out["actual"] = serde_json::json!({
+            "run_id": record.run_id,
+            "wall_clock_ms": record.elapsed_ms,
+            "peak_concurrency": record.peak_concurrency,
+            "roles": record.roles,
+            "watt_hours": record.watt_hours,
+            "cents_per_kwh": record.cents_per_kwh,
+            "cost_micros": record.cost_micros(planned.tariff),
+            "failed_roles": failed.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+        });
+        out["record"] = serde_json::Value::String(path.display().to_string());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+        );
+    } else {
+        println!();
+        for role in &record.roles {
+            println!(
+                "  ▸ {:<14} {}  started {} ms, finished {} ms",
+                role.name, role.status, role.started_ms, role.finished_ms
+            );
+        }
+        println!();
+        println!(
+            "  wall clock:      {} ({} ms), peak concurrency {} of {} at once",
+            wall_clock_label(record.elapsed_ms),
+            record.elapsed_ms,
+            record.peak_concurrency,
+            planned.scheduler.capacity(),
+        );
+        println!(
+            "  this run cost:   {}",
+            energy_label(
+                record.watt_hours,
+                record.cost_micros(planned.tariff),
+                planned.tariff,
+            )
+        );
+        match &planned.estimate {
+            Some(estimate) => {
+                println!(
+                    "  the estimate was {} · {}",
+                    wall_clock_label(estimate.wall_clock_ms),
+                    energy_label(
+                        estimate.watt_hours,
+                        estimate.cost_micros(planned.tariff),
+                        planned.tariff,
+                    ),
+                );
+                println!(
+                    "  checked:         {}",
+                    difference_label(record.elapsed_ms, estimate.wall_clock_ms)
+                );
+            }
+            None => println!(
+                "  checked:         nothing — this recipe had never run here before now. These \
+                 numbers are what the next plan of it will quote."
+            ),
+        }
+        println!("\n  Recorded in {}", path.display());
+        if failed.is_empty() {
+            println!("  Every role exited 0. The gates the recipe names were still not run.");
+        } else {
+            println!(
+                "  {} of {} roles did not exit 0: {}. The gates were not run.",
+                failed.len(),
+                record.roles.len(),
+                failed
+                    .iter()
+                    .map(|role| format!("{} ({})", role.name, role.status))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} of {} roles did not exit 0: {}",
+            failed.len(),
+            record.roles.len(),
+            failed
+                .iter()
+                .map(|role| role.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
+/// A wall clock as the machine's own power line says it, so a plan and a run
+/// quote time in the same units a person already reads elsewhere in xencode.
+fn wall_clock_label(ms: u64) -> String {
+    xencode_context_rs::power::elapsed_label(std::time::Duration::from_millis(ms))
+}
+
+/// Energy and its price on one line. `power_line` is what a generation window
+/// prints; a record only holds the watt-hours it measured, so the same labels are
+/// joined here.
+fn energy_label(watt_hours: Option<f64>, cost_micros: Option<u64>, tariff: Option<f64>) -> String {
+    match watt_hours {
+        Some(wh) => format!(
+            "{} · {} · this machine only",
+            xencode_context_rs::power::watt_hours_label(Some(wh)),
+            xencode_context_rs::power::cost_label(cost_micros, tariff)
+        ),
+        None => "energy unknown — this machine reports no power counter to read".to_string(),
+    }
+}
+
+/// How one measured run compares to the estimate a previous one set. A
+/// percentage is only offered when there is a number to divide by.
+fn difference_label(actual_ms: u64, estimated_ms: u64) -> String {
+    if estimated_ms == 0 {
+        return format!("{actual_ms} ms against an estimate of 0 ms, which cannot be divided by");
+    }
+    let percent = (actual_ms as f64 - estimated_ms as f64) / estimated_ms as f64 * 100.0;
+    let rounded = percent.round() as i64;
+    if rounded == 0 {
+        return format!(
+            "{actual_ms} ms against an estimated {estimated_ms} ms — the same to the nearest \
+             percent"
+        );
+    }
+    let by = rounded.unsigned_abs();
+    let word = if rounded > 0 { "longer" } else { "shorter" };
+    format!("{actual_ms} ms against an estimated {estimated_ms} ms: {by}% {word} than the estimate")
 }
 
 /// A file's recipe, or the reason it is not a team that could schedule — the

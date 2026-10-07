@@ -9,6 +9,7 @@ pub mod task_contract;
 pub mod tasks;
 pub mod tasks_file;
 pub mod team;
+pub mod team_runs;
 pub mod workspace;
 
 pub use atomic::write_atomic;
@@ -40,5 +41,9 @@ pub use tasks_file::{FileTask, FileTaskRegistry};
 pub use team::{
     load_recipes, Capacity, RecipeError, RecipeFile, RoleSpec, TeamRecipe, GATE_CHECKS,
     RECIPES_DIR,
+};
+pub use team_runs::{
+    estimate as estimate_from_runs, fingerprint as recipe_fingerprint, load_runs, Estimate,
+    RoleRun, RunFile, RunObservation, TeamRun, RUNS_DIR,
 };
 pub use workspace::{scan_workspace, EntryKind, ScanOptions, WorkspaceEntry, WorkspaceScanError};

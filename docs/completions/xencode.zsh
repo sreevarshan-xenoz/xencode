@@ -1295,6 +1295,15 @@ _arguments "${_arguments_options[@]}" : \
 ':name -- The recipe'\''s `name`, as written in the file:_default' \
 && ret=0
 ;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+'--approved-by=[Your name, for the record. Required to launch anything\: a team that runs with no name on it has nobody who agreed to it]:APPROVED_BY:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- The recipe'\''s `name`, as written in the file:_default' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__team__subcmd__help_commands" \
@@ -1316,6 +1325,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (plan)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(run)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -2819,6 +2832,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
         esac
     ;;
 esac
@@ -3235,7 +3252,7 @@ _xencode_commands() {
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
-'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it (OR-9)' \
+'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it — and run one, but only under a name that approves it (OR-9, OR-10)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3814,7 +3831,7 @@ _xencode__subcmd__help_commands() {
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
-'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it (OR-9)' \
+'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it — and run one, but only under a name that approves it (OR-9, OR-10)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -4609,7 +4626,8 @@ _xencode__subcmd__help__subcmd__team_commands() {
     local commands; commands=(
 'list:List the team recipes this project keeps, and say what each one is' \
 'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
-'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path and what limits it. Nothing is launched and no check is run' \
+'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run' \
+'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
     )
     _describe -t commands 'xencode help team commands' commands "$@"
 }
@@ -4622,6 +4640,11 @@ _xencode__subcmd__help__subcmd__team__subcmd__list_commands() {
 _xencode__subcmd__help__subcmd__team__subcmd__plan_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help team plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__run_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team run commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__show_commands] )) ||
 _xencode__subcmd__help__subcmd__team__subcmd__show_commands() {
@@ -5700,7 +5723,8 @@ _xencode__subcmd__team_commands() {
     local commands; commands=(
 'list:List the team recipes this project keeps, and say what each one is' \
 'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
-'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path and what limits it. Nothing is launched and no check is run' \
+'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run' \
+'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode team commands' commands "$@"
@@ -5710,7 +5734,8 @@ _xencode__subcmd__team__subcmd__help_commands() {
     local commands; commands=(
 'list:List the team recipes this project keeps, and say what each one is' \
 'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
-'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path and what limits it. Nothing is launched and no check is run' \
+'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run' \
+'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode team help commands' commands "$@"
@@ -5730,6 +5755,11 @@ _xencode__subcmd__team__subcmd__help__subcmd__plan_commands() {
     local commands; commands=()
     _describe -t commands 'xencode team help plan commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__run_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help run commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__show_commands] )) ||
 _xencode__subcmd__team__subcmd__help__subcmd__show_commands() {
     local commands; commands=()
@@ -5744,6 +5774,11 @@ _xencode__subcmd__team__subcmd__list_commands() {
 _xencode__subcmd__team__subcmd__plan_commands() {
     local commands; commands=()
     _describe -t commands 'xencode team plan commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__run_commands] )) ||
+_xencode__subcmd__team__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team run commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__show_commands] )) ||
 _xencode__subcmd__team__subcmd__show_commands() {

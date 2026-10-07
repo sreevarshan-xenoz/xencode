@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-10`: a team run you approve by name, with an estimate you can check
+
+`xencode team run <name>` shows what would happen and stops there. The plan — the waves, each role's worker, gate, needs and command, the critical path, the serial bottleneck, the estimated wall clock and the estimated cost — is the default answer, and getting past it takes `--approved-by <your name>`. Nothing is launched and nothing is written until that name is on the command line, and a blank name is refused: the record of a run says who agreed to it.
+
+- The estimate is a measurement of an earlier run, not a guess. A recipe's fingerprint covers everything that would change what the run does — its name, both capacity numbers, and each role's name, worker, command, gates and dependencies — and the plan quotes the newest recorded run whose fingerprint matches. Edit a role's command and the estimate is gone, replaced by `unknown — this recipe has never run here, so there is no measurement to quote`, rather than the stale number carried on.
+- The cost is the machine's own reading. A run records the power its CPU package drew while it ran, priced at your configured cents-per-kWh. No price set means the energy is recorded unpriced, not free; no power counter on the machine means the plan says so instead of printing a zero.
+- Every estimate is checked against the run it came from: the run prints its wall clock, what it cost, the estimate it was made against, and the difference between them.
+- Runs are kept in `.xencode/team-runs/`, one JSON file each, and that directory is git-ignored while `.xencode/teams/` stays tracked: the recipe is what a team agrees on, the timings are one machine's. A run whose role failed is still recorded, with the real exit status, and the command still fails.
+
 ### Added — `OR-9`: a team written down as a file
 
 A team can now be described without running it. One TOML file under `.xencode/teams/` names the roles, which agent plays each one, which checks gate that role's output, and how wide the team may run at once — read it with `xencode team list`, `xencode team show <name>`, or `xencode team plan <name>`.
