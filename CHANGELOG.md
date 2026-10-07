@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AE-6`: propose goals from failing check observations and insights
+
+Observations of failing checks and repository insights can now be offered as proposed tasks that convert into file-backed tasks:
+
+- Added `FailingCheckObservation` and `ProposedTask` in `xencode-context-rs::advise` converting failing check observations into a proposed task question.
+- Added `source` provenance field to `FileTask` in `xencode-core-rs::tasks_file` with `record_task` and `start_with_source` methods to persist observation context on disk.
+- Accepting a proposed task via `proposal.accept()` writes it to `tasks_file` (`tasks.json`) with the originating observation as its source, while declining (`proposal.decline()`) leaves the repository byte-identical.
+- Extended `/plan` in `xencode-tui-rs` with `/plan accept` and `/plan decline` commands to review and respond to pending proposed tasks.
+- Mapped key `p` in the insights panel to offer the selected finding as a proposed task.
+
+
 ### Added — `AE-5`: progressive disclosure levels across destinations and first-run welcome screen
 
 Navigation and discovery across all 26 `FocusArea` destinations are now organized into four enforced progressive disclosure levels (`Level1` Core, `Level2` Workflow, `Level3` Advanced, `Level4` Specialist):

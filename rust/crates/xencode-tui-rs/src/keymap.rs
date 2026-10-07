@@ -1527,6 +1527,11 @@ fn key_advise_panel(app: &mut App, key: KeyEvent) -> bool {
                 app.open_file_in_editor(&path);
             }
         }
+        KeyCode::Char('p') => {
+            if let Some(item) = app.advise_items.get(app.advise_selected) {
+                app.propose_task(item.offer_task());
+            }
+        }
         _ => return false,
     }
     true

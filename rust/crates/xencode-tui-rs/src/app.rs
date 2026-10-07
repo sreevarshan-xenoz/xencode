@@ -488,6 +488,10 @@ pub struct App<'a> {
     pub agent_plan: crate::agent_tools::PlanHandle,
     /// `/plan` toggles this: pinned shows every item, unpinned the first few.
     pub plan_pinned: bool,
+    /// Pending proposed task offer from an observation or advice (AE-6).
+    pub pending_task_proposal: Option<xencode_context_rs::ProposedTask>,
+    /// Root directory for tasks file storage (AE-6). None uses current directory.
+    pub tasks_root: Option<std::path::PathBuf>,
     /// MCP servers started for this session (I3-01) and the tools they offer.
     /// Empty until `/mcp` starts something.
     pub mcp: Arc<crate::mcp::McpHub>,
@@ -2706,6 +2710,8 @@ impl<'a> App<'a> {
                 std::path::PathBuf::new(),
             )),
             plan_pinned: false,
+            pending_task_proposal: None,
+            tasks_root: None,
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
             approval_tx,
@@ -6084,9 +6090,18 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Propose a task to the user as a question, leaving the repo unchanged until accepted (AE-6).
+    pub fn propose_task(&mut self, proposal: xencode_context_rs::ProposedTask) {
+        let question = proposal.question();
+        self.pending_task_proposal = Some(proposal);
+        self.system_line(&question);
+        self.system_line("Respond with `/plan accept` or `/plan decline`.");
+    }
+
     /// `/plan` toggles the agent's todo strip between its compact form (the
     /// first few steps, always visible while a plan exists) and the full list;
-    /// `/plan clear` drops the list the model posted without asking it to.
+    /// `/plan clear` drops the list the model posted without asking it to;
+    /// `/plan accept` / `/plan decline` responds to a pending proposed task (AE-6).
     fn handle_plan_command(&mut self, prompt: &str) {
         let arg = prompt.strip_prefix("/plan").unwrap_or("").trim();
         let items = crate::agent_tools::plan_items(&self.agent_plan);
@@ -6102,11 +6117,49 @@ impl<'a> App<'a> {
                 self.plan_pinned = false;
                 self.system_line("Plan cleared. The agent can post a new one.");
             }
+            "accept" => {
+                if let Some(proposal) = self.pending_task_proposal.take() {
+                    let root = self
+                        .tasks_root
+                        .clone()
+                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+                    let registry = xencode_core_rs::tasks_file::FileTaskRegistry::new(&root);
+                    match proposal.accept(&registry) {
+                        Ok(task) => {
+                            self.system_line(&format!(
+                                "Accepted proposed task #{}: '{}' (source: {})",
+                                task.id,
+                                task.name,
+                                task.source.as_deref().unwrap_or("observation")
+                            ));
+                        }
+                        Err(err) => {
+                            self.system_line(&format!("Failed to record task: {err}"));
+                        }
+                    }
+                } else {
+                    self.system_line("No pending task proposal to accept.");
+                }
+            }
+            "decline" => {
+                if let Some(proposal) = self.pending_task_proposal.take() {
+                    proposal.decline();
+                    self.system_line("Declined proposed task. Repository left byte-identical.");
+                } else {
+                    self.system_line("No pending task proposal to decline.");
+                }
+            }
             "" => {
+                if let Some(proposal) = &self.pending_task_proposal {
+                    self.system_line(&proposal.question());
+                    self.system_line("Use `/plan accept` or `/plan decline` to respond.");
+                }
                 if items.is_empty() {
-                    self.system_line(
-                        "No plan yet. Ask the agent to plan the work and it will post one here.",
-                    );
+                    if self.pending_task_proposal.is_none() {
+                        self.system_line(
+                            "No plan yet. Ask the agent to plan the work and it will post one here.",
+                        );
+                    }
                     return;
                 }
                 self.plan_pinned = !self.plan_pinned;
@@ -6129,7 +6182,9 @@ impl<'a> App<'a> {
                     }
                 ));
             }
-            _ => self.system_line("usage: /plan (toggle the full list)  |  /plan clear"),
+            _ => self.system_line(
+                "usage: /plan (toggle the full list)  |  /plan clear  |  /plan accept  |  /plan decline",
+            ),
         }
     }
 
@@ -12989,6 +13044,54 @@ mod tests {
         assert!(!app.is_generating);
         assert_eq!(app.messages.last().unwrap().role, "system");
         assert!(app.messages.last().unwrap().content.contains("No plan yet"));
+    }
+
+    #[test]
+    fn plan_proposal_offer_accept_and_decline_flow() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("xencode-plan-proposal-test-{nonce}"));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut app = App::for_tests();
+        app.tasks_root = Some(dir.clone());
+
+        let obs = xencode_context_rs::FailingCheckObservation::new(
+            "cargo test --test parser",
+            "cargo test --test parser",
+            3,
+            "Introduced",
+        );
+        let proposal = obs.offer_task();
+
+        // 1. Propose task
+        app.propose_task(proposal);
+        assert!(app.pending_task_proposal.is_some());
+        assert!(app.messages.last().unwrap().content.contains("Respond with `/plan accept` or `/plan decline`"));
+
+        // 2. Decline proposed task: repo left byte-identical, no tasks recorded
+        app.handle_plan_command("/plan decline");
+        assert!(app.pending_task_proposal.is_none());
+        assert!(app.messages.last().unwrap().content.contains("Declined proposed task"));
+        assert!(!dir.join("tasks.json").exists(), "declining writes nothing");
+
+        // 3. Propose again and accept
+        let proposal2 = obs.offer_task();
+        app.propose_task(proposal2);
+        app.handle_plan_command("/plan accept");
+        assert!(app.pending_task_proposal.is_none());
+        assert!(app.messages.last().unwrap().content.contains("Accepted proposed task"));
+
+        // Verify task exists on disk in tasks_file
+        let registry = xencode_core_rs::tasks_file::FileTaskRegistry::new(&dir);
+        let tasks = registry.list().expect("list tasks");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].name, "fix failing check: cargo test --test parser");
+        assert_eq!(tasks[0].source.as_deref(), Some(obs.observation.as_str()));
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

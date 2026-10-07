@@ -70,7 +70,7 @@ mouse over (the same row lives on the Settings panel, and it takes effect on
 the next frame). Slash commands: `/init`, `/ctx`, `/advise`,
 `/impact <file>` (open the blast-radius panel over `xencode impact`'s three
 layers),
-`/bytebot`, `/plan` (pin or clear the agent's todo list),
+`/bytebot`, `/plan` (pin or clear the agent's todo list, or accept/decline proposed tasks from failing-check observations or insights via `/plan accept` / `/plan decline`),
 `/rewind` (undo the agent's file changes for this session; it refuses to
 overwrite a file you edited by hand after the agent wrote it, and
 `/rewind [turns] --force` overrides that),

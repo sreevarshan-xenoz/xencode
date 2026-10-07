@@ -15557,6 +15557,11 @@ appear in it are how the §R-0 counts went wrong.
   a question, and declining it writes nothing. *Done-when:* one failing-check observation offers
   exactly one task, accepting it puts that task in `tasks_file` with the observation as its
   source, and declining leaves the repository byte-identical.
+  *Completed:* Added `FailingCheckObservation` and `ProposedTask` in `advise.rs` with `offer_task()`
+  which frames the failing check as an explicit question. Added `source` provenance field,
+  `record_task` function, and `start_with_source` in `tasks_file.rs`. Extended `/plan` with `accept`
+  and `decline` commands, and added `p` key in the insights panel. Declining leaves repository byte-identical,
+  accepting puts task in `tasks_file` with observation as source. 2552 tests passing; clippy clean.
 
 - **AE-7 — a public entry to the agent loop.** *Effort: M.* `agent_rounds` is
   `pub(crate)` (`app.rs:9722`) and `run_app` is the only public path in the crate, which is fact
