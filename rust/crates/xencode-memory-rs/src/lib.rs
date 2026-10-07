@@ -1,3 +1,8 @@
+//! Conversation and durable-fact memory, and the scoped shared memory that
+//! workers hand to each other (OR-8).
+
+pub mod scoped;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;

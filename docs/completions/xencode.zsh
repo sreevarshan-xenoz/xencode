@@ -490,6 +490,85 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(publish)
+_arguments "${_arguments_options[@]}" : \
+'--worker=[Worker id publishing under (needs a policy that grants the scope)]:WORKER:_default' \
+'--scope=[Scope to publish into, e.g. \`architecture\` or \`release-gate\`]:SCOPE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':content -- The finding itself:_default' \
+&& ret=0
+;;
+(read)
+_arguments "${_arguments_options[@]}" : \
+'--worker=[Worker id reading (needs a policy that grants each scope shown)]:WORKER:_default' \
+'--scope=[Read only this scope; without it, every scope the policy grants]:SCOPE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(policy)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__memory__subcmd__policy_commands" \
+"*::: :->policy" \
+&& ret=0
+
+    case $state in
+    (policy)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-memory-policy-command-$line[1]:"
+        case $line[1] in
+            (set)
+_arguments "${_arguments_options[@]}" : \
+'--worker=[Worker id the policy applies to]:WORKER:_default' \
+'*--read=[Scopes this worker may read (repeatable; none means it reads nothing)]:SCOPE:_default' \
+'*--publish=[Scopes this worker may publish into (repeatable; none means it publishes nothing)]:SCOPE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+'--worker=[Show only this worker'\''s policy]:WORKER:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__memory__subcmd__policy__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-memory-policy-help-command-$line[1]:"
+        case $line[1] in
+            (set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__memory__subcmd__help_commands" \
@@ -525,6 +604,38 @@ _arguments "${_arguments_options[@]}" : \
 (evidence)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
+;;
+(publish)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(read)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(policy)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__memory__subcmd__help__subcmd__policy_commands" \
+"*::: :->policy" \
+&& ret=0
+
+    case $state in
+    (policy)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-memory-help-policy-command-$line[1]:"
+        case $line[1] in
+            (set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
@@ -2352,6 +2463,38 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(publish)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(read)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(policy)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__memory__subcmd__policy_commands" \
+"*::: :->policy" \
+&& ret=0
+
+    case $state in
+    (policy)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-memory-policy-command-$line[1]:"
+        case $line[1] in
+            (set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
         esac
     ;;
 esac
@@ -3994,6 +4137,9 @@ _xencode__subcmd__help__subcmd__memory_commands() {
 'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
+'publish:Publish one finding into the shared memory that workers hand each other' \
+'read:Read shared memory as the worker you name, marked and attributed' \
+'policy:Set and inspect which scopes each worker may read and publish' \
     )
     _describe -t commands 'xencode help memory commands' commands "$@"
 }
@@ -4017,10 +4163,38 @@ _xencode__subcmd__help__subcmd__memory__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help memory list commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__policy_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__policy_commands() {
+    local commands; commands=(
+'set:Replace one worker'\''s memory policy. A worker with no policy can neither read nor publish anything, and a repeat of this command overwrites what was granted before' \
+'show:Show the configured policies, or one worker'\''s if named' \
+    )
+    _describe -t commands 'xencode help memory policy commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__policy__subcmd__set_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__policy__subcmd__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory policy set commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__policy__subcmd__show_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__policy__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory policy show commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__prune_commands] )) ||
 _xencode__subcmd__help__subcmd__memory__subcmd__prune_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help memory prune commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__publish_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__publish_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory publish commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__read_commands] )) ||
+_xencode__subcmd__help__subcmd__memory__subcmd__read_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help memory read commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__memory__subcmd__show_commands] )) ||
 _xencode__subcmd__help__subcmd__memory__subcmd__show_commands() {
@@ -4616,6 +4790,9 @@ _xencode__subcmd__memory_commands() {
 'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
+'publish:Publish one finding into the shared memory that workers hand each other' \
+'read:Read shared memory as the worker you name, marked and attributed' \
+'policy:Set and inspect which scopes each worker may read and publish' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode memory commands' commands "$@"
@@ -4644,6 +4821,9 @@ _xencode__subcmd__memory__subcmd__help_commands() {
 'prune:Delete conversation sessions that have no messages' \
 'gc:List the durable facts this repository contradicts, with how long each has been contradicted for. \`--apply\` retires the ones past a year' \
 'evidence:How many revisions each durable fact has been re-checked against, and what that evidence supports saying. Prints an interval, never a confidence' \
+'publish:Publish one finding into the shared memory that workers hand each other' \
+'read:Read shared memory as the worker you name, marked and attributed' \
+'policy:Set and inspect which scopes each worker may read and publish' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode memory help commands' commands "$@"
@@ -4673,10 +4853,38 @@ _xencode__subcmd__memory__subcmd__help__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory help list commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__policy_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__policy_commands() {
+    local commands; commands=(
+'set:Replace one worker'\''s memory policy. A worker with no policy can neither read nor publish anything, and a repeat of this command overwrites what was granted before' \
+'show:Show the configured policies, or one worker'\''s if named' \
+    )
+    _describe -t commands 'xencode memory help policy commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__policy__subcmd__set_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__policy__subcmd__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help policy set commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__policy__subcmd__show_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__policy__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help policy show commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__prune_commands] )) ||
 _xencode__subcmd__memory__subcmd__help__subcmd__prune_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory help prune commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__publish_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__publish_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help publish commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__read_commands] )) ||
+_xencode__subcmd__memory__subcmd__help__subcmd__read_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory help read commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory__subcmd__help__subcmd__show_commands] )) ||
 _xencode__subcmd__memory__subcmd__help__subcmd__show_commands() {
@@ -4688,10 +4896,63 @@ _xencode__subcmd__memory__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory list commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__memory__subcmd__policy_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy_commands() {
+    local commands; commands=(
+'set:Replace one worker'\''s memory policy. A worker with no policy can neither read nor publish anything, and a repeat of this command overwrites what was granted before' \
+'show:Show the configured policies, or one worker'\''s if named' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode memory policy commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__policy__subcmd__help_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy__subcmd__help_commands() {
+    local commands; commands=(
+'set:Replace one worker'\''s memory policy. A worker with no policy can neither read nor publish anything, and a repeat of this command overwrites what was granted before' \
+'show:Show the configured policies, or one worker'\''s if named' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode memory policy help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory policy help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__set_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory policy help set commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__show_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory policy help show commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__policy__subcmd__set_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy__subcmd__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory policy set commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__policy__subcmd__show_commands] )) ||
+_xencode__subcmd__memory__subcmd__policy__subcmd__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory policy show commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__memory__subcmd__prune_commands] )) ||
 _xencode__subcmd__memory__subcmd__prune_commands() {
     local commands; commands=()
     _describe -t commands 'xencode memory prune commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__publish_commands] )) ||
+_xencode__subcmd__memory__subcmd__publish_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory publish commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__memory__subcmd__read_commands] )) ||
+_xencode__subcmd__memory__subcmd__read_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode memory read commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory__subcmd__show_commands] )) ||
 _xencode__subcmd__memory__subcmd__show_commands() {

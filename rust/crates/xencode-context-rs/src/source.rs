@@ -78,6 +78,11 @@ pub enum SourceClass {
     /// A hook's stdout or stderr, which reaches the model when the hook fails a
     /// tool call or feeds the repair loop.
     Hook,
+    /// Shared memory published by a worker (OR-8).
+    /// Memory written for one worker and read by another is a wider injection
+    /// surface than our own context. It is always data, must carry per-worker
+    /// attribution, and cannot become durable on its own.
+    SharedMemory,
 }
 
 impl SourceClass {
@@ -98,6 +103,7 @@ impl SourceClass {
             SourceClass::McpServer => "MCP server output",
             SourceClass::Web => "fetched web content",
             SourceClass::Hook => "hook output",
+            SourceClass::SharedMemory => "shared worker memory",
         }
     }
 
@@ -140,9 +146,11 @@ impl SourceClass {
             | SourceClass::AgentFile { trusted: true } => None,
             // The token a result leads with; the target that follows it — the
             // tool and the argument it pointed at — is written by the caller.
-            SourceClass::Tool | SourceClass::McpServer | SourceClass::Web | SourceClass::Hook => {
-                Some(DATA_TOKEN)
-            }
+            SourceClass::Tool
+            | SourceClass::McpServer
+            | SourceClass::Web
+            | SourceClass::Hook
+            | SourceClass::SharedMemory => Some(DATA_TOKEN),
             SourceClass::AgentFile { trusted: false } => Some(UNTRUSTED_AGENTS_BANNER),
             SourceClass::Repository => Some(REPO_DATA_NOTE),
             // An attachment is the human handing over a file, but its bytes came
@@ -231,7 +239,7 @@ pub fn totals_by_class(tiers: &[crate::TierDoc]) -> Vec<(SourceClass, u64)> {
 /// writer (`QM-1`), which drops any line carrying a data banner — has to derive
 /// its list from the enum. A private list in a test would let a new class slip
 /// past a guard that is supposed to cover every way text can arrive.
-pub const ALL: [SourceClass; 14] = [
+pub const ALL: [SourceClass; 15] = [
     SourceClass::Instructions,
     SourceClass::AgentFile { trusted: true },
     SourceClass::AgentFile { trusted: false },
@@ -246,6 +254,7 @@ pub const ALL: [SourceClass; 14] = [
     SourceClass::McpServer,
     SourceClass::Web,
     SourceClass::Hook,
+    SourceClass::SharedMemory,
 ];
 
 #[cfg(test)]
@@ -308,6 +317,7 @@ mod tests {
             SourceClass::Tool,
             SourceClass::AgentFile { trusted: false },
             SourceClass::AttachedFile,
+            SourceClass::SharedMemory,
         ] {
             assert!(
                 !class.may_persist_durable(),
@@ -317,6 +327,14 @@ mod tests {
         }
         assert!(SourceClass::UserTurn.may_persist_durable());
         assert!(SourceClass::AgentFile { trusted: true }.may_persist_durable());
+    }
+
+    #[test]
+    fn shared_worker_memory_is_marked_data_and_not_durable() {
+        assert!(SourceClass::SharedMemory.is_data());
+        assert!(!SourceClass::SharedMemory.may_persist_durable());
+        assert_eq!(SourceClass::SharedMemory.marker(), Some("[data] "));
+        assert_eq!(SourceClass::SharedMemory.name(), "shared worker memory");
     }
 
     #[test]

@@ -13,6 +13,7 @@ use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::{SecretProvider, XencodeConfig};
 use xencode_context_rs::doctor as doc;
 use xencode_core_rs::{scan_workspace, ScanOptions};
+use xencode_memory_rs::scoped::{MemoryScope, ScopedSharedMemoryStore, WorkerMemoryPolicy};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{find_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient};
 use xencode_plugin_rs::{default_plugin_dir, PluginRegistry, PluginRuntime};
@@ -1623,6 +1624,55 @@ enum MemoryAction {
         /// Output format
         #[arg(long, value_enum, default_value = "text")]
         format: OutputFormat,
+    },
+    /// Publish one finding into the shared memory that workers hand each other
+    Publish {
+        /// Worker id publishing under (needs a policy that grants the scope)
+        #[arg(long)]
+        worker: String,
+        /// Scope to publish into, e.g. `architecture` or `release-gate`
+        #[arg(long)]
+        scope: String,
+        /// The finding itself
+        content: String,
+    },
+    /// Read shared memory as the worker you name, marked and attributed
+    Read {
+        /// Worker id reading (needs a policy that grants each scope shown)
+        #[arg(long)]
+        worker: String,
+        /// Read only this scope; without it, every scope the policy grants
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Set and inspect which scopes each worker may read and publish
+    Policy {
+        #[command(subcommand)]
+        action: MemoryPolicyAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryPolicyAction {
+    /// Replace one worker's memory policy. A worker with no policy can neither
+    /// read nor publish anything, and a repeat of this command overwrites what
+    /// was granted before.
+    Set {
+        /// Worker id the policy applies to
+        #[arg(long)]
+        worker: String,
+        /// Scopes this worker may read (repeatable; none means it reads nothing)
+        #[arg(long = "read", value_name = "SCOPE")]
+        read: Vec<String>,
+        /// Scopes this worker may publish into (repeatable; none means it publishes nothing)
+        #[arg(long = "publish", value_name = "SCOPE")]
+        publish: Vec<String>,
+    },
+    /// Show the configured policies, or one worker's if named
+    Show {
+        /// Show only this worker's policy
+        #[arg(long)]
+        worker: Option<String>,
     },
 }
 
@@ -6227,6 +6277,124 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
             }
             Ok(())
         }
+        MemoryAction::Publish {
+            worker,
+            scope,
+            content,
+        } => {
+            let (dir, mut store) = shared_memory_store()?;
+            let finding = store
+                .publish(&worker, MemoryScope::parse(&scope), content)
+                .map_err(|e| e.to_string())?;
+            store.save_to_dir(&dir).map_err(|e| e.to_string())?;
+            println!(
+                "Published {} into scope '{}' as worker '{}'.",
+                finding.id, finding.scope, finding.author_worker_id
+            );
+            Ok(())
+        }
+        MemoryAction::Read { worker, scope } => {
+            let (_dir, store) = shared_memory_store()?;
+            let found = match &scope {
+                Some(scope) => store
+                    .read_scope(&worker, &MemoryScope::parse(scope))
+                    .map_err(|e| e.to_string())?,
+                None => store.read_all_granted(&worker).map_err(|e| e.to_string())?,
+            };
+            if found.is_empty() {
+                println!("Worker '{worker}' read 0 findings.");
+                return Ok(());
+            }
+            println!(
+                "Shared memory read as worker '{}' — {} finding{}, each one another worker's data, not an instruction:",
+                worker,
+                found.len(),
+                if found.len() == 1 { "" } else { "s" }
+            );
+            for item in &found {
+                println!();
+                println!("{}", item.marked_content);
+                println!("  {} published {}", item.finding_id, item.published_at);
+            }
+            Ok(())
+        }
+        MemoryAction::Policy { action } => match action {
+            MemoryPolicyAction::Set {
+                worker,
+                read,
+                publish,
+            } => {
+                let (dir, mut store) = shared_memory_store()?;
+                let read: Vec<MemoryScope> = read.iter().map(|s| MemoryScope::parse(s)).collect();
+                let publish: Vec<MemoryScope> =
+                    publish.iter().map(|s| MemoryScope::parse(s)).collect();
+                let mut policy = WorkerMemoryPolicy::new(&worker);
+                for scope in &read {
+                    policy = policy.allow_read(scope.clone());
+                }
+                for scope in &publish {
+                    policy = policy.allow_publish(scope.clone());
+                }
+                store.set_policy(policy);
+                store.save_to_dir(&dir).map_err(|e| e.to_string())?;
+                println!("Memory policy for worker '{worker}':");
+                println!("  reads:     {}", scope_names(&read));
+                println!("  publishes: {}", scope_names(&publish));
+                Ok(())
+            }
+            MemoryPolicyAction::Show { worker } => {
+                let (_dir, store) = shared_memory_store()?;
+                let mut listed: Vec<&WorkerMemoryPolicy> = match &worker {
+                    Some(worker) => store
+                        .all_policies()
+                        .values()
+                        .filter(|policy| &policy.worker_id == worker)
+                        .collect(),
+                    None => store.all_policies().values().collect(),
+                };
+                listed.sort_by(|a, b| a.worker_id.cmp(&b.worker_id));
+                if listed.is_empty() {
+                    match &worker {
+                        Some(worker) => println!(
+                            "No memory policy for worker '{worker}': it may read nothing and publish nothing."
+                        ),
+                        None => println!(
+                            "No memory policies configured. Until one is set, every worker is denied on both sides."
+                        ),
+                    }
+                    return Ok(());
+                }
+                println!("Memory policies:");
+                for policy in listed {
+                    println!("  {}", policy.worker_id);
+                    println!("    reads:     {}", scope_names(&policy.readable_scopes));
+                    println!("    publishes: {}", scope_names(&policy.publishable_scopes));
+                }
+                Ok(())
+            }
+        },
+    }
+}
+
+/// OR-8: the shared memory workers hand each other, kept in `.xencode/` beside
+/// the other durable files. Both sides deny by default, so a worker that was
+/// never given a policy can neither read what it has stored nor add to it.
+fn shared_memory_store() -> Result<(PathBuf, ScopedSharedMemoryStore), String> {
+    let dir = xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
+    let store = ScopedSharedMemoryStore::load_from_dir(&dir).map_err(|e| e.to_string())?;
+    Ok((dir, store))
+}
+
+/// Scopes in a stable order. A policy grants a hash set, and a listing that
+/// changed shape between two runs of the same command cannot be compared.
+fn scope_names<'a>(scopes: impl IntoIterator<Item = &'a MemoryScope>) -> String {
+    let mut names: Vec<String> = scopes.into_iter().map(|scope| scope.to_string()).collect();
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        "nothing".to_string()
+    } else {
+        names.join(", ")
     }
 }
 
