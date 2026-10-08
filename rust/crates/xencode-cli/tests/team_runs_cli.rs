@@ -8,6 +8,12 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
+/// Whether this machine has the CPU energy counter a run's power figure comes
+/// from. GitHub's virtual machines expose none, so a figure is not expected there.
+fn power_counter_readable() -> bool {
+    xencode_context_rs::power::package_energy_uj(xencode_context_rs::power::POWERCAP_ROOT).is_some()
+}
+
 fn xencode_bin() -> &'static str {
     env!("CARGO_BIN_EXE_xencode")
 }
@@ -231,10 +237,12 @@ fn an_approved_run_launches_the_roles_and_records_what_it_took() {
         "{stdout}"
     );
     assert!(stdout.contains("survey         exited(0)"), "{stdout}");
-    assert!(
-        stdout.contains("no $/kWh set"),
-        "an unpriced run must not read as a free one: {stdout}"
-    );
+    if power_counter_readable() {
+        assert!(
+            stdout.contains("no $/kWh set"),
+            "an unpriced run must not read as a free one: {stdout}"
+        );
+    }
 
     let found = records(dir.path());
     assert_eq!(found.len(), 1, "one run, one record");

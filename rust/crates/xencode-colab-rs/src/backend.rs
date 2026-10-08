@@ -403,6 +403,18 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn docker_backend_answers_honestly_when_daemon_unreachable() {
+        // This is the unreachable case. Where a daemon answers — GitHub's runners
+        // run one — provisioning would really start a container, which is a
+        // different test and not one to run by accident.
+        let reachable = std::process::Command::new("docker")
+            .arg("info")
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if reachable {
+            eprintln!("skipping: a docker daemon answers here, so it is not unreachable");
+            return;
+        }
         let backend = crate::docker::DockerBackend::new(
             std::path::PathBuf::from("/usr/bin/docker"),
             "alpine:latest".to_string(),
