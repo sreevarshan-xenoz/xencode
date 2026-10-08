@@ -6,13 +6,19 @@
 //! pick one line per agent, and picking one line is exactly how a reader gets
 //! built that works on the line you chose. These run whole streams: every event
 //! name, every field, every odd spelling the vendor happened to use that day.
+//!
+//! Seven of the eight streams are runs that did the task. The eighth is not:
+//! claude's capture is an `authentication_failed` run that never reached a model,
+//! billed nothing, and exited 1. It is kept as the evidence it is, which is why
+//! the `error` shape has a real case here and the answer-only checks below are
+//! asserted per agent rather than across the whole set.
 
 use std::collections::BTreeMap;
 
 use xencode_agents_rs::protocol::{normalise_line, run_completed, AgentEvent, Origin};
 
-fn stream(agent: &str) -> Vec<AgentEvent> {
-    let raw = match agent {
+fn raw(agent: &str) -> &'static str {
+    match agent {
         "opencode" => include_str!("fixtures/opencode.ndjson"),
         "kilo" => include_str!("fixtures/kilo.ndjson"),
         "cline" => include_str!("fixtures/cline.ndjson"),
@@ -22,10 +28,41 @@ fn stream(agent: &str) -> Vec<AgentEvent> {
         "kiro-cli" => include_str!("fixtures/kiro-cli.ndjson"),
         "claude" => include_str!("fixtures/claude.ndjson"),
         other => panic!("no captured stream for {other}"),
-    };
-    raw.lines()
+    }
+}
+
+fn stream(agent: &str) -> Vec<AgentEvent> {
+    raw(agent)
+        .lines()
         .flat_map(|line| normalise_line(agent, line))
         .collect()
+}
+
+/// The lines in a committed stream where the vendor itself names a failure.
+///
+/// Read out of the raw bytes on purpose: the point is to compare what the agent
+/// printed against what the model ended up reporting, so a check written only
+/// against the events can be satisfied by the same reader that missed the
+/// failure. `is_error: true` and a string `error` are the two spellings seen in
+/// this evidence so far.
+fn raw_failure_claims(agent: &str) -> Vec<String> {
+    let mut claims = Vec::new();
+    for (index, line) in raw(agent).lines().enumerate() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        let mut why = Vec::new();
+        if value.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+            why.push("is_error true".to_string());
+        }
+        if let Some(code) = value.get("error").and_then(|v| v.as_str()) {
+            why.push(format!("error {code}"));
+        }
+        if !why.is_empty() {
+            claims.push(format!("raw#{}: {}", index + 1, why.join(", ")));
+        }
+    }
+    claims
 }
 
 fn counts(events: &[AgentEvent]) -> BTreeMap<&'static str, usize> {
@@ -199,5 +236,44 @@ fn agy_is_the_one_agent_whose_tool_calls_cannot_be_paired_up() {
     assert!(
         ids.iter().all(|id| id.is_none()),
         "agy now sends correlation ids, so this limit is gone and the test should be rewritten: {ids:?}"
+    );
+}
+
+#[test]
+fn a_failure_the_vendor_named_is_never_read_as_a_plain_run() {
+    // The lesson the claude capture taught on 2026-10-08: a stream that says it
+    // failed has to arrive as a failure. The claims come from the raw bytes, and
+    // the events are counted against them, so this keeps failing if a normaliser
+    // starts turning a named error back into prose — for whichever vendor it
+    // regresses on, named in the message. Counted, not merely "is there an
+    // error": with the assistant line's `error` field unread, the result line
+    // still produced one and a looser version of this test stayed green.
+    let mut vendors_that_named_a_failure = Vec::new();
+    for agent in CAPTURED {
+        let claims = raw_failure_claims(agent);
+        if claims.is_empty() {
+            continue;
+        }
+        vendors_that_named_a_failure.push(*agent);
+        let events = stream(agent);
+        let errors = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::Error { .. }))
+            .count();
+        assert!(
+            errors >= claims.len(),
+            "{agent} names its failure on {} line(s) ({claims:?}) and the \
+             normalised run reports {errors}: {:?}",
+            claims.len(),
+            events
+        );
+    }
+    // And the converse guard: this is about a real capture, not a rule nobody
+    // ever saw fire. If no committed stream names a failure, the loop above has
+    // checked nothing.
+    assert_eq!(
+        vendors_that_named_a_failure,
+        vec!["claude"],
+        "the set of captured streams that name their own failure moved"
     );
 }

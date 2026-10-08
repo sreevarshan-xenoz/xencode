@@ -1714,6 +1714,14 @@ for no changes, so an agent that follows it modifies nothing — which also mean
 no account stops at its authentication check, and **that refusal is recorded as an
 observation**, not as a failure of the probe.
 
+Since 2026-10-08 that refusal reaches the normalised **events** as well. An agent that fails
+its own authentication check now reports `error` rows in its own words — claude's stream
+gives `authentication_failed: Not logged in · Please run /login`, then the same sentence
+with `(terminal_reason api_error)` — and the run closes without a `completed`. Until then the
+adapter read only `type`, `subtype` and the prose, so a worker that never reached a model
+normalised to one message and a success: the refusal was in the exit code and in the raw
+line, and nowhere in the event stream a router would read.
+
 What is captured per agent: the binary, its version, the argv executed, the working
 directory, exit code, wall-clock, stdout and stderr, any event lines found on a
 machine-readable stream, a session id if one appeared, and whether the run stopped on an

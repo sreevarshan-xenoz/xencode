@@ -6,11 +6,13 @@
 //! changes are visible in the code:
 //!
 //! - **Nothing is shared.** Six working agents spoke six vocabularies, and the
-//!   seven canonical variants below are reached from every one of them by
-//!   spelling. There is no common field name to lean on, so this keys on
-//!   *shape*: which keys a line carries, not which agent sent it. `opencode`
-//!   and `kilo` are a fork speaking one vocabulary, and keying on the agent's
-//!   name would have made the adapter layer pay for opencode twice.
+//!   model's eleven canonical variants below are reached from those streams
+//!   only by spelling — eight of the eleven come out of a real captured line
+//!   on this machine, and the three that do not are named in
+//!   `tests/agent_event_tck.rs`. There is no common field name to lean on, so
+//!   this keys on *shape*: which keys a line carries, not which agent sent it.
+//!   `opencode` and `kilo` are a fork speaking one vocabulary, and keying on
+//!   the agent's name would have made the adapter layer pay for opencode twice.
 //! - **A normalised model cannot invent a correlation id.** `codex` was the
 //!   only agent whose stream carried `thread_id`. Everything this module adds
 //!   that no stream said is marked [`Origin::Synthesised`], so a caller can
@@ -115,6 +117,11 @@ pub enum AgentEvent {
         origin: Origin,
     },
     /// The run hit a problem, or the stream said it did.
+    ///
+    /// `claude` is the vendor that has actually sent this from a real run: it
+    /// names the problem on `error` in its assistant line and on `is_error` in
+    /// its result line, and neither of those is visible in the `subtype` a
+    /// reader would check first. See `claude_shape`.
     Error {
         message: String,
         #[serde(default)]
@@ -642,6 +649,13 @@ fn kiro_shape(value: &serde_json::Value) -> Vec<AgentEvent> {
 /// `claude`: `system`, `assistant`, `result`. Parked by decision, but its shape
 /// is known from an observed run on 2026-09-28 and is kept so the model stays
 /// complete when it is switched back on.
+///
+/// What `claude` says when a run goes wrong is two different fields, and neither
+/// of them is the one a reader would look at. The 2026-10-02 capture — a run that
+/// never reached a model — carried `"error":"authentication_failed"` on its
+/// assistant line and `"is_error":true` on its result line, and both normalised
+/// to prose followed by a success. See [`AgentEvent::Error`] for the shape this
+/// reads now.
 fn claude_shape(value: &serde_json::Value) -> Vec<AgentEvent> {
     let kind = value.get("type").and_then(|v| v.as_str());
     let subtype = value.get("subtype").and_then(|v| v.as_str());
@@ -653,13 +667,81 @@ fn claude_shape(value: &serde_json::Value) -> Vec<AgentEvent> {
             session_id: str_at(value, "session_id"),
             origin: Origin::Observed,
         }],
-        (Some("assistant"), _) => text_or_nothing(message_text(value.get("message"))),
+        (Some("assistant"), _) => {
+            // The error code and the sentence the CLI printed for it ride on the
+            // same line. Emitting only the prose is what made an API failure look
+            // like the agent talking, so the code leads and the sentence follows.
+            let code = str_at(value, "error");
+            let said = trimmed_str(message_text(value.get("message")));
+            match (code, said) {
+                (Some(code), Some(text)) => vec![AgentEvent::Error {
+                    message: format!("{code}: {text}"),
+                    origin: Origin::Observed,
+                }],
+                (Some(code), None) => vec![AgentEvent::Error {
+                    message: code,
+                    origin: Origin::Observed,
+                }],
+                (None, _) => text_or_nothing(message_text(value.get("message"))),
+            }
+        }
+        (Some("result"), _) if result_failed(value) => {
+            // `subtype` names how claude's own turn handling ended and reads
+            // `success` for an API error too; `is_error` is the field that says
+            // whether the run worked. Taking the first and skipping the second is
+            // how a failed worker reported itself as a finished one.
+            let reason = str_at(value, "terminal_reason");
+            let said = value
+                .get("result")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string);
+            let message = match (&said, &reason) {
+                (Some(text), Some(r)) => format!("{text} (terminal_reason {r})"),
+                (Some(text), None) => text.clone(),
+                (None, Some(r)) => format!("terminal_reason {r}"),
+                (None, None) => "(no message)".to_string(),
+            };
+            vec![
+                AgentEvent::Error {
+                    message,
+                    origin: Origin::Observed,
+                },
+                // The session really did end — that is what a result line is —
+                // and a run nobody closes leaves an orchestrator waiting on it.
+                // `Completed` is withheld because nothing about this run completed.
+                AgentEvent::SessionEnded {
+                    reason,
+                    origin: Origin::Observed,
+                },
+            ]
+        }
         (Some("result"), _) => vec![AgentEvent::Completed {
             outcome: subtype.map(str::to_string),
             origin: Origin::Observed,
         }],
         _ => Vec::new(),
     }
+}
+
+/// Whether a claude result line says the run failed.
+///
+/// Absent and `false` are both "not reported as a failure"; only an explicit
+/// `true` moves a run out of [`AgentEvent::Completed`].
+fn result_failed(value: &serde_json::Value) -> bool {
+    value
+        .get("is_error")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// A string, trimmed, or none when it was empty. An empty sentence is not
+/// something the agent said.
+fn trimmed_str(text: Option<&str>) -> Option<String> {
+    text.map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
 }
 
 /// The prose inside a `message`, which may be a bare string or a list of
@@ -689,9 +771,9 @@ fn message_text(message: Option<&serde_json::Value>) -> Option<&str> {
 /// A message, or nothing when there was no text to carry. An empty string is
 /// not a message, and inventing one would make a silent run look chatty.
 fn text_or_nothing(text: Option<&str>) -> Vec<AgentEvent> {
-    match text.map(str::trim).filter(|t| !t.is_empty()) {
+    match trimmed_str(text) {
         Some(t) => vec![AgentEvent::Message {
-            text: t.to_string(),
+            text: t,
             origin: Origin::Observed,
         }],
         None => Vec::new(),
@@ -732,6 +814,11 @@ fn cursor_tool(value: &serde_json::Value) -> String {
 /// a turn, so this accepts either and does not care which. It exists so a
 /// text-only run — one that said some prose and stopped — terminates through the
 /// same check as one that ran tools, which is the `AR-9` done-when.
+///
+/// This is a liveness question, not a success question. A run that failed
+/// finished too: `claude`'s failed run closes on `SessionEnded` beside its
+/// `Error`, and does not report `Completed`. A caller that needs to know whether
+/// the work worked reads the events, not this.
 pub fn run_completed(events: &[AgentEvent]) -> bool {
     events.iter().any(|e| {
         matches!(
@@ -951,6 +1038,65 @@ mod tests {
                 }
                 other => panic!("{agent} produced {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn a_claude_api_failure_is_an_error_and_not_the_agent_talking() {
+        // These are the last two lines of the committed 2026-10-02 claude capture
+        // with the fields this function does not read dropped; `tests/
+        // protocol_streams.rs` replays that stream whole, line for line. The run
+        // never reached a model — `apiKeySource` was `none`, `total_cost_usd` was
+        // 0 and the CLI exited 1 — and its result line says `is_error` true while
+        // its own `subtype` says `success`. Reading the subtype alone reported a
+        // failed worker as a finished one.
+        let assistant = r#"{"type":"assistant","session_id":"c75c9174-e480-4f47-9923-8238849cb2cd","error":"authentication_failed","is_api_error_message":true,"message":{"content":[{"type":"text","text":"Not logged in · Please run /login"}]}}"#;
+        let result = r#"{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","result":"Not logged in · Please run /login","total_cost_usd":0,"session_id":"c75c9174-e480-4f47-9923-8238849cb2cd"}"#;
+        let events: Vec<AgentEvent> = [assistant, result]
+            .iter()
+            .flat_map(|l| normalise_line("claude", l))
+            .collect();
+        assert_eq!(names(&events), vec!["error", "error", "session_ended"]);
+        assert_eq!(
+            events,
+            vec![
+                AgentEvent::Error {
+                    message: "authentication_failed: Not logged in · Please run /login".into(),
+                    origin: Origin::Observed,
+                },
+                AgentEvent::Error {
+                    message: "Not logged in · Please run /login (terminal_reason api_error)".into(),
+                    origin: Origin::Observed,
+                },
+                AgentEvent::SessionEnded {
+                    reason: Some("api_error".into()),
+                    origin: Origin::Observed,
+                },
+            ]
+        );
+        // The failure still closes the run, so a caller waiting on it is released —
+        // with an error beside it, not a completion.
+        assert!(run_completed(&events));
+    }
+
+    #[test]
+    fn a_claude_result_that_is_not_marked_failed_still_completes() {
+        // The other half of the rule, or the fix would read every claude run as a
+        // failure. No successful claude stream is captured on this box, so this
+        // line is the mapping's own absent/false case rather than a vendor's
+        // bytes; the claim about a real stream is made in `protocol_streams.rs`.
+        for line in [
+            r#"{"type":"result","subtype":"success","result":"xencode"}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"xencode"}"#,
+        ] {
+            assert_eq!(
+                normalise_line("claude", line),
+                vec![AgentEvent::Completed {
+                    outcome: Some("success".into()),
+                    origin: Origin::Observed,
+                }],
+                "{line}"
+            );
         }
     }
 }
