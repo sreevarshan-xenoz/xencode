@@ -1831,6 +1831,10 @@ standing constraint.
         service restarted. Both belong in `kaggle preflight`. Still to build
         under this item: the `Backend::transport()` choice and `forward_url()`
         returning the private address.
+      - **Later the same night the probe kernel itself ended
+        `CANCEL_ACKNOWLEDGED`**, before its 600-second hold was over. It was
+        reachable, then Kaggle stopped it. See L-14 for what followed: on
+        Kaggle the tunnel works for minutes, not for a session.
 
 - [ ] **L-14 — `xencode kaggle up|status|down`: the 30 GPU-hours a week.**
       *Effort: L. Depends on L-13.* Kaggle gives two T4s free and runs notebook
@@ -1863,6 +1867,30 @@ standing constraint.
       size cap turns out to be the smaller reported 20 GB per private dataset,
       the fallback shape is batch offload — push a kernel, poll, pull output
       files — with no tunnel and no standing server at all.
+      - **Parked 2026-10-09: Kaggle cancels the session.** A first build of
+        `xencode kaggle preflight|up|status|down` lives on the local branch
+        `parked/l14-kaggle-tunnel`, not on main.
+        - What worked live: `preflight` read the user, the weekly quota and
+          the local Tailscale state. `up` pushed a private GPU script kernel
+          that got two Tesla T4s, downloaded llama-server `b11120` and the
+          9 GB `Qwen3-14B-Q4_K_M.gguf`, and printed a Tailscale login link.
+        - What failed: four runs, every one ended `CANCEL_ACKNOWLEDGED` 30–55 s
+          after it started. That held with the auth key in the source and
+          without it (login link instead), and with `-t` and without it.
+        - What did not fail: kernels doing exactly the same downloads and
+          starting the same `llama-server`, without the Tailscale steps, ran
+          to `COMPLETE` on CPU and on GPU machines. Disk (1.1 TB free) and
+          memory (flat at 1.2 GB) were ruled out the same way, and so was a
+          GPU kernel whose source merely mentions tailscale.
+        - A second, independent blocker: `kaggle kernels logs` returns
+          nothing until a kernel ends, so a login link printed by the session
+          can never reach the person while it waits.
+        - The reading: Kaggle stops kernels that run a tunnel, which is what
+          the product-feedback thread above asked for. Working around a
+          deliberate block breaks Kaggle's terms and risks the account, so it
+          is not attempted. **Next shape, if any:** the batch-offload fallback
+          above (push, poll, pull output files, no tunnel), which needs no
+          standing server and so is outside what Kaggle is stopping.
 
 - [ ] **L-15 — the free boxes that need no code: AMD Developer Cloud, and the
       grants behind them.** *Effort: S. Depends on L-2, not on L-13.* AMD gives
