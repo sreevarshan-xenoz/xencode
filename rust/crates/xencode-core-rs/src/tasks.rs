@@ -171,7 +171,15 @@ pub struct TaskManager {
     watchdogs: HashMap<u64, tokio::task::JoinHandle<()>>,
     timed_out: HashMap<u64, Arc<AtomicBool>>,
     outputs: HashMap<u64, Arc<Mutex<Vec<String>>>>,
+    /// The tasks reading each child's stdout and stderr. A child can be reaped
+    /// before they reach the end of its output, so a finished task waits for
+    /// them (see [`READER_SETTLE`]) before its output is read.
+    readers: HashMap<u64, Vec<tokio::task::JoinHandle<()>>>,
 }
+
+/// Longest a poll waits, once a task has finished, for its output readers to
+/// reach the end of what it wrote.
+const READER_SETTLE: Duration = Duration::from_secs(2);
 
 impl Default for TaskManager {
     fn default() -> Self {
@@ -208,6 +216,7 @@ impl TaskManager {
             watchdogs: HashMap::new(),
             timed_out: HashMap::new(),
             outputs: HashMap::new(),
+            readers: HashMap::new(),
         }
     }
 
@@ -290,14 +299,16 @@ impl TaskManager {
         // Merge stdout+stderr into one capped tail via reader tasks, so
         // `poll` only has to look at `try_wait` and the shared buffer.
         let buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut readers = Vec::new();
         if let Some(stream) = child.stdout.take() {
-            spawn_reader(stream, Arc::clone(&buffer));
+            readers.push(spawn_reader(stream, Arc::clone(&buffer)));
         }
         if let Some(stream) = child.stderr.take() {
-            spawn_reader(stream, Arc::clone(&buffer));
+            readers.push(spawn_reader(stream, Arc::clone(&buffer)));
         }
 
         self.store.insert(record);
+        self.readers.insert(id, readers);
         self.children.insert(id, child);
         let deadline = tokio::time::Instant::now() + timeout;
         self.deadlines.insert(id, deadline);
@@ -346,8 +357,26 @@ impl TaskManager {
         {
             self.kill_task(id, TaskStatus::TimedOut).await?;
         }
+        self.settle_output(id).await;
         self.drain_output(id);
         self.snapshot(id)
+    }
+
+    /// Once a task has finished, wait for its output readers to reach the end of
+    /// what the child wrote, so the last lines are not lost because the exit was
+    /// seen first. Bounded by [`READER_SETTLE`]: a grandchild left running in the
+    /// background can hold the pipe open, and a poll must not wait on it.
+    async fn settle_output(&mut self, id: u64) {
+        if self.children.contains_key(&id) {
+            return; // still running: there is no end of output to wait for yet
+        }
+        let Some(readers) = self.readers.remove(&id) else {
+            return;
+        };
+        let deadline = tokio::time::Instant::now() + READER_SETTLE;
+        for reader in readers {
+            let _ = tokio::time::timeout_at(deadline, reader).await;
+        }
     }
 
     /// Kill a running task. `AlreadyFinished` for anything already reaped —
@@ -416,6 +445,7 @@ impl TaskManager {
             watchdog.abort();
         }
         self.outputs.remove(&id);
+        self.readers.remove(&id);
         self.store.remove(id)
     }
 
@@ -480,7 +510,7 @@ impl Drop for TaskManager {
     }
 }
 
-fn spawn_reader<S>(stream: S, buffer: Arc<Mutex<Vec<String>>>)
+fn spawn_reader<S>(stream: S, buffer: Arc<Mutex<Vec<String>>>) -> tokio::task::JoinHandle<()>
 where
     S: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
@@ -494,7 +524,7 @@ where
                 buf.drain(..excess);
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
@@ -666,6 +696,29 @@ mod tests {
         ));
         m.remove(id).unwrap();
         assert!(m.list().is_empty());
+    }
+
+    /// The first poll that reports a task finished already holds everything it
+    /// printed. The exit used to be seen before the readers reached the end of
+    /// the pipe, so a finished task could report no output at all — which is how
+    /// `orchestrator retry` returned an empty tail on CI once. Thirty runs in a
+    /// row, because a race shows up as a rate, not as one failure.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_finished_task_reports_all_its_output_on_the_first_poll() {
+        for attempt in 0..30 {
+            let mut m = TaskManager::new();
+            let id = m.start("print", "printf 'a\\nb\\nc\\n'").await.unwrap();
+            let rec = loop {
+                let rec = m.poll(id).await.unwrap();
+                if !matches!(rec.status, TaskStatus::Running) {
+                    break rec;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            assert_eq!(rec.output(), ["a", "b", "c"], "attempt {attempt}");
+            m.remove(id).unwrap();
+        }
     }
 
     // The command backgrounds a POSIX `sleep` and the death check reads `/proc`,
