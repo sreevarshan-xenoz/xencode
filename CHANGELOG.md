@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `LSP-3`: the agent can rename a Rust item by what it is, not by how it is spelled
+
+The `rename` tool existed but was never offered to the model, so nothing could call it.
+It is now in the agent's tool list. When rust-analyzer's semantic index is current (see
+`xencode impact --semantic`), it renames exactly the places that resolve to the one item —
+its declaration, its uses, uses through re-exports — and leaves alone a struct field or
+local variable that happens to share the name. Two items with the same name are refused
+with both named unless `in` gives the file that declares the one meant. Without a current
+index it renames every identifier spelled the same, as before, and says so. Either way,
+`cargo check` runs afterwards and its verdict is reported.
+
+The plan asked for this through `rust-analyzer ssr`. That turned out to be impossible:
+ssr only rewrites code onto an item that already exists, and refuses a rule whose new name
+does not resolve yet.
+
 ### Added — `LSP-2`: impact answers from rust-analyzer's semantic index
 
 `xencode impact <file> --semantic` lists every file that refers to a symbol the file
