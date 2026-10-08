@@ -484,14 +484,17 @@ pub fn advise_tools() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "what_breaks".to_string(),
             description: "List the files that link to one file, before editing \
-                          it, from the project's .xencode symbol snapshot: who \
-                          `use`s its path, declares it as a `mod`, or implements \
-                          a trait it defines — one hop, then reached through \
-                          those, up to three. Read-only; requires /init. Pass a \
-                          symbol to mark which of those files write that name in \
-                          their own `use`. An edge is a module path that \
-                          resolves, not a type-checked call site, and the answer \
-                          says so."
+                          it — one hop, then reached through those, up to three. \
+                          Read-only. When rust-analyzer's semantic index is built \
+                          and current, the answer comes from it: every file that \
+                          refers to a symbol this file defines, with the symbols \
+                          named, and a symbol argument keeps only the files that \
+                          refer to that one. Otherwise it comes from the .xencode \
+                          symbol snapshot /init writes: who `use`s its path, \
+                          declares it as a `mod`, or implements a trait it \
+                          defines, where a symbol argument marks which files \
+                          write that name in their own `use`. The answer says \
+                          which index it came from and what an edge in it means."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",

@@ -661,6 +661,16 @@ enum Commands {
         /// The file to analyse, by path or by its tail
         file: String,
 
+        /// Answer from rust-analyzer's semantic index (SCIP) instead of `use`
+        /// paths: every file that refers to a symbol this file defines. Builds the
+        /// index first when it is missing or stale, which takes minutes
+        #[arg(long)]
+        semantic: bool,
+
+        /// With --semantic: only files that refer to this symbol of the file
+        #[arg(long, requires = "semantic")]
+        symbol: Option<String>,
+
         /// How many entries to list in each section
         #[arg(long, default_value_t = 15)]
         limit: usize,
@@ -2294,9 +2304,17 @@ async fn main() {
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
         Commands::Impact {
             file,
+            semantic,
+            symbol,
             limit,
             format,
-        } => run_impact(&file, limit, format),
+        } => {
+            if semantic {
+                run_impact_semantic(&file, symbol.as_deref(), limit, format)
+            } else {
+                run_impact(&file, limit, format)
+            }
+        }
         Commands::Removal {
             file,
             limit,
@@ -11849,6 +11867,104 @@ fn run_hotspots(limit: usize, format: OutputFormat) -> Result<(), String> {
 /// (it comes from `cargo metadata`); the file list is a hop-capped prediction over
 /// the source graph; the coupling list is history. The command runs with no
 /// `.xencode` index, building the graph from the files on disk.
+/// `xencode impact <file> --semantic`: the files that refer to symbols this file
+/// defines, from rust-analyzer's SCIP index (`LSP-2`). A missing or stale index
+/// is rebuilt first, and the reason is printed, because the rebuild takes
+/// minutes and a person waiting on it should know why.
+fn run_impact_semantic(
+    file: &str,
+    symbol: Option<&str>,
+    limit: usize,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_context_rs::scip_index::{self, ScipError};
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let workspace = xencode_context_rs::verify::manifest_dir(&root)?;
+    let mut rebuilt = None;
+    if let Err(why) = scip_index::freshness(&workspace) {
+        if !matches!(why, ScipError::Missing(_) | ScipError::Stale(_)) {
+            return Err(why.to_string());
+        }
+        eprintln!(
+            "  {why}\n  building it with rust-analyzer scip in {} (this takes minutes on a large workspace)…",
+            workspace.display()
+        );
+        let meta = scip_index::generate(&workspace, scip_index::SCIP_TIMEOUT)
+            .map_err(|e| e.to_string())?;
+        eprintln!(
+            "  indexed {} files in {:.0} s with {}",
+            meta.files.len(),
+            meta.seconds,
+            meta.rust_analyzer
+        );
+        rebuilt = Some(meta);
+    }
+    let report = scip_index::semantic_impact_for(
+        &workspace,
+        file,
+        symbol,
+        xencode_context_rs::IMPACT_MAX_HOPS,
+    )
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    let meta = match rebuilt {
+        Some(meta) => meta,
+        None => scip_index::read_meta(&workspace).ok_or("the semantic index record is missing")?,
+    };
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "target": report.target,
+                "symbol": report.symbol,
+                "tier": "semantic",
+                "index": {
+                    "rust_analyzer": meta.rust_analyzer,
+                    "head": meta.head,
+                    "seconds": meta.seconds,
+                    "files": meta.files.len(),
+                },
+                "declared": report.declared,
+                "basis": report.basis(),
+                "affected": report.files.iter().map(|f| serde_json::json!({
+                    "file": f.file, "hops": f.hops, "via": f.via,
+                })).collect::<Vec<_>>(),
+            }))
+            .map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    match &report.symbol {
+        Some(symbol) => println!("\n  who uses `{symbol}` from {}", report.target),
+        None => println!("\n  who uses {}", report.target),
+    }
+    println!(
+        "  semantic index: {} files, built by {} in {:.0} s",
+        meta.files.len(),
+        meta.rust_analyzer,
+        meta.seconds
+    );
+    if report.files.is_empty() {
+        println!("\n    nothing outside this file refers to it");
+    } else {
+        for f in report.files.iter().take(limit) {
+            let names = if f.via.len() > 6 {
+                format!("{} and {} more", f.via[..6].join(", "), f.via.len() - 6)
+            } else {
+                f.via.join(", ")
+            };
+            println!("    {} — {} hop(s), refers to {}", f.file, f.hops, names);
+        }
+        if report.files.len() > limit {
+            println!("    … {} more", report.files.len() - limit);
+        }
+    }
+    println!("\n  {}", report.basis());
+    Ok(())
+}
+
 fn run_impact(file: &str, limit: usize, format: OutputFormat) -> Result<(), String> {
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let workspace = xencode_context_rs::verify::manifest_dir(&root)?;

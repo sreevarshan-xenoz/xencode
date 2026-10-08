@@ -359,6 +359,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Memory** | `xencode memory publish\|read\|policy` | Shared memory between workers in `.xencode/`: a finding reaches another worker marked `[data]` and attributed to who wrote it, and both sides deny unless a policy names the scope |
 | **Bootstrap** | `xencode bootstrap [path] [--check]` | Write `AGENTS.md`, `.xencode/anchor.md` and a settings example for a project that has none of them, from what git reports — no command guessed, no existing file replaced, and no `--force` to ask for one |
 | **Advise** | `xencode advise [FILTER] [--json] [--limit 40]` | Repo insights from the `.xencode` snapshot |
+| **Impact** | `xencode impact <file> [--semantic [--symbol NAME]]` | Who has to be re-checked when one file changes: crates (exact), linking files, co-change history; `--semantic` answers from rust-analyzer's index instead — every file that refers to a symbol the file defines |
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
 | **Worktree** | `xencode worktree list` | List/add/remove git worktrees |
 | **Team** | `xencode team list` / `plan <name>` / `run <name> --approved-by <you>` | The recipes in `.xencode/teams/`: what each role waits on, the waves a run would schedule, and a run that starts nothing until your name is on it |

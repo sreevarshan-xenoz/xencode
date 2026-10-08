@@ -5124,6 +5124,7 @@ impl<'a> App<'a> {
 
         let cancel = self.init_cancel.clone();
         let root = xencode_context_rs::default_root();
+        let scip_root = root.clone();
 
         tokio::spawn(async move {
             let tx_progress = tx.clone();
@@ -5217,6 +5218,7 @@ impl<'a> App<'a> {
                     let _ = tx.send(format!("[INIT]log:❌ init task panicked: {join_err}"));
                 }
             }
+            start_semantic_index(&scip_root, tx.clone());
             let _ = tx.send("[INIT_DONE]".to_string());
         });
     }
@@ -12795,6 +12797,56 @@ pub async fn serve_scripted_answers(
         let _ = sock.write_all(reply.as_bytes()).await;
         let _ = sock.shutdown().await;
     }
+}
+
+/// Set while a semantic index is being built, so a second `/init` does not start
+/// another rust-analyzer run against the same output.
+static SEMANTIC_INDEX_BUILDING: AtomicBool = AtomicBool::new(false);
+
+/// After `/init`, build rust-analyzer's semantic index in the background when
+/// the one on disk is missing or stale (`LSP-2`). It takes minutes on a large
+/// workspace, which is why it never runs inside `/init` itself; until it
+/// finishes, `what_breaks` answers from the name tier and says so.
+fn start_semantic_index(root: &std::path::Path, tx: mpsc::UnboundedSender<String>) {
+    let Ok(workspace) = xencode_context_rs::verify::manifest_dir(root) else {
+        return; // not a Cargo workspace: there is nothing for rust-analyzer to index
+    };
+    use xencode_context_rs::scip_index::{self, ScipError};
+    match scip_index::freshness(&workspace) {
+        Ok(_) => return,
+        Err(ScipError::Missing(_) | ScipError::Stale(_)) => {}
+        Err(other) => {
+            let _ = tx.send(format!("[INIT]log:🧠 Semantic index skipped: {other}"));
+            return;
+        }
+    }
+    if SEMANTIC_INDEX_BUILDING.swap(true, Ordering::AcqRel) {
+        let _ = tx.send("[INIT]log:🧠 A semantic index build is already running.".to_string());
+        return;
+    }
+    let _ = tx.send(
+        "[INIT]log:🧠 Building rust-analyzer's semantic index in the background — minutes on a \
+         large workspace; what_breaks uses it once it is ready."
+            .to_string(),
+    );
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            scip_index::generate(&workspace, scip_index::SCIP_TIMEOUT)
+        })
+        .await;
+        SEMANTIC_INDEX_BUILDING.store(false, Ordering::Release);
+        let line = match result {
+            Ok(Ok(meta)) => format!(
+                "[INIT]log:🧠 Semantic index ready: {} files in {:.0} s ({}).",
+                meta.files.len(),
+                meta.seconds,
+                meta.rust_analyzer
+            ),
+            Ok(Err(e)) => format!("[INIT]log:🧠 Semantic index not built: {e}"),
+            Err(join) => format!("[INIT]log:🧠 Semantic index build panicked: {join}"),
+        };
+        let _ = tx.send(line);
+    });
 }
 
 #[cfg(test)]

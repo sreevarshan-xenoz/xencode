@@ -573,9 +573,11 @@ complete -c xencode -n "__fish_xencode_using_subcommand hotspots" -l limit -d 'H
 complete -c xencode -n "__fish_xencode_using_subcommand hotspots" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand hotspots" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand impact" -l symbol -d 'With --semantic: only files that refer to this symbol of the file' -r
 complete -c xencode -n "__fish_xencode_using_subcommand impact" -l limit -d 'How many entries to list in each section' -r
 complete -c xencode -n "__fish_xencode_using_subcommand impact" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
+complete -c xencode -n "__fish_xencode_using_subcommand impact" -l semantic -d 'Answer from rust-analyzer\'s semantic index (SCIP) instead of `use` paths: every file that refers to a symbol this file defines. Builds the index first when it is missing or stale, which takes minutes'
 complete -c xencode -n "__fish_xencode_using_subcommand impact" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand removal" -l limit -d 'How many entries to list in each section' -r
 complete -c xencode -n "__fish_xencode_using_subcommand removal" -l format -d 'Output format' -r -f -a "text\t''

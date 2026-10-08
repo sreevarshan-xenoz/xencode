@@ -57,6 +57,7 @@ pub mod retrieve;
 pub mod rollup;
 pub mod runledger;
 pub mod scanner;
+pub mod scip_index;
 pub mod seeds;
 pub mod session;
 pub mod shape;
@@ -150,8 +151,8 @@ pub use hotspots::{
 };
 pub use impact::{
     change_impact, impact, impact_from_filesystem, impact_from_snapshot, removal_from_graph,
-    removal_impact, ChangeImpact, ImpactReport, ImpactedFile, RemovalImpact, DECLARED_CAP,
-    IMPACT_MAX_HOPS,
+    removal_impact, ChangeImpact, ImpactReport, ImpactTier, ImpactedFile, RemovalImpact,
+    DECLARED_CAP, IMPACT_MAX_HOPS,
 };
 pub use impact_tree::{
     impact_tree, ChurnSummary, ImpactFile, ImpactGroup, ImpactRow, ImpactTree, UNCLAIMED,
