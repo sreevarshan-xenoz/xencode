@@ -1821,7 +1821,11 @@ the two biggest items: **MCP server mode** (another agent calls xencode's
 read/search/edit/run tools) and **ACP** (xencode's agent runs inside Zed, Neovim,
 or Emacs instead of only a terminal). ACP is real and growing in 2026 — Zed and
 JetBrains both ship it and a Rust SDK exists at 0.2.x — but the spec is pre-1.0,
-so it is last, not first.
+so it is last, not first. *(Out of date as of 2026-10-08: the `agent-client-protocol`
+crate is at 3.1.0 on crates.io, released 2026-10-07, and protocol v1 is stable,
+with a v2 draft published in July. The "pre-1.0" reason for putting ACP last no
+longer holds. `M-7` may still stay last on effort, but it should pin the 3.x crate
+and say whether it targets v1 or the v2 draft.)*
 
 ### The trap that decides the order of the big two
 
@@ -11518,7 +11522,10 @@ proposed an accessibility mode the shipped `UX-12` already covers.
   state for work still in flight, which is exactly the kind of field a normalised
   model has to mark as invented. `agy` also advertises `--input-format
   stream-json` for NDJSON on stdin, making it the only agent here that can be
-  *fed* a turn as well as asked for one.
+  *fed* a turn as well as asked for one. *(Corrected 2026-10-08: not the only
+  one. `claude --help` 2.1.294 lists `--input-format stream-json` with
+  `--replay-user-messages` under `--print`, so Claude can be fed turns on stdin
+  too.)*
 
   **`kilo` then broke the pattern — by being opencode.** Same four event names,
   same envelope, same `snapshot` hash. Kilo is a fork, and it is the first time
@@ -11831,10 +11838,10 @@ ecosystem. `crush` was probed too because it is installed; it was not proposed.
 | MCP **client** config | `codex mcp` | `--mcp-config`, `claude mcp` | present | `opencode mcp` | not seen | not seen |
 | **permission requests routed to an MCP tool** | not seen | **`--permission-prompt-tool`** | not seen | not seen | not seen | not seen |
 | vendor's own subagent definitions | not seen | `--agents <json>` (`{"reviewer": {...}}`) | not seen | `opencode agent create/list` | `--agent` | not seen |
-| vendor's own non-interactive review | `codex review` | `--from-pr` | not seen | not seen | not seen | not seen |
+| vendor's own non-interactive review | `codex review` | `claude ultrareview [target]` (corrected 2026-10-08: `--from-pr` only resumes a session linked to a PR) | not seen | not seen | not seen | not seen |
 | vendor's own session store + resume | `resume`, `fork`, `queue`, `archive`, `migrate-rollouts` | `--resume`, `--fork-session`, `--session-id <uuid>`, `--no-session-persistence` | `-r/--resume` | `--session`, `--continue`, `--fork` | `--conversation`, `--continue`, `--project` | not seen |
 | vendor's own doctor | `codex doctor` | `claude doctor` | not seen | `opencode debug` | `--log-file` | `--debug` |
-| structured final answer schema | `--output-schema`, `-o --output-last-message` | not seen | not seen | not seen | `--json-schema` | not seen |
+| structured final answer schema | `--output-schema`, `-o --output-last-message` | `--json-schema` (corrected 2026-10-08 from `claude --help` 2.1.294) | not seen | not seen | `--json-schema` | not seen |
 | session/turn import from a rival | not seen | `claude import [source]` ("Import config from another AI coding agent") | not seen | not seen | not seen | not seen |
 
 Three things follow from that table, and they are the substance of this appendix.
@@ -13013,7 +13020,7 @@ citations.
 > It contains 3,600 unique IDs across 36 waves, but the entries are formed from
 > repeated capability themes crossed with ten generic subsystem labels. Treat
 > them as prompts for investigation, not 3,600 independently specified features.
-> The source does not identify or mark a first 50. The ten investigations below
+> The source does not identify or mark a first 50. *(Corrected 2026-10-08: it does, in its closing "Suggested first 50 investigations" section, as five ten-ID ranges. Their labels do not match the topics those IDs hold: X0021–X0030 is labelled "adapter compatibility/TCK" but holds W01-03 session translation, X0031–X0040 is labelled "agent identity" but holds W01-04 artifact exchange, and X0041–X0050 is labelled "trace/event schema and privacy boundaries" while it holds W01-05 event normalization, which matches only the event half. So the conclusion below stands: nothing reliable can be read off that list.)* The ten investigations below
 > are the sequence supplied with the catalog; the other forty remain unspecified.
 
 - [x] **T-0 — Record the candidate catalog as a research input** — 2026-09-27.
@@ -13088,7 +13095,7 @@ paper, not a finalized control baseline.
 
 **Done-when:** each question has evidence and a disposition, and any new
 implementation work is separately assigned an ID in the dependency plan. The
-catalog's claimed first 50 is not present in the source file; do not infer the
+catalog's claimed first 50 is present only as five mislabelled ranges (see the correction above); do not infer the
 remaining forty from X0001–X0050, whose entries are generic subsystem variants.
 
 - [x] **T-2 — Work the supplied first investigations** — 2026-10-06. The ten
@@ -16048,6 +16055,18 @@ re-read it before any row's done-when depends on it. Two things soften it and ne
 routing to a different model with the person's own API key is not the prohibited shape, and the
 prohibition binds the *credential path*, not the orchestration. `AR-1`'s open terms check is the
 row that owns this, and it stays open.
+
+*(Re-read in full on 2026-10-08. The prohibition is real: "Anthropic does not permit third-party
+developers to offer Claude.ai login into their own applications, or to route requests through
+Free, Pro, or Max plan credentials on behalf of their users", and developers "may not collect,
+store, or intermediate Claude.ai credentials or session tokens". But the same section continues:
+"Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their
+own Claude subscription". Xencode launching the person's own, unmodified `claude` binary, signed
+in through Anthropic's flow, is that permitted shape — provided xencode never touches the
+credential. The remaining limit is volume: "Advertised usage limits for Pro and Max plans assume
+ordinary, individual usage of Claude Code and the Agent SDK", so a wide parallel fan-out on one
+subscription is the risk, not the launch itself. This answers the terms half of `AR-1`'s open
+check for Claude.)*
 
 ### Items
 
