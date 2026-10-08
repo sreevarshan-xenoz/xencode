@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `PL-1` (first half): xencode builds on Windows again
+
+Windows is one of the five release targets, but since 2026-10-01 the workspace had not
+compiled there: the Colab and context crates called Unix-only C functions (`kill`,
+`localtime_r`, `statvfs`) with no platform gate, and nothing in CI builds on Windows, so
+nobody saw it. Process checks, process termination and free-disk-space queries now live
+in one place, `xencode-core-rs/src/sys.rs`, with a real implementation for Unix and one
+for Windows that uses the Win32 API. Local timestamps use `chrono`. Two behaviours change
+on the way:
+
+- Asking whether a background task's process is still running used to answer "yes" for
+  every process on Windows and "no" for every process on macOS. It now asks the system.
+- On Windows a background task now really stops when its time limit runs out.
+
+Detached runs (`fork(2)`) still exist only on Unix; on Windows they now refuse with a
+plain message instead of breaking the build. Running the shell-based tool paths through
+the same file, and making the test suite compile on Windows, are still to do.
+
 ### Added — `OR-1`: a proposed split is scored against what the change really is, before anything schedules it
 
 Splitting one task into units that several workers can finish is the promise the rest

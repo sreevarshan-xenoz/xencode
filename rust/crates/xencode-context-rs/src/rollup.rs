@@ -164,19 +164,16 @@ pub fn local_day_key(ts_unix_ms: u64) -> String {
     if ts_unix_ms == 0 {
         return String::new();
     }
-    let mut when: libc::tm = unsafe { std::mem::zeroed() };
-    let secs = (ts_unix_ms / 1000) as libc::time_t;
-    if unsafe { libc::localtime_r(&secs, &mut when) }.is_null() {
+    use chrono::TimeZone;
+    match i64::try_from(ts_unix_ms / 1000)
+        .ok()
+        .and_then(|secs| chrono::Local.timestamp_opt(secs, 0).single())
+    {
+        Some(when) => when.format("%Y-%m-%d").to_string(),
         // No zone could be read. Grouping these together is still better than
         // dropping them, and the empty string is where they go.
-        return String::new();
+        None => String::new(),
     }
-    format!(
-        "{:04}-{:02}-{:02}",
-        when.tm_year + 1900,
-        when.tm_mon + 1,
-        when.tm_mday
-    )
 }
 
 /// The recent rate samples of one model, kept apart from every other model's

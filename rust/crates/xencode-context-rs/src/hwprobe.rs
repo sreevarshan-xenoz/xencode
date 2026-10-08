@@ -232,16 +232,7 @@ pub fn available_memory_kib() -> Option<u64> {
 /// assume either way.
 pub fn free_disk_bytes(path: &str) -> Option<u64> {
     let dir = existing_ancestor(Path::new(path))?;
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-    let c_dir = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes()).ok()?;
-    // SAFETY: `stat` is a valid, fully-sized destination for the struct and
-    // `c_dir` is a NUL-terminated path that outlives the call.
-    let rc = unsafe { libc::statvfs(c_dir.as_ptr(), &mut stat) };
-    if rc != 0 {
-        return None;
-    }
-    let block = stat.f_frsize.max(1) as u64;
-    Some(stat.f_bavail as u64 * block)
+    xencode_core_rs::sys::free_disk_bytes(dir)
 }
 
 /// The nearest directory at or above `path` that exists on disk.

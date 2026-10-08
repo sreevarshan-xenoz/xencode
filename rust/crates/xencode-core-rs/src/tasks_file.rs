@@ -263,24 +263,10 @@ fn unix_now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// A pid is alive if its `/proc` entry exists and is not a zombie (a
-/// dropped, unreaped child lingers as `Z` until we exit).
+/// A pid is alive if it exists and has not exited; on Linux an unreaped
+/// zombie counts as dead. See [`crate::sys::pid_alive`].
 pub fn pid_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        match fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Ok(stat) => match stat.rfind(')') {
-                Some(i) => stat.as_bytes().get(i + 2) != Some(&(b'Z')),
-                None => true,
-            },
-            Err(_) => false,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
+    crate::sys::pid_alive(pid)
 }
 
 fn kill_pid(pid: u32) -> std::io::Result<std::process::Child> {

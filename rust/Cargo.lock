@@ -4083,7 +4083,7 @@ dependencies = [
 name = "xencode-colab-rs"
 version = "0.1.0"
 dependencies = [
- "libc",
+ "chrono",
  "serde",
  "serde_json",
  "tokio",
@@ -4116,6 +4116,7 @@ dependencies = [
 name = "xencode-context-rs"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "criterion",
  "libc",
  "notify",
@@ -4143,6 +4144,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

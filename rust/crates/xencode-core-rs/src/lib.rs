@@ -7,6 +7,7 @@ pub mod result_envelope;
 pub mod routing;
 pub mod rustc_json;
 pub mod scheduler;
+pub mod sys;
 pub mod task_contract;
 pub mod tasks;
 pub mod tasks_file;
