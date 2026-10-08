@@ -699,6 +699,24 @@ pub fn read_log_tail(dir: &Path, lines: usize) -> Vec<String> {
 /// `xencode_dir` is passed through rather than re-derived, because the child
 /// runs with its working directory in the run's tree — re-deriving it there
 /// would point at the tree's own `.xencode`, not the project's.
+///
+/// The child is a `fork(2)` of this process, so detached runs exist only on
+/// Unix; elsewhere this returns `Unsupported` and nothing is started.
+#[cfg(not(unix))]
+pub fn spawn_child(
+    _exe: &Path,
+    _run_id: &str,
+    _xencode_dir: &Path,
+    _cwd: &Path,
+    _log: &Path,
+) -> std::io::Result<u32> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "detached runs need fork(2), which this platform does not have; run the task in the foreground instead",
+    ))
+}
+
+#[cfg(unix)]
 pub fn spawn_child(
     _exe: &Path,
     run_id: &str,
@@ -747,6 +765,7 @@ pub fn spawn_child(
 pub fn stop_child(dir: &Path, pid: u32) -> String {
     let _ = write_stop(dir);
     // SAFETY: `kill` with `SIGTERM` sends a signal and nothing else.
+    #[cfg(unix)]
     unsafe {
         libc::kill(pid as i32, libc::SIGTERM);
     }

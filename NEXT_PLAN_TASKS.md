@@ -3835,6 +3835,24 @@ tests.
   `cmd /S /C` quoting are not symmetric; either standardise on
   `powershell -NoProfile -Command` or ship an explicit `shell` config key
   rather than guessing per platform.
+  - [ ] **Started 2026-10-08, half done.** Since `L-1` (2026-10-01) the
+    workspace had not compiled on Windows at all, although
+    `x86_64-pc-windows-msvc` is a release target: `xencode-colab-rs` called
+    `libc::kill` and `localtime_r`, and `xencode-context-rs` called `statvfs`
+    and `localtime_r`, with no platform gate. `xencode-core-rs/src/sys.rs` now
+    owns `pid_alive`, `terminate` and `free_disk_bytes`, with a Unix body and a
+    Win32 body each (`OpenProcess`/`GetExitCodeProcess`, `TerminateProcess`,
+    `GetDiskFreeSpaceExW`); both local-time stamps use `chrono::Local`; a
+    detached run refuses with `Unsupported` off Unix instead of failing to
+    build; and a background task's timeout now ends it on Windows too. The old
+    `tasks_file::pid_alive` answered `true` for every pid off Unix and `false`
+    for every pid on macOS (no `/proc`); it now asks the same seam. Measured on
+    Windows: `cargo build --workspace` passes with no warnings, the three new
+    `sys` tests and `wall_clock_limit_kills_task_and_marks_timeout` pass, and
+    `cargo check --all-targets` passes for core and colab against
+    `x86_64-unknown-linux-gnu`, plus core against `x86_64-apple-darwin`. **Still
+    open:** `spawn_shell`, `hide_console`, replacing the `sh -c` call sites,
+    and `which()`.
 - **PL-2 Gate the Unix-only test modules and drop the hand-rolled `which()`**
   (fact 14) for the `which` crate. **S**. This is the precondition for any
   non-Linux CI job: today `cargo test` does not *compile* off Unix, a job that

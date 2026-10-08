@@ -80,35 +80,16 @@ pub async fn spawn_forward_cmd(
     Ok((forward_url(local_port), child))
 }
 
-/// True when the process with `pid` exists (a `kill(pid, 0)` probe). `0` is
-/// never a real pid we track.
+/// True when the process with `pid` exists and has not exited. `0` is never a
+/// real pid we track.
 pub fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    // Let the kernel decide; the probe sends no signal.
-    // SAFETY: kill(2) is async-signal-safe and raw; a bogus pid only errno.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    xencode_core_rs::sys::pid_alive(pid)
 }
 
-/// Terminate a process we spawned: SIGTERM first, escalate to SIGKILL after a
-/// short grace period. Idempotent against an already-dead pid.
+/// Terminate a process we spawned: ask first, force after a short grace
+/// period. Idempotent against an already-dead pid.
 pub fn terminate(pid: u32) {
-    if pid == 0 || !pid_alive(pid) {
-        return;
-    }
-    // SAFETY: kill(2) on a pid we spawned; a zombie only errno ESRCH.
-    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-    for _ in 0..5 {
-        if !pid_alive(pid) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    if pid_alive(pid) {
-        // SAFETY: as above.
-        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-    }
+    xencode_core_rs::sys::terminate(pid)
 }
 
 /// Session names flow through OpenSSH's `ProxyCommand` (a shell string, even
@@ -198,30 +179,11 @@ pub async fn probe_models(
 }
 
 /// Current local time formatted as RFC3339 (`YYYY-MM-DDTHH:MM:SS+ZZ:ZZ`) — the
-/// `started_at` stamp. Deterministic enough for state, no datetime dep.
+/// `started_at` stamp, to the whole second.
 pub fn now_rfc3339() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as libc::time_t)
-        .unwrap_or(0);
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: localtime_r fills `tm` from an epoch seconds value; the struct
-    // outlives the call.
-    unsafe { libc::localtime_r(&now, &mut tm) };
-    let off = tm.tm_gmtoff;
-    let sign = if off < 0 { '-' } else { '+' };
-    let abs = off.unsigned_abs();
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{sign}{:02}:{:02}",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec,
-        abs / 3600,
-        (abs % 3600) / 60,
-    )
+    chrono::Local::now()
+        .format("%Y-%m-%dT%H:%M:%S%:z")
+        .to_string()
 }
 
 /// Age in hours of a `started_at` stamp (`YYYY-MM-DDTHH:MM:SS({+,-}HH:MM|Z)`)

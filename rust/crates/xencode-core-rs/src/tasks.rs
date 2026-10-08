@@ -314,6 +314,19 @@ impl TaskManager {
                 }),
             );
         }
+        // Windows has no process groups to signal, so the timeout ends the
+        // task's own process; without this a task there would never time out.
+        #[cfg(not(unix))]
+        if let Some(pid) = self.store.get(id).and_then(|task| task.pid) {
+            self.watchdogs.insert(
+                id,
+                tokio::spawn(async move {
+                    tokio::time::sleep_until(deadline).await;
+                    watchdog_flag.store(true, Ordering::Release);
+                    let _ = tokio::task::spawn_blocking(move || crate::sys::terminate(pid)).await;
+                }),
+            );
+        }
         self.timed_out.insert(id, timed_out);
         self.outputs.insert(id, buffer);
         Ok(id)
