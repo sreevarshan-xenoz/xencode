@@ -5,6 +5,15 @@
 > the tree on 2026-09-29** — day-to-day detail in
 > [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md).
 
+## ▶ Current focus (2026-10-08)
+
+Make xencode fix code on a small local model, and make it one command to set up. Measured
+on 2026-10-08: Qwen3-4B on a laptop GPU fixed 0 of 8 seeded bugs, and first setup took an
+hour. The ordered list — CI green, a tool-reachability test (`RT-1`), diagnosing the 0/8
+(`SM-1`), fixing it to at least 4 of 8 (`SM-2`), `xencode setup` (`SU-1`), and a generated
+status table (`PS-1`) — is at the top of [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) under
+"Current order", and overrides wave order until `SM-2`'s gate is met.
+
 ## Current Status
 
 - ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, smoke gate)

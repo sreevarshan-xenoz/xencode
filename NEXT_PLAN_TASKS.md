@@ -4,6 +4,35 @@
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
 > All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates are not green as of 2026-10-08; see "Workspace gates" below.
 
+## ▶ Current order (owner handover, 2026-10-08) — read this first
+
+The owner handed the project over on 2026-10-08 with one direction: **make xencode
+something people would actually use.** Measured that day, it is not yet: with the best
+model this machine runs well (Qwen3-4B on an RTX 3060 laptop GPU, 86 tokens/s), `xencode
+eval run` fixed **0 of 8** seeded bugs, and getting that model working at all took an hour
+(Steam holds port 8080; a hand-started llama-server needs `--alias`). So this order
+**overrides wave order** until the gate in step 3 is met. Everything below this section
+keeps its IDs and history; nothing is renumbered.
+
+| # | ID | Item | Why now | Done when |
+|---|---|---|---|---|
+| 0 | — | CI green on Linux, and the Windows build job green | nothing else is trustworthy while CI is red (red since 2026-09-27) | both jobs green on `main` |
+| 1 | **RT-1** | A reachability test: every tool the executor dispatches is offered to the model by some tool list, or is named as internal | two tools were found built but unreachable on 2026-10-08 (`rename`, and `OR-4`/`OR-15` before it) | the test fails when a dispatch arm has no definition |
+| 2 | **SM-1** | Diagnose why a 4B model stops before the edit: read each case's turn trace — tools called, the last thing it said, the round it stopped | the 0/8 shows *that* it fails, not *why*; changing prompts blind is guessing | a table of the eight cases with the stop point and a named cause each |
+| 3 | **SM-2** | Fix what SM-1 names — the edit protocol, the prompt, the step size — one change at a time, each A/B'd on the eval at temperature 0, seed 42 | this is the product | Qwen3-4B passes **4 of 8** or more, recorded by `xencode eval run` |
+| 4 | **SU-1** | `xencode setup`: detect the GPU and free memory, pick a GGUF that fits (or one already on disk), download it, pick a free port, start llama-server with `--alias`, write `llama_cpp_url` and `default_model` | an hour to first answer loses every new user | from an empty config to a working `xencode query` in one command, on this machine |
+| 5 | **PS-1** | `PLAN_STATUS.md`: one row per ID — wave, status, gate, commit — generated from this file by a script, so counts cannot drift | this file is 17,000 lines and status lives in prose | the script's output matches the wave tables and is committed |
+| 6 | — | Back to wave order: `QA-6` (W5), then W6 | | |
+
+**Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
+They add surface; the measured problem is that the core loop does not land an edit.
+
+**How to measure SM-2:** `xencode eval run -m llamacpp:qwen3-4b --llamacpp-url
+http://127.0.0.1:<port>` against a server started with `--alias qwen3-4b -ngl 99 --jinja`;
+the eval pins temperature 0 and seed 42 and records every run in
+`.xencode/cache/task_eval.jsonl`, so each change is read against the run before it. Stop
+the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
+
 ## Rust Migration — Complete ✅
 
 - [x] Port core, config, cache, memory crates — `xencode-core-rs`, `-config-rs`, `-cache-rs`, `-memory-rs`
