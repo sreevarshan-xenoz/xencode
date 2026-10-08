@@ -24,6 +24,35 @@ keeps its IDs and history; nothing is renumbered.
 | 5 | **PS-1** | `PLAN_STATUS.md`: one row per ID — wave, status, gate, commit — generated from this file by a script, so counts cannot drift | this file is 17,000 lines and status lives in prose | the script's output matches the wave tables and is committed |
 | 6 | — | Back to wave order: `QA-6` (W5), then W6 | | |
 
+**Step 0 done 2026-10-08:** both workflows green on `d62843e4`, the first clean run since
+2026-09-27. **Step 1 (`RT-1`) done** in `9dd52897`.
+
+**`SM-1` done 2026-10-08 — why Qwen3-4B stops.** Eval run with the server at an 8K context
+(`-c 8192`, all layers on the RTX 3060), temperature 0, seed 42, prompts `449d6f4fd09a`:
+**2 of 8 passed** (`missing-value`, `inverted-condition`), where the same model at a 16K
+context passed 0 of 8 earlier the same day. The context size and the code both changed
+between the two runs, so the difference is not attributed to either. The six failures:
+
+| Case | What it did | Where it stopped | Cause |
+|---|---|---|---|
+| `off-by-one` | no tool at all | round 1 | answered in prose and asked for no tool |
+| `early-return` | `list_dir`, `read_file` | after reading | read the right file, then ended without an edit |
+| `ignored-result` | `search_files` | after one search | ended without reading or editing |
+| `stale-cache` | `search_files` | after one search | same |
+| `lost-update` | `update_plan`, `list_dir`, `read_file` | after reading | read the file, then ended without an edit |
+| `swallowed-error` | `read_file`, `edit_file` ✗, `read_file`, `edit_file` ✗ | after two failed edits | its `old` text (118 bytes) did not match the file's indentation; told to copy it exactly, it re-read the file and sent the same 118 bytes again |
+
+Two causes, then. **(a) Exact-match edits:** a small model cannot reproduce whitespace
+reliably, and the error message's advice does not change what it sends. **(b) Ending
+after looking:** five cases stop once they have read or searched, without trying an
+edit. What the model *said* when it stopped is not recorded — turn traces keep tool calls
+and a digest, never the answer — so (b) cannot yet be split into "described a fix in
+prose" and "gave up". That is the first thing `SM-2` adds: the eval keeps each case's
+final answer in its own results, never in the turn trace. Then the order of fixes:
+whitespace-tolerant matching in `edit_file` when exactly one site matches (a), and one
+"you changed no file" continuation when a fix task's turn ends without an edit (b) — each
+measured on the eval alone, before the next.
+
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.
 
