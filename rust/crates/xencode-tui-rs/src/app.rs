@@ -13669,6 +13669,58 @@ mod tests {
         std::fs::remove_dir_all(&plugin_dir).unwrap();
     }
 
+    #[test]
+    fn every_tool_the_executor_handles_is_offered_to_the_model() {
+        // RT-1. A tool with an executor and no definition is code no model can
+        // ever call — `rename` sat that way from QI-2 until 2026-10-08. The
+        // executor's own dispatch arms are read from its source, so adding an
+        // arm without offering the tool fails here rather than going unseen.
+        let source = include_str!("agent_tools.rs");
+        let start = source
+            .find("async fn execute_tool_call_plan(")
+            .expect("the dispatch function is where this test expects it");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").expect("the function ends")];
+        let arm = regex::Regex::new(r#"(?m)^\s+"([a-z_]+)"((?:\s*\|\s*"[a-z_]+")*)\s*=>"#).unwrap();
+        let name = regex::Regex::new(r#""([a-z_]+)""#).unwrap();
+        let mut dispatched: Vec<String> = Vec::new();
+        for caps in arm.captures_iter(body) {
+            dispatched.push(caps[1].to_string());
+            for more in name.captures_iter(&caps[2]) {
+                dispatched.push(more[1].to_string());
+            }
+        }
+        assert!(
+            dispatched.len() > 20,
+            "the arms were not found: {dispatched:?}"
+        );
+
+        // Everything a fully switched-on session can be offered: web fetch and
+        // search on, plus `load_skill`, which is offered once a skill exists.
+        let offered = offered_tools(
+            &crate::mcp::McpHub::new(),
+            &xencode_plugin_rs::SkillRuntime::empty(
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            ),
+            crate::agent_tools::ApprovalMode::Ask,
+            &crate::reprogate::ReproGate::new(),
+            true,
+            true,
+        );
+        let mut names: Vec<String> = offered.into_iter().map(|t| t.name).collect();
+        names.extend(
+            xencode_providers_rs::skill_tools()
+                .into_iter()
+                .map(|t| t.name),
+        );
+        let unreachable: Vec<&String> = dispatched.iter().filter(|d| !names.contains(d)).collect();
+        assert!(
+            unreachable.is_empty(),
+            "the executor handles {unreachable:?}, but no tool list offers them to the model"
+        );
+    }
+
     /// The tool half of the gate: no skills installed means the turn offers
     /// exactly the built-in tool list it always did, and installing one skill
     /// adds exactly one tool rather than a document.
