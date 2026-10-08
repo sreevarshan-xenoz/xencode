@@ -25,7 +25,10 @@ fn main() {
         }
     }
     println!(
-        "{agent}: {} | completed={} synthesised={synthesised}",
+        // Named `finished`, not `completed`: a run that ended in an error finished,
+        // and printing the word the vendor uses for success here would repeat the
+        // confusion `run_completed`'s own documentation warns about.
+        "{agent}: {} | finished={} synthesised={synthesised}",
         counts
             .iter()
             .map(|(k, v)| format!("{k}={v}"))

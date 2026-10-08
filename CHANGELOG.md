@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AR-9`: a worker that said it failed is no longer read as one that finished
+
+`xencode`'s claude adapter turned a run that never reached a model into a message
+and a success. The stream had said otherwise the whole time: its assistant line
+carries `"error":"authentication_failed"` and its result line carries
+`"is_error":true`, while the field the adapter was reading — `subtype` — still
+reads `"success"`, because that field describes how claude's own turn handling
+ended, not whether the work worked. `claude_shape` keyed on `type`, `subtype` and
+the prose, so a failed login check normalised to one sentence of chat followed by
+a completed run. `AR-1`'s probe table recorded that same run as exit code 1 the
+whole time; the finding survived in the matrix and was lost in the reader.
+
+An assistant line that names an error now yields `Error`, with the vendor's own
+code in front of the vendor's own sentence. A result line marked as failed yields
+`Error` naming the reported `terminal_reason`, followed by `SessionEnded` so the
+run still closes and nothing waits on it forever — and never `Completed`. A
+result line that is not marked failed is unchanged: `Completed`, carrying the
+stream's own `subtype`. `run_completed` is now documented for what it answers —
+whether a run ended, not whether it succeeded.
+
+Nothing was spent to learn this, and the stream says so itself: the committed
+capture reports `apiKeySource: "none"` and `total_cost_usd: 0`, and a fresh run
+made on 2026-10-08 in a `HOME` with no key configured behaved the same way and
+exited 1. The compatibility kit caught the change from the other direction — its
+assertion that no captured stream produces an error fired the moment the fields
+began to be read, and that gap is now a positive case built on the committed
+capture instead.
+Eight of the protocol's eleven event shapes now come from real vendor output;
+`permission_requested`, `permission_denied` and `file_changed` do not, and the kit
+names all three, because seeing a permission request needs a run that reaches a
+model and asks to use a tool.
+
 ### Added — `OR-17`: a review or verification outcome can block a merge, and the blocked worker cannot unblock it
 
 `xencode merge land` had one problem the plan it printed already described: it computed
@@ -2944,6 +2976,15 @@ replacing the declared gap with a positive case built on the new capture.
 (`file_changed` is absent by the model's own design — never derived from a worker's
 stream — so it is not an evidence gap and has its separate unit test.)
 
+**Corrected 2026-10-08.** The gap recorded above was half wrong, and this kit is
+what exposed it. The committed claude stream has named its own failure from the
+first day (`"error":"authentication_failed"`, `"is_error":true`) and
+`claude_shape` read that run as prose followed by a success, so `error` was
+recorded as unobserved because the events said so rather than the bytes. `error`
+is now a positive case built on that real capture. The count is eight of eleven,
+not seven of ten: the model defines eleven variants, and `permission_denied`
+appeared in neither of the two lists above.
+
 ### Added — `AR-5`: the event envelope, four provenance states, and a redaction that keeps recovery
 
 An event that leaves `AR-4`'s sealed capture and goes somewhere it can be joined
@@ -3027,6 +3068,11 @@ through the same state machine as one that ran tools. One done-when cell stays
 open honestly: `PermissionRequested` and `Error` were never observed from any
 agent on this box, so those variants are complete in the model and empty in the
 evidence.
+
+**Corrected 2026-10-08:** `Error` does not belong in that sentence. A real claude
+run on this box produced it on 2026-10-02 and the adapter discarded it — see the
+`AR-9` fix at the top of this file. The two permission variants are the evidence
+gaps that remain.
 
 ### Added — `xencode interop --fan-out`, and a measured five-worker run
 

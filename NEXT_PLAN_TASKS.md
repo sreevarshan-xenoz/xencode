@@ -21,7 +21,7 @@
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2813 tests passing, zero warnings (re-verified 2026-10-08, after `OR-17`; 19 ignored, so 2832 in the run, counted over 96 result lines)
+- [x] Workspace gates green — 16 crates, 2817 tests passing, zero warnings (re-verified 2026-10-08, after the `AR-9` claude error fix; 19 ignored, so 2836 in the run, counted over 96 result lines)
 
 ## Model Catalog Honesty
 
@@ -11532,7 +11532,7 @@ approval request instead of pre-granting one.
 | **AR-7** | The handoff package, built only from observed facts | core | no self-reported progress; `EVd-3`'s rule |
 | **AR-8** | Worker health, reported read-only | core | shows an expired login, never fixes one |
 | **AR-9** | The common event protocol every adapter normalises into | core | **derived from `AR-1`'s matrix**, not from the proposal's draft; file changes derived from our own diff (§S-12) |
-| **AR-10** | Agent Event TCK — the protocol replayed against the captured streams | core | after `AR-4`/`AR-5`; the regression firewall for the adapter layer; the two unobserved variants stay declared gaps, never fabricated lines |
+| **AR-10** | Agent Event TCK — the protocol replayed against the captured streams | core | after `AR-4`/`AR-5`; the regression firewall for the adapter layer; a variant no real stream has produced stays a declared gap, never a fabricated line (`permission_requested` and `permission_denied` as of 2026-10-08; `error` left the list when `claude_shape` began reading it) |
 | **OR-1** | Task decomposition, measured before it is trusted | core | gated on `EV-1` — the local planner is the weakest link (§S-4.2) |
 | **OR-2** | The task graph and scheduler | core | capacity is `min(workers, verification throughput)`, not worker count, and parallelism is computed from independence + lease collision + cost (§S-12), not a fixed constant |
 | **OR-3** | The permission broker | core | real brokering for one vendor, pre-grant for the rest; never widens a mode itself |
@@ -12020,9 +12020,16 @@ worker, `OR-` for the thing that decides what workers to talk to.
       streams, not against the proposal's wish list, and not on one vendor's
       stream alone (opencode and kilo were correctly collapsed to one
       vocabulary, and six others reached the same ten variants). The gate on
-      `OR-` scheduling is therefore open; the remaining evidence gap
-      (`PermissionRequested` and `Error` never observed on this box) belongs to
-      `AR-9`, whose box stays open for that alone.
+      `OR-` scheduling is therefore open.
+      **Corrected 2026-10-08:** the one evidence gap named above — that
+      `PermissionRequested` and `Error` were never observed on this box — was
+      half wrong. The claude capture committed with this probe *is* an observed
+      error: its assistant line carries `"error":"authentication_failed"` and its
+      result line carries `"is_error":true`. The run failed its login check, and
+      the normaliser reported it as prose that finished successfully — so the gap
+      was declared from the events that came out of the reader rather than from
+      the stream that went into it. `Error` was covered by real evidence the whole
+      time. The permission pair is the only gap left, and it belongs to `AR-9`.
 - [x] **AR-2 — discovery.** Find candidate agents on `PATH`, read their versions, and
       record how each was installed (`mise`, `~/.local/bin`, other) without installing,
       upgrading or touching any of them.
@@ -12146,9 +12153,11 @@ worker, `OR-` for the thing that decides what workers to talk to.
       synthesised is marked as synthesised; and a run whose worker emitted nothing but
       text still terminates correctly through the same state machine.
       **Status 2026-10-02 — drafted and tested; one variant still unobserved.**
-      `rust/crates/xencode-agents-rs/src/protocol.rs` holds the ten variants, a
-      shape-keyed `normalise_line` covering all eight captured vocabularies, and
-      an `Origin` that separates a measurement from xencode's own bookkeeping.
+      `rust/crates/xencode-agents-rs/src/protocol.rs` holds the eleven variants
+      (the draft's ten plus `PermissionDenied`, which is what a denied request
+      turns into), a shape-keyed `normalise_line` covering all eight captured
+      vocabularies, and an `Origin` that separates a measurement from xencode's
+      own bookkeeping.
       Whole captured streams (verbatim, under `tests/fixtures/`) are asserted to
       reach the model, to report finishing, and to contain no invented event; a
       prose-only run terminates through the same check. `FileChanged` is
@@ -12158,9 +12167,47 @@ worker, `OR-` for the thing that decides what workers to talk to.
       the variant stays unpopulated by a real stream until claude is switched
       back on or a run genuinely denies something. The box stays open for that
       single gap.
+
+      **Status 2026-10-08 — `Error` is now populated by real evidence, and it
+      always was; the sentence above about it is wrong.** The committed claude
+      capture is a run that failed its login check. Its assistant line carries
+      `"error":"authentication_failed"`, and its result line carries
+      `"is_error":true` while its own `subtype` still reads `"success"` —
+      `subtype` names how claude's turn handling ended, not whether the run
+      worked. `claude_shape` keyed on `type` and `subtype` and on the prose, so
+      the whole failed run normalised to one `Message` followed by one
+      `Completed`: a worker that never reached a model reported itself as having
+      finished. Reproduced live on 2026-10-08 in a sandboxed `HOME` with no key
+      configured — exit code 1, `apiKeySource: "none"`, `total_cost_usd: 0` — so
+      the shape is not an artifact of one day's build. And `AR-1`'s own §S-12
+      matrix row for claude still reads `exit 1` with `auth yes`: the finding was
+      in the table from the beginning and was lost in the reader.
+      `claude_shape` now reads both fields. An assistant line that names an
+      `error` becomes `Error` carrying the code in front of the vendor's own
+      sentence, instead of that sentence as prose. A result line marked
+      `is_error` becomes `Error` naming the `terminal_reason`, plus
+      `SessionEnded` so the run still closes, and never `Completed`; a result
+      line with `is_error` false or absent still reports `Completed` with its
+      `subtype` as the outcome. `run_completed` is documented as the liveness
+      question it answers, not a success question.
+      Three places hold this now: `protocol.rs`'s pair of unit cases — the
+      errored lines, and a result line that still works; `protocol_streams.rs`
+      counting the raw lines that name a failure against the `Error`s that came
+      out (verified to fail with the new branch disabled, then restored); and
+      `agent_event_tck.rs` committing claude's shape inventory as `error` +
+      `session_ended` + `session_started` in place of the `completed` + `message`
+      it used to claim, with the kit's `error` gap replaced by a positive case
+      built on that real capture. Eight of the model's eleven variants now come
+      from observed streams; the kit asserts that count and names the three that
+      do not.
+      What still is *not* met, and is the only reason the box stays open:
+      `PermissionRequested` and `PermissionDenied` have never come from a stream
+      on this box. Seeing them needs a run that reaches a model and then asks to
+      use a tool — a real, billed vendor turn, which is the owner's call and is
+      not spent here to close a checkbox.
 - [x] **AR-10 — the Agent Event TCK.** A compatibility kit for `AR-9`'s protocol: every
       captured vendor stream under `tests/fixtures/` replayed through `normalise_line`
-      on every test run — the ten variant shapes, the finish semantics, the origin
+      on every test run — the eleven variant shapes, the finish semantics, the origin
       discipline — so a normalisation regression is a test failure and not a runtime
       surprise in front of a user.
       **Done-when:** all eight real streams pass the suite as committed fixtures; the
@@ -12180,6 +12227,23 @@ worker, `OR-` for the thing that decides what workers to talk to.
       replacing the gap with a positive case. `file_changed` is absent by model design
       (never derived from a worker stream) and is covered by its own unit test, so it is
       not counted as a gap here. `AR-9` stays open on the two gaps.
+
+      **2026-10-08 — the kit did exactly what it was built to do, and the gap it
+      reported was a defect in the reader.** Its negative assertion on `error`
+      fired the moment `claude_shape` started reading the `error` and `is_error`
+      fields the committed claude stream had carried since 2026-10-02, and the
+      failure message pointed at replacing the gap with a positive case built on
+      that capture, which is now what the kit does. Two corrections to the text
+      above. The model defines eleven variants, not ten, so the old "seven of the
+      ten" left one variant out of both lists: seven covered plus the three named
+      as absent is ten, and `permission_denied` was in neither — the kit now
+      names all three absent variants by deriving them from its own full list.
+      The covered count is eight, because `error` came out of a real line. The
+      kit's claude row is re-committed as `error` + `session_ended` +
+      `session_started`; it used to claim `completed` + `message` +
+      `session_started` for a run that produced none of those but the session.
+      `permission_requested` and `permission_denied` stay asserted absent, with
+      the reason stated in the test.
 - [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
       tree, and score the split with `EV-1` before any router consumes it.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
@@ -15036,9 +15100,12 @@ follows: `f565837` (`AR-9`, the protocol), `b809826` (`AR-1`/`AR-2` closed),
   claim to match.
 - **Standing caveat, repeated because it is the rule that keeps breaking:** nothing
   in this appendix is permission to build. `AR-9`'s two unpopulated variants
-  (`PermissionRequested`, `Error`) are still open evidence gaps — closing them needs
-  a claude re-run on a parked paid account (the owner's call, per S-8) or a ninth
-  vendor, and a fabricated stream would certify nothing.
+  (`PermissionRequested`, `PermissionDenied`) are still open evidence gaps —
+  closing them needs a claude re-run on a parked paid account (the owner's call,
+  per S-8) or a ninth vendor, and a fabricated stream would certify nothing.
+  **Corrected 2026-10-08:** `Error` was on this list and does not belong there.
+  It has been produced by a real stream since the claude capture of 2026-10-02;
+  `claude_shape` was discarding it. See `AR-9`'s 2026-10-08 status.
 
 ---
 
@@ -15173,7 +15240,9 @@ Checked against what exists today, clause by clause, rather than asserted:
 **tasks first-class** is `OR-2`, planned, W16. **Interchangeable workers** is the
 `AR-` series: `AR-1`, `AR-2`, `AR-4`, `AR-5` and `AR-10` are done and `AR-9`'s
 protocol is built, but it carries two variants nothing has produced yet
-(`PermissionRequested`, `Error`), which §X-4 still lists as open evidence gaps;
+(`PermissionRequested`, `PermissionDenied`), which §X-4 still lists as open
+evidence gaps; `Error` left that list on 2026-10-08 — a real claude stream had
+been producing it since 2026-10-02 and the normaliser was throwing it away.
 `AR-3` is unchecked (`AR-7`, `AR-8` are done). So this clause is *mostly* true of the code.
 **Context explainable** is true of one part only: `QD-1` and `QD-2` ship today and
 explain a change's blast radius, while `GH-2`'s `/why <file>:<line>` is planned in
