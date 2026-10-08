@@ -34,6 +34,10 @@ fn open_home() -> &'static Path {
             .current_dir(home.path())
             .env("HOME", home.path())
             .env("XDG_CONFIG_HOME", home.path().join(".config"))
+            .env(
+                "XCODE_CONFIG_DIR",
+                home.path().join(".config").join("xencode"),
+            )
             .output()
             .expect("xencode ran");
         assert!(
@@ -58,6 +62,7 @@ fn run_in(home: &Path, args: &[&str]) -> String {
         .args(args)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XCODE_CONFIG_DIR", home.join(".config").join("xencode"))
         .output()
         .expect("must run xencode agents --route");
     assert!(

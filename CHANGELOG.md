@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `PL-2`: the test suite compiles on Windows, agents are found there, and tests no longer write your real settings
+
+- **Installed agents are found on Windows.** The four places that looked a program up
+  on `PATH` checked for a file named exactly `claude`, but on Windows the file is
+  `claude.exe` or `claude.cmd`, so every installed agent read as missing. All four now
+  use one lookup built on the `which` crate, which also requires the execute bit on Unix.
+- **Running the tests on Windows could change your settings.** Several command-line
+  tests isolate themselves by pointing `HOME` and `XDG_CONFIG_HOME` at a temporary
+  folder. Windows ignores both when it locates the settings folder, so those tests wrote
+  to the real `%APPDATA%\xencode\config.json` — one run left it set to approve every
+  agent action without asking. The tests now also set `XCODE_CONFIG_DIR`, which every
+  platform honours. If you ran the suite on Windows before this change, check that
+  file; xencode keeps the replaced versions beside it as `config.json.bak.*`.
+- `cargo test --workspace` now compiles on Windows. Tests that need a Unix shell script,
+  `/proc` or `/bin/sleep` are marked Unix-only one at a time, so the rest still run.
+  58 tests still fail on Windows. `NEXT_PLAN_TASKS.md` lists them by cause; the one that
+  affects users is that git's Windows checkout puts CRLF line endings into the prompt
+  templates compiled into a Windows build.
+
 ### Fixed — `PL-1` (first half): xencode builds on Windows again
 
 Windows is one of the five release targets, but since 2026-10-01 the workspace had not

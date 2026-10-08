@@ -382,6 +382,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn unreachable_ssh_backend_answers_honestly_that_it_cannot_connect() {
         let bins = crate::orchestrate::Binaries {
             colab: std::path::PathBuf::from("/bin/colab"),
@@ -400,6 +401,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn docker_backend_answers_honestly_when_daemon_unreachable() {
         let backend = crate::docker::DockerBackend::new(
             std::path::PathBuf::from("/usr/bin/docker"),

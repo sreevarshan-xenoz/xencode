@@ -524,6 +524,8 @@ mod tests {
     }
 
     #[test]
+    // The helper is a `#!/bin/sh` script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_stored_key_wins_over_the_environment() {
         let _guard = lock_env();
         let dir = temp_dir();
@@ -596,6 +598,8 @@ mod tests {
     }
 
     #[test]
+    // The helper is a `#!/bin/sh` script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_command_reference_is_run_and_its_first_line_is_the_key() {
         let dir = temp_dir();
         let reference = helper(
@@ -612,6 +616,8 @@ mod tests {
     }
 
     #[test]
+    // The helper is a `#!/bin/sh` script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_failing_helper_says_which_command_and_keeps_its_own_output_back() {
         let dir = temp_dir();
         let reference = helper(
@@ -635,6 +641,8 @@ mod tests {
     }
 
     #[test]
+    // The helper is a `#!/bin/sh` script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_helper_that_prints_nothing_is_reported_not_treated_as_no_key() {
         let dir = temp_dir();
         let reference = helper(&dir, "silent", "#!/bin/sh\nexit 0\n");
@@ -647,6 +655,8 @@ mod tests {
     }
 
     #[test]
+    // The helper is a `#!/bin/sh` script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_helper_that_never_answers_is_stopped_and_said_so() {
         let dir = temp_dir();
         // `sleep 30` is longer than the shipped ten-second deadline: the test
@@ -716,6 +726,8 @@ mod tests {
     }
 
     #[test]
+    // The helper is a `#!/bin/sh` script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_quoted_argument_reaches_the_helper_as_one_word() {
         let dir = temp_dir();
         // Prints its first two arguments, so an argument that was split wrongly is

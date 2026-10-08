@@ -1991,6 +1991,7 @@ mod tests {
     /// A directory of its own for a test that writes an executable: the suite
     /// runs in parallel, and two tests pointed at one directory overwrite each
     /// other's script.
+    #[cfg(unix)]
     fn scratch_dir(name: &str) -> std::path::PathBuf {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let unique = format!(
@@ -2164,6 +2165,7 @@ mod tests {
 
     /// A port nothing is listening on, chosen by the OS so two tests running at
     /// once do not answer each other.
+    #[cfg(unix)]
     fn unused_port() -> u16 {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

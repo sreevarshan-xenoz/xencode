@@ -3851,14 +3851,59 @@ tests.
     `sys` tests and `wall_clock_limit_kills_task_and_marks_timeout` pass, and
     `cargo check --all-targets` passes for core and colab against
     `x86_64-unknown-linux-gnu`, plus core against `x86_64-apple-darwin`. **Still
-    open:** `spawn_shell`, `hide_console`, replacing the `sh -c` call sites,
-    and `which()`.
+    open:** `spawn_shell`, `hide_console`, and replacing the `sh -c` call
+    sites. (`which()` moved into the seam with `PL-2`.)
 - **PL-2 Gate the Unix-only test modules and drop the hand-rolled `which()`**
   (fact 14) for the `which` crate. **S**. This is the precondition for any
   non-Linux CI job: today `cargo test` does not *compile* off Unix, a job that
   fails for a boring reason gets deleted rather than fixed, and the matrix
   never happens. Trap in the other direction: gating the tests also gates away
   the only place those paths were exercised.
+  - [x] **Done 2026-10-08 for what the item names; Windows still has 58 red
+    tests, sorted below.** `cargo build --workspace --all-targets` now compiles
+    on Windows with no warnings. Tests that write `#!/bin/sh` fixtures, read
+    `/proc`, or run `/bin/sleep` are gated one by one (`#[cfg(unix)]`), not by
+    module, so the pure tests beside them still run on Windows; `paths.rs`'s
+    module is the one exception, gated whole because every test in it fakes a
+    home through `HOME`/`XDG_*`. The four hand-written `which()` functions
+    (`roster.rs`, `preflight.rs`, `voice.rs`, `agent_tools.rs`) now go through
+    `xencode_core_rs::sys::which`, built on the `which` crate, so `claude.exe`
+    and `claude.cmd` are found on Windows — before this, no installed agent was.
+    **Found on the way, and worse than a red test:** on Windows the CLI tests'
+    `HOME`/`XDG_CONFIG_HOME` isolation does not hold, because `dirs` asks the
+    system for `%APPDATA%`. A full run rewrote the developer's real
+    `config.json` (`agent_approval` became `all-allow`). The three CLI test
+    files that change settings now also set `XCODE_CONFIG_DIR`. That has not
+    been proven sufficient alone: the run below also exported
+    `XCODE_CONFIG_DIR` for the whole suite, and on Windows that variable should
+    stay set for every run until a test proves no other test reaches
+    `%APPDATA%`. Measured on Windows with that variable set: the real file
+    was left untouched, and 2723
+    passed, 19 ignored, 58 failed, and no test hung. The 58, by cause:
+    - **Test servers that answer without reading the request** (17: `web`,
+      `search`, `agent_tools` fetch/search, `mcp-rs/tests/http.rs`,
+      `state_fold`). Windows resets a socket closed with unread input, so
+      reqwest sees a reset. The fixture has to read the request head first.
+    - **Unix tools or `/proc` and `/sys` in the test** (17: `power`,
+      `doctor` CPU count, `tasks` `pwd`/`echo`, `gitsign` gpg-agent,
+      `reprogate`, the profiler, the plugin hook). Gate, or give Windows its
+      own reading.
+    - **CRLF from git's Windows checkout** (6: `prompts`, the committed
+      completions, `symbols`, rustfmt in `toolchain` and `compete`).
+      `include_str!` templates built on Windows carry `\r\n` into prompts —
+      a real defect for a Windows release built on a Windows runner; a
+      `.gitattributes` `eol=lf` rule is the fix.
+    - **Backslash paths and a case-insensitive disk** (14: `covdiff` lcov
+      paths, `crate_graph`, `impact`, `gitinfo`, `refresh`, `crate_docs`'s
+      `README.md`/`README.rst`, CLI output asserting `/` paths, the team-run
+      JSON path, Windows refusing to delete an open file in
+      `state_stale_notice`).
+    - **Facts about this machine, not Windows** (4): `cursor-agent` is not
+      installed, which the roster test requires of every machine; and the
+      installed `kiro-cli` no longer lists `acp` in `--help`, which the
+      contract test and two CLI tests correctly report.
+    Whether to fix these depends on the open decision that Windows is a
+    release target while the table below calls native Windows "rejected".
 - **PL-3 A terminal capability probe in the TUI** — `NO_COLOR`,
   `FORCE_COLOR`, `CLICOLOR`, `COLORTERM=truecolor`, `TERM_PROGRAM`, tmux
   detection, with a documented 16-colour and plain fallback (fact 18). **M**.

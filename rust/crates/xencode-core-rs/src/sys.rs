@@ -47,6 +47,17 @@ pub fn terminate(pid: u32) {
     }
 }
 
+/// The full path of the program `name` would run as a command, found on the
+/// current `PATH`, or `None` when nothing there is runnable by that name.
+///
+/// On Windows a bare `claude` matches `claude.exe` or `claude.cmd` through
+/// `PATHEXT`, the way the shell finds it; on Unix only a file with an execute
+/// bit counts. A name that already contains a path separator is checked where
+/// it points rather than looked up.
+pub fn which(name: &str) -> Option<std::path::PathBuf> {
+    which::which(name).ok()
+}
+
 /// Bytes a non-root writer can still put on the filesystem holding `dir`,
 /// which must be an existing directory. `None` means the system refused to
 /// answer, which is not the same as a full disk.
@@ -174,7 +185,10 @@ mod tests {
     #[test]
     fn a_child_is_alive_until_terminated_and_dead_after() {
         #[cfg(unix)]
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         #[cfg(windows)]
         let mut child = std::process::Command::new("ping")
             .args(["-n", "30", "127.0.0.1"])
@@ -187,6 +201,14 @@ mod tests {
         // Reap it so a Linux zombie does not linger past the assertion.
         let _ = child.wait();
         assert!(!pid_alive(pid));
+    }
+
+    #[test]
+    fn which_finds_the_cargo_running_this_test_and_not_a_made_up_name() {
+        // `cargo test` runs with cargo on PATH; on Windows the file is
+        // `cargo.exe`, which a bare-name lookup has to find through PATHEXT.
+        assert!(which("cargo").is_some());
+        assert!(which("xencode-no-such-program-anywhere").is_none());
     }
 
     #[test]

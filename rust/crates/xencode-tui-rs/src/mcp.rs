@@ -580,7 +580,11 @@ impl McpHub {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    // The live-server tests spawn `#!/bin/sh` fixtures and run only on Unix, so
+    // the fixtures themselves are unused when the module is built anywhere else.
+    #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
@@ -730,6 +734,7 @@ done
 "#;
 
     /// Write a fixture where no other test can collide with it.
+    #[cfg(unix)]
     fn fixture_server(name: &str, script: &str) -> (PathBuf, ServerSpec) {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let unique = format!(
@@ -747,17 +752,20 @@ done
         (dir, spec)
     }
 
+    #[cfg(unix)]
     fn fixture_spec() -> (PathBuf, ServerSpec) {
         fixture_server("fixture", FIXTURE)
     }
 
     /// The documents-only server, for a test in another module that drives the
     /// real `/mcp` command handler against a server that is actually running.
+    #[cfg(unix)]
     pub(crate) fn live_documents_server() -> (PathBuf, ServerSpec) {
         fixture_server("docs", DOCUMENTS_FIXTURE)
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn a_live_server_becomes_offered_tools_that_route_back() {
         let (dir, spec) = fixture_spec();
         let hub = McpHub::new();
@@ -841,6 +849,7 @@ done
     /// connection, not a failed one: `tools/list` is never sent, the session
     /// stays up, and what it does have is listed by name.
     #[tokio::test]
+    #[cfg(unix)]
     async fn a_server_without_tools_stays_connected_and_says_it_has_none() {
         let (dir, spec) = fixture_server("docs", DOCUMENTS_FIXTURE);
         let hub = McpHub::new();

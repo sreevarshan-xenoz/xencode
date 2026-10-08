@@ -98,14 +98,7 @@ pub fn wav_bytes(pcm: &[u8], sample_rate: u32) -> Vec<u8> {
 
 /// First executable found on `PATH`, if any.
 pub fn which(bin: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(bin);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    xencode_core_rs::sys::which(bin)
 }
 
 /// Recorder candidates and the argv that makes each stream raw S16_LE mono on

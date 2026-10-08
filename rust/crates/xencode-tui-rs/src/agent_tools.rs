@@ -2316,14 +2316,9 @@ fn missing_ast_grep_message() -> String {
 
 /// `which`-style lookup, without shelling out.
 fn which(binary: &str) -> Result<String, String> {
-    let path_var = std::env::var_os("PATH").ok_or_else(|| err("PATH is not set"))?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(binary);
-        if candidate.is_file() {
-            return Ok(candidate.to_string_lossy().into_owned());
-        }
-    }
-    Err(err(format!("{binary} not found on PATH")))
+    xencode_core_rs::sys::which(binary)
+        .map(|path| path.to_string_lossy().into_owned())
+        .ok_or_else(|| err(format!("{binary} not found on PATH")))
 }
 
 /// One site ast-grep matched, as far as this tool needs it.
