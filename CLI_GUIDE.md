@@ -4174,6 +4174,37 @@ xencode impact crates/xencode-core-rs/src/lib.rs
 xencode impact crates/xencode-core-rs/src/lib.rs --format json
 ```
 
+### `xencode impact <file> --semantic [--symbol NAME] [--limit 15] [--format text|json]`
+
+The same question answered from rust-analyzer's semantic index (SCIP) instead of
+`use` paths: every file that refers to a symbol this file defines, as
+rust-analyzer resolved it — through re-exports, traits, inferred types and other
+crates — with the symbols each file refers to listed after it. `--symbol` keeps
+only the first-hop files that refer to that one name. The walk goes up to three
+hops, like the default layer. Needs `rust-analyzer` (`rustup component add
+rust-analyzer`).
+
+The index is stored in the workspace's `.xencode/scip/`. When it is missing or
+stale it is rebuilt first, and the reason is printed: building it on this
+repository's 16-crate workspace took between 164 and 205 seconds (2026-10-08).
+It is stale when `HEAD` has moved, when git knows a Rust file the index does not
+hold, or when an indexed file changed after the build started — including a file
+edited while the build was running. A stale index is never used. Once it is
+current, an answer takes a few seconds. Modules are not counted as uses:
+writing `crate::x` does not make a file depend on `lib.rs`.
+
+```
+xencode impact crates/xencode-context-rs/src/impact.rs --semantic
+xencode impact crates/xencode-context-rs/src/impact.rs --semantic --symbol basis
+xencode impact crates/xencode-context-rs/src/impact.rs --semantic --format json
+```
+
+Measured on this repository for `impact.rs`: the default layer finds 3 files
+that link it directly; `--semantic` finds 7, including callers in
+`xencode-cli` and `xencode-tui-rs` that reach it through the crate's re-exports.
+The agent's `what_breaks` tool reads the same index when it is current, and
+`/init` starts building it in the background when it is not.
+
 ### TUI slash: `/impact <file>`
 
 Opens a dedicated fan-out panel over the same three layers. One row per target,

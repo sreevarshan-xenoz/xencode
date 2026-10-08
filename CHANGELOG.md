@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `LSP-2`: impact answers from rust-analyzer's semantic index
+
+`xencode impact <file> --semantic` lists every file that refers to a symbol the file
+defines, as rust-analyzer resolved it — through re-exports, traits, inferred types and
+other crates — and names those symbols. `--symbol NAME` keeps only the files that refer
+to that one. The default answer only follows `use` paths: for `impact.rs` in this
+repository it finds 3 files that use it directly, and the semantic answer finds 7.
+
+The index comes from `rust-analyzer scip` and is kept in the workspace's
+`.xencode/scip/`. Building it takes minutes (164–205 seconds for this repository's 16
+crates), so `/init` starts it in the background, and `xencode impact --semantic` builds it
+first when it has to and says so. It is never used once it no longer matches the code:
+a moved `HEAD`, a new Rust file, or any indexed file changed after the build began makes
+it stale, and the answer says why. The agent's `what_breaks` tool uses it when it is
+current and says when it is not. Needs `rustup component add rust-analyzer`.
+
 ### Added — `PL-4` (Windows part): CI builds xencode on Windows
 
 Windows is a release target, but every CI job ran on Linux, which is how the workspace

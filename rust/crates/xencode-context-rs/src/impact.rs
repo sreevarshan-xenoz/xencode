@@ -55,6 +55,20 @@ pub struct ImpactReport {
     /// index rather than a promise about the code.
     pub indexed_files: usize,
     pub edges: usize,
+    /// Which index answered, which decides what an edge in it means.
+    pub tier: ImpactTier,
+}
+
+/// The two indexes an impact answer can come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImpactTier {
+    /// `use` paths, `mod` declarations and `impl` headers read as text and
+    /// resolved through module paths.
+    #[default]
+    Names,
+    /// The index `rust-analyzer scip` wrote: a reference to a symbol, joined to
+    /// the file that defines it (`LSP-2`).
+    Semantic,
 }
 
 impl ImpactReport {
@@ -71,6 +85,16 @@ impl ImpactReport {
     /// The confidence statement the caller owes the reader: what an edge is
     /// here, and what it therefore does not prove.
     pub fn basis(&self) -> String {
+        if self.tier == ImpactTier::Semantic {
+            return format!(
+                "From rust-analyzer's semantic index of {} files and {} references \
+                 between them. An edge means a file refers to a symbol the other file \
+                 defines, as rust-analyzer resolved it — through re-exports, traits and \
+                 inferred types — and `via` names those symbols. A use inside a macro \
+                 rust-analyzer could not expand is not seen.",
+                self.indexed_files, self.edges
+            );
+        }
         format!(
             "From the index of {} Rust files and {} resolved edges. An edge means a \
              file wrote a `use` path, a `mod` declaration or an `impl Trait for Type` \
@@ -235,6 +259,7 @@ pub fn impact(
         files,
         indexed_files: symbols.len(),
         edges: graph.len(),
+        tier: ImpactTier::Names,
     }
 }
 

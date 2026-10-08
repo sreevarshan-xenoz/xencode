@@ -1785,8 +1785,10 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (impact)
 _arguments "${_arguments_options[@]}" : \
+'--symbol=[With --semantic\: only files that refer to this symbol of the file]:SYMBOL:_default' \
 '--limit=[How many entries to list in each section]:LIMIT:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
+'--semantic[Answer from rust-analyzer'\''s semantic index (SCIP) instead of \`use\` paths\: every file that refers to a symbol this file defines. Builds the index first when it is missing or stale, which takes minutes]' \
 '-h[Print help]' \
 '--help[Print help]' \
 ':file -- The file to analyse, by path or by its tail:_default' \

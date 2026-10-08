@@ -318,6 +318,7 @@ mod tests {
                 files: Vec::new(),
                 indexed_files: 10,
                 edges: 20,
+                tier: crate::impact::ImpactTier::Names,
             },
             cochange: Vec::new(),
             own_commits: 0,

@@ -4465,11 +4465,13 @@ fn render_impact(report: &xencode_context_rs::ImpactReport) -> String {
     }
     lines.push(String::new());
     if report.files.is_empty() {
-        lines.push(
+        lines.push(if report.tier == xencode_context_rs::ImpactTier::Semantic {
+            "Nothing outside this file refers to a symbol it defines.".to_string()
+        } else {
             "Nothing in the index links to it: no file writes a `use` path to it, declares \
              it as a module, or implements a trait it defines."
-                .to_string(),
-        );
+                .to_string()
+        });
     } else {
         let mut shown_hop = 0;
         for file in report.files.iter().take(MODEL_IMPACT_CAP) {
@@ -4481,8 +4483,15 @@ fn render_impact(report: &xencode_context_rs::ImpactReport) -> String {
                     format!("Reached through those, {} hops back:", file.hops)
                 });
             }
-            let mut line = format!("  {}  via {}", file.file, file.via.join(", "));
-            if report.symbol.is_some() {
+            let semantic = report.tier == xencode_context_rs::ImpactTier::Semantic;
+            let mut line = if semantic {
+                format!("  {}  refers to {}", file.file, file.via.join(", "))
+            } else {
+                format!("  {}  via {}", file.file, file.via.join(", "))
+            };
+            // The semantic tier lists only files that refer to the symbol on the
+            // first hop, so there is nothing to mark.
+            if report.symbol.is_some() && !semantic {
                 line.push_str(if file.uses_symbol {
                     " — its own `use` names it"
                 } else {
@@ -4500,7 +4509,7 @@ fn render_impact(report: &xencode_context_rs::ImpactReport) -> String {
     }
     lines.push(String::new());
     lines.push(report.basis());
-    if let Some(symbol) = &report.symbol {
+    if let (Some(symbol), xencode_context_rs::ImpactTier::Names) = (&report.symbol, report.tier) {
         lines.push(format!(
             "\"names it\" means `{symbol}` appears as a whole path segment in that file's own \
              `use` statements. A file that reaches this one through `mod` or `impl` has no `use` \
@@ -4524,8 +4533,33 @@ fn tool_what_breaks(root: &Path, args: &serde_json::Map<String, serde_json::Valu
     ) {
         return err(refusal);
     }
+    // A fresh semantic index answers first (LSP-2). It is never built here —
+    // that takes minutes — and a missing or stale one is named, so the reader
+    // knows the answer below is the weaker, name-level one.
+    let mut fallback_note = None;
+    if let Ok(workspace) = xencode_context_rs::verify::manifest_dir(root) {
+        match xencode_context_rs::scip_index::semantic_impact_for(
+            &workspace,
+            raw,
+            symbol,
+            xencode_context_rs::IMPACT_MAX_HOPS,
+        ) {
+            Ok(Ok(report)) => return render_impact(&report),
+            Ok(Err(_)) => {
+                fallback_note = Some("The semantic index does not hold this file.".to_string())
+            }
+            Err(why) => fallback_note = Some(format!("Not from the semantic index: {why}.")),
+        }
+    }
     match xencode_context_rs::impact_from_snapshot(root, raw, symbol) {
-        Ok(report) => render_impact(&report),
+        Ok(report) => {
+            let mut out = render_impact(&report);
+            if let Some(note) = fallback_note {
+                out.push_str("\n\n");
+                out.push_str(&note);
+            }
+            out
+        }
         Err(e) => err(e.to_string()),
     }
 }

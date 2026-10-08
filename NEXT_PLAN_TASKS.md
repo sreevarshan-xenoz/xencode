@@ -5120,6 +5120,31 @@ pass found something the whole plan has been quietly assuming.
   regex-accurate. *Trap:* minutes of reindex latency and the same staleness
   problem — do this *before* attempting LSP-1, since it is the same data without
   the resident process.
+  - [x] **Done 2026-10-08.** `xencode-context-rs/src/scip_index.rs` runs
+    `rust-analyzer scip`, reads the index with the `scip` crate (0.10, over
+    `protobuf` 3.7.2), and turns every reference to a symbol defined in another
+    file into a file-to-file edge that carries the symbol's name; module
+    symbols (`crate/`) are not uses. The existing impact walk then runs over
+    those edges, and the report says which tier answered (`ImpactTier`).
+    Surfaces: `xencode impact <file> --semantic [--symbol NAME]` (builds or
+    rebuilds the index when needed, and says why), the agent's `what_breaks`
+    (uses the index only when current, otherwise says why and answers from the
+    name tier), and `/init`, which starts the build in the background. The
+    trap held exactly as written: one build of this workspace took 164–205 s with a peak working set of 4.49 GiB,
+    and wrote 30.7 MB, so the build is never on the way to an answer
+    someone is waiting for; a current index answers in about 3 s. **Staleness,
+    and how "on refresh" was handled:** the watcher's refresh does not rebuild
+    (it would start a three-minute job on every save). Instead every read
+    checks the index against `HEAD`, the set of Rust files git knows, and the
+    modification time of every indexed file, and refuses a stale one by name —
+    the first live run on this repository was refused because a file was edited
+    during the build. Measured on `impact.rs`: the name tier lists 3 direct
+    users, the semantic tier 7, including callers in `xencode-cli` and
+    `xencode-tui-rs` that reach it through re-exports; with `--symbol basis`, 3.
+    The tests run real `rust-analyzer` on a three-file crate and pin that a
+    caller reached only through a glob re-export is found here and missed by
+    the name tier; CI now installs the `rust-analyzer` component so they run
+    there rather than skip.
 - **LSP-3 — Semantic Rust rename through the `ssr` CLI** behind **CI-4**'s
   preview diff. *Effort: S–M.* CI-4 covers syntax-level codemod; this adds
   resolution, aliases and re-exports — i.e. the part where a codemod silently
