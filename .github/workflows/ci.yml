@@ -43,11 +43,11 @@ jobs:
 
     - name: Check generated completions and man page are current
       run: |
-        cargo build -p xencode-cli
-        ./target/debug/xencode generate completions --shell fish > docs/completions/xencode.fish
-        ./target/debug/xencode generate completions --shell zsh > docs/completions/xencode.zsh
-        ./target/debug/xencode generate completions --shell bash > docs/completions/xencode.bash
-        ./target/debug/xencode generate man > docs/man/xencode.1
+        cargo build --manifest-path rust/Cargo.toml -p xencode-cli
+        ./rust/target/debug/xencode generate completions --shell fish > docs/completions/xencode.fish
+        ./rust/target/debug/xencode generate completions --shell zsh > docs/completions/xencode.zsh
+        ./rust/target/debug/xencode generate completions --shell bash > docs/completions/xencode.bash
+        ./rust/target/debug/xencode generate man > docs/man/xencode.1
         git diff --exit-code -- docs/completions docs/man
       working-directory: .
 
