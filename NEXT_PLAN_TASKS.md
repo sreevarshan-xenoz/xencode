@@ -82,6 +82,29 @@ the thought, which is also why several recorded final answers break off mid-sent
 work through", "The line in"). Next measurement: the same 24 cases with the server started
 `--reasoning-budget 0` (no thinking), changing nothing else.
 
+**Fourth run, 2026-10-08 — thinking off (`--reasoning off`), nothing else changed:** **2 of
+24 (8%)** in 769 s, against 3 of 24 with thinking on — within the noise, so the token cap
+was not the binding constraint: answers that hit 1,024 tokens fell from 16 to 1, and the
+pass rate did not move. What changed is *how* it fails. Of 22 failures: 10 looked and
+stopped, **8 attempted an edit that failed**, 4 edited the wrong thing. The final answers
+and failed-call tails name the causes:
+- **A tool call written as text.** One `early-return` run ended with its answer reading
+  `<tool_call> {"name": "edit_file", "arguments": {...}}` — a correctly formed edit the
+  server did not return as a tool call, so nothing ran.
+- **A refused command read as "ask the user".** The evaluation runs without `--allow-shell`;
+  the model asks to run the tests, is refused, and answers "the user has denied this action.
+  Let me ask for permission…" and stops (`ignored-result`, `lost-update`).
+- **Quoted code that is not in the file.** "4 of 6 lines match" (`off-by-one`), a quote that
+  matches three places (`stale-cache`): the model paraphrases lines rather than copying them.
+  The whitespace tolerance is doing its job; these are not whitespace.
+- **Task misreading:** creating `license_utils.py` in a Rust crate; "settings.toml is not
+  present".
+
+Conclusion for this model size: the measured ceiling is around 10% whatever is toggled.
+Two fixes have direct evidence and are next: read a `<tool_call>{…}` block written in an
+answer as the call it is, and word a refused command so the model is told to make the edit
+rather than to ask for permission.
+
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.
 
