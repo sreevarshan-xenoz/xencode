@@ -128,7 +128,9 @@ pub fn unknown_slash_command(prompt: &str) -> Option<&str> {
     let word = prompt.split_whitespace().next()?;
     let name = word.strip_prefix('/')?;
     let looks_like_command = !name.is_empty()
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     looks_like_command.then_some(word)
 }
 
@@ -186,6 +188,43 @@ const BYTEBOT_PREFIX: &str = "[BYTEBOT]";
 /// `:err:<text>` (real failure) and finally `:finish:<final text>`. The app
 /// side derives progress from the step rows and posts the report to the chat.
 const SPAWN_PREFIX: &str = "[SPAWN]";
+
+/// A chat turn that ended because its model call failed: one line for the
+/// transcript, built by [`turn_error_line`].
+const TURN_ERROR_PREFIX: &str = "[TURNERR]";
+
+/// What the chat shows when a model call fails: which model, the first line
+/// of the error (credentials and query strings stripped), and the likely next
+/// step for that kind of failure.
+pub(crate) fn turn_error_line(model: &str, error: &str) -> String {
+    let shown = xencode_context_rs::redact_error_for_trace(error);
+    let lower = error.to_ascii_lowercase();
+    let hint = if lower.contains("connect")
+        || lower.contains("refused")
+        || lower.contains("timed out")
+        || lower.contains("error sending request")
+        || lower.contains("dns")
+    {
+        "is its server running? `xencode doctor` checks every provider; `m` picks another model"
+    } else if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("api key")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+    {
+        "check this provider's API key in Settings (`s`)"
+    } else if lower.contains("egress") {
+        "this model is off the machine and cloud models are not allowed; `m` picks a local one"
+    } else if lower.contains("404")
+        || lower.contains("not found")
+        || lower.contains("no such model")
+    {
+        "the server does not have that model; `m` lists what it serves"
+    } else {
+        "`m` picks another model; `/trace` shows the turn's record"
+    };
+    format!("✗ {model} failed: {shown} — {hint}")
+}
 
 /// Findings the security panel streams before it stops listing them. The
 /// totals it reports stay true — the cap only limits lines on screen.
@@ -11413,6 +11452,13 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                     let _ = tx.send(format!("{SPAWN_PREFIX}{id}:err:{e}"));
                 } else if sink == LoopSink::ByteBot {
                     let _ = tx.send(format!("{BYTEBOT_PREFIX}err:{e}"));
+                } else if sink == LoopSink::Chat {
+                    // Said in the chat itself: the error used to reach only the
+                    // trace, and the turn ended with the spinner just gone.
+                    let _ = tx.send(format!(
+                        "{TURN_ERROR_PREFIX}{}",
+                        turn_error_line(&model, &e.to_string())
+                    ));
                 }
                 break;
             }
@@ -12563,6 +12609,11 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                 app.messages.push(UiMessage {
                     role: "system".to_string(),
                     content: format!("◈ {body}"),
+                });
+            } else if let Some(body) = token.strip_prefix(TURN_ERROR_PREFIX) {
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: body.to_string(),
                 });
             } else if let Some(body) = token.strip_prefix("[FALLBACK]") {
                 // Provider fallback chain (I4-01): the primary model failed
@@ -14405,7 +14456,11 @@ mod tests {
         app.submit_message(tx.clone());
         assert!(!app.is_generating, "no model turn starts");
         let last = app.messages.last().unwrap();
-        assert!(last.content.contains("Unknown command /model"), "{}", last.content);
+        assert!(
+            last.content.contains("Unknown command /model"),
+            "{}",
+            last.content
+        );
         assert!(last.content.contains("/help"));
 
         app.set_chat_text("/help");
@@ -16031,6 +16086,68 @@ mod tests {
     /// both answered to the model instead of run — even in the most permissive
     /// approval mode. The second one only fails because the loop hands the
     /// executor the same descriptions it handed the model.
+    /// A model whose server is not there ends the chat turn with a line saying
+    /// so, naming the model and what to try, before the turn is closed.
+    #[tokio::test]
+    async fn a_failed_model_call_is_reported_in_the_chat() {
+        // A port that was just free and is now closed: a real refused connection.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let mut app = App::for_tests();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "hello".into(),
+            }],
+            "hello",
+        );
+        run.ollama_url = format!("http://{addr}");
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        let err = lines
+            .iter()
+            .position(|l| l.starts_with(super::TURN_ERROR_PREFIX))
+            .unwrap_or_else(|| panic!("no error line in {lines:?}"));
+        let done = lines
+            .iter()
+            .position(|l| l == "[DONE]")
+            .expect("turn closed");
+        assert!(err < done, "said before the turn closes: {lines:?}");
+        assert!(lines[err].contains(" failed: "), "{}", lines[err]);
+
+        // And the transcript shows it as a system line.
+        for line in &lines {
+            if let Some(body) = line.strip_prefix(super::TURN_ERROR_PREFIX) {
+                assert!(body.starts_with("✗ "), "{body}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_error_line_names_the_next_step_for_each_kind_of_failure() {
+        let line = super::turn_error_line(
+            "qwen3",
+            "error sending request for url (http://127.0.0.1:8081/v1): connection refused",
+        );
+        assert!(line.starts_with("✗ qwen3 failed: "), "{line}");
+        assert!(line.contains("server running"), "{line}");
+        assert!(super::turn_error_line("m", "HTTP 401 Unauthorized").contains("API key"));
+        assert!(super::turn_error_line("m", "model \"x\" not found").contains("`m` lists"));
+        let leaky = super::turn_error_line("m", "failed: http://user:pw@host/v1?key=abc");
+        assert!(
+            !leaky.contains("pw@") && !leaky.contains("key=abc"),
+            "{leaky}"
+        );
+    }
+
     #[tokio::test]
     async fn the_loop_refuses_a_tool_call_whose_arguments_do_not_fit() {
         let dir = std::env::temp_dir().join(format!(
