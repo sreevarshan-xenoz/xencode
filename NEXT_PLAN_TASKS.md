@@ -1810,6 +1810,27 @@ standing constraint.
       restricted container at all — that is a one-kernel experiment, not an
       assumption. If it fails, L-14 has no private path and this whole track is
       parked with the reason written down.
+      - **The blocking experiment passed, 2026-10-08.** A private Kaggle `script`
+        kernel (no GPU, internet on), pushed with `kaggle kernels push`,
+        downloaded `tailscale_latest_amd64.tgz`, started `tailscaled
+        --tun=userspace-networking --state=mem:`, joined with an ephemeral
+        single-use auth key, and served a file with `python3 -m http.server` on
+        `0.0.0.0:8080`. Two minutes after the push the node
+        `xencode-kaggle-probe` appeared in the laptop's `tailscale status` at
+        `100.116.188.53`, and `curl http://100.116.188.53:8080/probe.txt` from
+        the laptop answered `xencode-probe-ok` on the first try — reachable at a
+        private address only, with no public URL and no inbound port. Userspace
+        mode needs no `tailscale serve`: an inbound connection to the node's
+        tailnet address reaches a process listening on all interfaces.
+        **Two things learned on the way:** a Kaggle account that is not
+        phone-verified has its kernel cancelled the moment it makes its first
+        outbound request (`CANCEL_ACKNOWLEDGED`, log ending at the first `curl`)
+        — on two unverified accounts, before anything tunnel-related ran; and on
+        Windows a laptop with Cloudflare WARP running and two `tailscaled`
+        processes could not bring Tailscale up at all until WARP was off and the
+        service restarted. Both belong in `kaggle preflight`. Still to build
+        under this item: the `Backend::transport()` choice and `forward_url()`
+        returning the private address.
 
 - [ ] **L-14 — `xencode kaggle up|status|down`: the 30 GPU-hours a week.**
       *Effort: L. Depends on L-13.* Kaggle gives two T4s free and runs notebook
