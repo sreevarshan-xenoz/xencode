@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `PL-2` (follow-up): files keep LF line endings on Windows
+
+On Windows, git's default setting turned every LF line ending into CRLF on checkout. A
+Windows build therefore compiled `\r\n` into the prompt templates it sends to models,
+and a checkout could not run `install.sh`. A root `.gitattributes` now keeps LF on every
+platform, which is how the repository already stores its files.
+
 ### Fixed — `PL-2`: the test suite compiles on Windows, agents are found there, and tests no longer write your real settings
 
 - **Installed agents are found on Windows.** The four places that looked a program up

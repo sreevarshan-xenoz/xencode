@@ -3891,8 +3891,12 @@ tests.
     - **CRLF from git's Windows checkout** (6: `prompts`, the committed
       completions, `symbols`, rustfmt in `toolchain` and `compete`).
       `include_str!` templates built on Windows carry `\r\n` into prompts —
-      a real defect for a Windows release built on a Windows runner; a
-      `.gitattributes` `eol=lf` rule is the fix.
+      a real defect for a Windows release built on a Windows runner.
+      **Fixed 2026-10-08** by a root `.gitattributes` (`* text=auto eol=lf`):
+      after a fresh checkout the two `prompts` tests, `symbols` and the
+      completions check pass on Windows. The two rustfmt tests still fail and
+      were misfiled here: rustfmt names the file as `\\?\C:\…\src\lib.rs`, and
+      the tests look for `src/lib.rs`, so they belong with the path cases below.
     - **Backslash paths and a case-insensitive disk** (14: `covdiff` lcov
       paths, `crate_graph`, `impact`, `gitinfo`, `refresh`, `crate_docs`'s
       `README.md`/`README.rst`, CLI output asserting `/` paths, the team-run
