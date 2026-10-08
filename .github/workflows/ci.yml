@@ -50,3 +50,34 @@ jobs:
         ./target/debug/xencode generate man > docs/man/xencode.1
         git diff --exit-code -- docs/completions docs/man
       working-directory: .
+
+  windows-build:
+    # Windows is a release target, and from 2026-10-01 to 2026-10-08 it did not
+    # compile without anyone noticing, because every other job runs on Linux.
+    # This job only proves that every target, tests included, still builds there
+    # without warnings. It does not run the tests: some still fail on Windows for
+    # the reasons listed under PL-2 in NEXT_PLAN_TASKS.md.
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo registry and build
+      uses: actions/cache@v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Build every target, tests included
+      run: cargo build --workspace --all-targets
+      working-directory: rust
+      env:
+        RUSTFLAGS: -D warnings

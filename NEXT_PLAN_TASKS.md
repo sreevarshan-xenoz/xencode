@@ -3919,6 +3919,15 @@ tests.
   **M**. Trap: it is blocked on fact 16 — `aws-lc-sys` needs a CMake/pkg-config
   toolchain for the target, so the first move is selecting a pure-Rust rustls
   backend, which is a dependency change, not a CI change.
+  - [ ] **Windows leg started 2026-10-08, on a Windows runner rather than by
+    cross-compiling.** Owner decision of the same day: Windows stays a release
+    target and must keep compiling, but is not polished — the rest of `PL-1`
+    and the Windows test failures listed under `PL-2` are parked behind it.
+    `ci.yml` gains a `windows-build` job: `cargo build --workspace
+    --all-targets` with `RUSTFLAGS=-D warnings` on `windows-latest`. It runs
+    no tests. Not yet observed passing: nothing is pushed from here, and
+    whether `aws-lc-sys` (fact 16) builds on the runner without extra tools is
+    exactly what its first run will say. The two musl targets are untouched.
 - **PL-5 macOS `aarch64-apple-darwin` build *and test*** on GitHub's arm64
   runners, with ad-hoc `codesign --force --sign -` at release and notarisation
   only on tags. **M**. Trap: notarisation needs a paid Apple Developer ID and
@@ -4175,7 +4184,7 @@ interrupt-style desktop notifications as the primary ambient surface.
 | Coverage-% gates and badges | Invites assert-free padding |
 | `git2`/`gix` dependency | All needs are one-shot text queries; `gitinfo.rs:74` is the seam; gix has no merge |
 | Rebase engines (`git-imerge`, jj) | Duplicate WF-10 |
-| Native Windows as a *supported* target | `sh -c`, ProxyCommand quoting, POSIX permissions, `arecord`, no CI |
+| Native Windows as a *supported* target | `sh -c`, ProxyCommand quoting, POSIX permissions, `arecord`, no CI. Narrowed by the owner on 2026-10-08: Windows remains a release target that must compile, with a CI build check (`PL-4`), but Windows-only behaviour is not polished |
 | FreeBSD / riscv64 / i686 / armv7 | No dependency pressure; pure rot |
 | Notarised macOS as a launch blocker | CLI quarantine yields a warning, not a hard stop |
 | Vim modal emulation | Undertaking to maintain an editor |

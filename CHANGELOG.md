@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `PL-4` (Windows part): CI builds xencode on Windows
+
+Windows is a release target, but every CI job ran on Linux, which is how the workspace
+stopped compiling on Windows for a week without anyone seeing it. A new `windows-build`
+job in `ci.yml` builds every target, tests included, on `windows-latest` and fails on any
+warning. It does not run the tests, because some still fail on Windows.
+
 ### Fixed — `AR-2`: kilo is found from any directory, and CI stops failing on which agents a machine has
 
 - kilo installs itself to `~/.kilo/bin/kilo`, off `PATH`. Its roster entry named that
