@@ -75,6 +75,10 @@ pub enum AuditAction {
     MemberRemoved,
     RoleChanged,
     Denied,
+    /// A reviewer or a verification run blocked a branch from landing (`OR-17`).
+    MergeVetoed,
+    /// An open veto was lifted, by whom and under what authority (`OR-17`).
+    MergeVetoCleared,
 }
 
 impl std::fmt::Display for AuditAction {
@@ -85,6 +89,8 @@ impl std::fmt::Display for AuditAction {
             AuditAction::MemberRemoved => write!(f, "member_removed"),
             AuditAction::RoleChanged => write!(f, "role_changed"),
             AuditAction::Denied => write!(f, "denied"),
+            AuditAction::MergeVetoed => write!(f, "merge_vetoed"),
+            AuditAction::MergeVetoCleared => write!(f, "merge_veto_cleared"),
         }
     }
 }
@@ -99,6 +105,15 @@ pub struct AuditEvent {
     pub action: AuditAction,
     pub target: String,
     pub detail: String,
+}
+
+/// The wall clock in the format the audit trail stamps its records with.
+///
+/// A record appended from outside a session — a merge veto lifted at a
+/// terminal, with no `WorkspaceManager` in the process — has to carry the same
+/// timestamp shape as one the server wrote, or the two are not one log.
+pub fn audit_stamp() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 /// In-memory workspace manager for collaboration sessions.
@@ -126,7 +141,7 @@ impl WorkspaceManager {
         self.next_seq += 1;
         self.audit.push(AuditEvent {
             seq,
-            at: chrono::Utc::now().to_rfc3339(),
+            at: audit_stamp(),
             actor: actor.to_string(),
             action,
             target: target.to_string(),

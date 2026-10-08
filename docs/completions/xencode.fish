@@ -351,11 +351,14 @@ complete -c xencode -n "__fish_xencode_using_subcommand compete; and __fish_seen
 complete -c xencode -n "__fish_xencode_using_subcommand compete; and __fish_seen_subcommand_from help" -f -a "show" -d 'Re-print the verification table of a recorded run, from its saved report'
 complete -c xencode -n "__fish_xencode_using_subcommand compete; and __fish_seen_subcommand_from help" -f -a "pick" -d 'Switch the repository onto one arm\'s branch, leaving every other candidate branch and all evidence files on disk untouched'
 complete -c xencode -n "__fish_xencode_using_subcommand compete; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land help" -s h -l help -d 'Print help'
-complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land help" -f -a "precheck" -d 'Speculatively precheck a candidate branch against a base branch using git merge-tree'
-complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land help" -f -a "plan" -d 'Build a multi-branch merge plan with conflict prechecks and worker checks'
-complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land help" -f -a "land" -d 'Land branches into base branch guarded by a named human decision'
-complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "precheck" -d 'Speculatively precheck a candidate branch against a base branch using git merge-tree'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "plan" -d 'Build a multi-branch merge plan with conflict prechecks and worker checks'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "land" -d 'Land branches into base branch guarded by a named human decision'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "veto" -d 'Block a branch from landing, over a review or a verification outcome'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "clear-veto" -d 'Lift one open veto, by a name that is not the blocked worker'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "vetoes" -d 'List the vetoes on record for this repository'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and not __fish_seen_subcommand_from precheck plan land veto clear-veto vetoes help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from precheck" -l base -d 'Target base branch' -r
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from precheck" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
@@ -372,9 +375,24 @@ complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_s
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from land" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from land" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from veto" -l source -d 'What kind of outcome the block comes from: review or verification' -r
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from veto" -l raised-by -d 'Who or what raised it' -r
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from veto" -l worker -d 'The worker being blocked; defaults to the branch\'s commit author' -r
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from veto" -l reason -d 'Why the branch must not land' -r
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from veto" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from clear-veto" -l by -d 'The reviewer or the human lifting the block' -r
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from clear-veto" -l policy -d 'A policy statement that names the veto it clears' -r
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from clear-veto" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from vetoes" -l format -d 'Output format' -r -f -a "text\t''
+json\t''"
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from vetoes" -l open -d 'Only the ones still blocking'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from vetoes" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "precheck" -d 'Speculatively precheck a candidate branch against a base branch using git merge-tree'
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "plan" -d 'Build a multi-branch merge plan with conflict prechecks and worker checks'
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "land" -d 'Land branches into base branch guarded by a named human decision'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "veto" -d 'Block a branch from landing, over a review or a verification outcome'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "clear-veto" -d 'Lift one open veto, by a name that is not the blocked worker'
+complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "vetoes" -d 'List the vetoes on record for this repository'
 complete -c xencode -n "__fish_xencode_using_subcommand merge; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand team; and not __fish_seen_subcommand_from list show plan run help" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand team; and not __fish_seen_subcommand_from list show plan run help" -f -a "list" -d 'List the team recipes this project keeps, and say what each one is'
@@ -882,6 +900,9 @@ complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_su
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from merge" -f -a "precheck" -d 'Speculatively precheck a candidate branch against a base branch using git merge-tree'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from merge" -f -a "plan" -d 'Build a multi-branch merge plan with conflict prechecks and worker checks'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from merge" -f -a "land" -d 'Land branches into base branch guarded by a named human decision'
+complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from merge" -f -a "veto" -d 'Block a branch from landing, over a review or a verification outcome'
+complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from merge" -f -a "clear-veto" -d 'Lift one open veto, by a name that is not the blocked worker'
+complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from merge" -f -a "vetoes" -d 'List the vetoes on record for this repository'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from team" -f -a "list" -d 'List the team recipes this project keeps, and say what each one is'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from team" -f -a "show" -d 'Print one recipe\'s roles, workers, gates and capacity as it was written'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from team" -f -a "plan" -d 'Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run'

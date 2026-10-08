@@ -87,8 +87,11 @@ pub struct Evidence {
 }
 
 /// Where the task passes next, so a fleet can chain without a human reading
-/// prose to find out. `NeedsReview` and `Blocked` both stop a merge; they differ
-/// in whether a reviewer or an author is expected to move it.
+/// prose to find out. `NeedsReview` and `Blocked` are both states that mean "do
+/// not land yet", and differ in whether a reviewer or an author is expected to
+/// move it. What actually refuses a merge today is the veto these names point
+/// at (`OR-17`, `xencode-analysis-rs/src/veto.rs`); nothing consumes the
+/// envelope itself yet, which is what `AE-1` is for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum Handoff {

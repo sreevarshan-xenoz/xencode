@@ -10,12 +10,16 @@
 //! 4. A human gate to land anything: nothing merges without a decision a named human made.
 //! 5. Post-integration verification: after integration, tests are re-run on the
 //!    merged tree and kept distinct from the workers' own runs.
+//! 6. `OR-17`'s veto: a review or verification outcome recorded against a branch
+//!    blocks the land, and [`crate::veto`] holds what that takes.
 
 use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+use crate::veto::{open_vetoes_for, Veto};
 
 /// Result of checking a candidate branch with git merge-tree against a base branch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +60,11 @@ pub struct BranchVerdict {
     pub changed_files: Vec<String>,
     pub worker_checks: Vec<BranchCheck>,
     pub precheck: MergePrecheck,
+    /// Every review or verification outcome still blocking this branch (`OR-17`).
+    /// The plan carries them so a reader sees the reason and who may lift it,
+    /// and `execute_merge` re-reads them from disk so a plan that left them out
+    /// cannot land the branch either.
+    pub vetoes: Vec<Veto>,
     pub eligible: bool,
 }
 
@@ -258,7 +267,22 @@ pub fn build_merge_plan(
             all_clean = false;
         }
 
-        let checks_ok = !spec.checks.is_empty() && spec.checks.iter().all(|c| c.passed);
+        // OR-17: a review or verification outcome recorded against this branch is
+        // a check that failed. It arrives from the veto file rather than from the
+        // caller's spec, because the party that was blocked is not the party that
+        // gets to say which checks existed.
+        let vetoes = open_vetoes_for(repo_root, &spec.branch)?;
+        let mut checks = spec.checks.clone();
+        for veto in &vetoes {
+            checks.push(BranchCheck {
+                name: format!("veto:{}", veto.id),
+                exit_code: 1,
+                passed: false,
+                evidence_ref: veto.evidence_ref(),
+            });
+        }
+
+        let checks_ok = !checks.is_empty() && checks.iter().all(|c| c.passed);
         if !checks_ok {
             all_worker_checks_passed = false;
         }
@@ -271,8 +295,9 @@ pub fn build_merge_plan(
             task_id: spec.task_id.clone(),
             commit_sha,
             changed_files,
-            worker_checks: spec.checks.clone(),
+            worker_checks: checks,
             precheck,
+            vetoes,
             eligible,
         });
     }
@@ -286,6 +311,11 @@ pub fn build_merge_plan(
 }
 
 /// Execute a merge operation governed by a named human approval gate.
+///
+/// Four things have to hold before anything is written: a named human decided
+/// yes, no veto is open on any branch in the plan, every recorded worker check
+/// passed, and the tree merges clean. The veto check reads the disk again rather
+/// than trusting the plan, so a stale or hand-built plan is not a way around it.
 ///
 /// Re-runs post-integration verification tests on the resulting integrated tree.
 pub fn execute_merge(
@@ -305,7 +335,71 @@ pub fn execute_merge(
         ));
     }
 
-    // 2. CONFLICT GATE
+    // 2. VETO GATE (`OR-17`): re-read from disk, not from the plan in hand. A
+    //    caller that built a plan before the veto landed — or built one that
+    //    simply left the field out — still cannot merge the branch.
+    let mut blocked: Vec<String> = Vec::new();
+    for verdict in &plan.branches {
+        for veto in open_vetoes_for(repo_root, &verdict.branch)? {
+            blocked.push(format!(
+                "{} on '{}' — {}",
+                veto.summary_line(),
+                verdict.branch,
+                veto.who_may_clear()
+            ));
+        }
+    }
+    if !blocked.is_empty() {
+        return Err(format!(
+            "merge refused: {} open veto(es), and a veto is not the worker's to lift\n{}",
+            blocked.len(),
+            blocked.join("\n")
+        ));
+    }
+
+    // 3. WORKER-CHECK GATE: every check the plan recorded has to have passed.
+    //    This flag was computed and printed and then never consulted; an empty
+    //    check list is not a pass either, so "nothing proven" cannot read as
+    //    "green" — the same rule the result envelope holds itself to.
+    if !plan.all_worker_checks_passed {
+        let failures: Vec<String> = plan
+            .branches
+            .iter()
+            .flat_map(|verdict| {
+                let branch = verdict.branch.clone();
+                verdict
+                    .worker_checks
+                    .iter()
+                    .filter(|check| !check.passed)
+                    .map(move |check| {
+                        format!(
+                            "{}: {} exited {} ({})",
+                            branch, check.name, check.exit_code, check.evidence_ref
+                        )
+                    })
+            })
+            .collect();
+        let unknown: Vec<String> = plan
+            .branches
+            .iter()
+            .filter(|verdict| verdict.worker_checks.is_empty())
+            .map(|verdict| verdict.branch.clone())
+            .collect();
+        let mut detail = String::new();
+        if !failures.is_empty() {
+            detail += &format!("failed checks:\n{}", failures.join("\n"));
+        }
+        if !unknown.is_empty() {
+            detail += &format!(
+                "{}branches with no recorded check: {}",
+                if detail.is_empty() { "" } else { "\n" },
+                unknown.join(", ")
+            );
+        }
+        return Err(format!("merge refused: {detail}"));
+    }
+
+    // 4. CONFLICT GATE
     if !plan.all_clean {
         let conflicts: Vec<String> = plan
             .branches
@@ -319,7 +413,7 @@ pub fn execute_merge(
         ));
     }
 
-    // 3. Ensure base branch is checked out
+    // 5. Ensure base branch is checked out
     let checkout = Command::new("git")
         .arg("-C")
         .arg(repo_root)
@@ -334,7 +428,7 @@ pub fn execute_merge(
         ));
     }
 
-    // 4. Merge each candidate branch
+    // 6. Merge each candidate branch
     let mut merged_branches = Vec::new();
     for bv in &plan.branches {
         let msg = format!(
@@ -358,7 +452,8 @@ pub fn execute_merge(
         merged_branches.push(bv.branch.clone());
     }
 
-    // 5. POST-INTEGRATION VERIFICATION: Re-run tests after integration (never the worker's own run!)
+    // 7. POST-INTEGRATION VERIFICATION: re-run tests on the integrated tree,
+    //    which is a different run from the one each worker did on its own.
     let mut post_integration_checks = Vec::new();
     for cmd_str in post_integration_test_cmds {
         let out = Command::new("sh")
@@ -631,5 +726,244 @@ mod tests {
         assert!(repo.join("mod2.txt").exists());
         assert!(repo.join("mod3.txt").exists());
         assert!(repo.join("mod4.txt").exists());
+    }
+
+    /// A passing plan built by the worker's own side of the pipeline, ready to
+    /// land, with one clean branch on it.
+    fn landable_plan(repo: &Path) -> MergePlan {
+        build_merge_plan(
+            repo,
+            "master",
+            &[BranchSpec {
+                branch: "feature-x".to_string(),
+                worker: "codex".to_string(),
+                task_id: "task-x".to_string(),
+                checks: vec![BranchCheck {
+                    name: "unit-test".to_string(),
+                    exit_code: 0,
+                    passed: true,
+                    evidence_ref: "logs/test.log".to_string(),
+                }],
+            }],
+        )
+        .unwrap()
+    }
+
+    /// The whole point of `OR-17`: a plan that says everything is fine is not
+    /// enough, because the plan is not where the block lives. It was built before
+    /// anyone objected, and `execute_merge` reads the veto file again.
+    #[test]
+    fn a_veto_lands_on_a_plan_that_already_said_it_was_ready() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        init_git_repo(repo);
+        create_branch_with_commit(repo, "feature-x", "fx.txt", "feature x\n");
+
+        let plan = landable_plan(repo);
+        assert!(
+            plan.all_worker_checks_passed,
+            "the plan itself looks clean before the veto"
+        );
+        let approval = HumanMergeApproval::new("Alice", true, "looks good to me");
+        assert!(
+            execute_merge(repo, &plan, &approval, &["true"]).is_ok(),
+            "and it lands while nothing objects"
+        );
+
+        // Back to a clean base and try again, this time with someone in the way.
+        git(repo, &["reset", "--hard", "HEAD~1"]);
+        let veto = crate::veto::record_veto(
+            repo,
+            "feature-x",
+            "codex",
+            crate::veto::VetoSource::Review,
+            "Alice",
+            "the retry swallows the error",
+        )
+        .unwrap();
+
+        let err = execute_merge(repo, &plan, &approval, &["true"]).unwrap_err();
+        assert!(err.contains("merge refused: 1 open veto"), "{err}");
+        assert!(err.contains(&veto.id), "{err}");
+        assert!(
+            err.contains("the retry swallows the error"),
+            "the reason is in the refusal: {err}"
+        );
+        assert!(
+            err.contains("not codex, which is the worker this veto blocks"),
+            "and so is who may clear it: {err}"
+        );
+        assert!(
+            !repo.join("fx.txt").exists(),
+            "the branch did not reach master"
+        );
+    }
+
+    /// The plan is the reader's view of the block, so it has to carry it: an
+    /// injected failed check, the veto attached, the branch ineligible.
+    #[test]
+    fn the_plan_shows_the_veto_and_stops_calling_the_branch_eligible() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        init_git_repo(repo);
+        create_branch_with_commit(repo, "feature-x", "fx.txt", "feature x\n");
+        crate::veto::record_veto(
+            repo,
+            "feature-x",
+            "codex",
+            crate::veto::VetoSource::Verification,
+            "ci",
+            "clippy exited 101",
+        )
+        .unwrap();
+
+        let plan = landable_plan(repo);
+        assert!(!plan.all_worker_checks_passed);
+        let verdict = &plan.branches[0];
+        assert!(!verdict.eligible);
+        assert!(
+            verdict.precheck.clean,
+            "it still merges cleanly, and that is not enough"
+        );
+        assert_eq!(verdict.vetoes.len(), 1);
+        assert_eq!(verdict.vetoes[0].reason, "clippy exited 101");
+        assert!(verdict
+            .worker_checks
+            .iter()
+            .any(|c| c.name == "veto:veto-0001" && !c.passed));
+    }
+
+    /// The half that was missing all along: `all_worker_checks_passed` was
+    /// computed, printed and then never consulted. A failed check now blocks,
+    /// and so does the absence of any check — nothing proven is nothing passed.
+    #[test]
+    fn a_failed_check_blocks_and_so_does_a_branch_with_no_checks_at_all() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        init_git_repo(repo);
+        create_branch_with_commit(repo, "feature-x", "fx.txt", "feature x\n");
+        let approval = HumanMergeApproval::new("Alice", true, "looks good to me");
+
+        let red = build_merge_plan(
+            repo,
+            "master",
+            &[BranchSpec {
+                branch: "feature-x".to_string(),
+                worker: "codex".to_string(),
+                task_id: "task-x".to_string(),
+                checks: vec![BranchCheck {
+                    name: "unit-test".to_string(),
+                    exit_code: 101,
+                    passed: false,
+                    evidence_ref: "logs/test.log".to_string(),
+                }],
+            }],
+        )
+        .unwrap();
+        let err = execute_merge(repo, &red, &approval, &["true"]).unwrap_err();
+        assert!(err.contains("merge refused: failed checks"), "{err}");
+        assert!(err.contains("unit-test exited 101"), "{err}");
+        assert!(!repo.join("fx.txt").exists());
+
+        let unproven = build_merge_plan(
+            repo,
+            "master",
+            &[BranchSpec {
+                branch: "feature-x".to_string(),
+                worker: "codex".to_string(),
+                task_id: "task-x".to_string(),
+                checks: vec![],
+            }],
+        )
+        .unwrap();
+        let err = execute_merge(repo, &unproven, &approval, &["true"]).unwrap_err();
+        assert!(
+            err.contains("no recorded check"),
+            "an empty check list is not a pass: {err}"
+        );
+        assert!(!repo.join("fx.txt").exists());
+    }
+
+    /// A veto is a block, not a sentence: once someone with standing clears it,
+    /// the same branch lands.
+    #[test]
+    fn clearing_the_veto_by_a_name_that_is_not_the_blocked_worker_lets_it_land() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        init_git_repo(repo);
+        create_branch_with_commit(repo, "feature-x", "fx.txt", "feature x\n");
+        crate::veto::record_veto(
+            repo,
+            "feature-x",
+            "codex",
+            crate::veto::VetoSource::Review,
+            "Alice",
+            "the retry swallows the error",
+        )
+        .unwrap();
+        let plan = landable_plan(repo);
+        let approval = HumanMergeApproval::new("Alice", true, "looks good to me");
+
+        // The blocked party cannot be the one who unblocks itself, and saying so
+        // does not change the record.
+        assert!(crate::veto::clear_veto(repo, "veto-0001", "codex", None).is_err());
+        assert!(execute_merge(repo, &plan, &approval, &["true"]).is_err());
+
+        crate::veto::clear_veto(repo, "veto-0001", "Grace", None).unwrap();
+        let after = landable_plan(repo);
+        assert!(
+            after.all_worker_checks_passed,
+            "the veto is gone from the plan"
+        );
+        let outcome = execute_merge(repo, &after, &approval, &["true"]).unwrap();
+        assert_eq!(outcome.merged_branches, vec!["feature-x".to_string()]);
+        assert!(repo.join("fx.txt").exists());
+    }
+
+    /// A veto file that will not parse has to stop the plan, not clear it.
+    #[test]
+    fn a_corrupt_veto_file_stops_the_plan_rather_than_passing_it() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        init_git_repo(repo);
+        create_branch_with_commit(repo, "feature-x", "fx.txt", "feature x\n");
+        crate::veto::record_veto(
+            repo,
+            "feature-x",
+            "codex",
+            crate::veto::VetoSource::Review,
+            "Alice",
+            "x",
+        )
+        .unwrap();
+        std::fs::write(crate::veto::veto_path(repo), "{ truncated").unwrap();
+
+        let err = build_merge_plan(
+            repo,
+            "master",
+            &[BranchSpec {
+                branch: "feature-x".to_string(),
+                worker: "codex".to_string(),
+                task_id: "task-x".to_string(),
+                checks: vec![BranchCheck {
+                    name: "unit-test".to_string(),
+                    exit_code: 0,
+                    passed: true,
+                    evidence_ref: "e".to_string(),
+                }],
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("unreadable veto list"), "{err}");
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .status()
+            .expect("git is on PATH");
+        assert!(status.success(), "git {args:?} failed");
     }
 }

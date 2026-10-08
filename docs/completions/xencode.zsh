@@ -1223,6 +1223,34 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(veto)
+_arguments "${_arguments_options[@]}" : \
+'--source=[What kind of outcome the block comes from\: review or verification]:SOURCE:_default' \
+'--raised-by=[Who or what raised it]:RAISED_BY:_default' \
+'--worker=[The worker being blocked; defaults to the branch'\''s commit author]:WORKER:_default' \
+'--reason=[Why the branch must not land]:REASON:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':branch -- Candidate branch to block:_default' \
+&& ret=0
+;;
+(clear-veto)
+_arguments "${_arguments_options[@]}" : \
+'--by=[The reviewer or the human lifting the block]:BY:_default' \
+'--policy=[A policy statement that names the veto it clears]:POLICY:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- The veto id, as printed by `merge plan` or `merge veto`:_default' \
+&& ret=0
+;;
+(vetoes)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'--open[Only the ones still blocking]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__merge__subcmd__help_commands" \
@@ -1244,6 +1272,18 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (land)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(veto)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clear-veto)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(vetoes)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -2972,6 +3012,18 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(veto)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clear-veto)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(vetoes)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
         esac
     ;;
 esac
@@ -4556,8 +4608,16 @@ _xencode__subcmd__help__subcmd__merge_commands() {
 'precheck:Speculatively precheck a candidate branch against a base branch using git merge-tree' \
 'plan:Build a multi-branch merge plan with conflict prechecks and worker checks' \
 'land:Land branches into base branch guarded by a named human decision' \
+'veto:Block a branch from landing, over a review or a verification outcome' \
+'clear-veto:Lift one open veto, by a name that is not the blocked worker' \
+'vetoes:List the vetoes on record for this repository' \
     )
     _describe -t commands 'xencode help merge commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__clear-veto_commands] )) ||
+_xencode__subcmd__help__subcmd__merge__subcmd__clear-veto_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help merge clear-veto commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__land_commands] )) ||
 _xencode__subcmd__help__subcmd__merge__subcmd__land_commands() {
@@ -4573,6 +4633,16 @@ _xencode__subcmd__help__subcmd__merge__subcmd__plan_commands() {
 _xencode__subcmd__help__subcmd__merge__subcmd__precheck_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help merge precheck commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__veto_commands] )) ||
+_xencode__subcmd__help__subcmd__merge__subcmd__veto_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help merge veto commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__merge__subcmd__vetoes_commands] )) ||
+_xencode__subcmd__help__subcmd__merge__subcmd__vetoes_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help merge vetoes commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__migrate_commands] )) ||
 _xencode__subcmd__help__subcmd__migrate_commands() {
@@ -5416,9 +5486,17 @@ _xencode__subcmd__merge_commands() {
 'precheck:Speculatively precheck a candidate branch against a base branch using git merge-tree' \
 'plan:Build a multi-branch merge plan with conflict prechecks and worker checks' \
 'land:Land branches into base branch guarded by a named human decision' \
+'veto:Block a branch from landing, over a review or a verification outcome' \
+'clear-veto:Lift one open veto, by a name that is not the blocked worker' \
+'vetoes:List the vetoes on record for this repository' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode merge commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__clear-veto_commands] )) ||
+_xencode__subcmd__merge__subcmd__clear-veto_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge clear-veto commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__merge__subcmd__help_commands] )) ||
 _xencode__subcmd__merge__subcmd__help_commands() {
@@ -5426,9 +5504,17 @@ _xencode__subcmd__merge__subcmd__help_commands() {
 'precheck:Speculatively precheck a candidate branch against a base branch using git merge-tree' \
 'plan:Build a multi-branch merge plan with conflict prechecks and worker checks' \
 'land:Land branches into base branch guarded by a named human decision' \
+'veto:Block a branch from landing, over a review or a verification outcome' \
+'clear-veto:Lift one open veto, by a name that is not the blocked worker' \
+'vetoes:List the vetoes on record for this repository' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode merge help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__clear-veto_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__clear-veto_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help clear-veto commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__merge__subcmd__help__subcmd__help_commands() {
@@ -5450,6 +5536,16 @@ _xencode__subcmd__merge__subcmd__help__subcmd__precheck_commands() {
     local commands; commands=()
     _describe -t commands 'xencode merge help precheck commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__veto_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__veto_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help veto commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__help__subcmd__vetoes_commands] )) ||
+_xencode__subcmd__merge__subcmd__help__subcmd__vetoes_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge help vetoes commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__merge__subcmd__land_commands] )) ||
 _xencode__subcmd__merge__subcmd__land_commands() {
     local commands; commands=()
@@ -5464,6 +5560,16 @@ _xencode__subcmd__merge__subcmd__plan_commands() {
 _xencode__subcmd__merge__subcmd__precheck_commands() {
     local commands; commands=()
     _describe -t commands 'xencode merge precheck commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__veto_commands] )) ||
+_xencode__subcmd__merge__subcmd__veto_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge veto commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__merge__subcmd__vetoes_commands] )) ||
+_xencode__subcmd__merge__subcmd__vetoes_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode merge vetoes commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__migrate_commands] )) ||
 _xencode__subcmd__migrate_commands() {

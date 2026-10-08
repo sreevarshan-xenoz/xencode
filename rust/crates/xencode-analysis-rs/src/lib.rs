@@ -16,6 +16,7 @@ pub mod runtime_hazards;
 pub mod search;
 pub mod security;
 pub mod toolchain;
+pub mod veto;
 pub mod web;
 
 pub use compete::{
@@ -26,6 +27,10 @@ pub use compete::{
 pub use merge_decision::{
     build_merge_plan, execute_merge, precheck_branch, BranchCheck, BranchSpec, BranchVerdict,
     HumanMergeApproval, IntegrationCheck, MergeOutcome, MergePlan, MergePrecheck,
+};
+pub use veto::{
+    check_clearance, clear_veto, load_vetoes, open_vetoes_for, persist_clearance, record_veto,
+    veto_path, Veto, VetoClearance, VetoSource, VetoStore, VETO_FILE,
 };
 
 pub use analyzer::CodeAnalyzer;

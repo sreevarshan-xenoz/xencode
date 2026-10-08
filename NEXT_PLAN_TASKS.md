@@ -21,7 +21,7 @@
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2792 tests passing, zero warnings (re-verified 2026-10-08, after `OR-14`; 19 ignored, so 2811 in the run)
+- [x] Workspace gates green — 16 crates, 2813 tests passing, zero warnings (re-verified 2026-10-08, after `OR-17`; 19 ignored, so 2832 in the run, counted over 96 result lines)
 
 ## Model Catalog Honesty
 
@@ -12605,12 +12605,51 @@ worker, `OR-` for the thing that decides what workers to talk to.
       agent is handed this record instead of prose, which is the row's second done-when
       clause. `AE-1` is already open for exactly that half and is where the work belongs;
       the shape itself is finished and tested.
-- [ ] **OR-17 — the veto.** A review or verification outcome can block a merge, and the
+- [x] **OR-17 — the veto.** A review or verification outcome can block a merge, and the
       block cannot be lifted by the worker that caused it. Only a named reviewer, the
       human, or a policy that says out loud what it clears.
       **Done-when:** a vetoed run reads as blocked, with the reason and who may clear it;
       nothing a worker emits can change its own veto; and clearing one is an audited event
       on `EV-11`'s log rather than a keypress.
+      **The defect this found is the same shape as `OR-4`/`OR-15`/`OR-16`: a number that
+      was computed, printed and asserted in a test, and never consulted.** At `a9144266`
+      `all_worker_checks_passed` appears in `merge_decision.rs` only as a struct field
+      (line 68), two writes (222, 263), the plan's own report line (284) and a test
+      assertion (605) — `execute_merge` read the human approval and the git conflict and
+      nothing else, so a plan printing `All worker checks passed: false` still landed the
+      branch. Fixed by making the land check four things instead of two: a named human, no
+      open veto (re-read from disk, so a plan built before the veto landed is not a way
+      around it), every recorded check passed with an empty list counting as unproven, and
+      a clean merge. Vetoes live in `.xencode/vetoes.json` in the repository; the blocked
+      party is taken from `git log -1 --format=%an` rather than typed in, because the commit
+      author is the only identity on this machine that was not supplied by whoever is asking.
+      Names themselves are still self-asserted and the module says so — the guard is against
+      an outcome laundering itself, not against a determined user of the box.
+      **Proved live, both directions, against the real binary in a throwaway repo** (`arm-1`
+      authored by `Tester`): `merge land` committed `9c414ecc` with nothing on record
+      (`Post-integration checks (1): test -f feature.rs: PASSED (exit code 0)`); the repo was
+      then unwound to its first commit and the *same command* run again after
+      `merge veto arm-1 --source review --raised-by Grace --reason "auth path untested, will
+      not land"`, which printed `error: merge refused: 1 open veto(es), and a veto is not the
+      worker's to lift`. The plan reads `All worker checks passed: false`, `Open vetoes: 1 —
+      this plan cannot land`, `eligible: false` and names who may clear it. A worker lifting
+      its own block was refused on the case-folded match — `clear-veto veto-0001 --by tester`
+      gave `veto 'veto-0001' blocks 'Tester', the worker whose branch it is`, `merge vetoes
+      --open` still listed it, and only `--by Grace` cleared it, after which the same command
+      committed again. Both decisions are on `EV-11`'s log: `audit verify` reports
+      `2 records, chain intact` over `merge_vetoed` then `merge_veto_cleared`, and changing
+      one word of a stored record made it report `2 records, chain broken — line 1: the
+      contents do not match the digest recorded on this line, and 1 further problems` (exit 1)
+      until restored. The two halves fail in opposite directions on purpose: recording names
+      the dead trail in a warning and keeps the block, while lifting one writes nothing until
+      the trail has accepted the record — with `audit.jsonl` replaced by a directory, the
+      clear answered `'veto-0001' is still open and nothing was changed` and the veto file's
+      md5 (`7246ccce…`) was byte-identical afterwards, so there was no clearance to take back.
+      A block against a branch that is not there is refused, and a veto file that does not
+      parse is an error (`an unreadable veto list is not an empty one`) rather than a clean
+      slate. `merge_veto_cli.rs` holds 7 of these as integration tests, `veto.rs` 13 unit
+      tests and `merge_decision.rs` 5 more, including a plan that already said it was ready
+      before the block arrived.
 
 - **OR-18 — put the lease and the contract in the launch path, or say so.** *Effort: M.*
   `OR-4` and `OR-15` are both built and neither is reachable: `LeaseRegistry` is called from

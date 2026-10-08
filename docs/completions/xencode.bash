@@ -697,6 +697,9 @@ _xencode() {
             xencode__subcmd__help__subcmd__memory__subcmd__policy,show)
                 cmd="xencode__subcmd__help__subcmd__memory__subcmd__policy__subcmd__show"
                 ;;
+            xencode__subcmd__help__subcmd__merge,clear-veto)
+                cmd="xencode__subcmd__help__subcmd__merge__subcmd__clear__subcmd__veto"
+                ;;
             xencode__subcmd__help__subcmd__merge,land)
                 cmd="xencode__subcmd__help__subcmd__merge__subcmd__land"
                 ;;
@@ -705,6 +708,12 @@ _xencode() {
                 ;;
             xencode__subcmd__help__subcmd__merge,precheck)
                 cmd="xencode__subcmd__help__subcmd__merge__subcmd__precheck"
+                ;;
+            xencode__subcmd__help__subcmd__merge,veto)
+                cmd="xencode__subcmd__help__subcmd__merge__subcmd__veto"
+                ;;
+            xencode__subcmd__help__subcmd__merge,vetoes)
+                cmd="xencode__subcmd__help__subcmd__merge__subcmd__vetoes"
                 ;;
             xencode__subcmd__help__subcmd__models,advice)
                 cmd="xencode__subcmd__help__subcmd__models__subcmd__advice"
@@ -1027,6 +1036,9 @@ _xencode() {
             xencode__subcmd__memory__subcmd__policy__subcmd__help,show)
                 cmd="xencode__subcmd__memory__subcmd__policy__subcmd__help__subcmd__show"
                 ;;
+            xencode__subcmd__merge,clear-veto)
+                cmd="xencode__subcmd__merge__subcmd__clear__subcmd__veto"
+                ;;
             xencode__subcmd__merge,help)
                 cmd="xencode__subcmd__merge__subcmd__help"
                 ;;
@@ -1039,6 +1051,15 @@ _xencode() {
             xencode__subcmd__merge,precheck)
                 cmd="xencode__subcmd__merge__subcmd__precheck"
                 ;;
+            xencode__subcmd__merge,veto)
+                cmd="xencode__subcmd__merge__subcmd__veto"
+                ;;
+            xencode__subcmd__merge,vetoes)
+                cmd="xencode__subcmd__merge__subcmd__vetoes"
+                ;;
+            xencode__subcmd__merge__subcmd__help,clear-veto)
+                cmd="xencode__subcmd__merge__subcmd__help__subcmd__clear__subcmd__veto"
+                ;;
             xencode__subcmd__merge__subcmd__help,help)
                 cmd="xencode__subcmd__merge__subcmd__help__subcmd__help"
                 ;;
@@ -1050,6 +1071,12 @@ _xencode() {
                 ;;
             xencode__subcmd__merge__subcmd__help,precheck)
                 cmd="xencode__subcmd__merge__subcmd__help__subcmd__precheck"
+                ;;
+            xencode__subcmd__merge__subcmd__help,veto)
+                cmd="xencode__subcmd__merge__subcmd__help__subcmd__veto"
+                ;;
+            xencode__subcmd__merge__subcmd__help,vetoes)
+                cmd="xencode__subcmd__merge__subcmd__help__subcmd__vetoes"
                 ;;
             xencode__subcmd__models,advice)
                 cmd="xencode__subcmd__models__subcmd__advice"
@@ -3970,8 +3997,22 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__merge)
-            opts="precheck plan land"
+            opts="precheck plan land veto clear-veto vetoes"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__merge__subcmd__clear__subcmd__veto)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -4012,6 +4053,34 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__merge__subcmd__precheck)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__merge__subcmd__veto)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__merge__subcmd__vetoes)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -6136,7 +6205,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__merge)
-            opts="-h --help precheck plan land help"
+            opts="-h --help precheck plan land veto clear-veto vetoes help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -6149,9 +6218,45 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        xencode__subcmd__merge__subcmd__help)
-            opts="precheck plan land help"
+        xencode__subcmd__merge__subcmd__clear__subcmd__veto)
+            opts="-h --by --policy --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --by)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --policy)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__merge__subcmd__help)
+            opts="precheck plan land veto clear-veto vetoes help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__merge__subcmd__help__subcmd__clear__subcmd__veto)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -6206,6 +6311,34 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__merge__subcmd__help__subcmd__precheck)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__merge__subcmd__help__subcmd__veto)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__merge__subcmd__help__subcmd__vetoes)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -6290,6 +6423,54 @@ _xencode() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__merge__subcmd__veto)
+            opts="-h --source --raised-by --worker --reason --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --source)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --raised-by)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --worker)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --reason)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__merge__subcmd__vetoes)
+            opts="-h --open --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0

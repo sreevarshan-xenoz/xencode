@@ -1593,6 +1593,43 @@ enum MergeAction {
         #[arg(long, default_value = "text")]
         format: OutputFormat,
     },
+    /// Block a branch from landing, over a review or a verification outcome
+    Veto {
+        /// Candidate branch to block
+        branch: String,
+        /// What kind of outcome the block comes from: review or verification
+        #[arg(long, default_value = "review")]
+        source: String,
+        /// Who or what raised it
+        #[arg(long, default_value = "human")]
+        raised_by: String,
+        /// The worker being blocked; defaults to the branch's commit author
+        #[arg(long)]
+        worker: Option<String>,
+        /// Why the branch must not land
+        #[arg(long)]
+        reason: String,
+    },
+    /// Lift one open veto, by a name that is not the blocked worker
+    ClearVeto {
+        /// The veto id, as printed by `merge plan` or `merge veto`
+        id: String,
+        /// The reviewer or the human lifting the block
+        #[arg(long = "by")]
+        by: String,
+        /// A policy statement that names the veto it clears
+        #[arg(long)]
+        policy: Option<String>,
+    },
+    /// List the vetoes on record for this repository
+    Vetoes {
+        /// Only the ones still blocking
+        #[arg(long)]
+        open: bool,
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Subcommand)]
@@ -7493,6 +7530,55 @@ fn run_compete(action: CompeteAction) -> Result<(), String> {
     }
 }
 
+/// Who last committed on this branch, read from git rather than asserted. A
+/// veto has to name the party it blocks before anyone asks who is clearing it,
+/// and the branch's own author is the only identity here that was not typed in
+/// by whoever is asking.
+fn branch_author(repo: &std::path::Path, branch: &str) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["log", "-1", "--format=%an", branch])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let author = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!author.is_empty()).then_some(author)
+}
+
+/// The trail a veto belongs to: the same chained `audit.jsonl` the server writes
+/// session events to, so `xencode audit verify` walks one log rather than two.
+fn veto_audit_sink() -> Result<xencode_server_rs::audit::AuditSink, String> {
+    let path = xencode_config_rs::paths::state_dir()
+        .map_err(|e| format!("cannot find where xencode keeps its records: {e}"))?
+        .join("audit.jsonl");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    Ok(xencode_server_rs::audit::AuditSink::to_file(path))
+}
+
+/// One veto record as the trail wants it: who acted, what it was about, and the
+/// reasoning rather than a pointer to it.
+fn veto_audit_event(
+    action: xencode_collaboration_rs::AuditAction,
+    veto: &xencode_analysis_rs::Veto,
+    actor: &str,
+    detail: String,
+) -> xencode_collaboration_rs::AuditEvent {
+    xencode_collaboration_rs::AuditEvent {
+        seq: 0,
+        at: xencode_collaboration_rs::audit_stamp(),
+        actor: actor.to_string(),
+        action,
+        target: veto.branch.clone(),
+        detail,
+    }
+}
+
 fn run_merge(action: MergeAction) -> Result<(), String> {
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     match action {
@@ -7547,7 +7633,7 @@ fn run_merge(action: MergeAction) -> Result<(), String> {
                 };
                 specs.push(xencode_analysis_rs::BranchSpec {
                     branch: b.clone(),
-                    worker: "worker".to_string(),
+                    worker: branch_author(&root, b).unwrap_or_else(|| "unknown".to_string()),
                     task_id: format!("task-{}", b),
                     checks: vec![xencode_analysis_rs::BranchCheck {
                         name: "branch-commit-verified".to_string(),
@@ -7570,12 +7656,16 @@ fn run_merge(action: MergeAction) -> Result<(), String> {
                     );
                 }
                 _ => {
+                    let open: usize = plan.branches.iter().map(|b| b.vetoes.len()).sum();
                     println!("Merge Plan for base branch '{}':", plan.base_branch);
                     println!("  Overall clean: {}", plan.all_clean);
                     println!(
                         "  All worker checks passed: {}",
                         plan.all_worker_checks_passed
                     );
+                    if open > 0 {
+                        println!("  Open vetoes: {open} — this plan cannot land");
+                    }
                     println!("  Candidate branches ({}):", plan.branches.len());
                     for bv in &plan.branches {
                         let short_sha = if bv.commit_sha.len() >= 8 {
@@ -7593,6 +7683,10 @@ fn run_merge(action: MergeAction) -> Result<(), String> {
                         );
                         if !bv.precheck.clean {
                             println!("      Conflicts: {:?}", bv.precheck.conflict_files);
+                        }
+                        for veto in &bv.vetoes {
+                            println!("      BLOCKED — {}", veto.summary_line());
+                            println!("      clear it: {}", veto.who_may_clear());
                         }
                     }
                 }
@@ -7622,7 +7716,7 @@ fn run_merge(action: MergeAction) -> Result<(), String> {
                 };
                 specs.push(xencode_analysis_rs::BranchSpec {
                     branch: b.clone(),
-                    worker: "worker".to_string(),
+                    worker: branch_author(&root, b).unwrap_or_else(|| "unknown".to_string()),
                     task_id: format!("task-{}", b),
                     checks: vec![xencode_analysis_rs::BranchCheck {
                         name: "branch-commit-verified".to_string(),
@@ -7673,6 +7767,146 @@ fn run_merge(action: MergeAction) -> Result<(), String> {
                             chk.command,
                             if chk.passed { "PASSED" } else { "FAILED" },
                             chk.exit_code
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        MergeAction::Veto {
+            branch,
+            source,
+            raised_by,
+            worker,
+            reason,
+        } => {
+            let source = xencode_analysis_rs::VetoSource::parse(&source).ok_or_else(|| {
+                format!("unknown veto source '{source}' — it is 'review' or 'verification'")
+            })?;
+            let exists = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["rev-parse", "--verify", &branch])
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false);
+            if !exists {
+                return Err(format!(
+                    "'{branch}' is not a branch in this repository, and a veto names the change \
+                     it blocks"
+                ));
+            }
+            let author = match worker.as_deref() {
+                Some(given) if !given.trim().is_empty() => given.trim().to_string(),
+                _ => branch_author(&root, &branch).ok_or_else(|| {
+                    format!("cannot read who authored '{branch}' from git; pass --worker")
+                })?,
+            };
+            let veto = xencode_analysis_rs::record_veto(
+                &root, &branch, &author, source, &raised_by, &reason,
+            )?;
+            println!("Veto {} blocks '{}'.", veto.id, veto.branch);
+            println!("  blocked worker: {}", veto.worker);
+            println!("  reason: {}", veto.reason);
+            println!("  clear it: {}", veto.who_may_clear());
+            println!("  xencode merge clear-veto {} --by \"<name>\"", veto.id);
+            // The block stands whatever the logging does: refusing to record a
+            // veto because the trail is unwritable would remove protection.
+            let event = veto_audit_event(
+                xencode_collaboration_rs::AuditAction::MergeVetoed,
+                &veto,
+                &veto.raised_by,
+                format!("{}: {}", veto.id, veto.reason),
+            );
+            match veto_audit_sink()?.append_external(&event) {
+                Ok(seq) => println!("  recorded as audit sequence {seq}"),
+                Err(e) => eprintln!("  warning: the veto holds but is not in the audit trail: {e}"),
+            }
+            Ok(())
+        }
+        MergeAction::ClearVeto { id, by, policy } => {
+            // Decide, then record, then write. The clearance never reaches the
+            // veto file until the audit trail has accepted it, so a clear that
+            // cannot be audited leaves the branch blocked without having to be
+            // taken back afterwards.
+            let on_record = xencode_analysis_rs::load_vetoes(&root)?;
+            let veto = on_record
+                .iter()
+                .find(|v| v.id == id.trim())
+                .ok_or_else(|| format!("no veto '{id}' is on record in this repository"))?;
+            let cleared = xencode_analysis_rs::check_clearance(veto, &by, policy.as_deref())?;
+            let detail = match &cleared.cleared {
+                Some(c) => {
+                    let policy = c
+                        .policy
+                        .as_deref()
+                        .map(|text| format!(" under the policy: {text}"))
+                        .unwrap_or_default();
+                    format!(
+                        "{} lifted by {}{policy} — it had blocked '{}' for: {}",
+                        cleared.id, c.cleared_by, cleared.branch, cleared.reason
+                    )
+                }
+                None => format!("{} lifted by {by}", cleared.id),
+            };
+            let event = veto_audit_event(
+                xencode_collaboration_rs::AuditAction::MergeVetoCleared,
+                &cleared,
+                &by,
+                detail,
+            );
+            if let Err(e) = veto_audit_sink()?.append_external(&event) {
+                return Err(format!(
+                    "clearing a veto is an audited event, and the audit trail would not take \
+                     it: {e}. '{}' is still open and nothing was changed.",
+                    cleared.id
+                ));
+            }
+            xencode_analysis_rs::persist_clearance(&root, &cleared).map_err(|e| {
+                format!(
+                    "the audit trail now says '{}' was cleared by {}, but the veto file would \
+                     not take it: {e}. The branch stays blocked, so it is the record that is \
+                     wrong, not the merge.",
+                    cleared.id,
+                    by.trim()
+                )
+            })?;
+            println!("Veto {} no longer blocks '{}'.", cleared.id, cleared.branch);
+            println!("  cleared by: {}", by.trim());
+            if let Some(p) = cleared.cleared.as_ref().and_then(|c| c.policy.as_ref()) {
+                println!("  under policy: {p}");
+            }
+            Ok(())
+        }
+        MergeAction::Vetoes { open, format } => {
+            let mut all = xencode_analysis_rs::load_vetoes(&root)?;
+            if open {
+                all.retain(|veto| veto.is_open());
+            }
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    if all.is_empty() {
+                        println!("No vetoes on record for this repository.");
+                    }
+                    for veto in &all {
+                        let state = match &veto.cleared {
+                            None => "open".to_string(),
+                            Some(c) => match &c.policy {
+                                Some(p) => format!("cleared by {} under policy: {p}", c.cleared_by),
+                                None => format!("cleared by {}", c.cleared_by),
+                            },
+                        };
+                        println!(
+                            "{}  {:<12}  {}  [{state}]",
+                            veto.id,
+                            veto.branch,
+                            veto.summary_line()
                         );
                     }
                 }

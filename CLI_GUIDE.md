@@ -4538,11 +4538,23 @@ Speculatively inspect whether a candidate branch merges cleanly into the target 
 
 ### `xencode merge plan --branch <branch> [--branch <branch2>...] [--base <base>] [--format text|json]`
 
-Build an evidence-backed integration plan evaluating candidate branches, checking commit validation and conflict status before presenting integration readiness.
+Build an evidence-backed integration plan evaluating candidate branches, checking commit validation and conflict status before presenting integration readiness. It also reads the repository's open merge vetoes (`.xencode/vetoes.json`): a branch under one is reported `eligible: false`, the plan prints `Open vetoes: <n> — this plan cannot land` with each veto's reason and who may clear it, and a branch with no recorded check at all is not reported as passing either.
 
 ### `xencode merge land --branch <branch>... --approved-by <name> [--base <base>] [--test-cmd <cmd>...] [--format text|json]`
 
-Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
+Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Four things must hold before anything is written: a named human approved it, no veto is open on any branch in the plan (re-read from disk, so a plan built before a veto landed is not a way around it), every recorded worker check passed, and the tree merges clean. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
+
+### `xencode merge veto <branch> [--source review|verification] [--raised-by <name>] [--worker <name>] --reason <text>`
+
+Block a branch from landing over a review or a verification outcome. `--reason` is required, and the branch must exist — `git rev-parse --verify` refuses a veto naming a change that is not there. The blocked worker defaults to the branch's commit author (`git log -1 --format=%an`), which is the only identity here not typed in by whoever is asking; `--worker` overrides it. Prints the veto id, what it blocks and the exact command that clears it. Recording succeeds even if the audit trail cannot be written, and says so on the warning line: the block holds either way.
+
+### `xencode merge clear-veto <id> --by <name> [--policy <text>]`
+
+Lift one open veto. The name is refused if it matches the blocked worker (compared trimmed and case-insensitively, so `tester` does not clear a veto on `Tester`), and a `--policy` is refused unless its text names the veto id it claims to clear. Clearing is an audited event: nothing is written to the veto file until the record has been accepted by the audit trail, so a clear the trail refuses answers that the veto is still open and changes nothing.
+
+### `xencode merge vetoes [--open] [--format text|json]`
+
+List the vetoes on record for this repository, all of them or only the ones still blocking.
 
 ### `xencode team [list|show|plan|run] [--format text|json]`
 
