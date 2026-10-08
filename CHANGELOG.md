@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AR-2`: kilo is found from any directory, and CI stops failing on which agents a machine has
+
+- kilo installs itself to `~/.kilo/bin/kilo`, off `PATH`. Its roster entry named that
+  location as `.kilo/bin/kilo`, and a name with a slash in it is looked up relative to
+  the current directory, so an installed kilo was found only when xencode ran from the
+  home directory. The entry is now `~/.kilo/bin/kilo`.
+- Two roster tests asserted that every agent in the roster, and `agy` in particular, was
+  installed on the machine running them. GitHub's runner has none of them, and these two
+  tests are what failed CI on the latest runs; CI has not passed since 2026-09-27. Whether
+  anything later in the suite also fails on Linux is not known yet, because the run
+  stopped at this crate. The tests now check what holds on any machine:
+  every off-`PATH` location is written home-relative, and `agy`'s location is checked only
+  where `agy` is installed.
+
 ### Fixed — `PL-2` (follow-up): files keep LF line endings on Windows
 
 On Windows, git's default setting turned every LF line ending into CRLF on checkout. A

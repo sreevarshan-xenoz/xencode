@@ -309,7 +309,7 @@ pub const ROSTER: &[AgentSpec] = &[
         // kilo's own installer puts it; `which` walks `PATH` only, so this
         // entry keeps the documented location as a fallback rather than
         // reporting an installed agent as absent.
-        binaries: &["kilo", ".kilo/bin/kilo"],
+        binaries: &["kilo", "~/.kilo/bin/kilo"],
         one_shot: "kilo run {prompt}",
         stream_flag: Some("--format json"),
         advertises_daemon: true,   // `kilo serve`, `kilo attach <url>`
@@ -991,17 +991,29 @@ mod tests {
     /// reported it missing while the binary sat in `~/.local/bin`; and `kilo`
     /// was installed outside `PATH` entirely, where even its real name does not
     /// resolve. Both are one entry with two executable names.
+    ///
+    /// Which agents are installed differs from machine to machine — CI has none —
+    /// so presence is not asserted here. What holds everywhere is the shape of the
+    /// names: a location off `PATH` has to be written home-relative, because
+    /// `which` resolves any other path-shaped name against the working directory.
+    /// kilo's entry was once `.kilo/bin/kilo`, found only when xencode happened to
+    /// run from the home directory.
     #[test]
     fn an_agent_is_found_by_any_of_its_binary_names() {
         for spec in ROSTER {
-            let found = spec.binaries.iter().find_map(|b| which(b));
-            assert!(
-                found.is_some(),
-                "{} lists {:?} and none of them resolve",
-                spec.name,
-                spec.binaries
-            );
+            assert!(!spec.binaries.is_empty(), "{} names no binary", spec.name);
+            for binary in spec.binaries {
+                if binary.contains('/') {
+                    assert!(
+                        binary.starts_with("~/"),
+                        "{}'s {binary} would resolve against the working directory",
+                        spec.name
+                    );
+                }
+            }
         }
+        let kilo = find("kilo").expect("kilo is in the roster");
+        assert!(kilo.binaries.contains(&"~/.kilo/bin/kilo"));
     }
 
     /// The bug this replaced: a name was called "not installed" from a
