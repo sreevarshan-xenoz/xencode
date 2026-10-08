@@ -1911,13 +1911,14 @@ fn preview_and_bound_files(root: &Path, call: &ToolCall) -> (String, Vec<(PathBu
                 let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
                 (
                     format!(
-                        "rename would turn `{}` ({} in {}) into `{}` at {total} site(s) across {} file(s):{}",
+                        "rename would turn `{}` ({} in {}) into `{}` at {total} site(s) across {} file(s):{}\n\n{}",
                         plan.symbol,
                         plan.kind,
                         plan.definition,
                         plan.new_name,
                         plan.rewrites.len(),
-                        describe_rewrites(&plan.rewrites)
+                        describe_rewrites(&plan.rewrites),
+                        plan.basis
                     ),
                     bound,
                 )
@@ -2896,6 +2897,150 @@ pub(crate) struct RenamePlan {
     pub kind: String,
     /// Per-file rewrites, definition site included.
     pub rewrites: Vec<PlannedRewrite>,
+    /// How the sites were found, said in the preview and in the result, because
+    /// the two ways differ in what they can rename by mistake.
+    pub basis: String,
+}
+
+/// The rename from rust-analyzer's semantic index (`LSP-3`): exactly the places
+/// that resolve to the one symbol, so a struct field, a local variable or an
+/// unrelated item that happens to share the name is left alone.
+///
+/// `Ok(None)` means there is no current index to answer from, with the reason,
+/// and the caller falls back to the syntactic rename. `Err` is a refusal.
+fn semantic_rename_plan(
+    root: &Path,
+    symbol: &str,
+    new_name: &str,
+    in_file: Option<&str>,
+) -> Result<Result<RenamePlan, String>, String> {
+    use xencode_context_rs::scip_index;
+    let Ok(workspace) = xencode_context_rs::verify::manifest_dir(root) else {
+        return Ok(Err("there is no Cargo workspace here".to_string()));
+    };
+    let found = match scip_index::symbols_named(&workspace, symbol) {
+        Ok(found) => found,
+        Err(why) => return Ok(Err(why.to_string())),
+    };
+    // Paths in the index are workspace-relative; the rest of this file speaks
+    // root-relative, so the workspace's place under the root is put in front.
+    let prefix = match workspace.strip_prefix(root) {
+        Ok(rel) if rel.as_os_str().is_empty() => String::new(),
+        Ok(rel) => format!("{}/", rel.to_string_lossy().replace('\\', "/")),
+        Err(_) => {
+            return Ok(Err(
+                "the Cargo workspace is not inside the project root".to_string()
+            ))
+        }
+    };
+    let candidates: Vec<&scip_index::NamedSymbol> = match in_file {
+        Some(asked) => {
+            let asked = asked.trim().trim_start_matches("./").replace('\\', "/");
+            found
+                .iter()
+                .filter(|n| {
+                    n.defined_in.iter().any(|f| {
+                        let full = format!("{prefix}{f}");
+                        full == asked || full.ends_with(&format!("/{asked}"))
+                    })
+                })
+                .collect()
+        }
+        None => found.iter().collect(),
+    };
+    let target = match candidates.as_slice() {
+        [] if found.is_empty() => {
+            return Err(err(format!(
+                "rust-analyzer's index has no declaration of `{symbol}` in this \
+                 workspace, so there is nothing to rename. A local variable is not \
+                 renamed by name, and an item from another crate cannot be"
+            )))
+        }
+        [] => {
+            return Err(err(format!(
+                "`{symbol}` is declared in {}, not in {}",
+                found
+                    .iter()
+                    .flat_map(|n| n.defined_in.iter().map(|f| format!("{prefix}{f}")))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                in_file.unwrap_or_default()
+            )))
+        }
+        [one] => *one,
+        several => {
+            let list = several
+                .iter()
+                .map(|n| {
+                    format!(
+                        "a {} in {}",
+                        n.kind,
+                        n.defined_in
+                            .iter()
+                            .map(|f| format!("{prefix}{f}"))
+                            .collect::<Vec<_>>()
+                            .join(" and ")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(err(format!(
+                "`{symbol}` names {} different items — {list} — so rename refuses \
+                 rather than guess. Pass \"in\" with the file that declares the one \
+                 you mean",
+                several.len()
+            )));
+        }
+    };
+
+    let mut files: Vec<&str> = Vec::new();
+    for site in &target.sites {
+        if !files.contains(&site.file.as_str()) {
+            files.push(&site.file);
+        }
+    }
+    let mut rewrites = Vec::new();
+    for file in files {
+        let (full, display) = workspace_path(root, &format!("{prefix}{file}"))?;
+        let current = read_text(&full, &display)?;
+        let mut spans: Vec<(usize, usize, &str)> = Vec::new();
+        for site in target.sites.iter().filter(|s| s.file == file) {
+            let checked = scip_index::byte_range(&current, site)
+                .filter(|(s, e)| current.get(*s..*e) == Some(symbol));
+            let Some((start, end)) = checked else {
+                return Err(err(format!(
+                    "{display}:{} does not hold `{symbol}` where rust-analyzer's index \
+                     put it, so nothing was renamed. The file has changed since the \
+                     index was built",
+                    site.line + 1
+                )));
+            };
+            spans.push((start, end, new_name));
+        }
+        let updated = splice_replacements(&current, &spans, &display)?;
+        rewrites.push(PlannedRewrite {
+            full,
+            display,
+            current,
+            updated,
+            sites: spans.len(),
+        });
+    }
+    Ok(Ok(RenamePlan {
+        symbol: symbol.to_string(),
+        new_name: new_name.to_string(),
+        definition: target
+            .defined_in
+            .iter()
+            .map(|f| format!("{prefix}{f}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        kind: target.kind.to_string(),
+        rewrites,
+        basis: "Sites from rust-analyzer's semantic index: every place that resolves to \
+                this one item, and nothing else that shares its name."
+            .to_string(),
+    }))
 }
 
 /// Whether a name can be a Rust identifier. Shape only — `cargo check` after
@@ -3039,6 +3184,14 @@ pub(crate) fn plan_rename(
             "{new_name:?} is a Rust keyword, so renaming onto it would break the build"
         )));
     }
+    let in_file = arg_str(args, "in").filter(|s| !s.trim().is_empty());
+
+    // The semantic index first (LSP-3); without a current one, the syntactic
+    // rename below, which says why it was used.
+    let fallback_reason = match semantic_rename_plan(root, symbol, new_name, in_file)? {
+        Ok(plan) => return Ok(plan),
+        Err(why) => why,
+    };
 
     let definitions = definition_sites(root, symbol);
     let (definition, kind) = match definitions.as_slice() {
@@ -3083,6 +3236,11 @@ pub(crate) fn plan_rename(
         definition,
         kind,
         rewrites,
+        basis: format!(
+            "Sites from ast-grep: every Rust identifier spelled `{symbol}`, which also \
+             catches a field, a local variable or another item with that name. Not from \
+             rust-analyzer's semantic index: {fallback_reason}."
+        ),
     })
 }
 
@@ -3108,6 +3266,7 @@ fn tool_rename(
         plan.rewrites.len(),
         describe_rewrites(&plan.rewrites)
     );
+    out.push_str(&format!("\n{}", plan.basis));
     // The second half of QI-2's substrate: the rewrite is checked, not assumed.
     // A failure is reported with the errors, not reverted — the preview gate
     // approved the diff, and silent reverts destroy the evidence of what broke.
@@ -9485,6 +9644,80 @@ patched = ["{fixed}"]
             "let a = compute();\n"
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ---- LSP-3: `rename` from rust-analyzer's semantic index ----
+
+    /// A function, a struct field and a local variable all called `helper`, and
+    /// a caller that reaches the function only through a glob re-export. Runs
+    /// real rust-analyzer and real `cargo check`; skipped, saying so, where
+    /// rust-analyzer is not installed.
+    #[test]
+    fn a_semantic_rename_moves_only_the_item_it_resolves_to() {
+        if std::process::Command::new("rust-analyzer")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("skipping: rust-analyzer is not installed");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("xencode-lsp3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let write = |path: &str, text: &str| std::fs::write(root.join(path), text).unwrap();
+        write(
+            "Cargo.toml",
+            "[package]\nname = \"lsp3sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+        );
+        write(
+            "src/lib.rs",
+            "mod core_impl;\nmod user;\nmod holder;\npub use core_impl::*;\n",
+        );
+        write("src/core_impl.rs", "pub fn helper() -> u32 {\n    7\n}\n");
+        write(
+            "src/user.rs",
+            "use crate::core_impl::helper;\n\npub fn twice() -> u32 {\n    helper() * 2 + crate::helper()\n}\n",
+        );
+        let holder = "pub struct Holder {\n    pub helper: u32,\n}\n\npub fn make() -> u32 {\n    let helper = 2;\n    Holder { helper: 1 }.helper + helper\n}\n";
+        write("src/holder.rs", holder);
+        xencode_context_rs::scip_index::generate(
+            &root,
+            xencode_context_rs::scip_index::SCIP_TIMEOUT,
+        )
+        .expect("rust-analyzer indexes the sample");
+
+        // Two items are called `helper`: the rename names both and changes nothing.
+        let refused = tool_rename(&root, &rename_args("helper", "assist"), 300);
+        assert!(refused.contains("2 different items"), "{refused}");
+        assert!(
+            refused.contains("src/holder.rs") && refused.contains("src/core_impl.rs"),
+            "{refused}"
+        );
+        assert!(std::fs::read_to_string(root.join("src/core_impl.rs"))
+            .unwrap()
+            .contains("fn helper"));
+
+        let mut args = rename_args("helper", "assist");
+        args.insert("in".into(), serde_json::json!("core_impl.rs"));
+        let done = tool_rename(&root, &args, 300);
+        assert!(done.contains("rust-analyzer's semantic index"), "{done}");
+        assert!(done.contains("`cargo check` passes"), "{done}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/core_impl.rs")).unwrap(),
+            "pub fn assist() -> u32 {\n    7\n}\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/user.rs")).unwrap(),
+            "use crate::core_impl::assist;\n\npub fn twice() -> u32 {\n    assist() * 2 + crate::assist()\n}\n"
+        );
+        // The field and the local are other items, and are left exactly as they were.
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/holder.rs")).unwrap(),
+            holder
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     // ---- QI-2: `rename`, one symbol across the tree ----

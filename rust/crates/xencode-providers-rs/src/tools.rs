@@ -840,6 +840,39 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                 "required": ["rule"]
             }),
         },
+        ToolDefinition {
+            name: "rename".to_string(),
+            description: "Rename one Rust item — function, type, field, constant — \
+                          everywhere it is written, declaration and uses, in one \
+                          call, then run `cargo check` and report the verdict. \
+                          With rust-analyzer's semantic index current, only the \
+                          places that resolve to that item change; a local variable \
+                          or another item sharing the name is left alone. Without \
+                          it, every identifier spelled the same changes, and the \
+                          answer says so. Refuses when the name belongs to more \
+                          than one item unless `in` names the declaring file."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "The item's current name"
+                    },
+                    "new_name": {
+                        "type": "string",
+                        "description": "The name it should have; must be a Rust \
+                                        identifier and not a keyword"
+                    },
+                    "in": {
+                        "type": "string",
+                        "description": "The file that declares the item, by path or \
+                                        tail, when the name belongs to more than one"
+                    }
+                },
+                "required": ["symbol", "new_name"]
+            }),
+        },
     ]
 }
 
@@ -1202,7 +1235,8 @@ mod tests {
                 "edit_file",
                 "edit_symbol",
                 "ast_edit",
-                "codemod"
+                "codemod",
+                "rename"
             ]
         );
         for tool in &tools {

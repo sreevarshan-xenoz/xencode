@@ -493,6 +493,176 @@ pub fn semantic_impact_for(
     })
 }
 
+/// How a document counts the characters in its positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoding {
+    Utf8,
+    Utf16,
+    Utf32,
+}
+
+/// One place a symbol is written, exactly where rust-analyzer put it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolSite {
+    /// The document, relative to the workspace, `/`-separated.
+    pub file: String,
+    /// Zero-based line.
+    pub line: usize,
+    /// Start and end on that line, in `encoding` units.
+    pub start: usize,
+    pub end: usize,
+    pub encoding: Encoding,
+    /// The declaration itself, rather than a use of it.
+    pub definition: bool,
+}
+
+/// One symbol with a given name, every place it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedSymbol {
+    /// The SCIP symbol string, which is what tells two same-named items apart.
+    pub symbol: String,
+    /// `function`, `type`, `value`, `macro` or `item`, from the symbol's suffix.
+    pub kind: &'static str,
+    /// Documents that declare it.
+    pub defined_in: Vec<String>,
+    /// Declarations and uses, in document order.
+    pub sites: Vec<SymbolSite>,
+}
+
+fn kind_of(symbol: &str) -> &'static str {
+    if symbol.ends_with(").") {
+        "function"
+    } else if symbol.ends_with('#') {
+        "type"
+    } else if symbol.ends_with('!') {
+        "macro"
+    } else if symbol.ends_with('.') {
+        "value"
+    } else {
+        "item"
+    }
+}
+
+fn single_line(occ: &scip::types::Occurrence) -> Option<(usize, usize, usize)> {
+    match occ.range.as_slice() {
+        [line, start, end] => Some((*line as usize, *start as usize, *end as usize)),
+        [line, start, end_line, end] if line == end_line => {
+            Some((*line as usize, *start as usize, *end as usize))
+        }
+        _ if occ.has_single_line_range() => {
+            let r = occ.single_line_range();
+            Some((
+                r.line as usize,
+                r.start_character as usize,
+                r.end_character as usize,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn encoding_of(doc: &scip::types::Document) -> Encoding {
+    use scip::types::PositionEncoding;
+    match doc.position_encoding.enum_value() {
+        Ok(PositionEncoding::UTF16CodeUnitOffsetFromLineStart) => Encoding::Utf16,
+        Ok(PositionEncoding::UTF32CodeUnitOffsetFromLineStart) => Encoding::Utf32,
+        // rust-analyzer writes UTF-8 offsets; an index that does not say is
+        // read the same way, and every site is checked against the text anyway.
+        _ => Encoding::Utf8,
+    }
+}
+
+/// Every symbol named `name` that this workspace declares, with every place it
+/// is written (`LSP-3`). Locals are never returned: they belong to one body, and
+/// a rename by name should not reach into it. More than one entry means the name
+/// is ambiguous — a function and a field can share it — and the caller has to
+/// choose; this never chooses.
+pub fn symbols_named(workspace: &Path, name: &str) -> Result<Vec<NamedSymbol>, ScipError> {
+    freshness(workspace)?;
+    let index = read_index(&index_path(workspace))?;
+    let mut defined: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for doc in &index.documents {
+        for occ in &doc.occurrences {
+            if occ.symbol_roles & DEFINITION != 0
+                && display_name(&occ.symbol).as_deref() == Some(name)
+            {
+                defined
+                    .entry(occ.symbol.clone())
+                    .or_default()
+                    .insert(normalise(&doc.relative_path));
+            }
+        }
+    }
+    let mut out: Vec<NamedSymbol> = defined
+        .into_iter()
+        .map(|(symbol, files)| NamedSymbol {
+            kind: kind_of(&symbol),
+            symbol,
+            defined_in: files.into_iter().collect(),
+            sites: Vec::new(),
+        })
+        .collect();
+    for doc in &index.documents {
+        let file = normalise(&doc.relative_path);
+        let encoding = encoding_of(doc);
+        for occ in &doc.occurrences {
+            let Some(entry) = out.iter_mut().find(|n| n.symbol == occ.symbol) else {
+                continue;
+            };
+            let Some((line, start, end)) = single_line(occ) else {
+                continue;
+            };
+            let site = SymbolSite {
+                file: file.clone(),
+                line,
+                start,
+                end,
+                encoding,
+                definition: occ.symbol_roles & DEFINITION != 0,
+            };
+            if !entry.sites.contains(&site) {
+                entry.sites.push(site);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The byte range `site` covers in `text`, or `None` when the line or the
+/// columns do not exist there — which is what a file edited since the index was
+/// built looks like.
+pub fn byte_range(text: &str, site: &SymbolSite) -> Option<(usize, usize)> {
+    let mut line_start = 0usize;
+    for _ in 0..site.line {
+        line_start += text[line_start..].find('\n')? + 1;
+    }
+    let line_end = text[line_start..]
+        .find('\n')
+        .map(|i| line_start + i)
+        .unwrap_or(text.len());
+    let line = &text[line_start..line_end];
+    let to_byte = |units: usize| -> Option<usize> {
+        if site.encoding == Encoding::Utf8 {
+            return (units <= line.len() && line.is_char_boundary(units)).then_some(units);
+        }
+        let mut counted = 0usize;
+        for (byte, ch) in line.char_indices() {
+            if counted == units {
+                return Some(byte);
+            }
+            counted += match site.encoding {
+                Encoding::Utf16 => ch.len_utf16(),
+                _ => 1,
+            };
+        }
+        (counted == units).then_some(line.len())
+    };
+    Some((
+        line_start + to_byte(site.start)?,
+        line_start + to_byte(site.end)?,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,6 +791,73 @@ mod tests {
         match load(&dir) {
             Err(ScipError::Stale(why)) => assert!(why.contains("src/user.rs"), "{why}"),
             other => panic!("expected a stale index, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_site_maps_to_bytes_in_each_encoding_and_a_vanished_line_maps_to_nothing() {
+        let text = "fn a() {}\nlet é = helper();\n";
+        let site = |start, end, encoding| SymbolSite {
+            file: "x.rs".into(),
+            line: 1,
+            start,
+            end,
+            encoding,
+            definition: false,
+        };
+        // `é` is two bytes and one UTF-16 unit, so the two encodings disagree on
+        // where `helper` starts.
+        let (s, e) = byte_range(text, &site(9, 15, Encoding::Utf8)).unwrap();
+        assert_eq!(&text[s..e], "helper");
+        let (s, e) = byte_range(text, &site(8, 14, Encoding::Utf16)).unwrap();
+        assert_eq!(&text[s..e], "helper");
+        let gone = SymbolSite {
+            line: 7,
+            ..site(0, 1, Encoding::Utf8)
+        };
+        assert_eq!(byte_range(text, &gone), None);
+    }
+
+    #[test]
+    fn a_name_shared_by_a_function_and_a_field_is_two_symbols_and_a_local_is_none() {
+        if !rust_analyzer_works() {
+            return;
+        }
+        let dir = sample_crate("named");
+        std::fs::write(
+            dir.join("src/bystander.rs"),
+            "pub struct Holder { pub helper: u32 }\n\
+             pub fn make() -> u32 { let helper = 2; Holder { helper }.helper + helper }\n",
+        )
+        .unwrap();
+        generate(&dir, SCIP_TIMEOUT).expect("rust-analyzer indexes the sample");
+        let found = symbols_named(&dir, "helper").expect("a fresh index answers");
+        let kinds: Vec<&str> = found.iter().map(|n| n.kind).collect();
+        assert_eq!(
+            found.len(),
+            2,
+            "the function and the field, not the local: {found:?}"
+        );
+        assert!(
+            kinds.contains(&"function") && kinds.contains(&"value"),
+            "{kinds:?}"
+        );
+        let function = found.iter().find(|n| n.kind == "function").unwrap();
+        assert_eq!(function.defined_in, vec!["src/core_impl.rs".to_string()]);
+        // Declared once, used in user.rs — through the glob re-export.
+        assert!(function
+            .sites
+            .iter()
+            .any(|s| s.definition && s.file == "src/core_impl.rs"));
+        assert!(function
+            .sites
+            .iter()
+            .any(|s| !s.definition && s.file == "src/user.rs"));
+        for site in &function.sites {
+            let text = std::fs::read_to_string(dir.join(&site.file)).unwrap();
+            let (s, e) = byte_range(&text, site).expect("every site is on disk");
+            assert_eq!(&text[s..e], "helper", "{site:?}");
         }
         let _ = std::fs::remove_dir_all(dir);
     }

@@ -5149,6 +5149,27 @@ pass found something the whole plan has been quietly assuming.
   preview diff. *Effort: S–M.* CI-4 covers syntax-level codemod; this adds
   resolution, aliases and re-exports — i.e. the part where a codemod silently
   breaks a build.
+  - [x] **Done 2026-10-08 — but not through `ssr`, which cannot rename.**
+    Tried first on a scratch crate: `rust-analyzer ssr 'crate::a::helper ==>>
+    crate::a::assist'` exits 1 with `Failed to resolve path crate::a::assist`,
+    and so does the bare form. SSR rewrites uses onto an item that already
+    exists; a rename's target name does not exist yet. The resolution this item
+    asks for is in `LSP-2`'s SCIP index instead: every occurrence of one symbol,
+    declaration and uses, with exact positions. `scip_index::symbols_named`
+    returns each item declared with a name (locals excluded, since they belong
+    to one body), and the `rename` tool now rewrites exactly those positions,
+    checking each one still holds the old name before writing anything. Two
+    items with one name — a function and a field — are refused with both
+    named unless `in` gives the declaring file. With no current index the tool
+    falls back to the ast-grep rename and says why, in the preview and in the
+    result. **Also found:** `QI-2`'s `rename` had an executor and an approval
+    preview but no tool definition, so no model was ever offered it. It is now
+    in `file_tools()`. Proved by a test that runs real rust-analyzer and real
+    `cargo check` on a crate where a function, a struct field and a local
+    variable are all `helper` and one caller reaches the function only through
+    a glob re-export: the unqualified rename is refused naming both items; with
+    `in` the function and its two uses change, the field and the local do not,
+    and `cargo check` passes.
 - **LSP-4 — Fix the regex tier now** (fact 16): enum/trait/impl/`mod` edges, the
   export-name bug, private structs, and honest no-op behaviour on non-Rust repos.
   *Effort: S.* Not in **CI** at all, because CI-2 replaces this layer wholesale —
