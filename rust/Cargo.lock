@@ -4107,6 +4107,7 @@ dependencies = [
  "tokio",
  "toml",
  "xencode-context-rs",
+ "xencode-core-rs",
  "zip",
 ]
 

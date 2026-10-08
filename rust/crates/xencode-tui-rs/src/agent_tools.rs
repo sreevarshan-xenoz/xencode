@@ -2309,12 +2309,10 @@ pub struct AstEditPlan {
 /// A missing binary is reported, never treated as "no sites matched": those two
 /// look identical from the outside and only one of them is a fact about the code.
 fn ast_grep_binary() -> Result<String, String> {
-    for candidate in ["ast-grep", "sg"] {
-        if let Ok(path) = which(candidate) {
-            return Ok(path);
-        }
-    }
-    Err(err(missing_ast_grep_message()))
+    // The analysis crate checks that an `sg` on PATH really is ast-grep: on
+    // Ubuntu it is usually shadow-utils' "run as another group".
+    xencode_analysis_rs::runtime_hazards::ast_grep_binary()
+        .map_err(|_| err(missing_ast_grep_message()))
 }
 
 /// What a caller is told when the pattern engine is not on this machine.
@@ -2328,13 +2326,6 @@ fn missing_ast_grep_message() -> String {
      `npm i -g @ast-grep/cli` or `cargo install ast-grep`, or use edit_symbol / \
      search_files, which need no external binary."
         .to_string()
-}
-
-/// `which`-style lookup, without shelling out.
-fn which(binary: &str) -> Result<String, String> {
-    xencode_core_rs::sys::which(binary)
-        .map(|path| path.to_string_lossy().into_owned())
-        .ok_or_else(|| err(format!("{binary} not found on PATH")))
 }
 
 /// One site ast-grep matched, as far as this tool needs it.
@@ -8584,7 +8575,7 @@ patched = ["{fixed}"]
     /// directory — free to land bytes nobody reviewed.
     #[tokio::test]
     async fn an_ast_edit_over_two_files_is_re_reviewed_when_either_one_moves() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -9714,7 +9705,7 @@ patched = ["{fixed}"]
     /// to survive anyway — the refusal below covers that path.
     #[test]
     fn ast_edit_rewrites_three_seeded_sites_and_the_diff_matches_a_hand_check() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -9750,7 +9741,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn ast_edit_searching_changes_nothing_and_names_the_sites() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -9784,7 +9775,7 @@ patched = ["{fixed}"]
     /// clean sweep. It has to be reported as a refusal, and the file untouched.
     #[test]
     fn ast_edit_refuses_a_pattern_that_matched_nothing() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -9848,7 +9839,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn ast_edit_preview_shows_the_same_edit_the_executor_would_make() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10136,7 +10127,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn rename_moves_the_definition_and_every_use_together() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10179,7 +10170,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn rename_reports_cargo_check_not_just_the_rewrite() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10236,7 +10227,7 @@ patched = ["{fixed}"]
     /// the file is what a hand-check says.
     #[test]
     fn codemod_rewrites_twenty_seeded_sites_in_one_call() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10269,7 +10260,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn codemod_reaches_a_directory_recursively() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10304,7 +10295,7 @@ patched = ["{fixed}"]
     /// every match rather than failing, and this has to read as a report.
     #[test]
     fn codemod_reports_and_changes_nothing_without_a_fix_block() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10336,7 +10327,7 @@ patched = ["{fixed}"]
     /// this is never confused with a rule that simply found nothing.
     #[test]
     fn codemod_reports_a_rule_ast_grep_cannot_read_as_unreadable() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10367,7 +10358,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn codemod_refuses_a_rule_that_matched_nothing() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10402,7 +10393,7 @@ patched = ["{fixed}"]
     /// instead, on the call that creates it and in the preview before it.
     #[test]
     fn codemod_names_files_that_already_had_uncommitted_changes() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
@@ -10460,7 +10451,7 @@ patched = ["{fixed}"]
 
     #[test]
     fn codemod_preview_matches_what_the_executor_would_write() {
-        if which("ast-grep").is_err() && which("sg").is_err() {
+        if ast_grep_binary().is_err() {
             eprintln!("skipping: ast-grep is not installed");
             return;
         }
