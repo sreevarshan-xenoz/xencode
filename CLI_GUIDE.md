@@ -4027,9 +4027,26 @@ List installed roster agents with versions and how each was installed
 (`mise:<tool>`, cargo, npm, system, user-local, unknown — only what the path
 shows). Discovery only: nothing is installed, upgraded, or written.
 
-`--contract` re-reads every roster claim from the agents' live `--help` and
-reports confirmed or contradicted per claim with evidence. A contradiction is
-a stale roster cell, and a firewall test fails the build on any of them.
+`--contract` re-reads every roster claim from the agents' live `--help` — the top
+level screen plus the one-shot subcommand's screen, which is the exact invocation
+path xencode uses — and reports each claim confirmed, contradicted or untested,
+naming the screens it read. A contradiction is a stale roster cell, and a firewall
+test fails the build on any of them.
+
+The three outcomes are counted apart, and the wording of each is limited to what
+was actually searched (since 2026-10-08). An agent whose help could not be read is
+reported as **untested** and is not included in the confirmed count; a capability
+the roster *denies* is printed as an absence only when a token for it was
+registered and searched, and the line names that token and the screens it was
+looked for in — `not advertised — acp searched for and absent (read from
+claude --help)` — otherwise it says no token is registered and nothing was looked
+for. `--format json` carries the same split as a `summary` object
+(`claims`, `confirmed`, `confirmed_absences`, `contradicted`, `untested`) beside a
+per-claim `evidence` line. Two limits stay true: only `--help` is consulted, so
+anything a vendor documents elsewhere is invisible here; and a word found under a
+denied claim contradicts it only for `acp` and `mcp`, because for the rest —
+`serve`, `daemon`, `session` — a single word carries several meanings and proves
+nothing either way.
 
 `--health` probes installed status, reported version, authentication state,
 responsiveness, and rate limits across all roster agents (or a single agent

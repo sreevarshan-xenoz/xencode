@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AR-3`: the contract probe reports only what it actually searched for
+
+`xencode agents --contract` reads each installed agent's live `--help` and rules
+on what the roster claims about it. Two of the things it printed were not
+measurements. A capability the roster *denies* for an agent came back
+`confirmed`, and its evidence line said "not advertised — no token for it
+appeared" — on five rows (`codex acp`, `claude acp`, `gemini daemon`, `crush acp`,
+`crush mcp`) about a word no one had registered to look for, so the sentence was
+true only in the sense that nothing was searched. The same line also printed for a
+denied claim whose registered token *had* appeared in help, which is the opposite
+situation. And the summary computed `claims - contradicted`, so an agent whose help
+could not be read at all — here, a `cline` shim left dangling by an uninstalled
+tool — was counted among the confirmed: the report ended `54 claims confirmed, 0
+contradicted` while one of those fifty-four was never tested.
+
+A denial with no registered token is now `untestable`, and says so; the four cases
+the probe can land in are separated in one function, `verdict_for`, and tested
+there. The five denials above have had their tokens registered after reading the
+word out of each screen on 2026-10-08 (`acp` appears nowhere in `codex --help`,
+`codex exec --help`, `claude --help`, `crush --help` or `crush run --help`; `mcp`
+nowhere in the two crush screens; `daemon` nowhere in `gemini --help`), so they are
+searched absences now and their lines name the word and the screens:
+`not advertised — acp searched for and absent (read from claude --help)`. A
+registered token that turns up under a denied claim still contradicts the roster
+only for `acp` and `mcp`, and for the rest is now reported as untestable rather
+than as an absence. The command's summary counts the three outcomes apart and the
+JSON report carries them as a `summary` object beside a per-claim `evidence` line.
+
+Measured here after the change: `53 claims confirmed (8 of them absences the probe
+searched for), 0 contradicted, 1 untested`, with the untested row printed by name.
+That reading was taken while `cline` was still on `PATH` as a mise shim left behind
+by an uninstalled tool; mise has since pruned that shim, and the same command later
+the same day reads `53 claims confirmed (8 of them absences the probe searched
+for), 0 contradicted, 0 untested` — the single `cline` row went with the binary, and
+nothing else moved. Four new tests in `contract.rs` hold the verdict table and one
+live guard that fails if any confirmed absence names no searched token — it was
+watched failing on the five rows above before the fix — and
+`xencode-cli/tests/agents_contract_cli.rs` runs the real command in both formats and
+checks that the two reports agree about what was measured and what was not.
+
 ### Fixed — `AR-9`: a worker that said it failed is no longer read as one that finished
 
 `xencode`'s claude adapter turned a run that never reached a model into a message
