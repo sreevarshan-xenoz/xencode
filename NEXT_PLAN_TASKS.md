@@ -114,7 +114,7 @@ one of them is a reason a new user leaves in the first five minutes. Quick wins 
 
 | ID | Problem (evidence) | Fix |
 |---|---|---|
-| **TX-1** | A failed model call ends a chat turn silently: the provider error goes to the trace and ByteBot only, the chat gets `[DONE]` and the spinner just disappears (`app.rs` agent loop, `stop_error`) | send the chat one line naming the model, the error, and what to do (start the server / `m` to pick a model) |
+| **TX-1** ✅ | A failed model call ends a chat turn silently: the provider error goes to the trace and ByteBot only, the chat gets `[DONE]` and the spinner just disappears (`app.rs` agent loop, `stop_error`) | send the chat one line naming the model, the error, and what to do (start the server / `m` to pick a model) |
 | **TX-2** | In Normal mode on an empty screen, typing a sentence fires global keys — `q` quits, `s` opens Settings, `m` Models — before the user has pressed `i` (`keymap.rs` `global_chord`) | start in the composer when the transcript is empty; a bare `q` asks once |
 | **TX-3** ✅ | `/` opens the composer but drops the slash, so `/init` typed that way is sent to the model as "init" (`keymap.rs:643`) | insert the `/` when `/` opened the composer |
 | **TX-4** ✅ | An unknown `/word` (`/help`, `/model`, `/clear`, `/quit`) is sent to the model as a prompt | answer "Unknown command" with how to list them; add `/help` opening the existing overlay |

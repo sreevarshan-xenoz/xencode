@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `TX-1`: a failed model call says so in the chat
+
+When the model call behind a chat turn failed, for example because the server was
+not running, the error went only to the turn's trace. The chat got nothing and the
+spinner simply stopped. The chat now gets one line before the turn closes, such as
+`✗ qwen3 failed: … — is its server running? `xencode doctor` checks every provider;
+`m` picks another model`. The error's first line is shown with any credentials and
+query strings removed, and the suggestion depends on the failure: a refused
+connection, a rejected API key, a model the server does not have, or a cloud model
+the egress policy forbids.
+
 ### Fixed — `TX-4`: a mistyped `/command` is answered, not sent to the model, and `/help` exists
 
 A `/word` that is not one of the TUI's commands (`/model`, `/clear`, `/quit`) used to
