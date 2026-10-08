@@ -70,6 +70,18 @@ xencode had offered tools that could not work in that workspace, with an error w
 for a person. Five cases still have no final text: Qwen3's reasoning goes to a separate
 channel under `--jinja`, so a turn that ended in thought leaves nothing visible.
 
+**Third run, 2026-10-08 — the first one measured with repeats.** All three `SM-2` changes in,
+`--repeats 3`, same server settings: **3 of 24 passed (12.5%)** in 1,730 s
+(`inverted-condition`, `missing-value`, `stale-cache` once each — `stale-cache` is one of
+the two cases the index-tool fix aimed at). How the 21 failures ended: **11 looked, then
+stopped; 6 called no tool; 3 edited the wrong thing; 1 edit failed.** So 17 of 21 never
+attempted an edit. The cause of most of those is in the server's log: **16 completions
+stopped at exactly 1,024 tokens**, the evaluation's default answer cap — Qwen3 spends its
+budget in its hidden reasoning (the `--jinja` thinking channel) and the turn ends inside
+the thought, which is also why several recorded final answers break off mid-sentence ("I'll
+work through", "The line in"). Next measurement: the same 24 cases with the server started
+`--reasoning-budget 0` (no thinking), changing nothing else.
+
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.
 
