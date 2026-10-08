@@ -2141,8 +2141,35 @@ enum TaskAction {
     },
 }
 
-#[tokio::main]
-async fn main() {
+/// Stack for the thread the whole program runs on.
+///
+/// The command dispatch is one async function over every subcommand, and its
+/// future is large. Windows gives a program's main thread 1 MiB, which a debug
+/// build compiled with Rust 1.99 overflowed before printing `--version`
+/// (2026-10-08); Linux gives 8 MiB, which is why CI never saw it. So the
+/// program runs on a thread whose stack is set here instead of by the platform.
+const MAIN_STACK_BYTES: usize = 32 * 1024 * 1024;
+
+fn main() {
+    let worker = std::thread::Builder::new()
+        .name("xencode".into())
+        .stack_size(MAIN_STACK_BYTES)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("the async runtime starts")
+                .block_on(async_main())
+        })
+        .expect("the main thread starts");
+    if let Err(panic) = worker.join() {
+        // Same behaviour as a panic on the main thread: message already
+        // printed by the hook, process ends with the panic's own unwinding.
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn async_main() {
     let cli = Cli::parse();
 
     if cli.dump_config {
