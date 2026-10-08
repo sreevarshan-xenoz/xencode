@@ -118,7 +118,19 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/egress",
     "/goto",
     "/level",
+    "/help",
 ];
+
+/// The first word of `prompt` when it reads as a slash command (`/word`,
+/// letters, digits and dashes only) — so an absolute path such as
+/// `/usr/lib is missing` still reaches the model as a prompt.
+pub fn unknown_slash_command(prompt: &str) -> Option<&str> {
+    let word = prompt.split_whitespace().next()?;
+    let name = word.strip_prefix('/')?;
+    let looks_like_command = !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    looks_like_command.then_some(word)
+}
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
 /// Returns the longest common prefix when it extends the token (pure —
@@ -3743,12 +3755,28 @@ impl<'a> App<'a> {
             return;
         }
 
+        // /help opens the same overlay as `?`.
+        if prompt.trim() == "/help" {
+            self.help_visible = true;
+            self.help_scroll = 0;
+            return;
+        }
+
         // Direct slash-command navigation to any destination name (AE-5)
         if prompt.starts_with('/')
             && !prompt.contains(' ')
             && self.navigate_to_destination_by_name(&prompt)
         {
             self.push_system_message(format!("Switched focus to {}", self.focus.display_name()));
+            return;
+        }
+
+        // A `/word` that matched nothing above is a mistyped command, not a
+        // prompt: sending it to the model answered `/model` with an essay.
+        if let Some(word) = unknown_slash_command(&prompt) {
+            self.push_system_message(format!(
+                "Unknown command {word}. /help lists the commands; Tab after / completes one."
+            ));
             return;
         }
 
@@ -14367,6 +14395,32 @@ mod tests {
         let after = app.memory.get_context(100_000);
         assert_eq!(after.len(), before + 1);
         assert_eq!(after.last().unwrap().content, "plain prompt for memory");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_slash_command_is_answered_here_not_sent_to_the_model() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        app.set_chat_text("/model");
+        app.submit_message(tx.clone());
+        assert!(!app.is_generating, "no model turn starts");
+        let last = app.messages.last().unwrap();
+        assert!(last.content.contains("Unknown command /model"), "{}", last.content);
+        assert!(last.content.contains("/help"));
+
+        app.set_chat_text("/help");
+        app.submit_message(tx);
+        assert!(app.help_visible, "/help opens the help overlay");
+        assert!(!app.is_generating);
+    }
+
+    #[test]
+    fn a_slash_word_is_a_command_but_an_absolute_path_is_a_prompt() {
+        assert_eq!(super::unknown_slash_command("/model gpt"), Some("/model"));
+        assert_eq!(super::unknown_slash_command("/clear"), Some("/clear"));
+        assert_eq!(super::unknown_slash_command("/usr/lib is missing"), None);
+        assert_eq!(super::unknown_slash_command("/ alone"), None);
+        assert_eq!(super::unknown_slash_command("why is this slow"), None);
     }
 
     /// I2-03: the list the agent posts belongs to the user as well — `/plan`

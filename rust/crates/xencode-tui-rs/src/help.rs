@@ -88,6 +88,7 @@ const APPROVAL: &[Binding] = &[
 
 /// Commands intercepted by `submit_message` — keep in sync with SLASH_COMMANDS.
 const COMMANDS: &[Binding] = &[
+    ("/help", "this overlay — every key and command"),
     ("/init [abort|status]", "generate & control project docs"),
     (
         "/ctx …",
