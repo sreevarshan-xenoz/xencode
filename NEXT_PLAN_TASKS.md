@@ -53,6 +53,23 @@ whitespace-tolerant matching in `edit_file` when exactly one site matches (a), a
 "you changed no file" continuation when a fix task's turn ends without an edit (b) — each
 measured on the eval alone, before the next.
 
+**`SM-2` progress, 2026-10-08.** Done: the evaluation keeps each case's final answer
+(`e8dedfe7`); `edit_file` accepts the right lines with the wrong indentation when only one
+block matches (`95c7684a`); tools whose index is missing are not offered (this commit).
+**What the second run showed** (same settings, after the first two changes): **0 of 7
+graded**, one case not graded (llama.cpp returned 500, "Failed to parse tool call
+arguments"). The run is not comparable to the 2 of 8 before it, and that is the finding:
+**at temperature 0 and seed 42 on this GPU, the model's very first tool call differed
+between two runs** (`missing-value` opened with `list_dir` once and with a `read_file` of a
+file that does not exist the next time), so llama.cpp on CUDA is not deterministic here
+and one 8-case run cannot tell 0 from 2. The gate is therefore measured with `--repeats
+3` (24 cases) from now on. The recorded final answers named a cause the tool calls hid:
+in `inverted-condition` and `stale-cache` the model called an index-reading tool, got "no
+project index — run /init first", and **repeated that to the user and ended the turn** —
+xencode had offered tools that could not work in that workspace, with an error written
+for a person. Five cases still have no final text: Qwen3's reasoning goes to a separate
+channel under `--jinja`, so a turn that ended in thought leaves nothing visible.
+
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.
 

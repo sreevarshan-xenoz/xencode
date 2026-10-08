@@ -10856,7 +10856,86 @@ fn record_round(
 /// the model cannot spend a round on a call the gate will refuse. `write_file`
 /// and `edit_file` stay, because writing the reproduction is the one write this
 /// phase allows, and the gate checks where they point.
+/// Everything a session can be offered, every index assumed present: what the
+/// tests count against. The agent loop calls [`offered_tools_with`].
+#[cfg(test)]
 fn offered_tools(
+    mcp: &crate::mcp::McpHub,
+    skills: &xencode_plugin_rs::SkillRuntime,
+    mode: crate::agent_tools::ApprovalMode,
+    repro: &crate::reprogate::ReproGate,
+    web_fetch: bool,
+    search: bool,
+) -> Vec<xencode_providers_rs::ToolDefinition> {
+    offered_tools_with(
+        mcp,
+        skills,
+        mode,
+        repro,
+        web_fetch,
+        search,
+        AvailableIndexes::ALL,
+    )
+}
+
+/// Which of the indexes the index-reading tools answer from exist for one
+/// workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AvailableIndexes {
+    /// The `.xencode` symbol snapshot `/init` writes.
+    pub snapshot: bool,
+    /// rust-analyzer's semantic index, built and current (`LSP-2`).
+    pub semantic: bool,
+}
+
+impl AvailableIndexes {
+    #[cfg(test)]
+    pub(crate) const ALL: Self = Self {
+        snapshot: true,
+        semantic: true,
+    };
+
+    pub(crate) fn of(root: &std::path::Path) -> Self {
+        let snapshot = xencode_context_rs::index::symbols_json_path(
+            &root.join(xencode_context_rs::init::XENCODE_DIR),
+        )
+        .is_file();
+        let semantic = xencode_context_rs::verify::manifest_dir(root)
+            .map(|ws| xencode_context_rs::scip_index::freshness(&ws).is_ok())
+            .unwrap_or(false);
+        Self { snapshot, semantic }
+    }
+}
+
+/// [`offered_tools`] for one workspace: a tool whose index does not exist there
+/// is not offered.
+///
+/// Such a tool can only answer "no project index — run /init first", and that
+/// sentence is written for a person. On 2026-10-08 a small model given it twice
+/// repeated it to the user as its answer and ended the turn, on a task it could
+/// have done with read_file (SM-2: `inverted-condition`, `stale-cache`). A tool
+/// that cannot work here is better left off the menu, which is also one fewer
+/// name for a small model to weigh.
+fn offered_tools_with(
+    mcp: &crate::mcp::McpHub,
+    skills: &xencode_plugin_rs::SkillRuntime,
+    mode: crate::agent_tools::ApprovalMode,
+    repro: &crate::reprogate::ReproGate,
+    web_fetch: bool,
+    search: bool,
+    indexes: AvailableIndexes,
+) -> Vec<xencode_providers_rs::ToolDefinition> {
+    let mut tools = offered_tools_unfiltered(mcp, skills, mode, repro, web_fetch, search);
+    tools.retain(|def| match def.name.as_str() {
+        "repo_advise" => indexes.snapshot,
+        "what_breaks" => indexes.snapshot || indexes.semantic,
+        "find_refs" | "callers" => indexes.semantic,
+        _ => true,
+    });
+    tools
+}
+
+fn offered_tools_unfiltered(
     mcp: &crate::mcp::McpHub,
     skills: &xencode_plugin_rs::SkillRuntime,
     mode: crate::agent_tools::ApprovalMode,
@@ -11232,13 +11311,14 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             let _ = tx.send(format!("[OLLAMA]{note}"));
         }
     }
-    let tools = offered_tools(
+    let tools = offered_tools_with(
         &approval.mcp,
         &approval.skills,
         approval.mode,
         &approval.repro,
         approval.web_fetch,
         approval.search_offered(),
+        AvailableIndexes::of(&tool_root),
     );
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
@@ -13667,6 +13747,55 @@ mod tests {
 
         std::fs::remove_dir_all(&skills_dir).unwrap();
         std::fs::remove_dir_all(&plugin_dir).unwrap();
+    }
+
+    #[test]
+    fn a_tool_whose_index_is_missing_is_not_offered() {
+        let names = |indexes: crate::app::AvailableIndexes| -> Vec<String> {
+            crate::app::offered_tools_with(
+                &crate::mcp::McpHub::new(),
+                &xencode_plugin_rs::SkillRuntime::empty(
+                    std::path::PathBuf::new(),
+                    std::path::PathBuf::new(),
+                ),
+                crate::agent_tools::ApprovalMode::Ask,
+                &crate::reprogate::ReproGate::new(),
+                false,
+                false,
+                indexes,
+            )
+            .into_iter()
+            .map(|t| t.name)
+            .collect()
+        };
+        let none = names(crate::app::AvailableIndexes {
+            snapshot: false,
+            semantic: false,
+        });
+        for absent in ["repo_advise", "what_breaks", "find_refs", "callers"] {
+            assert!(
+                !none.contains(&absent.to_string()),
+                "{absent} offered with no index: {none:?}"
+            );
+        }
+        assert!(none.contains(&"read_file".to_string()) && none.contains(&"edit_file".to_string()));
+        let snapshot_only = names(crate::app::AvailableIndexes {
+            snapshot: true,
+            semantic: false,
+        });
+        assert!(snapshot_only.contains(&"what_breaks".to_string()));
+        assert!(!snapshot_only.contains(&"find_refs".to_string()));
+
+        // A workspace with neither index, as every seeded eval case is.
+        let empty = temp_dir("no-indexes");
+        assert_eq!(
+            crate::app::AvailableIndexes::of(&empty),
+            crate::app::AvailableIndexes {
+                snapshot: false,
+                semantic: false
+            }
+        );
+        let _ = std::fs::remove_dir_all(&empty);
     }
 
     #[test]
