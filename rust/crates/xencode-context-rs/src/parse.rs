@@ -138,6 +138,35 @@ fn declaration_named(content: &str, node: Node, symbol: &str) -> Option<Declarat
     })
 }
 
+/// The innermost function whose text holds `byte`, named the way a reader would
+/// look for it: `Type::method` inside an `impl`, the bare name otherwise. A use
+/// inside a closure belongs to the function the closure is written in. `None`
+/// when the byte is outside every function — a `use` line, a field's type, a
+/// `const`.
+pub fn enclosing_function(content: &str, byte: usize) -> Option<String> {
+    let tree = parse(content)?;
+    let mut node = tree.root_node().descendant_for_byte_range(byte, byte)?;
+    loop {
+        if node.kind() == "function_item" {
+            let name = &content[node.child_by_field_name("name")?.byte_range()];
+            let mut up = node.parent();
+            while let Some(parent) = up {
+                if parent.kind() == "impl_item" {
+                    if let Some(ty) = parent.child_by_field_name("type") {
+                        return Some(format!("{}::{name}", &content[ty.byte_range()]));
+                    }
+                }
+                if parent.kind() == "function_item" {
+                    break;
+                }
+                up = parent.parent();
+            }
+            return Some(name.to_string());
+        }
+        node = node.parent()?;
+    }
+}
+
 /// The names of every item this file declares, in the order they were found.
 pub fn item_names(content: &str) -> Vec<String> {
     let Some(tree) = parse(content) else {

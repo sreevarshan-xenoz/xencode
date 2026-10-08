@@ -230,10 +230,9 @@ pub fn tool_class(tool: &str) -> ToolClass {
         return ToolClass::External;
     }
     match tool {
-        "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
-        | "search_files" | "read_docs" | "lookup_advisory" | "load_skill" | "update_plan" => {
-            ToolClass::ReadOnly
-        }
+        "background_poll" | "repo_advise" | "what_breaks" | "find_refs" | "callers"
+        | "read_file" | "list_dir" | "search_files" | "read_docs" | "lookup_advisory"
+        | "load_skill" | "update_plan" => ToolClass::ReadOnly,
         "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
             ToolClass::Edit
         }
@@ -3876,6 +3875,8 @@ async fn execute_tool_call_plan(
         "codemod" => tool_codemod(root, &args, command_timeout),
         "rename" => tool_rename(root, &args, command_timeout),
         "what_breaks" => tool_what_breaks(root, &args),
+        "find_refs" => tool_find_refs(root, &args, false),
+        "callers" => tool_find_refs(root, &args, true),
         other => format!("error: unknown tool {other}"),
     }
 }
@@ -4721,6 +4722,145 @@ fn tool_what_breaks(root: &Path, args: &serde_json::Map<String, serde_json::Valu
         }
         Err(e) => err(e.to_string()),
     }
+}
+
+/// Most references or callers listed to the model in one answer.
+const MODEL_REFS_CAP: usize = 60;
+
+/// `find_refs` and `callers` (`LSP-1`): every place one Rust item is written, or
+/// the functions that use it, from rust-analyzer's semantic index. Read-only,
+/// and never builds the index — that takes minutes — so a missing or stale one
+/// is reported with how to build it.
+fn tool_find_refs(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    callers: bool,
+) -> String {
+    use xencode_context_rs::scip_index::{self, Pick};
+    let tool = if callers { "callers" } else { "find_refs" };
+    let Some(symbol) = arg_str(args, "symbol").filter(|s| !s.trim().is_empty()) else {
+        return err(format!("{tool} needs a string \"symbol\""));
+    };
+    let in_file = arg_str(args, "in").filter(|s| !s.trim().is_empty());
+    let workspace = match xencode_context_rs::verify::manifest_dir(root) {
+        Ok(ws) => ws,
+        Err(e) => return err(format!("{tool} reads a Cargo workspace's index: {e}")),
+    };
+    // Shown paths are root-relative, like every other tool's.
+    let prefix = match workspace.strip_prefix(root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => {
+            format!("{}/", rel.to_string_lossy().replace('\\', "/"))
+        }
+        _ => String::new(),
+    };
+    let in_workspace = in_file.map(|f| {
+        f.trim()
+            .replace('\\', "/")
+            .trim_start_matches(prefix.as_str())
+            .to_string()
+    });
+    let found = match scip_index::symbols_named(&workspace, symbol) {
+        Ok(found) => found,
+        Err(why) => {
+            return err(format!(
+                "{tool} answers only from rust-analyzer's semantic index, and {why}. \
+                 search_files finds the text instead, without knowing which item it is"
+            ))
+        }
+    };
+    let item = match scip_index::pick(found, symbol, in_workspace.as_deref()) {
+        Pick::One(item) => item,
+        Pick::Nothing(why) => return err(why),
+        Pick::Several(items) => {
+            let list = items
+                .iter()
+                .map(|n| {
+                    let files: Vec<String> = n
+                        .defined_in
+                        .iter()
+                        .map(|f| format!("{prefix}{f}"))
+                        .collect();
+                    format!("a {} in {}", n.kind, files.join(" and "))
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return err(format!(
+                "`{symbol}` names {} different items — {list}. Pass \"in\" with the file \
+                 that declares the one you mean",
+                items.len()
+            ));
+        }
+    };
+    let refs = scip_index::references(&workspace, &item, symbol);
+    let declared: Vec<String> = item
+        .defined_in
+        .iter()
+        .map(|f| format!("{prefix}{f}"))
+        .collect();
+    let mut lines = Vec::new();
+    if callers {
+        let mut by_caller: std::collections::BTreeMap<(String, String), usize> =
+            std::collections::BTreeMap::new();
+        let mut outside = 0usize;
+        for r in refs.iter().filter(|r| !r.definition) {
+            match &r.caller {
+                Some(caller) => {
+                    *by_caller
+                        .entry((format!("{prefix}{}", r.file), caller.clone()))
+                        .or_default() += 1
+                }
+                None => outside += 1,
+            }
+        }
+        lines.push(format!(
+            "functions that use `{symbol}` ({} in {}): {}",
+            item.kind,
+            declared.join(", "),
+            by_caller.len()
+        ));
+        for ((file, caller), count) in by_caller.iter().take(MODEL_REFS_CAP) {
+            lines.push(format!("  {caller}  in {file} ({count} use(s))"));
+        }
+        if by_caller.len() > MODEL_REFS_CAP {
+            lines.push(format!("  … +{} more", by_caller.len() - MODEL_REFS_CAP));
+        }
+        if outside > 0 {
+            lines.push(format!(
+                "{outside} more use(s) sit outside any function: `use` lines, types, \
+                 constants. find_refs lists them."
+            ));
+        }
+    } else {
+        lines.push(format!(
+            "`{symbol}` ({} in {}): {} place(s)",
+            item.kind,
+            declared.join(", "),
+            refs.len()
+        ));
+        for r in refs.iter().take(MODEL_REFS_CAP) {
+            let role = if r.definition {
+                " — declared here".to_string()
+            } else {
+                r.caller
+                    .as_ref()
+                    .map(|c| format!(" — in {c}"))
+                    .unwrap_or_default()
+            };
+            lines.push(format!("  {prefix}{}:{}{role}  {}", r.file, r.line, r.text));
+        }
+        if refs.len() > MODEL_REFS_CAP {
+            lines.push(format!("  … +{} more", refs.len() - MODEL_REFS_CAP));
+        }
+    }
+    lines.push(String::new());
+    lines.push(
+        "From rust-analyzer's semantic index: each place resolves to this one item, \
+         through re-exports and other crates; a field, local or other item with the \
+         same name is not included. The function each use sits in is read from the \
+         file's parse tree."
+            .to_string(),
+    );
+    lines.join("\n")
 }
 
 fn arg_id(args: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
@@ -9716,6 +9856,76 @@ patched = ["{fixed}"]
         assert_eq!(
             std::fs::read_to_string(root.join("src/holder.rs")).unwrap(),
             holder
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- LSP-1: `find_refs` and `callers` from the semantic index ----
+
+    #[test]
+    fn find_refs_and_callers_answer_from_the_index_and_refuse_without_one() {
+        let root = std::env::temp_dir().join(format!("xencode-lsp1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let write = |path: &str, text: &str| std::fs::write(root.join(path), text).unwrap();
+        write(
+            "Cargo.toml",
+            "[package]\nname = \"lsp1sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+        );
+        write(
+            "src/lib.rs",
+            "mod core_impl;\nmod user;\npub use core_impl::*;\n",
+        );
+        write("src/core_impl.rs", "pub fn helper() -> u32 {\n    7\n}\n");
+        write(
+            "src/user.rs",
+            "pub struct W;\n\nimpl W {\n    pub fn go(&self) -> u32 {\n        crate::helper() + crate::helper()\n    }\n}\n\npub fn twice() -> u32 {\n    crate::helper() * 2\n}\n",
+        );
+        let args = |symbol: &str| {
+            serde_json::json!({"symbol": symbol})
+                .as_object()
+                .unwrap()
+                .clone()
+        };
+        // No index yet: refused, and the refusal says how to get one.
+        let refused = tool_find_refs(&root, &args("helper"), false);
+        assert!(
+            refused.contains("xencode impact <file> --semantic"),
+            "{refused}"
+        );
+        assert_eq!(tool_class("find_refs"), ToolClass::ReadOnly);
+        assert_eq!(tool_class("callers"), ToolClass::ReadOnly);
+
+        if std::process::Command::new("rust-analyzer")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("skipping the indexed half: rust-analyzer is not installed");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        xencode_context_rs::scip_index::generate(
+            &root,
+            xencode_context_rs::scip_index::SCIP_TIMEOUT,
+        )
+        .expect("rust-analyzer indexes the sample");
+        let refs = tool_find_refs(&root, &args("helper"), false);
+        assert!(
+            refs.contains("src/core_impl.rs:1 — declared here"),
+            "{refs}"
+        );
+        assert!(refs.contains("src/user.rs:5 — in W::go"), "{refs}");
+        assert!(refs.contains("src/user.rs:10 — in twice"), "{refs}");
+        let callers = tool_find_refs(&root, &args("helper"), true);
+        assert!(
+            callers.contains("W::go  in src/user.rs (2 use(s))"),
+            "{callers}"
+        );
+        assert!(
+            callers.contains("twice  in src/user.rs (1 use(s))"),
+            "{callers}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

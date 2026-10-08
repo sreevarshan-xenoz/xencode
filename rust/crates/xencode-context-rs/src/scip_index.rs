@@ -663,6 +663,112 @@ pub fn byte_range(text: &str, site: &SymbolSite) -> Option<(usize, usize)> {
     ))
 }
 
+/// Which of the items with one name was meant.
+#[derive(Debug)]
+pub enum Pick {
+    One(NamedSymbol),
+    /// No item matches; the message says what does exist.
+    Nothing(String),
+    /// More than one does, and the caller has to say which.
+    Several(Vec<NamedSymbol>),
+}
+
+/// Narrow `found` to the one item `in_file` declares, by path or by tail, or to
+/// the only item there is. Never chooses between two.
+pub fn pick(found: Vec<NamedSymbol>, name: &str, in_file: Option<&str>) -> Pick {
+    if found.is_empty() {
+        return Pick::Nothing(format!(
+            "rust-analyzer's index has no declaration of `{name}` in this workspace; a \
+             local variable is not looked up by name, and an item from another crate \
+             is not indexed here"
+        ));
+    }
+    let candidates: Vec<NamedSymbol> = match in_file {
+        Some(asked) => {
+            let asked = normalise(asked.trim().trim_start_matches("./"));
+            let all: Vec<String> = found.iter().flat_map(|n| n.defined_in.clone()).collect();
+            let kept: Vec<NamedSymbol> = found
+                .into_iter()
+                .filter(|n| {
+                    n.defined_in.iter().any(|f| {
+                        *f == asked
+                            || f.ends_with(&format!("/{asked}"))
+                            || asked.ends_with(&format!("/{f}"))
+                    })
+                })
+                .collect();
+            if kept.is_empty() {
+                return Pick::Nothing(format!(
+                    "`{name}` is declared in {}, not in {asked}",
+                    all.join(", ")
+                ));
+            }
+            kept
+        }
+        None => found,
+    };
+    if candidates.len() == 1 {
+        Pick::One(candidates.into_iter().next().expect("one"))
+    } else {
+        Pick::Several(candidates)
+    }
+}
+
+/// One place an item is written, as a reader would want it listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    /// Workspace-relative, `/`-separated.
+    pub file: String,
+    /// One-based.
+    pub line: usize,
+    /// The source line, trimmed.
+    pub text: String,
+    /// The function the reference is written in, `Type::method` inside an
+    /// `impl`; `None` outside every function.
+    pub caller: Option<String>,
+    pub definition: bool,
+}
+
+/// Every place `item` is written, read from the files as they are now (`LSP-1`).
+/// A site whose text no longer holds the name is left out rather than reported
+/// at a position that is not true any more.
+pub fn references(workspace: &Path, item: &NamedSymbol, name: &str) -> Vec<Reference> {
+    let mut out = Vec::new();
+    let mut texts: BTreeMap<&str, Option<String>> = BTreeMap::new();
+    for site in &item.sites {
+        let text = texts
+            .entry(site.file.as_str())
+            .or_insert_with(|| std::fs::read_to_string(workspace.join(&site.file)).ok());
+        let Some(text) = text.as_deref() else {
+            continue;
+        };
+        let Some((start, end)) = byte_range(text, site) else {
+            continue;
+        };
+        if text.get(start..end) != Some(name) {
+            continue;
+        }
+        out.push(Reference {
+            file: site.file.clone(),
+            line: site.line + 1,
+            text: text.lines().nth(site.line).unwrap_or("").trim().to_string(),
+            caller: if site.definition {
+                None
+            } else {
+                crate::parse::enclosing_function(text, start)
+            },
+            definition: site.definition,
+        });
+    }
+    out.sort_by(|a, b| {
+        b.definition
+            .cmp(&a.definition)
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -859,6 +965,50 @@ mod tests {
             let (s, e) = byte_range(&text, site).expect("every site is on disk");
             assert_eq!(&text[s..e], "helper", "{site:?}");
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn references_name_the_function_each_use_is_written_in() {
+        if !rust_analyzer_works() {
+            return;
+        }
+        let dir = sample_crate("refs");
+        std::fs::write(
+            dir.join("src/user.rs"),
+            "pub struct W;\n\
+             impl W {\n    pub fn go(&self) -> u32 {\n        crate::helper()\n    }\n}\n\
+             pub fn twice() -> u32 {\n    crate::helper() * 2\n}\n",
+        )
+        .unwrap();
+        generate(&dir, SCIP_TIMEOUT).expect("rust-analyzer indexes the sample");
+        let found = symbols_named(&dir, "helper").unwrap();
+        let Pick::One(item) = pick(found, "helper", None) else {
+            panic!("one item is called helper here");
+        };
+        let refs = references(&dir, &item, "helper");
+        assert!(refs[0].definition, "the declaration comes first: {refs:?}");
+        assert_eq!(refs[0].file, "src/core_impl.rs");
+        let callers: BTreeSet<String> = refs.iter().filter_map(|r| r.caller.clone()).collect();
+        assert_eq!(
+            callers,
+            BTreeSet::from(["W::go".to_string(), "twice".to_string()]),
+            "{refs:?}"
+        );
+        let in_go = refs
+            .iter()
+            .find(|r| r.caller.as_deref() == Some("W::go"))
+            .unwrap();
+        assert_eq!((in_go.file.as_str(), in_go.line), ("src/user.rs", 4));
+        assert_eq!(in_go.text, "crate::helper()");
+        assert!(matches!(
+            pick(
+                symbols_named(&dir, "helper").unwrap(),
+                "helper",
+                Some("src/user.rs")
+            ),
+            Pick::Nothing(_)
+        ));
         let _ = std::fs::remove_dir_all(dir);
     }
 

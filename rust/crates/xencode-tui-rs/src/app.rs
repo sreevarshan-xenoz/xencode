@@ -13708,7 +13708,7 @@ mod tests {
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
             built_in.len(),
-            20,
+            22,
             "the built-in surface, uncounted before this: {built_in:?}"
         );
         assert!(!built_in.contains(&"load_skill"), "{built_in:?}");
