@@ -2058,19 +2058,34 @@ mod tests {
         app.input_mode = InputMode::Normal;
         press(&mut app, KeyCode::Char('/'));
         assert_eq!(app.input_mode, InputMode::Editing);
-        assert_eq!(app.chat_input.lines().join("
-"), "/");
+        assert_eq!(
+            app.chat_input.lines().join(
+                "
+"
+            ),
+            "/"
+        );
         for c in "init".chars() {
             press(&mut app, KeyCode::Char(c));
         }
-        assert_eq!(app.chat_input.lines().join("
-"), "/init");
+        assert_eq!(
+            app.chat_input.lines().join(
+                "
+"
+            ),
+            "/init"
+        );
 
         // A draft already there is left as it was.
         press(&mut app, KeyCode::Esc);
         press(&mut app, KeyCode::Char('/'));
-        assert_eq!(app.chat_input.lines().join("
-"), "/init");
+        assert_eq!(
+            app.chat_input.lines().join(
+                "
+"
+            ),
+            "/init"
+        );
     }
 
     #[test]
