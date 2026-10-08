@@ -47,7 +47,7 @@ jobs:
       working-directory: rust
 
     - name: Run cargo test
-      run: cargo test --workspace --verbose
+      run: cargo test --workspace --no-fail-fast
       working-directory: rust
 
   build-and-push:

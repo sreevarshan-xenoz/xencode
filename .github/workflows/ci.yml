@@ -38,7 +38,7 @@ jobs:
       working-directory: rust
 
     - name: Run cargo test
-      run: cargo test --workspace --verbose
+      run: cargo test --workspace --no-fail-fast
       working-directory: rust
 
     - name: Check generated completions and man page are current
