@@ -1,0 +1,7 @@
+# Every text file is checked out with LF line endings on every platform, which is
+# how the repository already stores them. Without this, git's default on Windows
+# rewrites them to CRLF on checkout, and that changes behaviour, not just
+# appearance: prompt templates and recorded agent streams are compiled into the
+# binary with include_str!, shell completions are compared byte for byte with
+# what clap generates, and install.sh stops running under sh.
+* text=auto eol=lf
