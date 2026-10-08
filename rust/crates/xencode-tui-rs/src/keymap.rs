@@ -685,6 +685,7 @@ fn on_esc(app: &mut App) {
                 app.settings_url_editing = false;
             } else {
                 app.settings_reset_active = false;
+                app.settings_reset_armed = false;
                 app.save_config();
                 app.focus = FocusArea::ChatInput;
             }
@@ -916,6 +917,11 @@ fn forget_secret(app: &mut App) {
 
 fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     let row_count = crate::focus::SETTINGS_ITEMS.len();
+    // An armed Factory Reset (TX-5) is only ever performed by the very next key
+    // being Enter on that row; anything else takes the arming back.
+    if key.code != KeyCode::Enter {
+        app.settings_reset_armed = false;
+    }
     // While a value is being typed, every character belongs to the buffer —
     // including j/k, which would otherwise move the row cursor (E6-01).
     if app.settings_url_editing {
@@ -1052,7 +1058,13 @@ fn settings_enter(app: &mut App, tx: &Tx) {
             app.settings_url_cursor = app.settings_url_buffer.len();
         }
         SettingKind::Action => {
-            // Factory Reset
+            // Factory Reset replaces every setting — URLs, model, keys kept in the
+            // config — so one Enter only arms it; the second performs it (TX-5).
+            if !app.settings_reset_armed {
+                app.settings_reset_armed = true;
+                return;
+            }
+            app.settings_reset_armed = false;
             app.config = XencodeConfig::default();
             app.theme = ThemeColors::get(&app.config.active_theme);
             app.style_chat_input();
@@ -2928,6 +2940,42 @@ mod tests {
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(app.settings_url_buffer, "http://localhost:11434j");
         assert_eq!(app.settings_cursor, url_row);
+    }
+
+    /// TX-5: one Enter on Factory Reset only arms it; the second performs it;
+    /// any other key in between takes the arming back.
+    #[tokio::test]
+    async fn factory_reset_needs_a_second_enter_and_any_other_key_disarms_it() {
+        let mut app = App::for_tests();
+        app.config.default_model = "kept-model".to_string();
+        app.focus = FocusArea::Settings;
+        app.settings_cursor = crate::focus::SETTINGS_ITEMS.len() - 1;
+
+        press(&mut app, KeyCode::Enter);
+        assert!(app.settings_reset_armed, "the first Enter arms it");
+        assert_eq!(
+            app.config.default_model, "kept-model",
+            "and changes nothing"
+        );
+
+        press(&mut app, KeyCode::Up);
+        press(&mut app, KeyCode::Down);
+        assert!(
+            !app.settings_reset_armed,
+            "moving away takes the arming back"
+        );
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.config.default_model, "kept-model",
+            "a fresh first Enter only arms again"
+        );
+
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.settings_reset_armed);
+        assert_ne!(
+            app.config.default_model, "kept-model",
+            "the second Enter reset it"
+        );
     }
 
     #[test]

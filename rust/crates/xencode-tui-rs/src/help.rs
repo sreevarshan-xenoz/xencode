@@ -196,7 +196,7 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("↑ ↓ / j k", "move cursor"),
             ("← →", "change value / number"),
             ("Enter", "toggle, edit URL/number, or save"),
-            ("row 13 + Enter", "factory reset"),
+            ("row 13 + Enter twice", "factory reset"),
         ],
         CodeReview => &[("↑ ↓ / j k", "scroll review"), ("Enter", "start review")],
         CollaborationHub => &[
