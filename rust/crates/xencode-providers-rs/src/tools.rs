@@ -950,6 +950,46 @@ pub fn command_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// The debugger (`CI-7`): one Rust test run under lldb-dap or GDB's adapter until
+/// a line, with the frame's locals read back. Offered beside the shell tools
+/// because it builds and runs the project's code.
+pub fn debug_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "debug_test".to_string(),
+        description: "Run one Rust test under a real debugger until it reaches a line, \
+                      and report where it stopped and the values of the locals there — \
+                      to see what a failing test actually held instead of guessing. \
+                      Builds the test binary first. One call is a whole session: the \
+                      debugger and the test are ended before the answer comes back. Uses \
+                      lldb-dap when installed, otherwise GDB 14 or later. If the test \
+                      never reaches the line, that is reported with its exit code."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "test": {
+                    "type": "string",
+                    "description": "The test's full name as `cargo test -- --list` \
+                                    prints it, e.g. tests::sums"
+                },
+                "file": {
+                    "type": "string",
+                    "description": "Source file to stop in, relative to the workspace root"
+                },
+                "line": {
+                    "type": "integer",
+                    "description": "One-based line to stop at"
+                },
+                "package": {
+                    "type": "string",
+                    "description": "Cargo package to build, when the workspace has several"
+                }
+            },
+            "required": ["test", "file", "line"]
+        }),
+    }]
+}
+
 /// The red-to-green reproduction gate (U-6). This is the one call that turns "I
 /// fixed it" into a measurement: the same command run before the change (where
 /// it must fail) and after it (where it must pass).

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `CI-7`: the agent can stop a test in a debugger and read what it held
+
+`debug_test(test, file, line, package?)` builds the test binary, runs one Rust test under a
+real debugger until it reaches the line, and reports where it stopped and the values of
+the locals there — so a failing assertion can be explained from what the program actually
+held. It uses `lldb-dap` when installed and otherwise GDB 14 or later through GDB's own
+debug adapter. One call is one whole session: the debugger and the test are both ended
+before the answer comes back, and a test that never reaches the line is reported with its
+exit code. It runs the project's code, so it asks for approval like `run_command`.
+Checked with GDB 16.3; not yet run against `lldb-dap`.
+
 ### Added — `LSP-1`: the agent can ask where an item is used, and by which functions
 
 Two read-only agent tools answer from rust-analyzer's semantic index (the one

@@ -246,6 +246,9 @@ pub fn tool_class(tool: &str) -> ToolClass {
         // costs whatever `run_command` costs in this mode, never less. Naming it
         // explicitly keeps it out of the unknown-tool fallback while saying why.
         "reproduce_bug" => ToolClass::Shell,
+        // CI-7: builds and runs a test binary under a debugger — it runs the
+        // project's code, so it costs what running a command costs.
+        "debug_test" => ToolClass::Shell,
         // RS-1: the address comes from the model, so the class is the trip
         // itself rather than anything it reads or writes.
         "web_fetch" => ToolClass::Network,
@@ -1957,6 +1960,19 @@ fn preview_and_bound_files(root: &Path, call: &ToolCall) -> (String, Vec<(PathBu
             }
             _ => (summarize_call(call), Vec::new()),
         },
+        "debug_test" => (
+            format!(
+                "debug: `cargo test --no-run`{}, then run test `{}` under a debugger \
+                 until {}:{}, read its locals, and end the session",
+                arg_str(&args, "package")
+                    .map(|p| format!(" -p {p}"))
+                    .unwrap_or_default(),
+                arg_str(&args, "test").unwrap_or("?"),
+                arg_str(&args, "file").unwrap_or("?"),
+                args.get("line").and_then(|v| v.as_u64()).unwrap_or(0)
+            ),
+            Vec::new(),
+        ),
         // The one call whose entire consequence is its argument, so the preview
         // can say more than what will happen — it can say whether it is allowed
         // to happen at all. Same check the fetch makes, one host resolution,
@@ -3875,6 +3891,7 @@ async fn execute_tool_call_plan(
         "codemod" => tool_codemod(root, &args, command_timeout),
         "rename" => tool_rename(root, &args, command_timeout),
         "what_breaks" => tool_what_breaks(root, &args),
+        "debug_test" => tool_debug_test(root, &args).await,
         "find_refs" => tool_find_refs(root, &args, false),
         "callers" => tool_find_refs(root, &args, true),
         other => format!("error: unknown tool {other}"),
@@ -4722,6 +4739,81 @@ fn tool_what_breaks(root: &Path, args: &serde_json::Map<String, serde_json::Valu
         }
         Err(e) => err(e.to_string()),
     }
+}
+
+/// Longest one `debug_test` session may take, build included. Separate from
+/// the command timeout, which is sized for one command and not for a build.
+const DEBUG_TIMEOUT_SECS: u64 = 300;
+
+/// `debug_test` (`CI-7`): run one test under a real debugger until a line, and
+/// report where it stopped and what the frame held. One call is one whole
+/// session; nothing is left running afterwards.
+async fn tool_debug_test(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(test) = arg_str(args, "test").filter(|t| !t.trim().is_empty()) else {
+        return err("debug_test needs a string \"test\": the test's full name, as `cargo test -- --list` prints it");
+    };
+    let Some(file) = arg_str(args, "file").filter(|f| !f.trim().is_empty()) else {
+        return err("debug_test needs a string \"file\": the source file to stop in");
+    };
+    let Some(line) = args.get("line").and_then(|v| v.as_u64()).filter(|l| *l > 0) else {
+        return err("debug_test needs a positive \"line\" to stop at");
+    };
+    let workspace = match xencode_context_rs::verify::manifest_dir(root) {
+        Ok(ws) => ws,
+        Err(e) => return err(format!("debug_test needs a Cargo workspace: {e}")),
+    };
+    // The file is given root-relative like every other tool's path; the
+    // debugger is handed it absolute, so the workspace's place does not matter.
+    let (full, display) = match workspace_path(root, file) {
+        Ok(ok) => ok,
+        Err(reason) => return reason,
+    };
+    let request = xencode_analysis_rs::dap::DebugRequest {
+        workspace,
+        package: arg_str(args, "package").map(str::to_string),
+        test: test.to_string(),
+        file: full.to_string_lossy().into_owned(),
+        line: line as u32,
+        timeout: std::time::Duration::from_secs(DEBUG_TIMEOUT_SECS),
+    };
+    let outcome =
+        match tokio::task::spawn_blocking(move || xencode_analysis_rs::dap::debug_test(&request))
+            .await
+        {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(e)) => return err(format!("debug_test: {e}")),
+            Err(join) => return err(format!("debug_test stopped unexpectedly: {join}")),
+        };
+    let mut lines = vec![format!("debugger: {}", outcome.adapter)];
+    match &outcome.stopped_at {
+        Some(at) => {
+            lines.push(format!(
+                "stopped ({}) in {at}",
+                outcome.reason.as_deref().unwrap_or("unknown reason")
+            ));
+            if outcome.variables.is_empty() {
+                lines.push("the frame showed no locals".to_string());
+            }
+            for var in &outcome.variables {
+                let ty = var
+                    .ty
+                    .as_ref()
+                    .map(|t| format!(": {t}"))
+                    .unwrap_or_default();
+                lines.push(format!("  {}{ty} = {}", var.name, var.value));
+            }
+        }
+        None => lines.push(format!(
+            "the test ran to the end without reaching {display}:{line}{} — the line is \
+             not on the path this test takes, or holds no code",
+            outcome
+                .exit_code
+                .map(|c| format!(" (exit code {c})"))
+                .unwrap_or_default()
+        )),
+    }
+    lines.push("The debugger and the test process have both been ended.".to_string());
+    lines.join("\n")
 }
 
 /// Most references or callers listed to the model in one answer.
@@ -9857,6 +9949,46 @@ patched = ["{fixed}"]
             std::fs::read_to_string(root.join("src/holder.rs")).unwrap(),
             holder
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- CI-7: `debug_test`, a whole debugger session in one call ----
+
+    #[tokio::test]
+    async fn debug_test_stops_a_failing_test_and_prints_its_locals() {
+        assert_eq!(tool_class("debug_test"), ToolClass::Shell);
+        let root = std::env::temp_dir().join(format!("xencode-ci7-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"ci7sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn counts() {\n        let seen = vec![1, 2, 3].len();\n        assert_eq!(seen, 4);\n    }\n}\n",
+        )
+        .unwrap();
+        let missing = tool_debug_test(
+            &root,
+            serde_json::json!({"test": "tests::counts"})
+                .as_object()
+                .unwrap(),
+        )
+        .await;
+        assert!(missing.contains("needs a string \"file\""), "{missing}");
+
+        let args = serde_json::json!({"test": "tests::counts", "file": "src/lib.rs", "line": 6});
+        let out = tool_debug_test(&root, args.as_object().unwrap()).await;
+        if out.contains("no debug adapter here") {
+            eprintln!("skipping: {out}");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        assert!(out.contains("stopped (breakpoint)"), "{out}");
+        assert!(out.contains("seen") && out.contains("= 3"), "{out}");
+        assert!(out.contains("have both been ended"), "{out}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
