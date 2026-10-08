@@ -105,6 +105,26 @@ Two fixes have direct evidence and are next: read a `<tool_call>{…}` block wri
 answer as the call it is, and word a refused command so the model is told to make the edit
 rather than to ask for permission.
 
+### First-hour TUI fixes (`TX-*`, added 2026-10-08)
+
+A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,
+`focus.rs`, `help.rs`, `app.rs`; nothing rendered), three of its claims re-checked against
+the code. These sit beside `SM-2` in the current order: they cost no GPU time, and every
+one of them is a reason a new user leaves in the first five minutes. Quick wins first.
+
+| ID | Problem (evidence) | Fix |
+|---|---|---|
+| **TX-1** | A failed model call ends a chat turn silently: the provider error goes to the trace and ByteBot only, the chat gets `[DONE]` and the spinner just disappears (`app.rs` agent loop, `stop_error`) | send the chat one line naming the model, the error, and what to do (start the server / `m` to pick a model) |
+| **TX-2** | In Normal mode on an empty screen, typing a sentence fires global keys — `q` quits, `s` opens Settings, `m` Models — before the user has pressed `i` (`keymap.rs` `global_chord`) | start in the composer when the transcript is empty; a bare `q` asks once |
+| **TX-3** | `/` opens the composer but drops the slash, so `/init` typed that way is sent to the model as "init" (`keymap.rs:643`) | insert the `/` when `/` opened the composer |
+| **TX-4** | An unknown `/word` (`/help`, `/model`, `/clear`, `/quit`) is sent to the model as a prompt | answer "Unknown command" with how to list them; add `/help` opening the existing overlay |
+| **TX-5** | Factory Reset replaces and saves the whole config on one Enter, no confirmation (`keymap.rs:1054`, verified) | a second Enter or `y`, the row saying what it erases |
+| **TX-6** | A failed Ollama health check is reported as `healthy` (`app.rs:9466`, verified); the status icon is ✅/❓ for Ollama only, so llama.cpp users always see ❓ | report the error as an error; a text state per provider in use |
+| **TX-7** | At 80 columns the footer's `?:help` is cut off behind the status block; the welcome text never mentions `?`, `/` or `Ctrl+F` (`ui.rs:482`, `ui.rs:785`) | `?:help` first; the empty screen shows provider status and "? keys · / commands · Ctrl+F all panels" |
+| **TX-8** | No `NO_COLOR` handling anywhere (verified); focus shown by border colour only | honour `NO_COLOR`; mark the focused pane in text |
+| **TX-9** | Global Ctrl chords fire while typing (Ctrl+A/E/K/U/W open panels or cycle layout; Ctrl+C quits with no way to cancel a running turn) | pass readline keys to the composer while editing; Esc/Ctrl+C cancel the turn first, quit only when idle |
+| **TX-10** | 27 destinations at the default disclosure level 4, and one panel under several names ("ByteBot"/"Agent", "Advice"/"Insights & Advice", "Impact"/"Blast Radius") | one name per destination from `DESTINATIONS`; with `AG-3`/`AG-4`, a lower default level and a palette |
+
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.
 
