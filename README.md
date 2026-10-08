@@ -370,6 +370,7 @@ These twenty-four are the only strings the chat input intercepts (`SLASH_COMMAND
 /egress [text]              Show where the next turn would send your prompt, and what redaction holds back — without sending it
 /goto <destination>         Switch focus directly to any panel destination by name
 /level [1-4]                Progressive disclosure tier: 1 Core, 2 Workflow, 3 Advanced, 4 All
+/help                       Open the help overlay (same as ?); an unknown /word is answered here, not sent to the model
 ```
 
 Press `?` in the TUI for the live keybinding and command overlay.

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `TX-4`: a mistyped `/command` is answered, not sent to the model, and `/help` exists
+
+A `/word` that is not one of the TUI's commands (`/model`, `/clear`, `/quit`) used to
+go to the model as a prompt. It is now answered with "Unknown command" and a pointer to
+`/help`, which is new and opens the same overlay as `?`. A first word with a second `/`
+in it, such as an absolute path, is still sent to the model.
+
 ### Fixed — `TX-3`: `/` in the TUI now types the slash it opened the composer with
 
 Pressing `/` outside the composer opened it but dropped the slash, so `/init` typed
