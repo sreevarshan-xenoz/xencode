@@ -4691,7 +4691,7 @@ machine, not a promise.
 Two files claiming the same `name` are refused by path, because picking one by
 directory order would schedule a team nobody read.
 
-### `xencode orchestrator [status|agents|tasks|graph|logs|permissions|costs|inspect|retry|stop|attach] [--format text|json]`
+### `xencode orchestrator [status|agents|tasks|graph|split|logs|permissions|costs|inspect|retry|stop|attach] [--format text|json]`
 
 The orchestrator's control surface with no terminal in the way. It is the same
 state the TUI's `/orchestrator` mode works on — the roster, the posture in the
@@ -4756,6 +4756,73 @@ xencode orchestrator attach claude sess-1
   it never resumes a saved conversation and calls that a handover, never picks the
   session for you, and needs a real terminal because that is the thing being handed
   over. The screen comes back with the exit status the process returned.
+
+#### `xencode orchestrator split` — a plan, measured before it is trusted
+
+`split` answers a question the rest of this track assumes: is a task cut up well
+enough to be worth running as more than one worker? A wrong edge does not crash —
+two nodes with nothing between them simply start together, and the second fails
+against a file the first has not written yet — so a split from a model has to be
+scored before the scheduler sees it.
+
+```bash
+xencode orchestrator split --commit 9d12f011                 # the honest measurement
+xencode orchestrator split --task "make the store retry" --path crates/core/src/store.rs
+xencode orchestrator split --commit 9d12f011 --answer split.json   # no model, no spend
+xencode orchestrator split --commit 9d12f011 --format json
+```
+
+Two facts are read off the repository, and the split is judged against them:
+
+- **which files the change really is.** With `--commit`, the file set is what
+  `git show --name-only` reports for that commit, written relative to this Cargo
+  workspace. The commit's own message is the task the planner is given; its file
+  list is not, so the answer cannot be a copy of the key.
+- **which order the build forces.** The pairs come from `cargo metadata`'s
+  dependency graph: if the crate holding file B depends on the crate holding file
+  A, then A must land first, and a split that says otherwise is wrong about the
+  compiler, not about taste. Two files in one crate assert no order at all, and
+  nothing here invents one. A file outside this workspace — a top-level README —
+  still has to be owned, but takes part in no ordering claim, because nothing
+  enforces one.
+
+Every split is quoted beside the **flat baseline**: one unit per file, no edges.
+That is what doing the work as one task looks like as a number, and it owns the
+whole file set, so the only figure a split can win on is order. The report always
+prints both halves — files owned out of the change, and required orders stated —
+and then names every disagreement it found rather than printing a score: a file
+nobody owns, two units reaching for one file (a lease collision before it is a
+schedule), a pair stated backwards, a pair left silent, and a file the split plans
+that the change does not consist of. Silence is never read as agreement: a missing
+edge means the scheduler starts those two units together, so it is counted against
+the split and named, exactly like a wrong one.
+
+A split that does not strictly beat the baseline is refused, and the command exits
+non-zero — which is what stops it reaching `xencode team run`. Nothing is launched
+or scheduled by this reading either way.
+
+The flags, as `--help` lists them:
+
+| flag | what it decides |
+| --- | --- |
+| `--task <text>` | the change to split, in your own words. The planner sees this and the list of crates, and nothing else |
+| `--commit <sha>` | split a change this repository already made: its message is the task, its files are what the split is scored against |
+| `--path <file>` | the files the change touches, when no commit is named. Repeat once per file |
+| `--answer <file>` | score the split in this file instead of asking a model |
+| `--verify <cmd>` | the command every unit is graded by, so a planner cannot pick an easier test than the baseline is graded by. Default `cargo check --offline --workspace` |
+| `--model <name>` | which model to ask. Defaults to this project's configured model |
+| `--format text\|json` | the report. Both formats refuse the same split for the same reasons |
+
+With neither `--commit` nor `--path`, the file set is the split's own, and only the
+ordering half of the score means anything — the report says so on screen instead of
+letting a self-compared split read as a measured one.
+
+`--model` routes by name, like every other model call here: a name prefixed
+`llamacpp:` goes to a local llama.cpp server, and a bare path to a `.gguf` file
+goes to Ollama instead, which is why pointing it at a file with no Ollama running
+fails with a refused connection rather than loading it. `--answer` skips the model
+entirely and scores a split off disk, so the scoring can be checked without a
+server or any spend.
 
 Nothing in the reading verbs launches, stops or changes anything, and each of them
 says so on its last line. `xencode team run <recipe> --approved-by <name>` is what

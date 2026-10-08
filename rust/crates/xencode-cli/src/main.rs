@@ -1389,6 +1389,50 @@ enum OrchestratorAction {
         format: OutputFormat,
     },
 
+    /// Ask the planner to split one task into units, then score that split against
+    /// what this workspace's own build requires and against the flat baseline: one
+    /// node per file, no order at all. A split that does not beat the baseline is
+    /// refused here and never reaches the scheduler, because a graph that orders no
+    /// more than a file list is two workers editing one file at once for no reason
+    /// anybody agreed to. Nothing is launched.
+    Split {
+        /// The change to split, in your own words. The planner sees this and the
+        /// list of crates, and nothing else — so it cannot copy the answer.
+        #[arg(long, conflicts_with = "commit")]
+        task: Option<String>,
+
+        /// Split the change a commit here already made: its message is the task and
+        /// the files it touched are what the split is scored against. This is the
+        /// honest measurement, since neither the task nor the file set came from the
+        /// planner.
+        #[arg(long)]
+        commit: Option<String>,
+
+        /// The files the change touches, when no commit is named. Repeat once per
+        /// file. Without this or `--commit`, the file set is the split's own, and
+        /// only the order half of the score means anything.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+
+        /// Score the split in this file instead of asking a model: the JSON the
+        /// planner is asked for, as it came back. Needs no server and no spend.
+        #[arg(long)]
+        answer: Option<std::path::PathBuf>,
+
+        /// The command that decides a unit is done, handed to every unit so a
+        /// planner cannot pick an easier test than the baseline is graded by
+        #[arg(long = "verify", default_value = "cargo check --offline --workspace")]
+        verification: String,
+
+        /// Model to ask. Defaults to this project's configured model.
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// The newest lines of a run's own log, naming the file they were read from.
     /// A detached run keeps a log; a recorded team run keeps timings and exit
     /// statuses and never captured its children's output, and says which of the
@@ -5618,6 +5662,15 @@ async fn run_orchestrator(action: OrchestratorAction) -> Result<(), String> {
         OrchestratorAction::Agents { format } => orchestrator_agents(format),
         OrchestratorAction::Tasks { format } => orchestrator_tasks(format),
         OrchestratorAction::Graph { recipe, format } => orchestrator_graph(recipe, format),
+        OrchestratorAction::Split {
+            task,
+            commit,
+            paths,
+            answer,
+            verification,
+            model,
+            format,
+        } => orchestrator_split(task, commit, paths, answer, verification, model, format).await,
         OrchestratorAction::Logs { run, lines, format } => orchestrator_logs(run, lines, format),
         OrchestratorAction::Permissions { agent, format } => {
             orchestrator_permissions(agent, format)
@@ -6044,6 +6097,255 @@ fn orchestrator_tasks(format: OutputFormat) -> Result<(), String> {
     }
     orchestrator_ran_nothing();
     Ok(())
+}
+
+/// The Cargo workspace a split is judged inside: the nearest directory at or above
+/// here whose manifest declares a `[workspace]`, because that is the tree whose
+/// crates `cargo metadata` names. There is no `--root` to point it somewhere else,
+/// on purpose — a reference built from the wrong tree is not a rough reading, it is
+/// a wrong answer, and the only sign would be a score nobody questions.
+fn split_workspace_root() -> Result<std::path::PathBuf, String> {
+    let start = std::env::current_dir()
+        .map_err(|e| format!("cannot read the working directory to find the workspace: {e}"))?;
+    let mut dir = start.as_path();
+    loop {
+        let manifest = dir.join("Cargo.toml");
+        let declares_workspace = std::fs::read_to_string(&manifest)
+            .map(|text| text.contains("[workspace]"))
+            .unwrap_or(false);
+        if declares_workspace {
+            return Ok(dir.to_path_buf());
+        }
+        dir = dir
+            .parent()
+            .ok_or_else(|| format!("no Cargo workspace at or above {}", start.display()))?;
+    }
+}
+
+/// `OR-1` — ask for a split, score it against what the build itself requires, and
+/// refuse it here rather than handing it to a scheduler.
+///
+/// The order of operations is the whole item. The reference is built *before*
+/// anything is asked, and out of something other than the answer whenever a person
+/// can name one: `--commit` gives the change's own message as the task and the
+/// files git says it touched as the file set; `--path` gives a list somebody
+/// wrote. With neither, the split can only be compared on ordering, and the report
+/// says which half was actually measured instead of printing full coverage as if it
+/// had been earned.
+///
+/// A refused split comes back as an error, so it exits non-zero and stops a script
+/// where the warning would have scrolled past.
+async fn orchestrator_split(
+    task: Option<String>,
+    commit: Option<String>,
+    paths: Vec<String>,
+    answer: Option<std::path::PathBuf>,
+    verification: String,
+    model: Option<String>,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_core_rs::{decide, Reference, Split};
+    use xencode_tui_rs::decompose::{
+        ask_planner, commit_change, reference_from_paths, reference_from_split, workspace_layout,
+        PlannerOptions,
+    };
+
+    let root = split_workspace_root()?;
+    let change = match &commit {
+        Some(sha) => Some(commit_change(&root, sha)?),
+        None => None,
+    };
+    let task_text = match &change {
+        Some(read) => read.task(),
+        None => task.filter(|text| !text.trim().is_empty()).ok_or_else(|| {
+            "nothing to split: name the change with --task \"…\", or take a change that \
+                 already happened with --commit <sha>"
+                .to_string()
+        })?,
+    };
+
+    // The split: read from a file when one is given, which needs no server and no
+    // spend, and otherwise asked of the model just now.
+    let (split, asked) = match &answer {
+        Some(file) => {
+            let text = std::fs::read_to_string(file)
+                .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+            let value = match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(value) => value,
+                // A saved raw answer usually carries the model's prose around the
+                // JSON, so the same reader the live path uses gets the first shot
+                // at it before this calls the file unreadable.
+                Err(e) => xencode_providers_rs::schema::read_answer(
+                    &text,
+                    &xencode_tui_rs::decompose::schema(),
+                )
+                .map_err(|why| format!("{} is not a split ({e}): {why}", file.display()))?,
+            };
+            let split = Split::from_value(&value)
+                .map_err(|e| format!("{} does not hold a split: {e}", file.display()))?;
+            (split, None)
+        }
+        None => {
+            let config = XencodeConfig::load().unwrap_or_default();
+            let options = PlannerOptions {
+                ollama_url: config.ollama_url.clone(),
+                llama_cpp_url: config.llama_cpp_url.clone(),
+                temperature: config.llama_cpp_temperature.unwrap_or(0.0),
+                seed: config.llama_cpp_seed.unwrap_or(42),
+                ..PlannerOptions::default()
+            };
+            let chosen = model.unwrap_or(config.default_model.clone());
+            let layout = workspace_layout(&root)?;
+            let run = ask_planner(&task_text, &layout, &chosen, &options).await?;
+            (run.split.clone(), Some(run))
+        }
+    };
+
+    let reference: Reference = match (&change, paths.is_empty()) {
+        (Some(read), _) => reference_from_paths(&root, &read.paths, &verification, &read.source())?,
+        (None, false) => reference_from_paths(
+            &root,
+            &paths,
+            &verification,
+            &format!("{} files named with --path", paths.len()),
+        )?,
+        (None, true) => reference_from_split(&split, &root, &verification)?,
+    };
+    let flat = Split::flat_baseline(&reference);
+    let decision = decide(&split, &reference, &flat);
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&split_json(&root, &reference, &split, &decision, &asked))
+                .map_err(|e| e.to_string())?
+        );
+        return split_verdict(&decision);
+    }
+
+    println!("Split · {}", reference.source);
+    println!("  workspace: {}", root.display());
+    println!("  every unit graded by: {verification}");
+    match &asked {
+        Some(run) => println!(
+            "  asked {} in {} ms, and got {} units back",
+            run.model,
+            run.elapsed_ms,
+            run.split.subtasks.len()
+        ),
+        None => println!(
+            "  read from a file, so no model was asked and nothing was spent: {}",
+            answer
+                .as_ref()
+                .map(|f| f.display().to_string())
+                .unwrap_or_default()
+        ),
+    }
+    println!();
+    println!("  the units a scheduler would run");
+    for node in &split.subtasks {
+        println!(
+            "    {:<16} {} — {}",
+            node.id,
+            node.goal,
+            if node.needs.is_empty() {
+                "starts at once".to_string()
+            } else {
+                format!("waits on {}", node.needs.join(", "))
+            }
+        );
+        println!("        writes {}", node.paths.join(", "));
+    }
+    println!();
+    for line in decision.lines() {
+        println!("{line}");
+    }
+    // The disagreements are not printed again here: every one that stops the split
+    // is already named in the reasons above, and the pair counts below say how
+    // many of each kind there were. The JSON keeps the lists themselves.
+    for line in decision.score.counts() {
+        println!("  {line}");
+    }
+    println!(
+        "  the same figures for the baseline ({} units):",
+        flat.subtasks.len()
+    );
+    for line in decision.baseline.counts() {
+        println!("    {line}");
+    }
+    if reference.source.contains("the split's own file list") {
+        println!(
+            "\n  Only the ordering above is a measurement: the file list came from the split \
+             itself, so nothing was compared on coverage. Name --commit <sha> or --path to get \
+             that half too."
+        );
+    }
+    println!();
+    println!(
+        "  Nothing was launched or scheduled by this reading. This screen decides how the work \
+         would be cut up; `xencode team run <recipe>` is where a plan becomes processes."
+    );
+    split_verdict(&decision)
+}
+
+/// The refusal, in the words the exit code carries. A split that did not beat the
+/// baseline is not a warning: the scheduler would run it, so this is the point
+/// where it stops.
+fn split_verdict(decision: &xencode_core_rs::SplitDecision) -> Result<(), String> {
+    if decision.schedulable {
+        return Ok(());
+    }
+    Err(format!(
+        "this split is not scheduled: {}",
+        decision.reasons.join("; ")
+    ))
+}
+
+fn split_json(
+    root: &std::path::Path,
+    reference: &xencode_core_rs::Reference,
+    split: &xencode_core_rs::Split,
+    decision: &xencode_core_rs::SplitDecision,
+    asked: &Option<xencode_tui_rs::decompose::PlannerRun>,
+) -> serde_json::Value {
+    let score = |s: &xencode_core_rs::SplitScore| {
+        serde_json::json!({
+            "files_expected": s.paths_expected,
+            "files_owned": s.paths_owned,
+            "coverage": s.coverage(),
+            "orders_expected": s.pairs_expected,
+            "orders_stated": s.agreed,
+            "ordering": s.ordering(),
+            "unclaimed": s.unclaimed,
+            "contested": s.contested.iter().map(|(path, owners)| serde_json::json!({"path": path, "owners": owners})).collect::<Vec<_>>(),
+            "backwards": s.contradicted,
+            "left_silent": s.unstated,
+            "inside_one_node": s.same_node,
+            "not_in_the_change": s.invented,
+        })
+    };
+    serde_json::json!({
+        "workspace": root,
+        "reference": {
+            "source": reference.source,
+            "verification": reference.verification,
+            "paths": reference.paths,
+            "before": reference.before,
+        },
+        "planner": asked.as_ref().map(|run| serde_json::json!({
+            "model": run.model,
+            "elapsed_ms": run.elapsed_ms,
+            "prompt": run.prompt,
+            "answer": run.raw,
+        })),
+        "units": split.subtasks.iter().map(|n| serde_json::json!({
+            "id": n.id, "goal": n.goal, "paths": n.paths, "needs": n.needs, "verify": n.verify,
+        })).collect::<Vec<_>>(),
+        "schedulable": decision.schedulable,
+        "reasons": decision.reasons,
+        "score": score(&decision.score),
+        "baseline": score(&decision.baseline),
+    })
 }
 
 /// The dependency shape. With a recipe name it is the graph a run *would* walk,

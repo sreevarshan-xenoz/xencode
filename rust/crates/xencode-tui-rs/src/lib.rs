@@ -6,6 +6,7 @@ pub mod collab_client;
 pub mod control_room;
 pub mod crate_docs;
 pub mod crate_sources;
+pub mod decompose;
 pub mod detached;
 pub mod eval_judge;
 pub mod event_bus;
