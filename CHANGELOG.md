@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `LSP-1`: the agent can ask where an item is used, and by which functions
+
+Two read-only agent tools answer from rust-analyzer's semantic index (the one
+`xencode impact --semantic` builds). `find_refs(symbol, in?)` lists every place one Rust
+item is written — its declaration and each use — with file, line, the line of source and
+the function the use sits in. `callers(symbol, in?)` lists the functions that use it, with
+how many times each does; a method is shown as `Type::method`. Uses through re-exports and
+from other crates are found, and a field or local variable that shares the name is not.
+Neither tool builds the index — that takes minutes — so when it is missing or stale they
+say so and how to build it. No rust-analyzer process is kept running for them.
+
 ### Added — `LSP-3`: the agent can rename a Rust item by what it is, not by how it is spelled
 
 The `rename` tool existed but was never offered to the model, so nothing could call it.

@@ -516,7 +516,48 @@ pub fn advise_tools() -> Vec<ToolDefinition> {
                 "required": ["path"]
             }),
         },
+        ToolDefinition {
+            name: "find_refs".to_string(),
+            description: "Every place one Rust item is written — its declaration \
+                          and each use, with file, line, the source line and the \
+                          function it sits in — from rust-analyzer's semantic \
+                          index, so uses through re-exports and other crates are \
+                          found and a field or local with the same name is not. \
+                          Read-only. Needs the index built and current (`xencode \
+                          impact --semantic` builds it); otherwise it says so."
+                .to_string(),
+            parameters: refs_parameters(),
+        },
+        ToolDefinition {
+            name: "callers".to_string(),
+            description: "The functions that use one Rust item, each with its file \
+                          and how many times it uses it, from rust-analyzer's \
+                          semantic index; a method is named `Type::method`. \
+                          Read-only. Needs the index built and current, like \
+                          find_refs."
+                .to_string(),
+            parameters: refs_parameters(),
+        },
     ]
+}
+
+/// The arguments `find_refs` and `callers` share.
+fn refs_parameters() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "symbol": {
+                "type": "string",
+                "description": "The item's name: a function, type, field or constant"
+            },
+            "in": {
+                "type": "string",
+                "description": "The file that declares it, by path or tail, when the \
+                                name belongs to more than one item"
+            }
+        },
+        "required": ["symbol"]
+    })
 }
 
 /// The workspace file tools (Milestone I, I1-02): read, list, search, write,
@@ -1305,7 +1346,7 @@ mod tests {
         let tools = advise_tools();
         assert_eq!(
             tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            ["repo_advise", "what_breaks"]
+            ["repo_advise", "what_breaks", "find_refs", "callers"]
         );
         let value = tools[0].to_api_value();
         assert_eq!(value["type"], "function");

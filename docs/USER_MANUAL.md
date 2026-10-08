@@ -363,6 +363,8 @@ back to the model before it continues.
 | `search_files(pattern, path?)` | Regex search over the tree (skips `target/`, `node_modules/`, dot-dirs; 100 hits) | read-only |
 | `repo_advise(filter?)` | Findings from the project index | read-only |
 | `what_breaks(path, symbol?)` | The files that link to a file, walked backwards through the project index up to 3 steps; each answer says an edge is a resolved `use`/`mod`/`impl`, not a checked call site. With `symbol`, each line also says whether that file's own `use` writes the name | read-only |
+| `find_refs(symbol, in?)` | Every place one Rust item is written — declaration and uses — with file, line, the source line and the function each use sits in, from rust-analyzer's semantic index (see `xencode impact --semantic`); a field or local with the same name is not included. Refuses, saying how to build it, when the index is missing or stale | read-only |
+| `callers(symbol, in?)` | The functions that use one Rust item, with file and use count, from the same index; a method is named `Type::method` | read-only |
 | `update_plan(items)` | Post or refresh the todo list the user watches | read-only |
 | `background_poll(id)` / `background_stop(id)` | Output / cancel of a background task | read-only |
 | `write_file(path, content)` | Create or replace a file (answers with the unified diff) | file change |

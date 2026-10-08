@@ -5114,6 +5114,23 @@ pass found something the whole plan has been quietly assuming.
   genuinely un-collectable signal in the whole retrieval story. *Trap:* resident
   RA's memory on 15 GiB, plus owning a server lifecycle state machine, plus it is
   a new subsystem the Rust ecosystem does not provide. Not **CI-1…CI-7**.
+  - [x] **Done 2026-10-08, without the resident process.** Once `LSP-2`
+    existed the trap could be stepped around rather than paid: the SCIP index
+    already holds every reference to every symbol, resolved by rust-analyzer,
+    and the one thing it does not record — which function a reference sits in
+    — is read from the file's tree-sitter parse (`parse::enclosing_function`,
+    `Type::method` inside an `impl`). So `find_refs(symbol, in?)` and
+    `callers(symbol, in?)` are agent tools over the index, read-only and
+    offered in plan mode, with no rust-analyzer process kept alive and no
+    lifecycle to own. The memory question the trap raised was measured
+    instead: one `rust-analyzer scip` run over this workspace peaked at
+    4.49 GiB. **What this gives up:** answers are only as fresh as the last
+    index build, and a missing or stale index is refused (with how to build it)
+    rather than answered; a resident client would have answered about unsaved
+    edits. **Proved** by a test that runs real rust-analyzer on a crate where
+    `W::go` calls `helper` twice and `twice` once: `find_refs` lists the
+    declaration and each use with its line and enclosing function, `callers`
+    lists `W::go (2)` and `twice (1)`, and both refuse before the index exists.
 - **LSP-2 — `rust-analyzer scip` at `/init` and on refresh**, answering impact
   and reference questions from the emitted index. *Effort: M.* Client-free
   semantic graph, and it makes **CI-6** symbol-accurate instead of
