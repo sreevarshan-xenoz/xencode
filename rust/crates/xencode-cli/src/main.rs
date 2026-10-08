@@ -663,7 +663,8 @@ enum Commands {
 
         /// Answer from rust-analyzer's semantic index (SCIP) instead of `use`
         /// paths: every file that refers to a symbol this file defines. Builds the
-        /// index first when it is missing or stale, which takes minutes
+        /// index first when it is missing or stale, which takes minutes and runs
+        /// the project's build scripts and procedural macros, as `cargo build` does
         #[arg(long)]
         semantic: bool,
 
@@ -11886,7 +11887,7 @@ fn run_impact_semantic(
             return Err(why.to_string());
         }
         eprintln!(
-            "  {why}\n  building it with rust-analyzer scip in {} (this takes minutes on a large workspace)…",
+            "  {why}\n  building it with rust-analyzer scip in {} — this runs the project's build scripts and takes minutes on a large workspace…",
             workspace.display()
         );
         let meta = scip_index::generate(&workspace, scip_index::SCIP_TIMEOUT)

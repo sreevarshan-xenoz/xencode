@@ -372,17 +372,6 @@ pub fn routes_to_ollama(model: &str) -> bool {
         && !model.contains('/')
 }
 
-/// ProviderManager abstracts over local and cloud models.
-///
-/// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud),
-/// Gemini (cloud), Anthropic (cloud), and any OpenAI-compatible `/chat/completions`
-/// server the user pointed at (`remote:`, which is also how a Colab GPU reaches
-/// the laptop).
-///
-/// Features:
-/// - Automatic provider routing based on model prefix
-/// - Retry with exponential backoff on transient failures
-/// - Health tracking across all providers
 /// A server address fit to print: no `user:password@` and no query string,
 /// either of which can carry a credential. Unparseable text is not printed.
 fn display_url(url: &str) -> String {
@@ -398,6 +387,17 @@ fn display_url(url: &str) -> String {
     }
 }
 
+/// ProviderManager abstracts over local and cloud models.
+///
+/// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud),
+/// Gemini (cloud), Anthropic (cloud), and any OpenAI-compatible `/chat/completions`
+/// server the user pointed at (`remote:`, which is also how a Colab GPU reaches
+/// the laptop).
+///
+/// Features:
+/// - Automatic provider routing based on model prefix
+/// - Retry with exponential backoff on transient failures
+/// - Health tracking across all providers
 pub struct ProviderManager {
     ollama_client: OllamaClient,
     llama_cpp_client: Option<LlamaCppClient>,

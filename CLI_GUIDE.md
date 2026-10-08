@@ -4203,7 +4203,9 @@ Measured on this repository for `impact.rs`: the default layer finds 3 files
 that link it directly; `--semantic` finds 7, including callers in
 `xencode-cli` and `xencode-tui-rs` that reach it through the crate's re-exports.
 The agent's `what_breaks` tool reads the same index when it is current, and
-`/init` starts building it in the background when it is not.
+`/init` says whether it is current. Building it runs the project's build scripts and
+procedural macros, as `cargo build` does, so only `xencode impact --semantic` builds it
+— for code you trust.
 
 ### TUI slash: `/impact <file>`
 

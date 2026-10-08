@@ -5177,7 +5177,9 @@ pass found something the whole plan has been quietly assuming.
     Surfaces: `xencode impact <file> --semantic [--symbol NAME]` (builds or
     rebuilds the index when needed, and says why), the agent's `what_breaks`
     (uses the index only when current, otherwise says why and answers from the
-    name tier), and `/init`, which starts the build in the background. The
+    name tier), and `/init`, which reports whether the index is current — it
+    does not build it, because rust-analyzer runs the project's build scripts
+    and proc macros (changed after a security review the same day). The
     trap held exactly as written: one build of this workspace took 164–205 s with a peak working set of 4.49 GiB,
     and wrote 30.7 MB, so the build is never on the way to an answer
     someone is waiting for; a current index answers in about 3 s. **Staleness,
