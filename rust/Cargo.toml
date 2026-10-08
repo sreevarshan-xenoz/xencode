@@ -27,3 +27,15 @@ license = "MIT"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+# Keep `target/` from eating the disk. Full debug info in every dependency is
+# what made it grow: one working day of builds and test runs reached 90 GiB, 71
+# of it in `target/debug/deps` (measured 2026-10-08). Line tables keep file and
+# line in panics and backtraces for our own crates; dependencies carry none.
+# A session that needs a real debugger on xencode itself can override this
+# with `CARGO_PROFILE_DEV_DEBUG=true`.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
