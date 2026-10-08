@@ -11541,7 +11541,7 @@ approval request instead of pre-granting one.
 | **M-5** | `xencode mcp serve` | ecology | moved up from W14: the broker's only seam (§S-3) |
 | **V-10** | Worker-event to window bridge | capability | after V-1 and AR-1/AR-4/AR-5/AR-6/AR-9; consumes observed state without controlling layout |
 
-#### W17 — Many workers at once — 14 items
+#### W17 — Many workers at once — 15 items
 
 From Milestone S. Needs W6 (evidence), W11 (`CX-7`'s budgets that act, `CX-4`'s price
 lookup) and W12 (`LF-2`'s approval round-trip), and it is where `MA-4`/`MA-5` come back in
@@ -11560,6 +11560,7 @@ processes at once.
 | **OR-10** | Plan, simulate, and dry-run first by default | capability | folds item 33's separate mode into the default render |
 | **OR-11** | Explain every routing choice | capability | and label an estimate as an estimate |
 | **OR-17** | The veto, liftable only by reviewer, human or stated policy | capability | the authority claim that makes the middle position real rather than cosmetic |
+| **OR-18** | Put the lease and the task contract in the launch path | capability | added 2026-10-08 when `OR-4` and `OR-15` were found built-but-unreachable; it is the half both rows' done-when clauses actually ask for |
 | **OR-13** | The Local-Only profile | capability | refuses external workers by name; rides `LF-8`'s no-network measurement in W14 |
 | **OR-12** | The worker panel | ecology | every number traces to a row; unobservable renders as unknown, never as idle |
 | **OR-14** | `/orchestrator` as a mode, plus its command surface | ecology | turning it off leaves plain xencode untouched; the mode itself is now `X-2`, this row keeps the command surface |
@@ -12252,11 +12253,22 @@ worker, `OR-` for the thing that decides what workers to talk to.
       path and worker panel wire in (`X-3`, `OR-12`); the actual end-to-end spawn of a
       live Claude through the prompt tool is a paid call and is **not** claimed here —
       the two done-when clauses are met at xencode's gate, which is what they ask.
-- [x] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
+- [ ] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
       file set, and a conflict refused at scheduling time rather than discovered at merge
       time.
       **Done-when:** two workers asked for the same file and the second was told to wait
       before it was launched, not after it had written.
+      **Checked in error on 2026-10-07 and reopened.** `xencode-core-rs/src/lease.rs`
+      (532 lines) is real and unit-tested — `request_lease` queues an overlapping request
+      instead of granting it, `release_lease` hands the turn to the next waiter, and a path
+      that climbs out of the workspace is refused. What was claimed for it is not what it
+      does: `grep -rn "LeaseRegistry" crates/*/src crates/*/tests` returns the module and
+      `core-rs/src/lib.rs:18-19`, so **nothing consults it**, and the done-when is about a
+      worker that was told to wait *before it was launched*. `arm_spawn`
+      (`xencode-tui-rs/src/app.rs:4798`) calls `spawn_worktree(&root, id, &branch_name)` on
+      `xencode/spawn-{id}` (`app.rs:10216`) and asks the registry nothing; `/spawn <task>`
+      carries no file set. The registry's scheduling rule therefore cannot fire in the
+      product, only inside its own tests. The missing half is **`OR-18`**.
 - [x] **OR-5 — the merge decision.** `git merge-tree` detection, a rendered conflict, an
       evidence-backed verdict per branch, and a human gate to land anything.
       **Done-when:** nothing merges without a decision a named human made, and a clean
@@ -12529,7 +12541,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       integration tests run against the built binary. Found and fixed on the way: a session
       with no events on the timeline lost the log section from the panel entirely, so
       "checked, nothing yet" was indistinguishable from "never looked at".
-- [x] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
+- [ ] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
       means, by xencode: the lease and its workspace, the allowed file set, the forbidden
       paths, the expected deliverables, the verification commands, and the completion
       condition. The worker does not get to redefine any of them.
@@ -12555,10 +12567,13 @@ worker, `OR-` for the thing that decides what workers to talk to.
       that real diff. Mutation-checked: with the lease-boundary enforcement stripped the
       outside-lease and absolute-path tests both fail, so the guard is load-bearing. The
       worktree and `SE-4`'s gate stop the forbidden write at run time; this contract is
-      the after-the-fact check that denies a merge. A library capability the launch path
-      and control room consume (`X-3`); no CLI command is added, so no user-facing doc
-      changes here.
-- [x] **OR-16 — the result envelope.** Every finished task produces one machine-readable
+      the after-the-fact check that denies a merge. **Reopened 2026-10-08: the last
+      sentence above was wrong.** `grep -rn "TaskContract" crates/` returns
+      `task_contract.rs` and `core-rs/src/lib.rs:37` and nothing else — no launch path
+      builds a contract and no merge path reads one — so the idea is not yet "living in a
+      real launch path", which is what this row's done-when asks for. The wiring is
+      **`OR-18`**.
+- [ ] **OR-16 — the result envelope.** Every finished task produces one machine-readable
       record: status, agent, task, changed files taken from the diff, the commands that
       ran with their exit codes, claims held apart from evidence, and a handoff state.
       **Done-when:** claims and evidence sit in different fields and only the evidence
@@ -12584,13 +12599,55 @@ worker, `OR-` for the thing that decides what workers to talk to.
       envelope reflects both while still keeping the claim out of the quotable view.
       Mutation-checked: leaking claims into `evidence_quotable` fails the exclusion test,
       and dropping the empty-command guard makes "nothing proven" wrongly read as passed.
-      A library capability the reviewer and control room consume; no CLI surface added.
+      **Reopened 2026-10-08: the sentence above this one was wrong.** Nothing produces an
+      envelope and nothing reads one — `grep -rn ResultEnvelope crates/` is its own module
+      plus the declaration and re-export at `core-rs/src/lib.rs:5,22-23` — so no reviewing
+      agent is handed this record instead of prose, which is the row's second done-when
+      clause. `AE-1` is already open for exactly that half and is where the work belongs;
+      the shape itself is finished and tested.
 - [ ] **OR-17 — the veto.** A review or verification outcome can block a merge, and the
       block cannot be lifted by the worker that caused it. Only a named reviewer, the
       human, or a policy that says out loud what it clears.
       **Done-when:** a vetoed run reads as blocked, with the reason and who may clear it;
       nothing a worker emits can change its own veto; and clearing one is an audited event
       on `EV-11`'s log rather than a keypress.
+
+- **OR-18 — put the lease and the contract in the launch path, or say so.** *Effort: M.*
+  `OR-4` and `OR-15` are both built and neither is reachable: `LeaseRegistry` is called from
+  `lease.rs`'s own tests and re-exported at `core-rs/src/lib.rs:18-19` and nowhere else, and
+  `TaskContract` at `core-rs/src/lib.rs:37` likewise, while `arm_spawn`
+  (`xencode-tui-rs/src/app.rs:4798`) calls `spawn_worktree` (`app.rs:10216`) on
+  `xencode/spawn-{id}` and asks nothing. A row whose type exists but never runs is how this
+  plan got overclaimed twice in one week, so this item's alternative is the honest sentence in
+  the changelog — both are now written. Wiring it for real has three problems the library does
+  not solve. (1) **The declared file set has no source.** `/spawn <task>` carries prose, and
+  `OR-15`'s own rule is that the worker cannot widen what it was given — so letting the model
+  declare its own set to get around this is the wrong fix, because the constrained party chose
+  the constraint; the set has to come from the human's task text or from nothing, in which
+  case the conflict rule only ever compares empty sets. (2) **Leases live in memory**
+  (`LeaseRegistry { active_leases: BTreeMap, waiting_queue: Vec }`, `lease.rs:107-111`), and a
+  worker is a separate process that outlives the screen showing it, so restarting the TUI
+  silently frees every file a live worker holds. The tree already has the pattern for the fix
+  — `.xencode/` JSON written with `write_atomic` and re-read on start, the same discipline
+  `DB-5` exists for. (3) **Releasing a lease destroys work.** `release_lease` runs
+  `git worktree remove --force` and, for a non-git root, `std::fs::remove_dir_all`
+  (`lease.rs:298-313`), with the failure discarded — a bookkeeping call named *release* that
+  deletes an unmerged tree, which is the opposite of `OR-5`'s rule that nothing lands without a
+  person deciding. Keep the directory, keep the branch, and make removal a separate named
+  action. *Trap:* the tree already has the right removal rule and the unused registry
+  contradicts it — the worktree panel's `worktree_do_remove` (`app.rs:4464`) refuses the main
+  worktree, confirms the rest, and calls `worktree_remove(root, path, false)`
+  (`context-rs/src/worktree.rs:139`) so git itself blocks deleting a dirty one. That is why the
+  worktree this session left behind (`rust/crates/xencode-tui-rs-spawn-1/`, branch
+  `xencode/spawn-1`, clean and 0 commits ahead) is still there and still findable. Wiring
+  `release_lease` in must not smuggle the `--force` version of that decision into a call nobody
+  named.
+  *Done-when:* two workers asking for the same file, launched for real, produce one running
+  worker and one waiting record that says which file it is waiting on, watched by launching
+  both; a restart of the TUI leaves the running worker's lease intact; and finishing a worker
+  whose diff leaves its declared set denies the merge through `TaskContract::check_finish`
+  rather than through the contract's own test — with `OR-4` and `OR-15` checked again only when
+  those three are seen happening.
 
 ### S-10 Where this sits in the wave order
 
@@ -12600,7 +12657,12 @@ of their own (W15) ahead of everything else in this appendix; `AR-4…AR-8`, `OR
 depend on W1 (events, ledger), W5 (verification) and W7 (`CAP-1`, `SE-4`, `SE-7`) and sit
 in a new W16; `OR-4…OR-14` need W6, W11 and W12 and sit in W17, with `OR-13` riding
 `LF-8`'s no-network measurement from W14; the four later additions land in W16
-(`AR-9`, `OR-15`, `OR-16`) and W17 (`OR-17`). Two existing items change status because of S:
+(`AR-9`, `OR-15`, `OR-16`) and W17 (`OR-17`). **Added 2026-10-08:** `OR-18` sits in W17
+beside `OR-4`, whose done-when it is the missing half of, and `OR-4`, `OR-15` and `OR-16` are
+unchecked again — all three shipped a library that no launch path, merge path or reviewer
+reads (`lease.rs`, `task_contract.rs`, `result_envelope.rs` each appear only in their own
+module and their `core-rs/src/lib.rs` re-export), which their done-when clauses do not allow.
+Two existing items change status because of S:
 **`M-5` (`xencode mcp serve`) moves out of W14 into W16**, in front of `OR-3`, because it
 is the broker's only seam (S-3), and **`MA-4`/`MA-5` get a scoped un-rejection** for
 external workers only (§R-2 item 8). `S` adds no item to W0–W13, and nothing in it may
@@ -15723,7 +15785,7 @@ appear in it are how the §R-0 counts went wrong.
   `xencode-core-rs/src/result_envelope.rs` holds `ResultEnvelope`, `ReviewerView`,
   `evidence_quotable`, `FinishStatus{Completed,Failed,Blocked}` and `RanCommand{command,
   exit_code, evidence_ref}`, and `grep -rn ResultEnvelope crates/` returns only that module and
-  its re-export in `core-rs/src/lib.rs:3,13`. It has no producer and no consumer, while `OR-16`'s
+  its re-export at `core-rs/src/lib.rs:5,22-23`. It has no producer and no consumer, while `OR-16`'s
   own progress note describes it as "a library capability the reviewer and control room consume"
   — `control_room.rs` and `worker_bridge.rs` reference only each other and `lib.rs`. *Trap:* the
   tempting shortcut is to fill `evidence_ref` with a plausible string, which is exactly the

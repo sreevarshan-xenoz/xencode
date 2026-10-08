@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — three capabilities described as wired when nothing called them
+
+`OR-4`'s worker leases, `OR-15`'s task contract and `OR-16`'s result envelope were each
+written up as things a running worker went through. They are not. All three libraries are
+real, tested, and exported — and each appears only in its own module plus its re-export in
+`xencode-core-rs/src/lib.rs`:
+
+- `LeaseRegistry` decides that an overlapping file request waits rather than starting, and
+  nothing asks it. `/spawn` creates its worktree directly (`xencode-tui-rs/src/app.rs:4798`
+  and `:10216`) and carries no file set at all.
+- No launch path builds a `TaskContract` and no merge path reads one, so "finishing outside
+  the lease denies a merge" happens inside the contract's tests, not to a worker.
+- Nothing writes a `ResultEnvelope` and nothing reads one, so a reviewing agent is still
+  handed prose.
+
+The entries for those three items, further down in this section, now say which half exists
+and which does not, and the matching rows
+in `NEXT_PLAN_TASKS.md` are unchecked again — their own done-when clauses are about a worker
+that was actually stopped, not about a type that could. The wiring is a new item, **`OR-18`**,
+and it is not a mechanical job: the file set has no source that is not the constrained worker
+itself, leases live only in memory while a worker is a separate process that outlives the
+screen, and releasing a lease runs `git worktree remove --force` with the failure discarded —
+unlike the worktree panel, which confirms and refuses to delete a dirty tree. Producing and
+consuming the envelope is already open as `AE-1`.
+
 ### Added — `OR-14`: the orchestrator is a mode you are in, with a surface of its own
 
 `Ctrl+Space` now flips the status bar between `CODING` and `ORCHESTRATOR`, and
@@ -280,14 +305,24 @@ Candidate branches can now be evaluated and merged under human supervision (`xen
 - Enforces a mandatory human approval requirement: merges require a named person who approved the decision, rejecting integration if the approver name is empty or unapproved.
 - Re-runs post-integration test commands on the newly integrated tree and reports results separately from worker test executions.
 
-### Added — `OR-4`: dedicated worker leases and scheduling-time file conflict detection
+### Added — `OR-4`: worker leases and scheduling-time file conflict detection
 
-Workers now execute within dedicated worktree leases with declared file sets (`LeaseRegistry`, `WorkerLease`):
+A lease registry that decides, before a worker starts, whether another worker
+already holds the files it asked for (`LeaseRegistry`, `WorkerLease`,
+`ScheduleOutcome` in `xencode-core-rs/src/lease.rs`):
 
-- Each active worker is allocated an isolated git worktree rather than sharing a single working tree checkout.
-- Conflicts between workers' declared target files are evaluated at scheduling time prior to process launch: when two workers declare overlapping files, the second worker is told to wait before it is launched.
-- Releasing a completed lease automatically unblocks the next waiting worker in the queue.
-- Rejects invalid path components that attempt to climb outside the workspace.
+- A lease records a worker, its worktree, and the set of files it declared.
+- Overlapping declarations put the later request in a waiting queue instead of granting it, and releasing a lease hands the turn to the next waiter.
+- A declared path that climbs out of the workspace is refused.
+- **What is not true yet:** no worker launch path consults this. `/spawn` and the
+  team runner create their worktree directly and pass no file set, so the conflict
+  rule cannot fire in the product today — the guarantee holds inside the registry's
+  own tests only. Wiring it into arming is `OR-18`, which is blocked on deciding
+  *who declares the file set*, since `/spawn <task>` has no place for one today.
+  The claim in the original entry for this item ("workers now execute within
+  dedicated worktree leases") described the library as if it were the launch path,
+  and was wrong; `NEXT_PLAN_TASKS.md` had `OR-4` checked on the same mistaken basis
+  and is unchecked again.
 
 ### Added — `AR-7`: worker task continuation package built from observed diffs and test results
 
@@ -2642,7 +2677,12 @@ rule, so a command that never ran has no entry and cannot inflate the record,
 whole envelope. Four tests, one of them fully real — `sh -c true` and
 `sh -c 'exit 7'` are executed for their genuine exit codes and a genuine
 `git diff` supplies the changed-file list, and the envelope reflects both while
-still keeping the claim out of the quotable view.
+still keeping the claim out of the quotable view. **What is not true yet:**
+nothing writes an envelope and nothing reads one — `ResultEnvelope` appears only
+in its own module and its crate re-export — so no reviewing agent is handed this
+record today instead of prose. Producing and consuming it is `AE-1`, already open
+in the plan; the envelope's original entry said the control room consumed it,
+which it does not.
 
 ### Added — `OR-15`: the task contract
 
@@ -2666,8 +2706,12 @@ allowed and one disallowed file are edited for real, and the contract refuses
 the finish on the strength of what git actually reports. Ten tests; the
 lease-boundary guard was verified by stripping it and watching the right tests
 fail. The worktree and the approval gate stop a forbidden write at run time; the
-contract is the after-the-fact check that denies the merge. A library capability
-the launch path and control room consume; no command is added.
+contract is the after-the-fact check that denies the merge. **What is not true
+yet:** no launch path builds a contract and no merge path reads one, so today the
+refusal happens in the contract's own tests rather than to a real worker — the
+last sentence of this entry originally claimed the launch path consumed it, which
+it does not. Wiring it in is `OR-18`, together with the lease registry it depends
+on, and blocked on deciding who declares the file set.
 
 ### Added — `OR-3`: the permission broker
 
