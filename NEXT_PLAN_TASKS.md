@@ -16338,3 +16338,122 @@ plus `V-11`'s parked half. The dependency the directive does not state is stated
 palette comes before the clean screen**, because hiding navigation costs discoverability and an
 escape hatch is what makes the saving repayable.
 
+## Milestone AH — Web Preview stays experimental (owner directive, 2026-10-08)
+
+**"Keep Web Preview as an experimental capability, not something we make part of the core Xencode
+UX yet."** The owner drew it as one branch under one label — `Experimental └── Web Preview ├── Live
+screenshot ├── Dev-server detection ├── Console output ├── DOM inspection └── Open interactive
+browser` — and gave the reason for holding it back: **"No need to let this rabbit hole eat the main
+TUI. We can revisit it once the core TUIOS/workspace architecture is solid."** This milestone is
+therefore a boundary rather than a build plan: what already exists, what is actually missing, and
+which decisions would have to be made before any of it becomes a panel.
+
+Four of the five named parts are already reachable, and none of them is product code. `CU-2` /
+`MM-11` shipped on 2026-10-04 as "Recipe: driving a real browser with Playwright MCP (no product
+code)" (`CLI_GUIDE.md:3596`), verified by running it: `/mcp` against the real `@playwright/mcp`
+0.0.83 reported `◈ ✓ playwright · 25 tool(s)`, `browser_navigate` reached a loopback dev server —
+whose log showed a real Chromium `GET /` plus `/favicon.ico` — and `browser_take_screenshot` wrote a
+1280×720 PNG of 18,330 bytes. Checking that server against its own published tool list (the
+`README.md` at tag `v0.0.83` of `microsoft/playwright-mcp`, 37,913★, Apache-2.0, pushed 2026-10-08)
+puts four of the directive's five asks inside the group it calls **Core automation**, which is what
+a default-configured server offers: `browser_take_screenshot` for the live screenshot,
+`browser_console_messages` for console output, `browser_snapshot` and `browser_evaluate` for DOM
+inspection, and `browser_network_requests`, which nobody asked for and is there anyway. The knobs are
+flags rather than features to build: `--console-level error|warning|info|debug`, `--snapshot-mode
+full|none`, and `--snapshot-boxes`, which adds "each element's bounding box as [box=x,y,width,height]
+… in CSS pixels" to a snapshot.
+
+The same document argues against the screenshot-first reading of "preview". It opens by describing
+the server as letting models work on "structured accessibility snapshots, **bypassing the need for
+screenshots or visually-tuned models**" and lists as a key feature that it is "**LLM-friendly**. No
+vision models needed, operates purely on structured data." That is the wall `CU-2` already recorded
+from this machine: the attached PNG travelled as a data URL and the text-only local model answered
+`image input is not supported — hint: … you may need to provide the mmproj`, which is why the recipe
+says the screenshot lands and is sent, but only a vision-capable model can *read* it.
+
+### The disposition
+
+| the directive's branch | already recorded as | state |
+|---|---|---|
+| Live screenshot | `CU-2` / `MM-11`, shipped 2026-10-04 | a documented recipe and a real tool (`browser_take_screenshot`); no panel exists and none is asked for → the label is **AH-1** |
+| Console output | same recipe, `browser_console_messages` (Core automation) + `--console-level` | exists as a tool call the agent makes; presenting it as a stream is UI work behind the directive's own precondition |
+| DOM inspection | same recipe, `browser_snapshot` / `browser_evaluate` (+ `--snapshot-boxes`) | exists, and structured — the evidence says prefer this to pixels for the model's sake |
+| Dev-server detection | nothing in the tree | **the only genuinely missing piece of the five**, and it is a socket question, not a browser one → **AH-2** |
+| Open interactive browser | the documented config pins `--headless` and `--image-responses omit` (`CLI_GUIDE.md:3609`) | one flag away, but then a person watches a window and the image responses stop being free; not scheduled |
+| Rendering a page inside the TUI | `images.rs` only encodes; no image widget anywhere in `xencode-tui-rs` | parked, with the seam written down so the next pass does not re-research it → **AH-3** |
+
+### Items
+
+- **AH-1 — give "Experimental" a real place, and put Web Preview in it.** *Effort: S.* The
+  directive's structure is one label with one child, so the cheapest honest reading is that the
+  label has to be findable. Today it is not: there is no experimental tier in the manuals, and the
+  browser recipe is written as a recipe. *Trap:* "experimental" only means something if a person can
+  discover it and can tell what is allowed to break; otherwise it is the euphemism for unmaintained.
+  It also has to stay out of the clean screen `AG-4` is trying to ship — an experimental surface that
+  leaks into the default tier is how a parked idea eats the TUI anyway. *Done-when:* `README.md` and
+  `CLI_GUIDE.md` name the experimental tier and list Web Preview under it with the four parts the
+  recipe already reaches and the one it does not; a grep over `xencode-tui-rs` proves no preview panel
+  was added; and the entry says in one sentence what reopening it requires — the `§AG` architecture
+  landed.
+
+- **AH-2 — dev-server detection: the missing piece, and it is not a browser feature.** *Effort: M.*
+  Nothing in the workspace reads listening sockets. `xencode-cli/src/main.rs` only ever prints that
+  *something else* is not listening (`:16005`, "nothing listening on 11434"), and `MM-11`'s own
+  done-when is "the agent loads a dev server, screenshots, attaches" (`:2620`) — the URL in that
+  sentence is typed by hand today. The real version reads the `LISTEN` rows out of `/proc/net/tcp` and
+  `/proc/net/tcp6`, decodes the hex port, resolves the socket inode to a pid through `/proc/<pid>/fd`,
+  names the process, and then correlates it with what the project declares (`package.json` scripts,
+  `vite.config.*`, `next.config.*`, a `--port` flag, `.env`) before calling it *this* project's
+  server. Confirming it answers HTTP is part of the item, because a socket is not a server. *Trap:*
+  this reads the whole machine, and this machine has other loopback listeners — Ollama on 11434, a
+  `llama-server` on 8080, and `xencode server` itself, whose collaboration server defaults to
+  `127.0.0.1:8765` (`main.rs:367-373`) — so the output must separate "a socket is
+  listening here" from "we believe this is your dev server", and must never claim the second when it
+  only has the first. `/proc/<pid>/fd` only resolves for processes the person owns; a root's listener
+  appears as a port with no name, and that is the correct answer rather than an error. *Done-when:*
+  start a real dev server, run the command, and see the port it actually bound named with its pid and
+  its command line; stop it and see the row gone; a listener xencode did not start is reported as
+  unattributed, watched in a terminal rather than asserted from a fixture.
+
+- **AH-3 — the rendering seam, and the one decision in here that is not about UI.** *Effort: L.*
+  **Parked by the directive itself** — revisit once the workspace architecture is solid — and written
+  down so the next pass starts from evidence instead of re-researching. On rendering: nothing in
+  `xencode-tui-rs` draws an image at all (no sixel, kitty, iterm2 or `ratatui-image` reference in the
+  crate), and `xencode-analysis-rs/src/images.rs` ends at `to_data_url` (`:306`) after `dimensions`
+  (`:137`) and `prepare_for_send` (`:377`) — the picture reaches the model and never the screen. The
+  terminal here is kitty 0.48.2 (this session's process chain is `bash → /usr/bin/kitty → Hyprland`),
+  which is the terminal that invented the graphics protocol, so the capability question is answered on
+  this machine and nowhere else: `foot` 1.28.0 is also installed, and `~/.config` holds alacritty and
+  ghostty directories for binaries that are not on `PATH`, which is why anything built here must detect
+  and degrade. The crate to build on is `ratatui-image` 12.0.0-rc.2 (published 2026-10-05, 1.02M
+  downloads), which describes itself as "An image widget for ratatui, supporting sixels, kitty,
+  iterm2, and unicode-halfblocks".
+  The non-UI half is bigger: `xencode-server-rs/src/routes.rs:243-245` states "No CORS layer: the only
+  clients are the TUI (reqwest — unaffected by CORS) and curl-style tooling. Adding permissive CORS
+  would only widen the browser-based attack surface for no consumer", and `lib.rs:488-491` keeps a test
+  (`no_cors_headers_are_emitted`) to stop it coming back by accident. A preview that renders a page
+  which then calls the local API is precisely the browser client that sentence says does not exist, so
+  shipping it is a security decision and has to be argued as one. *Trap:* do not embed a browser — the
+  plan rejected that on the record ("Headless browser in the binary — Drags Chromium into a
+  single-binary tool", `:4104`) and settled browser work as zero product code (`:4332`). The nearest
+  counter-argument is `vercel-labs/agent-browser`, worth stating precisely because it is easy to
+  misquote: Rust, Apache-2.0, 43,633★, GitHub release v0.38.2 published 2026-10-01 — and it is
+  installed with `npm install -g agent-browser` followed by `agent-browser install`, whose own README
+  says that step is to "Download Chrome from Chrome for Testing". Its crates.io entry is stale at
+  0.19.0 (published 2026-03-14) while GitHub is at v0.38.2, so `cargo install agent-browser` buys a
+  version nineteen minor releases behind the one being developed. A Rust binary is still a Chrome
+  download, and that is the objection the plan already made. *Done-when:* none, while parked. When the
+  precondition is met the row is reopened as three separable decisions — a socket reader (`AH-2`), an
+  image widget, and the CORS question — and not as one feature.
+
+### Counting
+
+`AH-1`…`AH-3` add three rows over three new IDs, taking the pool from §AG's 349 rows over 346 unique
+IDs to **352 rows over 349 unique IDs**, and none is inserted into a wave table, for §AD's reason.
+Only `AH-2` is implementable on its own terms today, and it is not dependent on §AG — it is the piece
+that makes the already-shipped `CU-2` recipe usable, since that recipe's done-when assumes a dev-server
+URL a person had to know. `AH-1` is documentation with a grep behind it. `AH-3` is parked by the
+owner's own words, and keeps an entry so that the research done here — four of five asks already
+covered by a tool set that ships, no image rendering in the TUI at all, and a CORS decision that is
+really a security decision — does not have to be repeated.
+
