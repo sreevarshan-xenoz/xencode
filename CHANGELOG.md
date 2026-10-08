@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — fifty-one product directions sorted into what is new, what others already ship, and what is already here
+
+The owner sent two briefs — twenty-five directions, then twenty-six more plus an umbrella idea and a
+retelling of the whole set in twenty-four other words — and asked for the one thing worth knowing about
+them: which are genuinely new capabilities, which are already commodities, and which should become
+Xencode's three to five differentiators. Every idea was searched against this plan's own registers and
+checked against the market at the source. The answer is lopsided: **28 of the 51 already had an entry
+under a different name, 16 had already been refused here with a measurement behind the refusal, 2 are
+commodities someone else ships, and 5 are new.** The two commodities are predicting a developer's next
+edit, which Microsoft published in August 2025, and a phone or browser client for a running agent,
+which an unofficial ecosystem has already built around a competing terminal runtime.
+
+Four differentiators are named, each chosen because the nearest competitor's own documentation says it
+does not do it. The strongest evidence is not a product comparison but a measurement: a randomized
+controlled trial of sixteen experienced developers on 246 tasks found they *believed* AI tools made
+them 20% faster when the same tools made them **19% slower** — which is exactly the failure this plan
+already refuses, by not letting a worker report a progress percentage at all. Likewise the closest thing
+to an agent runtime today states in its own README that after a restart it restores the layout and can
+resume sessions but "the original processes do not survive", and it owns terminals rather than the work,
+so it cannot see a file lease even if it wanted to freeze one.
+
+Five new items come out of it, and four of the five are joins rather than new machinery: freezing one
+turn of xencode's own agent atomically — its position, its files, and the lease it holds, without
+pretending to suspend another vendor's program; a named hypothesis that carries the single command which
+would disprove it; a word for the grouping the screen redesign is short of, since "workspace" is already
+used for four unrelated things; a record of what a decision assumed, deliberately not a confidence
+score; and a red-team run of a real attack corpus through xencode's own guards, reporting which one
+caught what. Six research corrections are recorded in the plan because they were wrong on the way in and
+would otherwise have been written down as fact.
+
+The README now carries the owner's framing line as a stated direction rather than a feature claim,
+alongside the plain note that what ships today is listed underneath it.
+
 ### Added — Web Preview recorded as experimental, not as a screen
 
 The owner decided the browser-preview idea stays an experimental capability — *"No need to let this

@@ -16457,3 +16457,267 @@ owner's own words, and keeps an entry so that the research done here — four of
 covered by a tool set that ships, no image rendering in the TUI at all, and a CORS decision that is
 really a security decision — does not have to be repeated.
 
+## Milestone AI — fifty-one directions, sorted into what is new, what somebody else already ships, and what is already here (owner directive, 2026-10-08)
+
+The owner sent two more briefs — twenty-five product directions, then twenty-six ideas plus the
+"Xencode Worlds" umbrella, then a second framing of the same ambitions in twenty-four more phrases —
+and set the task himself: **"The next step should be to identify which of these are genuinely novel
+primitives, which are already commoditized by existing products, and which could become Xencode's 3
+to 5 killer differentiators. That is the part worth doing serious competitive research on."** He also
+gave the line to put in the manuals: **"Xencode doesn't just help you build software. It understands
+the environment in which the software, agents, tools, and people operate."**
+
+Two loops ran over all fifty-one. First the tree: every idea was searched against `NEXT_PLAN_TASKS.md`
+itself, because this file already carries four rejection registers (§P-10, §Q-0's hundred rows, §Q-12,
+§S-8) and four dispositions (§AE, §AF, §AG, §AH), and an idea that arrives after a register has already
+said no is not a new idea — it is the same one with better marketing. Second the market, over the
+GitHub API, crates.io, npm and arXiv. The result is lopsided in a way worth stating up front:
+
+| bucket | count | what it means |
+|---|---|---|
+| already in this plan under another name | **28 of 51** | the idea is `EVd-*`, `QD-*`, `GL-*`, `AR-*`/`OR-*`, `LF-*`, `AM-*`, `QO-*`, `MEM-*`, `CAP-*`, `UX-*` or shipped (`voice.rs`, `/rewind`, `EV-2`+`QA-3`, `OR-11`) |
+| already rejected here, with a reason on the record | **16 of 51** | the register said no and measured why; re-listing them as vision would be the plan arguing with itself |
+| already a commodity outside this repo | **2 of 51** | next-edit prediction and a phone/web client, both shipped by larger projects |
+| genuinely new | **5 of 51** | plus one more from the second framing — six rows, five items |
+
+**Corrections to the research, made here because the discipline is the point.** Several numbers handed
+back by the research pass were wrong and were re-read at the source: `togethercomputer/MoA` is not
+missing but live at 2,981 stars and last pushed 2025-01-07; `git-branchless` v0.11.1 ships no `simulate`
+command (its commands directory was listed); the ACP registry holds exactly 41 agents, not 42; herdr is
+at 42,849 stars under `herdrdev/herdr`, not the name the pass used; and `microsoft/cargo-gamma` is a
+404 — the crate lives at `github.com/microsoft/ox-tools`, in `crates/cargo-gamma`, 0.2.1 with 790
+downloads. All thirteen arXiv IDs cited below were resolved against the arXiv API, including the two
+whose dates the pass had guessed (`2507.09089` was published 2025-07-12, not 07-10). One product claim
+reversed in the checking: herdr was described as not surviving a restart, and its README says something
+sharper and more useful — "after a server or machine restart, herdr restores the saved layout and can
+resume supported agent sessions; **the original processes do not survive**".
+
+### The disposition — the first brief's twenty-five
+
+| the direction | verdict | where it actually lives |
+|---|---|---|
+| Project Brain | already planned | `EV-4` + `EV-7` + `MEM-1…MEM-3` + `QK-1…QK-8` + `AC-3…AC-6`. `state.md` having no writer was found and is `MEM-1`; there is no eleventh store to add |
+| Project X-Ray (`/xray`, scored health with evidence) | already planned | `DB-6` / `QO-7` `doctor --selfcheck` for the rows, `QB-4` for the scorecard, `QO-5` `doctor --env` for the machine — and `QB-4` already narrowed it to "rows only where local data exists, zero LLM calls" |
+| Code Archaeology | shipped + planned | `QT-3` (§Q-0 row 46: one wrapper over analyzer TODO flags, `GH-4` hotspots, `cargo-machete` as a subprocess) and `GH-2` `/why <file>:<line>` (row 47, restricted to git ops measured ≤0.1 s) |
+| Bug Detective | **new**, as a type | no ID holds a diagnosis that can be wrong → **AI-2** |
+| Hypothesis Engine | **new**, same type as Bug Detective | nothing in the tree represents "an explanation not yet tested" → **AI-2** |
+| Mutation Testing | already planned | `VF-3` `cargo mutants --in-diff`, rolled up per symbol by `QD-3`. Upstream is real and healthy: cargo-mutants 27.1.0, 691,039 downloads |
+| Change Blast-Radius Simulator (`/ximpact`) | already planned | `QD-1` `xencode impact <file>` + `QD-2`'s TUI fan-out + `CI-6`'s `what_breaks` tool. Row 7 already struck the word "simulation" from it, and `git-branchless` proves the word is not backed by a command anywhere |
+| Agent Memory | already planned | `EV-4`, `EV-7`, `MEM-1…MEM-3`, `OR-8` (shared memory as a scoped capability, shipped) |
+| Computer Fabric | already planned | `AF-4` — a computer registry and an agent bound to one — over `xencode-colab-rs` and `L-*` |
+| Remote Xencode | already planned | `LF-1` `xencode tail serve`, `LF-3` an outbound-only controller window over the tailnet, `LF-2` the approval round-trip |
+| Event Stream / Flight Recorder (`/replay task-492`) | **shipped** | `EV-2`'s turn trace + `QA-3`'s decision markers, both built 2026-09-24; `xencode replay` is a CLI subcommand today. `AR-9`/`AR-10` are the vendor-side protocol and `AF-1` is the log |
+| Time Travel | shipped + planned | `I2-01` checkpoints + `/rewind` (done: pre-bytes snapshot per approved write, grouped per turn) and `QTR-4` git-backed checkpoints. Rows 35 and 91 already narrowed the wider claim |
+| Goal Engine | already planned | `GL-1…GL-7`, all open: a goal as one JSONL file, `GL-3` "resume by re-verifying, never by replaying", `GL-4` goals as a row on `LF-4`'s detached queue |
+| Autonomous Maintenance | already planned | `AM-1…AM-6`, and the plan already keeps it on the safe side of acting: `AM-1` is watch-triggered **checks, not writes**, and `AM-2`'s idle turn writes a fix *proposal* to an inbox, "never applied". `AM-6`'s "digest, not interrupt" is the answer to the part nobody else gives |
+| Plugin Ecosystem | half shipped | `xencode-plugin-rs` (`manifest`, `registry`, `runtime`, `host`, `skills`) exists; `CAP-2` makes `permissions` real at load. The marketplace half stays rejected (`:6457`, `:1348`) |
+| Capability Discovery | already planned | `CAP-1`'s vocabulary, `AR-3`'s contract probe, and §S-8's rule that nothing in the router "may consult a table of vibes" (`:11978`), plus `OR-6`'s capability-gated routing (shipped) |
+| Agent Debate | **rejected here already** | row 75 and `:6454`: "+11.40% EM on AmbigDocs is a 4B-hostile token bill". `QM-4` reports disagreement and never resolves. The reference implementation is `togethercomputer/MoA`, 2,981★ and untouched since 2025-01-07, and the literature is mixed — `2402.06782` says more persuasive debate is more truthful, `2605.01566` (2026-05-02) claims multi-agent reasoning buys compute efficiency; neither is affordable at 24 tok/s on one GPU |
+| Red Team Mode | **new** | no ID. `garak` 9,494★, `microsoft/PyRIT` 4,590★ and `inspect_ai` 2,956★ all exist and all assume a remote model endpoint → **AI-5** |
+| Architecture Evolution Simulator | rejected / subsumed | `QB-1` is drift against a human-written rule file (row 4: auto-inferred layers are circular), `QD-5` is removal analysis, and the general `AgentGraph` is a registered do-not-build (`:3441`, row 99) |
+| Teacher Mode | already planned | `QB-5` "Explain This Repo" (row 49, citation-gated: no claim without a `file:line`), `QB-6` onboarding (row 50, "only the list is trustworthy, not the narration"), `UX-12`'s screen-reader transcript |
+| Voice Buddy | **shipped** | J-07, `xencode-tui-rs/src/voice.rs` — `arecord`/`pw-record` capture on Enter with a level meter, and the `m` mute is reachable |
+| Control Client (mobile / web) | **commodity** | herdr has grown an unofficial fleet around it in public: `missuo/herdrm` 744★, `penso/herdr-gpui` 996★ "Rust and GPUI", `devswha/herdr-web-ui` 628★ "chat and live terminal for every agent pane", `dcolinmorgan/herdr-remote` 407★ "phone, or Telegram". xencode's answer is not a smaller version of that — `LF-2` is a phone that answers an **approval**, which none of those four do |
+| Incident Commander | **rejected here already** | rows 57 and 58 and `:6459`: no deploys, no traces, `dmesg` is EPERM, and a postmortem is a text template |
+| Engineering Intelligence | already planned | `QO-1…QO-7`, `DB-6`, `GH-*` — and `QO-4` is gated on `CX-8` because "agent success %" needs a corpus that does not exist |
+| "Xencode as an AI OS" | rejected as a claim | row 100 (`:5455`): "Fleet — the best-funded attempt at exactly this — was cancelled 2025-12". `:13611` already drew the line: "'Adopt the TUIOS UX' is tractable; 'become TUIOS' is a different product", and `Y-4`'s "local AI development control plane" is flagged as a direction, not a capability claim |
+
+### The disposition — the second brief's twenty-six, plus Worlds
+
+| the idea | verdict | where it actually lives |
+|---|---|---|
+| Personal Digital Twin | already planned, as three parts | `QD-1`/`QD-5` for the graph, `AF-5` for running competing arms, `V-9` for the transition inspector. A twin is a **derived** model or it is a second index, and the second index is `:6441` |
+| Intent Memory | rejected in its strong form, planned in its weak one | row 1 rejects the Intent Engine outright ("no literature that a structured-intent stage improves coding-agent outcomes"; `QI-1` A/B-tests the premise instead). What survives is `QK-1`'s provenance triple and row 69's rule: an invariant carries no reason field **unless a human typed one** |
+| Predictive Development | **commodity** | `2508.10074` (2025-08-13) is Microsoft's "Next Edit Prediction: Learning to Predict Code Edits from Context and Interaction History" — trained, shipped, and requiring a corpus and a GPU this project refuses to assume. The local version of "what to do next" is `AE-6`, below |
+| "What should I do next?" | already planned | `AE-6` "advice that becomes a proposed goal" over `advise.rs`, fed by `AM-6`'s digest, ranked from `GH-4` hotspots, `QT-4`'s debt ledger and `DB-6`'s rows. It is not a new object and it must not become a recommendation engine that guesses |
+| Universal Knowledge Graph | **rejected here, three times** | `:5106`, `:6441` ("two indexes, no invalidation story"), `:15960`. Edges stay derived; `CI-2` + `LSP-2` produce them on demand |
+| Counterfactual Xencode | already planned | `QD-5` — the same graph with one node removed, no migration-specific ontology (row 37) |
+| Failure Laboratory | already planned | `EVd-6` false-verified calibration ("seed broken changes, then measure how often the agent's verdict claimed success"), `QA-6`'s failpoints and six real kill tests (row 82), `RS-6` seeded from rustc's own JSON error channel |
+| Evolution Mode | rejected as a claim | `:6451`: separating 92% from 84% success needs **≈258 runs per arm**. Row 29 keeps `QO-4`'s harness, which is the honest part |
+| Multi-Agent Scientific Method | rejected, one half live | `2304.02195` is AutoSD — "Explainable Automated Debugging via Large Language Model-driven Scientific Debugging", 2023-04-05 — so the method is published; what is refused is paying for it with N simultaneous agents. `AF-5` runs two or three candidate implementations and prints what each did, which is the affordable residue, and the hypothesis shape is **AI-2** |
+| Evidence Ledger | already planned, and the standard is already chosen | `EVd-1…EVd-8` + `AE-1`; `:4643` and `:4665` take in-toto's *shape* (subjects + predicate, no signatures) and `:5086` declines DSSE/Sigstore because "one local user, no trust boundary, no third party to convince". `c2pa` 0.91.2 at 10,699,320 downloads proves the market for provenance is media, not edits |
+| Uncertainty Engine | **rejected here, five times** | `:15749` counts them and gives the reasons independently — `:6448` ("a single number over contradictory sources is worse than the contradiction"), `:6452` (verbalized confidence is systematically overconfident and weakly calibrated), `:6451` (≈258 runs per arm), `:13450` (an uncalibrated flake or failure probability — "a percentage implies a distribution this workspace has never measured"), and the shipped rule that `capabilities.rs` will not print an unmeasured number. *Note for the next reader:* two of the line references inside `:15749`'s own list are about eighteen lines low — `:6430`/`:6433`/`:6434` land on the §Q-12 prose above its table, and `:12871` lands on the Milestone U heading rather than `:13450` — so the numbers quoted here are re-checked at the source, not a drift to "correct" back |
+| Human Skill Amplifier | rejected | row 72 and `:6453`, on Gajos & Weld: frequency-reordered menus slow users and destroy feature awareness. Horvitz is the surviving rule — act autonomously only where information is asymmetric |
+| Personal Automation Language | rejected | rows 98 and 99, `:6443`: "schema rot turns every product change into a breaking change. A Rust enum + config keys + markdown won everywhere this lost" |
+| Capability Marketplace | rejected, and the cost of rejecting it is now visible | row 86, `:6457`, `:1348`, `:11959`. herdr runs a public plugin marketplace (`herdr.dev/plugins/`) from the same Rust binary that carries no second-party signing authority — so the trade is real and should be stated as a trade, not as a moral win |
+| Agent Genome | rejected as written | §AF's disposition declines the `Coworker` object with role, prompt, model policy, tool policy, memory scope and permissions ("the role is a prompt and a policy, not a new type"), and its live halves are `AF-4` (the computer binding) and `AM-4`/`GL-*` (the schedule). "Genome" is the same object wearing a biological word |
+| Self-Improving Orchestrator | rejected | `:6451`, same arithmetic as Evolution Mode, plus §S-8's rule at `:11978` that nothing in the router "may consult a table of vibes" — a worker's capability comes from `AR-3` probing its flags |
+| Collective Intelligence | rejected | row 54: "Backstage's documented failure is ownership rot that only an org can force-sync. This box has two nodes"; row 19 keeps `QM-4`'s report-don't-resolve. MiroFish (77,060★, AGPL-3.0, pushed 2026-10-01) and the OASIS engine under it are the simulation, and §AF already took its concept and refused its licence and its Python |
+| Artifact Intelligence | already planned | `EVd-4` — `.xencode/artifacts/<session>/`, log tails and the last N plus all failures (§P's item 12 at `:4333`, called "new and cheap") |
+| Task-aware model routing with explanation | **shipped, this week** | `OR-6` capability-gated routing (done) and `OR-11` explainable routing — "print the reasons behind every worker choice" — done 2026-10-08, over `MI-7`'s task-shaped profiles and `AC-3`. The research line is `2406.18665`, RouteLLM, 2024-06-26, whose repository has not moved since 2024-08-10 |
+| Trust Levels | already planned | `MD-1`'s modes, `CAP-1`'s capabilities, `SE-4`'s egress classes, `QK-8`; `OR-13` shipped the Local-Only profile that refuses another vendor's agent |
+| "Pause the World" | **new** | no ID holds it, and §S-8's refusal is about pausing *somebody else's* CLI (`AgentAdapter.pause()/resume()` "invented because the interface was drawn before the CLIs were read"). Freezing **our own** agent atomically is the unclaimed thing → **AI-1** |
+| Mission Control | shipped + planned | `OR-12`'s worker panel (done: agents, tasks, graph, costs, logs, pending approvals), `X-3`'s event-to-UI projection, `AG-1`/`AG-2` for the grouping. herdr, gastown (18,301★, MIT) and vibe-kanban (28,281★, BloopAI, pushed 2026-09-19) are the outside competition, and none of them sees a file lease |
+| non-coding work | out of scope as stated | row 52's finding holds — the TUI already aggregates the honest subset across its focus areas (that row says "25"; the real registry has **27**, which is `AG`'s first correction). `AM-5`'s inbound triggers and `LF-5`'s read-only SQL are the real non-coding surface; a general life assistant is a different product with a different corpus |
+| Workspace OS | rejected | row 100 and `:5455`, with Fleet's cancellation post cited there, plus §S's answer to a new policy syntax (`:11923`, "not a fourth format"). herdr's own tagline — "the runtime your coding agents live on" — is that ground being claimed in words, in Rust, at 42,849★ |
+| managing other AI systems | already planned | all of Milestone S: `AR-1…AR-10` and `OR-1…OR-18`, which is 22 new IDs and most of Track B |
+| Xencode Worlds | **new name, no new subsystem** | the World is what `AG-1` is short of a name for, and `V-4` already wrote down the constraint ("NOT called workspaces: Milestone G owns that word") → **AI-3** |
+
+### The second framing, which mostly renames the first
+
+Intelligence routing → `OR-6`/`OR-11`. Cognitive pipelines → `MA-2` + `MA-1`. AI scientific method →
+`2304.02195`, and `AF-5`. Counterfactual engineering / "what if?" engine / failure universe → `QD-5`,
+`EVd-6`, `QA-6`. Software digital twin → the `QD-*` derived graph. Project genome → the declined
+`Coworker` object. Evolution engine → `:6451`. Memory that remembers WHY → row 69, gated on a human
+typing the reason. Decision graph → row 11, rejected on measured linkage (73 of 760 commit messages
+reference an issue; 0 reverts), with row 43 refusing the feature-mapped variant for the same reason.
+**Assumption tracker → no ID, and it is not the rejected scalar** → **AI-4**. Evidence marketplace →
+row 86 (`:5441`, `:6457`). AI provenance /
+reproducible AI work → `EVd-1`/`EVd-7` shape + `EV-8`'s HTTP-boundary playback + `QA-1`'s
+`xencode replay <run-id>`. Agent constitution → row 2 (`QB-3`, human-authored under a nested cap).
+Agent reputation → row 68. Agent economics → `CX-1…CX-7`. Model escalation → `MI-7` + `QTR-2`, with
+row 95's ladder still refused because nobody has measured the cliff. Self-improving workflows / AI A/B
+testing → `EV-1` + `QO-4` gated on `CX-8`. Human-AI team optimization → row 72. Personal engineering
+operating model → `AGENTS.md` + `anchor.md` + skills + hooks, which is `QK-9` and shipped as
+`xencode bootstrap` on 2026-10-06 minus the two halves its own row forbids re-proposing.
+
+### The differentiators, named — four, not five
+
+The brief asked for three to five. Four is the honest number, because the fifth candidate is a join
+rather than a claim. Each of these is something a competitor's own documentation says they do not do,
+checked at the source:
+
+1. **A local, falsifiable record of what was actually verified.** `EVd-1`'s run ledger through `EVd-3`'s
+   checks-ran verdict to `AE-1`'s result envelope, with `AF-1`'s append-only log underneath. The market
+   argument is not a product comparison — it is `2507.09089`, the randomized controlled trial by Becker,
+   Rush, Barnes & Rein: 16 experienced developers, 246 tasks on projects they had averaged five years
+   on, and they *believed* AI made them 20% faster when the measurement said it made them **19% slower**
+   (they had forecast 24%). Every agent product on earth reports self-claimed progress; §S-8
+   already refuses it ("a worker that says '72% done' contributes a diff and an exit status, nothing
+   else"). Refusing it and then *proving* the refusal is the differentiator.
+2. **Asking the repo what would break, on demand, derived and never stored.** `QD-1` + `QD-2` + `QD-5` +
+   `CI-6`. Nobody else does this at this scale: `git-branchless` v0.11.1 ships no `simulate` command at
+   all, and cargo-mutants (27.1.0, 691,039 downloads) scores the *test suite* — it mutates the source and
+   asks whether anything noticed — rather than answering a question about one pending change. The two
+   best-funded attempts at the wider platform are gone: Daytona's OSS at 71,608★ archived 2026-07-24, and
+   JetBrains Fleet cancelled 2025-12.
+3. **Pausing your own agent mid-turn, and coming back to the same position.** **AI-1**. herdr — the
+   closest thing to a runtime for coding agents that exists — states in its README that after a restart
+   it "can resume supported agent sessions; the original processes do not survive". E2B (14,230★,
+   Apache-2.0, pushed 2026-10-07) and Modal do it in cloud micro-VMs, and CRIU (4,022★, alive, pushed
+   2026-10-04) does it at the kernel level with no agent tooling around it and a known TCP-restore gap
+   (`checkpoint-restore/criu` issue #2456, already cited at `:6591`). xencode can do it where those
+   cannot, because it owns the turn, the worktree, the lease and the contract.
+4. **A worker choice audited down to the number behind it.** `OR-6` + `OR-11`, shipped 2026-10-08, over
+   `AR-3`'s flag probing and `AR-8`'s health report. RouteLLM is the published research (`2406.18665`,
+   2024-06-26) and its repository has not moved since 2024-08-10; the shipped alternative outside this
+   tree is `aurelio-labs/semantic-router` (3,942★, "smart, fast LLM routing… across any model provider"),
+   which decides by similarity to a declared intent and therefore cannot say how any figure in its own
+   decision was measured. `capabilities.rs` already refuses to print an unmeasured number, which is the
+   half neither of them has.
+
+What is **not** a differentiator, said plainly so nobody spends a wave rediscovering it: fleet UI
+(herdr 42,849★, gastown 18,301★, vibe-kanban 28,281★), agent memory as a product (mem0 66,790★,
+graphiti 31,537★), plugin distribution (herdr's marketplace), repository simulation at scale (MiroFish
+77,060★ on OASIS), agent-to-agent protocols (ACP's registry has 41 agents and the Rust crate is at 3.1.0
+with 5,008,484 downloads; A2A is at 26,061★ under the Linux Foundation), and browser automation
+(`microsoft/playwright-mcp` v0.0.83, 37,913★) — which `CU-2` already drives as a recipe with zero
+product code.
+
+### Items
+
+- **AI-1 — pause the world: one atomic freeze of a turn, its bytes, and its claim on the machine.**
+  *Effort: L.* The plan already owns every **half** and has never joined them: `I2-01` restores bytes
+  (`/rewind`, grouped per turn, session-only), `QTR-4` plans a git-backed checkpoint branch, `AF-1` plans
+  the append-only log that a position can be read from, `OR-4`/`OR-18` own the lease a worker holds, and
+  `GL-3` already states the resume rule — "resume by re-verifying, never by replaying". §P-8 records what
+  everyone else's word for this means: Claude Code's `--resume` replays **conversation state, not the
+  filesystem**, LangGraph's checkpointers persist channel values "explicitly not the environment", and
+  Temporal buys durability from deterministic replay, which no LLM-agent product has actually adopted.
+  The primitive worth having is the **atomic unit**: a turn boundary where the loop position, the
+  worktree's bytes, the held lease and the task contract freeze together, and unfreeze together.
+  *Trap:* this is not `AgentAdapter.pause()`. §S-8 declines that method on measured grounds — we cannot
+  suspend another vendor's CLI, and inventing the method before reading the CLIs is the exact failure
+  `AR-1` was built to catch — so this item is **only ever about xencode's own loop**. And it is not a
+  process snapshot: freezing a `llama.cpp` server would dump gigabytes of weights and KV cache, and
+  `perf_event_paranoid=2` with `unprivileged_bpf_disabled=2` (§Q-1, fact 17) rules out half the
+  kernel-side tricks anyway. The freeze point is a turn, not an instruction. *Done-when:* pause a real
+  running agent mid-task, quit xencode entirely, restart the machine's session, resume, and see the same
+  turn boundary with the same files in the same worktree and the same lease held — then interrupt the
+  write halfway and show that the resume either fully applies or fully does not, watched failing rather
+  than asserted. No claim about another vendor's agent, and none about the model process.
+
+- **AI-2 — a hypothesis: an explanation that names the command which would kill it.** *Effort: M.*
+  Bug Detective and Hypothesis Engine are one missing type. Today a diagnosis is prose in the transcript:
+  `RS-6` seeds known-error patterns from rustc's own JSON channel, `EVd-3` records whether checks ran,
+  `QA-6` injects failures at four seams, and `QM-4` prints "sources disagree" — but nothing ties a
+  candidate cause to the specific check that would falsify it, so the next turn cannot tell which
+  hypothesis died. The published method is `2304.02195` (AutoSD, 2023-04-05); the interactive and
+  intervention-driven refinements are `2602.18571` ("Debug2Fix: Can Interactive Debugging Help Coding
+  Agents Fix More Bugs?", 2026-02-20) and `2512.06749` ("DoVer: Intervention-Driven Auto Debugging for
+  LLM Multi-Agent Systems", 2025-12-07). *Trap:* **one hypothesis at a time, run by one agent.** The
+  multi-arm versions of this are the rejected debate (`:6454`, a 4B-hostile token bill) and §S-8's
+  refusal to let a claim substitute for evidence; `AF-5` is where running several candidates is already
+  budgeted, and this row must feed it rather than duplicate it. And a hypothesis carries no truth field:
+  `2606.08275` ("Causal Agent Replay: Counterfactual Attribution for LLM-Agent Failures", 2026-06-06)
+  attributes failure to a step after the fact, which is exactly the prose this plan refuses to promote to
+  a cause. *Done-when:* during a real bug hunt the screen lists the live hypotheses, each with the one
+  command that would kill it, and running that command is what marks it dead in the ledger — a
+  hypothesis nobody tested stays visibly untested, proved by watching one survive a full session.
+
+- **AI-3 — "World" is the name `AG-1` needs, and the only new thing it buys is a scope file.**
+  *Effort: S.* The second brief's Worlds are "context + memory + people/agents + computers + tools +
+  resources + rules + goals + state + time", and the first brief's TUIOS wants "a small number of
+  workspaces with adaptive layouts". Those are the same decision, and the naming half is now forced:
+  `AG-1` is standing on a four-way collision — `xencode-collaboration-rs/src/workspace.rs:38`'s
+  `Workspace` (a roster of members and roles), `xencode-core-rs/src/workspace.rs:26`'s
+  `WorkspaceEntry` (a file-scan record), `xencode-context-rs`'s `WorkspaceWatcher`, and the word already
+  printed on screen in `ui.rs:686`'s `📁 Workspace (N files)`. `V-4` already ruled "NOT called
+  workspaces: Milestone G owns that word". **World** is free in this tree: a grep over `rust/crates`
+  finds no `World` identifier at all, and the only uses of the word in this file are §AF's description
+  of somebody else's product (`:15908`, "build a 'parallel digital world'"). *Trap:* a World is a **join
+  over stores that already exist** — `.xencode/`, `goals/<id>.jsonl` (`GL-1`), `CAP-1`'s capabilities,
+  `AF-4`'s computer binding, `MEM-2`'s durable facts — and nothing else, or it becomes row 100's
+  engineering runtime, `:6443`'s new DSL, and §S's own answer to a new policy syntax (`:11923`: "the
+  syntax should be the existing TOML config, not a fourth format"). Nine named ingredients do not mean
+  nine new tables; the honest deliverable is one addressable scope that says which of the existing
+  things are in play. *Done-when:* `AG-1`'s grouping axis has one name in the source and in the
+  manuals, a test proves a World's contents are read from the existing stores rather than copied into a
+  new one, and no `World` struct owns state that `GL-*`, `CAP-1`, `AF-4` or `MEM-*` already own.
+
+- **AI-4 — the assumption tracker: what a claim rested on, and whether it still does.** *Effort: M.*
+  The one genuinely new row in the second framing. `QK-1` already records a fact's `provenance +
+  last_verified_by + verdict`, `GH-1`'s digest and `MEM-3`'s verify-on-read catch a stale fact, and
+  `EVd-6` measures over-claiming — but nothing records the **premises a decision assumed**, so the turn
+  that chose a design cannot be re-examined when a premise goes. `2602.20206` ("Mitigating 'Epistemic
+  Debt' in Generative AI-Scaffolded Novice Programming using Metacognitive Scripts", 2026-02-22) is the
+  closest published argument for making assumptions explicit, and `2503.13657` ("Why Do Multi-Agent LLM
+  Systems Fail?", 2025-03-17) is the failure taxonomy it defends against. *Trap:* this must never become
+  the uncertainty engine. `:6452`, `:6448` and `:15749` refuse a confidence scalar five times over, and
+  row 76 keeps the triple precisely because "a single number on three contradictory facts is worse than
+  the contradiction". So an assumption is a **named sentence plus the check that would break it plus the
+  verdict**, held in `MEM-2`'s durable tier, never a percentage and never computed by the model that made
+  it. And like `EV-5`'s learned lessons, a reason field carries text a human approved or nothing.
+  *Done-when:* a real architectural decision is recorded with its assumptions, one assumption is then
+  falsified by changing the thing it assumed, and the screen shows the decision as resting on a broken
+  premise instead of silently keeping the number — watched, not unit-tested.
+
+- **AI-5 — a red-team pass over xencode's own guards, offline.** *Effort: M.* The only item here that is
+  a product rather than a join. The guards are real and individually tested: `SE-2`'s untrusted marking,
+  `SE-4`'s egress classes, `SE-5`'s secret scan, `SE-1`'s permissions, the approval gate's
+  `ApprovalRequest { tool, class, summary, preview }` (`agent_tools.rs:105-121`, `:623` — row 90,
+  already shipped), and `trace.rs`'s `secret_spans`/`redact_secrets`. What does not exist is a corpus
+  that drives them in one run and prints which one caught what. Outside, the tools exist and all assume a
+  remote endpoint: `garak` 9,494★ (NVIDIA), `microsoft/PyRIT` 4,590★ — the live repository, since the
+  Azure-named one was archived 2026-03-25 — and `inspect_ai` 2,956★. *Trap:* this is **not** a
+  classifier firewall and not a detector; row 83 rejects classifier-based injection defense as unsound and
+  `:6456` keeps CaMeL's lesson that the guarantee comes from control and data flow plus egress
+  capabilities, which is `PR-1`/`SE-4`. A red-team pass reports which guard held; it must not be described
+  as making anything safe, and `EVd-6`'s discipline applies — seed it with attacks that are known to
+  succeed, or the pass is a demo. Local models are the point and the limit: at 24 tok/s a corpus is hours,
+  so the item ships the harness and the first small corpus, not a score. *Done-when:* run the corpus
+  against the real guards on this machine and print, per attack, which guard fired, which passed, and
+  which is untested — with at least one attack shown getting through, or the report is not believed.
+
+### Counting
+
+`AI-1`…`AI-5` add five rows over five new IDs, taking the pool from §AH's 352 rows over 349 unique IDs
+to **357 rows over 354 unique IDs**, and none enters a wave table, for §AD's reason. Four of the five
+are joins over stores this plan already commits to, which is the finding rather than a hedge: on a list
+of fifty-one ambitions advertised as a roadmap for a new product, twenty-eight already had an ID, sixteen
+had already been refused with a measurement behind the refusal, and two are commodities. Only `AI-5` is
+buildable without deciding something else first; `AI-1` needs `AF-1` and `OR-18`, `AI-2` needs `EVd-3`
+and feeds `AF-5`, `AI-3` is a naming decision that `AG-1` has to make and is written here as its input,
+and `AI-4` depends on `MEM-2`'s durable tier. The differentiators are stated as four, in the open, so
+that a later pass can be judged against them instead of against the size of this list.
+
