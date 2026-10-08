@@ -57,6 +57,10 @@ and fix your code — driven entirely from your terminal.
 
 ## 🧠 Why Xencode?
 
+> **Xencode doesn't just help you build software. It understands the environment in which the
+> software, agents, tools, and people operate.** That is where it is going; what ships today is
+> below, and the difference between the two is always stated rather than implied.
+
 | Problem | Xencode |
 | --- | --- |
 | **Privacy** | Local by default: code, context and models stay on your machine. A remote backend is a choice you make, never a dependency you inherit. |
