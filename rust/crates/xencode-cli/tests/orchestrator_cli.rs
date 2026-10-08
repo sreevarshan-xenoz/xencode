@@ -12,6 +12,12 @@ use std::path::Path;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+/// Whether this machine has the CPU energy counter a run's power figure comes
+/// from. GitHub's virtual machines expose none, so a figure is not expected there.
+fn power_counter_readable() -> bool {
+    xencode_context_rs::power::package_energy_uj(xencode_context_rs::power::POWERCAP_ROOT).is_some()
+}
+
 fn xencode_bin() -> &'static str {
     env!("CARGO_BIN_EXE_xencode")
 }
@@ -870,6 +876,10 @@ fn permissions_builds_each_launch_with_the_same_function_a_launch_uses() {
 
 #[test]
 fn costs_prices_only_what_has_a_price_and_counts_only_what_the_counter_saw() {
+    if !power_counter_readable() {
+        eprintln!("skipping: this machine exposes no CPU energy counter to read (as on CI)");
+        return;
+    }
     let dir = project(&[("demo.toml", recipe("demo", "echo hardened"))]);
     let home = sandbox_home(&[]);
 
@@ -1107,7 +1117,9 @@ fn retry_re_runs_one_role_for_real_and_writes_no_run_record() {
         json["not_run"]["roles_that_were_waiting_on_this_one"],
         serde_json::json!(["integrate"])
     );
-    assert!(json["watt_hours"].as_f64().is_some());
+    if power_counter_readable() {
+        assert!(json["watt_hours"].as_f64().is_some());
+    }
 
     // The record count is the proof, not the sentence above it.
     assert_eq!(
