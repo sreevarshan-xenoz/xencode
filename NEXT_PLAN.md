@@ -14,7 +14,7 @@
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
-- ✅ **Rust migration complete**: 16 crates, 1694 tests passing, zero warnings — the Rust workspace is the only active codebase (workspace gates re-verified 2026-09-29)
+- ✅ **Rust migration complete**: 16 crates — the Rust workspace is the only active codebase. ⚠️ **Workspace gates are not green as of 2026-10-08:** CI has not passed since 2026-09-27 (see "Workspace gates" at the top of NEXT_PLAN_TASKS.md)
 - ✅ **Milestone J complete** (2026-09-21): every panel tells the truth.
   The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
   surface; dead Rust, the Python-era tooling configs and the unused k8s /
@@ -283,7 +283,7 @@
   below — over **303 recorded plan items** (258 then, 26 added by S, 8 added by U and
   11 by V, which hold 21 rows between them): the
   208 research candidates, the 31 further Q IDs that fold into them, the 19
-  committed L/M tasks, S's 26 and U's 8 — with every ID placed exactly once (verified by script) and
+  committed L/M tasks, S's 26 and U's 8 — with every ID meant to be placed exactly once (by the 2026-10-08 recount the wave tables hold 324 rows for 321 IDs: `U-3`, `U-6` and `V-10` each sit in two waves; the IDs added by Milestones Z to AI deliberately enter no wave) and
   **no renumbering**, so each item keeps the appendix that produced it as its
   provenance. The sequence: correctness → observability → model substrate → code
   intelligence → retrieval → verification → evidence → trust → outward research →
