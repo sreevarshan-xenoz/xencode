@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-14`: the orchestrator is a mode you are in, with a surface of its own
+
+`Ctrl+Space` now flips the status bar between `CODING` and `ORCHESTRATOR`, and
+`/orchestrator on` and `/orchestrator off` do the same thing by name. The mode is
+one field on the running app — not a setting, not a second copy of anything. The
+tasks, agents, sessions, worktrees, diffs and approvals on that screen are the ones
+the session already had, read by another view, so leaving the mode has nothing to
+undo:
+
+```
+Orchestrator mode is off. The mode is one field on this app, never a setting, so it
+is not written down anywhere to be left behind: the panel filter and the focus are
+back where they were when you turned it on, and everything else was untouched the
+whole time.
+```
+
+What makes it a mode rather than a nicer panel is that the verbs belonging to the
+surface answer only while it is on, and say how to enter when it is not. `status`,
+`on`, `off` and `help` are exempt: refusing to tell you which mode this is, or to
+let you leave, would be a gate that only locks you in.
+
+```
+/orchestrator on | off | status | help
+/orchestrator agents | tasks | graph | logs | costs [text]
+/orchestrator permissions | inspect <text> | retry <#id> | stop <run-id>
+/orchestrator attach <agent> <session>
+```
+
+`attach` is the verb with the hard edge, and it is the reason this item is not just
+another screen. xencode's TUI is one drawing surface, so a second full-screen
+program cannot live inside it; the only honest meaning of "attach" is to put the
+terminal back the way the shell expects, run the vendor's own command against the
+keyboard you are typing into, and take the screen back when that process ends. Both
+standard input and standard output have to be a terminal for any of that to be true
+— which is why `/orchestrator status` prints which they are, in the same report as
+the fleet:
+
+```
+  terminal — this is a real terminal, so `/orchestrator attach` can hand it over
+```
+
+What it will not do is guess its way to a handover. An agent whose own help
+documents no command for taking over a session it already has is refused with the
+one-shot call it does document, and the reason that is not a handover; a session you
+have not named is not chosen for you, because picking the newest session is how a
+control plane starts lying about what it attached to; and a roster row whose program
+is not on `PATH` here says so. Running it is what proves the round trip, and this is
+what a real terminal did with it:
+
+```
+The terminal is xencode's again; `/home/sree/.local/bin/claude` returned exit
+status: 1.
+```
+
+The same surface runs headless, for a fleet you are not sitting in front of:
+`xencode orchestrator status | agents | tasks | graph | logs | permissions | costs |
+inspect | retry | stop | attach`, each reading verb taking `--format text|json`. A
+reading that has no data names the directory it looked in instead of printing an
+empty table that would read as "checked and clear", and every one of them ends by
+saying it changed nothing. `retry` asks for your name, because a second run of
+somebody else's work is a decision and not a retry button, and it writes no run
+record: a retry is not a scheduled run of the team.
+
+One gap in the fleet screen itself closed on the way: a session where no worker has
+put anything on the event timeline used to lose the log section entirely, so a
+reader could not tell "checked, nothing yet" from "not looked at". The section now
+reports its own nothing — `logs: nothing has reported yet` — the way the other five
+already did, and `/orchestrator status` and the panel agree about how many sections
+there are.
+
 ### Added — `OR-13`: the posture has a name, and it refuses to hand your work to another vendor's agent
 
 The two consent rules that keep things on this machine are now one thing with one name. `Local Only`

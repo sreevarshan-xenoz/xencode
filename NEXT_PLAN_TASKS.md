@@ -21,7 +21,7 @@
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2765 tests passing, zero warnings (re-verified 2026-10-07, after `OR-13`; 19 ignored, so 2784 in the run)
+- [x] Workspace gates green — 16 crates, 2792 tests passing, zero warnings (re-verified 2026-10-08, after `OR-14`; 19 ignored, so 2811 in the run)
 
 ## Model Catalog Honesty
 
@@ -12504,12 +12504,31 @@ worker, `OR-` for the thing that decides what workers to talk to.
       cannot place ran both of them as real `sh -c` children inside a network namespace holding
       only the loopback interface, where `ping 1.1.1.1` answered `Network is unreachable`.
       Left open: no run under this profile has been described as `LF-8`'s conformance suite.
-- [ ] **OR-14 — `/orchestrator` as a mode, with its own command surface.** On/off, status,
+- [x] **OR-14 — `/orchestrator` as a mode, with its own command surface.** On/off, status,
       agents, tasks, graph, logs, permissions, costs, inspect, retry, stop, and terminal
       handover to a vendor's own session.
       **Done-when:** turning it off leaves plain xencode exactly as it was found, and
       "attach" only ever means handing the real terminal to a process that has one
       (`S-6 #29`).
+      `Ctrl+Space` and `/orchestrator on`/`off` move one field on the app; the thirteen
+      verbs share the state the panels already read (`X-2` owns the mode's own behaviour,
+      this row is the surface). Proved by watching both halves of the done-when: a tour of
+      all twenty command forms through the real dispatcher, snapshotted before `on` and
+      after `off` across mode, transcript, focus, input mode, open file, editor state, file
+      tree, models, generation flag, this session's spawns, the waiting approvals, both
+      consent settings, the panel's section and posture and the handover request — equal,
+      with the only differences being the lines the commands answered and the history of
+      what was typed, each checked for being exactly that. And the handover is not a claim:
+      the code that gives the screen away was run against a real child process which was
+      handed its argument on inherited stdio, returned `exit status: 3`, and the line the
+      app printed quoted that status; the same command driven in a real terminal handed it
+      to an installed vendor binary, took it back, and quoted `exit status: 1`. Under the
+      test harness, where no stream is a terminal, `attach` refuses in every case and arms
+      nothing — which is the case the clause is about. Headless: eleven verbs under
+      `xencode orchestrator`, one read per invocation, `--format text|json`, thirteen
+      integration tests run against the built binary. Found and fixed on the way: a session
+      with no events on the timeline lost the log section from the panel entirely, so
+      "checked, nothing yet" was indistinguishable from "never looked at".
 - [x] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
       means, by xencode: the lease and its workspace, the allowed file set, the forbidden
       paths, the expected deliverables, the verification commands, and the completion

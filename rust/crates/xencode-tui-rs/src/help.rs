@@ -14,6 +14,10 @@ type Binding = (&'static str, &'static str);
 
 pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+C / q", "quit"),
+    (
+        "Ctrl+Space",
+        "Coding ⇄ Orchestrator mode (one view of the same session)",
+    ),
     ("Ctrl+G", "refresh git status"),
     ("Ctrl+E", "file explorer"),
     ("Ctrl+S", "save editor / git commit panel"),
@@ -97,6 +101,11 @@ const COMMANDS: &[Binding] = &[
     (
         "/workers",
         "workers, tasks, graph, costs, logs and approvals — each figure names its source",
+    ),
+    (
+        "/orchestrator on|off|status|agents|tasks|graph|logs|costs|permissions|inspect|retry|stop|attach",
+        "the orchestrator's command surface: the fleet panel by section, the launch grants, a named \
+         row's sources, and the terminal handover that only runs when there is a terminal here",
     ),
     ("/bytebot <task>", "autonomous task execution"),
     ("/plan [clear|accept|decline]", "expand, clear, or respond to proposed plan tasks"),

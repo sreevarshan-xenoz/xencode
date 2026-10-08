@@ -188,6 +188,20 @@ pub enum Grant {
     Bypass,
 }
 
+impl Grant {
+    /// What the grant means, in the words both surfaces print it in — the CLI's
+    /// `xencode orchestrator permissions` and the TUI's `/orchestrator
+    /// permissions` (`OR-14`) quote one wording, so the two screens cannot
+    /// describe the same launch differently.
+    pub fn words(self) -> &'static str {
+        match self {
+            Grant::Nothing => "no autonomy flag",
+            Grant::Prompt => "prompts back to xencode",
+            Grant::Bypass => "full autonomy",
+        }
+    }
+}
+
 /// Every approval-control flag token a roster agent is known to accept, drawn
 /// from the `approval` markers `AR-3` verifies against each `--help`. A worker
 /// that puts any of these in its own launch args is overruled: only xencode's

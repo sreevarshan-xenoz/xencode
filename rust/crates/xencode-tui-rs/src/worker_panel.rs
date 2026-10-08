@@ -52,6 +52,18 @@ pub enum PanelSection {
 }
 
 impl PanelSection {
+    /// Every section, in the order the panel lays them out. `/orchestrator status`
+    /// (`OR-14`) walks this list so a section with nothing in it is named as one
+    /// rather than going missing from the report.
+    pub const ALL: [PanelSection; 6] = [
+        PanelSection::Agents,
+        PanelSection::Tasks,
+        PanelSection::Graph,
+        PanelSection::Costs,
+        PanelSection::Logs,
+        PanelSection::Approvals,
+    ];
+
     /// The heading as the screen shows it. Lower case, because it is a label in
     /// a row rather than a title of its own panel.
     pub fn title(self) -> &'static str {
@@ -138,9 +150,11 @@ impl PanelRow {
     }
 }
 
-/// Lay the six sections out in order, each behind its own heading. A section
-/// with nothing to say still gets its heading, because the list of what was
-/// checked is itself an answer.
+/// Lay the six sections out in order, each behind its own heading. A section with
+/// nothing in it gets no heading: the heading carries the count, and a heading
+/// over an empty list would be a figure with nothing behind it. `App` reads the
+/// missing heading as "this section found nothing to say", which is what
+/// `/orchestrator status` (`OR-14`) prints in that case.
 pub fn sections(parts: [(PanelSection, Vec<PanelRow>); 6]) -> Vec<PanelRow> {
     let mut out = Vec::new();
     for (section, rows) in parts {
@@ -150,6 +164,20 @@ pub fn sections(parts: [(PanelSection, Vec<PanelRow>); 6]) -> Vec<PanelRow> {
         out.extend(rows);
     }
     out
+}
+
+/// Keep one section of an already-built panel, heading and all (`OR-14`). This is
+/// a filter over rows that were read, not a second reading: `/orchestrator graph`
+/// and `/workers` show the same figures about the same runs, because they are the
+/// same `Vec<PanelRow>` with one comparison applied.
+pub fn only(rows: Vec<PanelRow>, section: Option<PanelSection>) -> Vec<PanelRow> {
+    match section {
+        None => rows,
+        Some(wanted) => rows
+            .into_iter()
+            .filter(|row| row.section == wanted)
+            .collect(),
+    }
 }
 
 /// One card per worker xencode launched. The figures are the card's, and each
@@ -661,6 +689,20 @@ pub fn cost_rows(
 /// cost are named, so the screen never reads as the whole history.
 pub fn log_rows(entries: &[TimelineEntry], keep: usize) -> Vec<PanelRow> {
     let mut rows = Vec::new();
+    if entries.is_empty() {
+        // The other five sections each report a measured nothing; a section that
+        // simply went missing would be the panel skipping part of its own answer.
+        return vec![PanelRow {
+            section: PanelSection::Logs,
+            is_header: false,
+            line: "logs: nothing has reported yet".to_string(),
+            sources: vec![
+                "the timeline this session's control room built is empty — no worker has put an \
+                 event on it, so the read counted zero rather than the panel passing over it"
+                    .to_string(),
+            ],
+        }];
+    }
     let hidden = entries.len().saturating_sub(keep);
     for (i, entry) in entries.iter().enumerate().skip(hidden) {
         rows.push(PanelRow {
@@ -1151,6 +1193,52 @@ mod tests {
         ]);
         assert_eq!(laid.len(), 2);
         assert_eq!(laid[0].line, "── tasks (1) ──");
+    }
+
+    /// A session where no worker has put anything on the timeline still has a log
+    /// section, said as the counted nothing it is. Every other builder reports its
+    /// own nothing this way; a section that only appears once something happens is a
+    /// part of the answer the panel withholds until it is convenient.
+    #[test]
+    fn a_timeline_with_no_events_reports_that_rather_than_going_missing() {
+        let rows = log_rows(&[], 30);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].line, "logs: nothing has reported yet");
+        assert!(
+            rows[0].sources[0].contains("counted zero"),
+            "{:?}",
+            rows[0].sources
+        );
+        let laid = sections([
+            (
+                PanelSection::Agents,
+                vec![PanelRow {
+                    section: PanelSection::Agents,
+                    is_header: false,
+                    line: "subagent #1 — a task, not started".to_string(),
+                    sources: vec!["the fleet this session launched".to_string()],
+                }],
+            ),
+            (PanelSection::Tasks, task_rows(Some(&[]))),
+            (
+                PanelSection::Graph,
+                graph_rows(&[], std::path::Path::new("/nowhere")),
+            ),
+            (PanelSection::Costs, cost_rows(None, &[], &[])),
+            (PanelSection::Logs, rows),
+            (PanelSection::Approvals, approval_rows(&[], &[])),
+        ]);
+        let headed: Vec<PanelSection> = laid
+            .iter()
+            .filter(|row| row.is_header)
+            .map(|row| row.section)
+            .collect();
+        assert_eq!(
+            headed,
+            Vec::from(PanelSection::ALL),
+            "a fresh session shows all six headings, so `/orchestrator status` and the panel \
+             agree"
+        );
     }
 
     /// The detail view is the trace: the line, then every figure with its source.

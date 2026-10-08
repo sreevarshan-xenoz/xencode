@@ -2068,9 +2068,14 @@ fn draw_worker_panel(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(format!(
-            " ⚙ Workers — {} · {} row(s) · Enter shows where each was read from ",
+            " ⚙ Workers — {} · {} row(s) · {} ",
             app.workers_posture,
-            app.workers_rows.len()
+            app.workers_rows.len(),
+            match app.workers_filter {
+                Some(section) =>
+                    format!("filtered to {} (`/workers` shows all six)", section.title()),
+                None => "Enter shows where each was read from".to_string(),
+            }
         ));
     f.render_widget(outer, popup_area);
     let inner = popup_area.inner(ratatui::layout::Margin {

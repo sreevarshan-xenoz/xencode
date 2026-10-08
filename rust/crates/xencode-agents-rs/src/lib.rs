@@ -57,8 +57,8 @@ pub use redispatch::{
     redispatch_failed_worker, RedispatchOutcome, TaskAttemptEntry, TaskAttemptLedger,
 };
 pub use roster::{
-    inventory, is_external_worker, provenance_of_help_cell, AgentSpec, InstallSource,
-    InstalledAgent, Provenance, ROSTER,
+    attach_argv, handover, inventory, is_external_worker, provenance_of_help_cell, AgentSpec,
+    Handover, InstallSource, InstalledAgent, Provenance, ROSTER,
 };
 pub use worker_package::{
     resume_task_from_package, ObservedDiff, ResumptionOutcome, VerifiedTestRun, WorkerPackage,

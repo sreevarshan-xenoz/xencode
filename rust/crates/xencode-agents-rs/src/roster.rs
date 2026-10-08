@@ -68,6 +68,30 @@ pub struct AgentSpec {
     pub advertises_resume: bool,
     /// Whether help advertises its own approval or permission control.
     pub advertises_approval: bool,
+    /// The vendor's own command that opens one of its **already-running**
+    /// sessions in this terminal. The placeholder is the vendor's own argument
+    /// name — `{id}` for a session, `{url}` for a server address — so the row
+    /// says what has to go there instead of xencode inventing a word for it.
+    ///
+    /// `None` is the common case and the honest one. An agent whose help
+    /// advertises resuming a saved conversation as a flag on a *new* run has no
+    /// running process to hand a terminal to, and `OR-14`'s done-when is exactly
+    /// that difference: "attach" may only ever mean handing the real terminal to
+    /// a process that has one, so xencode starting a second copy of the vendor
+    /// and calling it a take-over would be the lie this field exists to prevent.
+    /// Read from `--help` on 2026-10-07.
+    pub attach: Option<&'static str>,
+    /// The vendor's own command that prints the sessions it knows about, which
+    /// is where a `{id}` for [`AgentSpec::attach`] comes from. xencode **prints
+    /// this command for the person to run** and never runs it: a listing that
+    /// browses instead of printing would dump escape codes into the terminal,
+    /// and whether a vendor's own tool is worth starting is `AR-8`'s rule to
+    /// leave with the human. `None` when the help read here shows no such
+    /// command — recorded as not known rather than guessed at, because a wrong
+    /// listing command prints nothing and a person would read that as an empty
+    /// session list.
+    /// Read from `--help` on 2026-10-07.
+    pub session_list: Option<&'static str>,
     /// The operator has stood this agent down, so the probe skips it by default.
     ///
     /// This is a decision, not an observation. A parked agent is still
@@ -105,6 +129,16 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,    // `opencode mcp`
         advertises_resume: true, // `session list`, `export`/`import`
         advertises_approval: true, // `--auto`, auto-approve permissions (AR-3 contradicted `false` on 2026-09-29)
+        // `opencode attach <url>` — "attach to a running opencode server", read
+        // from `opencode --help` on 2026-10-07. The placeholder is named `{url}`
+        // because that is what the vendor's own usage line asks for: the address
+        // a server it already started printed. `opencode session list` names the
+        // sessions on disk, which is a different thing, and is recorded as
+        // `session_list` for that reason rather than as the source of a `{url}`.
+        attach: Some("opencode attach {url}"),
+        // `opencode session list` was run on 2026-10-07 and printed real session
+        // ids from this machine's own state, with no network involved.
+        session_list: Some("opencode session list"),
         parked: false,
         park_reason: None,
         read_on: "2026-09-29",
@@ -119,6 +153,11 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `cline mcp`
         advertises_resume: true,   // `--id <session-id>`, `cline history`
         advertises_approval: true, // `--auto-approve`, `CLINE_TOOL_APPROVAL_MODE`
+        // `--id <session-id>` resumes a session, but as a flag on a run cline
+        // starts here and now — there is no cline process already holding that
+        // terminal, so there is nothing to hand over (2026-10-07 help read).
+        attach: None,
+        session_list: None,
         parked: false,
         park_reason: None,
         read_on: "2026-09-28",
@@ -133,6 +172,13 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `codex mcp`
         advertises_resume: true,   // `resume`, `fork`, `queue`, `archive`
         advertises_approval: true, // `--sandbox`, `--ask-for-approval`
+        // `codex agents` "browse[s] all agent sessions on the shared local
+        // app-server daemon" and `codex resume` opens a picker; neither takes a
+        // session argument to hand this terminal to, so xencode reads no
+        // handover verb here (2026-10-07 help read). That is a statement about
+        // what was read, not a claim codex cannot be attached to.
+        attach: None,
+        session_list: None,
         parked: false,
         park_reason: None,
         read_on: "2026-09-28",
@@ -150,6 +196,16 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `claude mcp`
         advertises_resume: true,   // `--resume`, `--fork-session`
         advertises_approval: true, // `--permission-mode`, `--allowedTools`
+        // `claude attach <id>` — "Open the background session in this terminal",
+        // read from `claude attach --help` on 2026-10-07. A session started with
+        // `--bg` keeps running with no terminal, and this is the vendor's own way
+        // to give it one.
+        attach: Some("claude attach {id}"),
+        // Its `--bg` help says "`claude agents` lists them", so the vendor names
+        // this as the way to see the background sessions. xencode prints the
+        // command rather than running it: it may browse rather than print, and
+        // deciding that is the person's, not ours.
+        session_list: Some("claude agents"),
         parked: true,
         park_reason: Some("no Claude account on this box; the operator has not asked for one"),
         read_on: "2026-09-28",
@@ -164,6 +220,11 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `gemini mcp`
         advertises_resume: true,   // `--resume`, `--session-id`, `--session-file`
         advertises_approval: true, // `--approval-mode`, `--policy`
+        // `-r/--resume` takes "latest" or an index on a new run, which is a
+        // conversation picked up, not a running process handed a terminal
+        // (2026-10-07 help read).
+        attach: None,
+        session_list: None,
         parked: true,
         park_reason: Some("no Gemini auth configured; the operator has not asked for one"),
         read_on: "2026-09-28",
@@ -178,6 +239,11 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: false,
         advertises_resume: true,   // `--session`, `--continue`
         advertises_approval: true, // `--yolo`
+        // `crush server` binds a socket and `crush session list` lists sessions,
+        // but help shows no `attach`: nothing in what was read takes a session
+        // and puts it in this terminal (2026-10-07 help read).
+        attach: None,
+        session_list: Some("crush session list"),
         parked: true,
         park_reason: Some("no provider configured in crush; the operator has not asked for one"),
         read_on: "2026-09-28",
@@ -197,6 +263,12 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `agy mcp`
         advertises_resume: true,   // `--conversation`, `--continue`
         advertises_approval: true, // `--mode`, `--dangerously-skip-permissions`
+        // `agy agents` lists the agent *definitions* it knows, not running
+        // sessions, and `--continue`/`--conversation` resume on a new run — so
+        // there is no handover verb and no session listing to offer here
+        // (2026-10-07 help read).
+        attach: None,
+        session_list: None,
         parked: false,
         park_reason: None,
         read_on: "2026-10-02",
@@ -220,6 +292,12 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `cursor-agent mcp`, `--approve-mcps`
         advertises_resume: true,   // `--resume`, `--continue`
         advertises_approval: true, // `--mode`, `--force`/`--yolo`, `--sandbox`
+        // `resume` "resume[s] the latest chat session" and `--resume [chatId]`
+        // picks one up on a new run; neither is a process already holding a
+        // terminal, so there is nothing for xencode to hand over (2026-10-07
+        // help read).
+        attach: None,
+        session_list: None,
         parked: false,
         park_reason: None,
         read_on: "2026-10-02",
@@ -239,6 +317,11 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,      // `kilo mcp`
         advertises_resume: true,   // `kilo session`, `kilo run --continue`
         advertises_approval: true, // `kilo run --auto`
+        // `kilo attach <url>` — "attach to a running kilo server", read from
+        // `kilo --help` on 2026-10-07. Same shape as opencode: the target is the
+        // address a server this machine started is listening on.
+        attach: Some("kilo attach {url}"),
+        session_list: Some("kilo session list"),
         parked: false,
         park_reason: None,
         read_on: "2026-10-02",
@@ -255,6 +338,10 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_mcp: true,     // `kiro-cli mcp`
         advertises_resume: true,  // `-r/--resume`, `--resume-id`
         advertises_approval: true, // `-a/--trust-all-tools`, `--trust-tools`
+        // `kiro-cli --help` on 2026-10-07 lists chat, agent, doctor, settings and
+        // quit: no attach verb and no session listing in what it showed.
+        attach: None,
+        session_list: None,
         parked: false,
         park_reason: None,
         read_on: "2026-10-02",
@@ -350,6 +437,100 @@ pub fn find(name: &str) -> Option<&'static AgentSpec> {
 /// caller must say it as an unanswered question rather than as permission.
 pub fn is_external_worker(name: &str) -> bool {
     find(name).is_some()
+}
+
+/// What a terminal handover to `{name}`'s own session would take, decided from
+/// its roster row and what is on this machine.
+///
+/// This is a sum type rather than an `Option` because the three refusals say
+/// different things and each has to be quotable: an agent with no handover verb
+/// in its help is a different fact from an agent whose verb is known but whose
+/// program is not here, and both differ from the case where the person has not
+/// yet said which session. Guessing at the last one — passing an empty id, or
+/// picking the newest session — is how a control plane starts lying about what
+/// it attached to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Handover {
+    /// The row's own command, as argv, ready to be handed this terminal. The
+    /// first element is the resolved path when this machine has the program.
+    Ready {
+        argv: Vec<String>,
+        /// The roster template it came from, so the screen can quote the
+        /// vendor's own usage line back rather than xencode's reconstruction.
+        template: &'static str,
+    },
+    /// Nothing in what was read from this agent's help hands a terminal to a
+    /// running session. `one_shot` is what the row *does* advertise, so the
+    /// refusal can name the difference instead of just saying no.
+    NoHandoverVerb {
+        one_shot: &'static str,
+        read_on: &'static str,
+        /// The vendor's own way to list its sessions, when help shows one —
+        /// printed for the person to run, never run here.
+        session_list: Option<&'static str>,
+    },
+    /// The row advertises the verb but the program is not on this machine.
+    NotInstalled { template: &'static str },
+    /// A session was not named, and xencode does not choose one for you.
+    NeedsTarget {
+        template: &'static str,
+        session_list: Option<&'static str>,
+    },
+    /// No roster row for that name, so nothing is known about how to hand a
+    /// terminal to it.
+    Unknown(String),
+}
+
+/// What `orchestrator attach` may do with `name`, given the session it was
+/// pointed at. See [`Handover`].
+pub fn handover(name: &str, target: Option<&str>) -> Handover {
+    let Some(spec) = find(name) else {
+        return Handover::Unknown(name.to_string());
+    };
+    let Some(template) = spec.attach else {
+        return Handover::NoHandoverVerb {
+            one_shot: spec.one_shot,
+            read_on: spec.read_on,
+            session_list: spec.session_list,
+        };
+    };
+    let Some(target) = target.filter(|t| !t.trim().is_empty()) else {
+        return Handover::NeedsTarget {
+            template,
+            session_list: spec.session_list,
+        };
+    };
+    let Some(binary) = spec.binaries.iter().find_map(|b| which(b)) else {
+        return Handover::NotInstalled { template };
+    };
+    Handover::Ready {
+        argv: attach_argv(template, target, &binary.to_string_lossy()),
+        template,
+    }
+}
+
+/// Split a roster handover template into argv, putting `target` where the row's
+/// placeholder is and `binary` — the path this machine resolved — first.
+///
+/// The placeholder is matched as a whole word (`{id}`, `{url}`) because the
+/// vendor's own argument name is documentation the person reading the line
+/// should keep seeing: a row that says `attach {url}` and a row that says
+/// `attach {id}` want different things after them.
+pub fn attach_argv(template: &str, target: &str, binary: &str) -> Vec<String> {
+    let mut argv: Vec<String> = template
+        .split_whitespace()
+        .map(|token| {
+            if token.starts_with('{') && token.ends_with('}') {
+                target.to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .collect();
+    if !argv.is_empty() {
+        argv[0] = binary.to_string();
+    }
+    argv
 }
 
 /// Resolve an executable name to a full path, the way `which` would.
@@ -593,6 +774,101 @@ mod tests {
         // `kiro-cli` because its binary is not called `kiro`.
         assert!(find("kilo").is_some());
         assert!(find("kiro-cli").is_some());
+    }
+
+    /// The three agents whose help was read as carrying a command that hands
+    /// this terminal to a session already running, and the seven whose does not.
+    ///
+    /// Pinned as a list on purpose: `OR-14`'s done-when is that "attach" only
+    /// ever means the handover, so a row moving from `None` to `Some` is a claim
+    /// about a vendor's binary that has to be read off that binary again, not
+    /// typed in because it would be nice for the command to work.
+    #[test]
+    fn only_the_rows_that_advertise_an_attach_verb_can_be_attached_to() {
+        let with_verb: Vec<&str> = ROSTER
+            .iter()
+            .filter(|spec| spec.attach.is_some())
+            .map(|spec| spec.name)
+            .collect();
+        assert_eq!(with_verb, ["opencode", "claude", "kilo"]);
+    }
+
+    /// A placeholder is the vendor's own argument name, so the line a person
+    /// reads says what belongs after it — and xencode never invents a session to
+    /// fill it with.
+    #[test]
+    fn the_handover_placeholder_carries_the_named_session_and_nothing_else() {
+        let argv = attach_argv("claude attach {id}", "ses_42", "/usr/local/bin/claude");
+        assert_eq!(argv, ["/usr/local/bin/claude", "attach", "ses_42"]);
+        // `attach` with no argument is a different program's error, not a
+        // question xencode answers by guessing.
+        let no_placeholder = attach_argv("codex agents", "ignored", "/bin/codex");
+        assert_eq!(no_placeholder, ["/bin/codex", "agents"]);
+    }
+
+    #[test]
+    fn attaching_is_refused_in_words_that_distinguish_why() {
+        // Nothing was read that hands a terminal over: the refusal says what the
+        // row *does* advertise, so the person learns the difference rather than
+        // being told a command failed.
+        let cline = handover("cline", Some("anything"));
+        assert!(
+            matches!(
+                &cline,
+                Handover::NoHandoverVerb { one_shot, .. } if *one_shot == "cline --json {prompt}"
+            ),
+            "cline resumes with `--id` on a run it starts, which is not a handover: {cline:?}"
+        );
+
+        // The verb exists but no session was named, and xencode does not pick one.
+        let claude = handover("claude", None);
+        assert_eq!(
+            claude,
+            Handover::NeedsTarget {
+                template: "claude attach {id}",
+                session_list: Some("claude agents"),
+            }
+        );
+        // A blank is not a session either.
+        assert_eq!(
+            handover("claude", Some("  ")),
+            Handover::NeedsTarget {
+                template: "claude attach {id}",
+                session_list: Some("claude agents"),
+            }
+        );
+
+        assert!(
+            matches!(handover("not-on-the-roster", Some("x")),
+                     Handover::Unknown(name) if name == "not-on-the-roster"),
+            "a name with no row is answered as an unanswered question"
+        );
+    }
+
+    /// Whether this resolves to a command or to "that program is not here" is a
+    /// fact about the machine, not about the row — so the test asks which of the
+    /// two it was, and that the one it got is well-formed.
+    #[test]
+    fn a_named_session_on_an_agent_with_a_handover_verb_resolves_or_says_it_is_absent() {
+        let opencode = handover("opencode", Some("http://127.0.0.1:54321"));
+        match &opencode {
+            Handover::Ready { argv, template } => {
+                assert_eq!(*template, "opencode attach {url}");
+                assert_eq!(argv.len(), 3, "opencode, attach, and the url: {argv:?}");
+                assert!(
+                    std::path::Path::new(&argv[0]).is_file(),
+                    "the resolved binary must be a file that exists: {argv:?}"
+                );
+                assert_eq!(&argv[1], "attach");
+                assert_eq!(&argv[2], "http://127.0.0.1:54321");
+            }
+            Handover::NotInstalled { template } => {
+                assert_eq!(*template, "opencode attach {url}");
+            }
+            other => {
+                panic!("opencode has a handover verb and a named url, so it is neither {other:?}")
+            }
+        }
     }
 
     #[test]

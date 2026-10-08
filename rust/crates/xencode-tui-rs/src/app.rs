@@ -113,6 +113,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/hotspots",
     "/agents",
     "/workers",
+    "/orchestrator",
     "/trust",
     "/egress",
     "/goto",
@@ -482,6 +483,24 @@ pub struct App<'a> {
     pub workers_selected: usize,
     pub workers_detail: bool,
     pub workers_scroll: usize,
+    /// The one section the panel is showing (`OR-14`). `None` is the whole
+    /// panel, which is what `/workers` opens; `/orchestrator graph` and its
+    /// siblings name a section and the list keeps only that one. It is a view
+    /// filter over the rows already read, so a filtered panel and a full one are
+    /// two ways of looking at one reading, never two readings.
+    pub workers_filter: Option<crate::worker_panel::PanelSection>,
+    /// A terminal handover `/orchestrator attach` approved (`OR-14`): the argv to
+    /// put on this real terminal. The frame loop takes it, because only it owns
+    /// the `Terminal` — the command handler that set it cannot reach the screen.
+    /// Session-only and consumed on the way out: a handover that never ran leaves
+    /// nothing behind.
+    pub handover_argv: Option<Vec<String>>,
+    /// What the fleet surface found on its way in (`OR-14`): the panel filter and
+    /// the focus area, recorded by `/orchestrator on` so `/orchestrator off` can
+    /// put both back. `off` deciding for itself what plain xencode should look
+    /// like would be `off` changing something, and the done-when is that it
+    /// changes nothing.
+    pub mode_surface: Option<(Option<crate::worker_panel::PanelSection>, FocusArea)>,
     /// Tool classes the user answered "always allow" for this session
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
@@ -2629,7 +2648,7 @@ impl<'a> App<'a> {
             ])
         };
 
-        self.workers_rows = rows;
+        self.workers_rows = panel::only(rows, self.workers_filter);
         self.workers_posture = profile.name();
         self.workers_selected = 0;
         self.workers_detail = false;
@@ -2904,6 +2923,9 @@ impl<'a> App<'a> {
             workers_selected: 0,
             workers_detail: false,
             workers_scroll: 0,
+            workers_filter: None,
+            handover_argv: None,
+            mode_surface: None,
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             secret_taint: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             repro_gate: Arc::new(crate::reprogate::ReproGate::new()),
@@ -3347,7 +3369,19 @@ impl<'a> App<'a> {
     /// switching cannot copy or drop any of them. What changes is which way the
     /// same state is presented, not the state itself.
     pub fn toggle_mode(&mut self) {
-        self.mode = self.mode.toggled();
+        self.set_mode(self.mode.toggled());
+    }
+
+    /// Put the product mode into a named one (`OR-14`). `/orchestrator on` and
+    /// `/orchestrator off` come through here rather than writing `self.mode`, so
+    /// the mode has exactly two ways of changing and both say so on screen. It is
+    /// one field on this `App`: nothing is copied into a per-mode state to be left
+    /// behind when the mode is turned off, because there is no per-mode state.
+    pub fn set_mode(&mut self, mode: Mode) {
+        if self.mode == mode {
+            return;
+        }
+        self.mode = mode;
         self.push_toast(
             crate::toast::ToastKind::Info,
             format!("Mode: {}", self.mode.label()),
@@ -3531,6 +3565,13 @@ impl<'a> App<'a> {
         // records, each row naming where its figures were read from (`OR-12`).
         if prompt == "/workers" || prompt.starts_with("/workers ") {
             self.handle_workers_command();
+            return;
+        }
+
+        // The orchestrator's own surface (/orchestrator on|off|status|…), over the
+        // mode this app already keeps (`OR-14`).
+        if prompt == "/orchestrator" || prompt.starts_with("/orchestrator ") {
+            self.handle_orchestrator_command(&prompt, tx);
             return;
         }
 
@@ -6005,8 +6046,648 @@ impl<'a> App<'a> {
     /// (`OR-12`). It reads on the way in, the way the worktree list does, so the
     /// rows a reader sees are the rows the files held at the moment they asked.
     fn handle_workers_command(&mut self) {
+        // The whole panel: a section filter belongs to `/orchestrator`, and
+        // asking for everything is what `/workers` means.
+        self.workers_filter = None;
         self.refresh_worker_panel();
         self.focus = FocusArea::WorkerPanel;
+    }
+
+    /// The `.xencode` directory of the project this screen is open in. The panel
+    /// and every `/orchestrator` verb read through here, so a report and the rows
+    /// it quotes cannot name two different directories (`OR-14`).
+    fn project_xencode_dir(&self) -> std::path::PathBuf {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".xencode")
+    }
+
+    /// Whether this process has a real terminal it could give away (`OR-14`): the
+    /// input and the output both, because a session that cannot be typed into is
+    /// not a session a person can use. Headless frame loops, a piped stdin and a
+    /// redirect all answer `false`, and `attach` refuses on that rather than
+    /// starting a vendor that would have nowhere to draw.
+    fn real_terminal() -> (bool, bool) {
+        use std::io::IsTerminal;
+        (
+            std::io::stdin().is_terminal(),
+            std::io::stdout().is_terminal(),
+        )
+    }
+
+    /// `/orchestrator` — the orchestrator's own command surface (`OR-14`), over the
+    /// mode `X-2` already keeps.
+    ///
+    /// Most of these verbs read: the panel rows, the posture in the config this
+    /// project carries, the spawns this session made, the detached run directories
+    /// xencode itself wrote, the roster table, and the launch line a launch would
+    /// carry. Two act, and both are calls the rest of xencode already makes —
+    /// `retry` re-arms a task through the same `arm_spawn` `/spawn` uses, `stop`
+    /// writes the stop request and signals the pid that run recorded. `attach` is
+    /// the only verb that can take this screen away, so it is the only one that has
+    /// to prove the screen is a real terminal before it promises anything at all.
+    ///
+    /// The mode is one field and not a setting: it never reaches `config.json`, and
+    /// there is no per-mode copy of the chat, the tasks, the agents or the files to
+    /// be left dirty. That is why `off` can put plain xencode back exactly as it was
+    /// found — it restores the two things the surface itself touched, the panel's
+    /// section filter and the focus, which `on` recorded on the way in.
+    fn handle_orchestrator_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        use crate::worker_panel::PanelSection;
+        let arg = prompt
+            .strip_prefix("/orchestrator")
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let (verb, rest) = match arg.split_once(' ') {
+            Some((verb, rest)) => (verb.to_string(), rest.trim().to_string()),
+            None => (arg.clone(), String::new()),
+        };
+        match verb.as_str() {
+            "" | "help" => {
+                self.system_line("usage: /orchestrator <verb> — the fleet surface over the mode Ctrl+Space flips");
+                for (name, what) in [
+                    (
+                        "on · off",
+                        "enter or leave Orchestrator mode; the state is shared, so leaving changes nothing else",
+                    ),
+                    ("status", "what mode this is, under what posture, and what was actually read"),
+                    (
+                        "agents · tasks · graph · logs · costs [text]",
+                        "one section of the fleet panel, straight to the row text names",
+                    ),
+                    ("permissions", "what a launch to each agent on the roster would be allowed to do"),
+                    ("inspect <text>", "open the sources of the row the text names"),
+                    ("retry <#id>", "run a spawn's task again, in a fresh worktree"),
+                    ("stop <run-id>", "ask a detached run to stop, by the name its directory holds"),
+                    (
+                        "attach <agent> <session>",
+                        "hand this terminal to a vendor's own session — only when there is one to hand",
+                    ),
+                ] {
+                    self.system_line(&format!("  {name:<48} {what}"));
+                }
+            }
+            "on" if self.mode != Mode::Orchestrator => {
+                self.mode_surface = Some((self.workers_filter, self.focus));
+                self.set_mode(Mode::Orchestrator);
+                self.system_line("Orchestrator mode is on. Nothing was copied to get here: the tasks, agents, sessions, worktrees, diffs and approvals on this screen are the ones the session already had, read by another view. `/orchestrator status` says what is on hand, and `/orchestrator off` puts the surface back the way it was.");
+            }
+            "on" => self.system_line(
+                "Orchestrator mode is already on — `/orchestrator status` reads it, `/orchestrator \
+                 off` leaves it.",
+            ),
+            "off" => {
+                let back = self.mode_surface.take();
+                let was_on = self.mode == Mode::Orchestrator;
+                self.set_mode(Mode::Coding);
+                if let Some((filter, focus)) = back {
+                    self.workers_filter = filter;
+                    self.focus = focus;
+                }
+                self.system_line(if was_on {
+                    "Orchestrator mode is off. The mode is one field on this app, never a setting, \
+                     so it is not written down anywhere to be left behind: the panel filter and \
+                     the focus are back where they were when you turned it on, and everything \
+                     else was untouched the whole time."
+                } else {
+                    "Orchestrator mode was not on — xencode is exactly as it was."
+                });
+            }
+            "status" => self.orchestrator_status(),
+            "agents" | "tasks" | "graph" | "logs" | "costs" => {
+                if !self.orchestrator_surface_open(&verb) {
+                    return;
+                }
+                let section = match verb.as_str() {
+                    "agents" => PanelSection::Agents,
+                    "tasks" => PanelSection::Tasks,
+                    "graph" => PanelSection::Graph,
+                    "logs" => PanelSection::Logs,
+                    _ => PanelSection::Costs,
+                };
+                self.workers_filter = Some(section);
+                self.refresh_worker_panel();
+                self.focus = FocusArea::WorkerPanel;
+                let titled = section.title();
+                if rest.is_empty() {
+                    let shown = self.workers_rows.iter().filter(|r| !r.is_header).count();
+                    self.system_line(&format!(
+                        "Panel filtered to {titled}: {shown} row(s). `r` re-reads it, Enter opens \
+                         where each figure came from, and `/workers` shows all six sections \
+                         again."
+                    ));
+                } else {
+                    self.say_panel_match(&rest, titled);
+                }
+            }
+            "permissions" => {
+                if self.orchestrator_surface_open(&verb) {
+                    self.orchestrator_permissions();
+                }
+            }
+            "inspect" => {
+                if self.orchestrator_surface_open(&verb) {
+                    self.orchestrator_inspect(&rest);
+                }
+            }
+            "retry" => {
+                if self.orchestrator_surface_open(&verb) {
+                    self.orchestrator_retry(&rest, tx);
+                }
+            }
+            "stop" => {
+                if self.orchestrator_surface_open(&verb) {
+                    self.orchestrator_stop(&rest);
+                }
+            }
+            "attach" => {
+                if self.orchestrator_surface_open(&verb) {
+                    self.orchestrator_attach(&rest);
+                }
+            }
+            other => self.system_line(&format!(
+                "`/orchestrator {other}` is not a verb. `/orchestrator help` lists them, and the \
+                 ones that read are the same figures the panel shows."
+            )),
+        }
+    }
+
+    /// The verbs belonging to the surface work only while the mode is on
+    /// (`OR-14`) — that is what makes the mode the thing rather than a label in the
+    /// status bar. `on`, `off`, `status` and `help` are exempt: refusing to tell
+    /// you what mode you are in, or to let you leave, would be a gate that only
+    /// locks you in.
+    fn orchestrator_surface_open(&mut self, verb: &str) -> bool {
+        if self.mode == Mode::Orchestrator {
+            return true;
+        }
+        self.system_line(&format!(
+            "`/orchestrator {verb}` is the orchestrator's surface and this is {} mode. \
+             `/orchestrator on` enters it (Ctrl+Space flips it back).",
+            self.mode.label()
+        ));
+        false
+    }
+
+    /// `/orchestrator status` — one read of the panel, printed as it reads, plus
+    /// the three facts the panel itself does not hold: which mode this is, how many
+    /// detached runs are on disk, and whether there is a terminal here to hand over.
+    /// The section lines are quoted from the panel's own headings rather than
+    /// recounted here, so a number on this list and a number in the panel a
+    /// keystroke away are the same number.
+    fn orchestrator_status(&mut self) {
+        use crate::worker_panel::PanelSection;
+        self.refresh_worker_panel();
+        let lines: Vec<String> = PanelSection::ALL
+            .iter()
+            .map(|section| {
+                match self
+                    .workers_rows
+                    .iter()
+                    .find(|row| row.is_header && row.section == *section)
+                {
+                    Some(header) => format!("  {}", header.line),
+                    None => format!(
+                        "  {} — 0 row(s): the reading found nothing to put there",
+                        section.title()
+                    ),
+                }
+            })
+            .collect();
+
+        let running = self.spawns.iter().filter(|s| s.running).count();
+        let failed = self.spawns.iter().filter(|s| s.failed).count();
+        let detached = self.detached_run_status();
+        let waiting = self.approval_queue.len();
+        let (stdin_tty, stdout_tty) = Self::real_terminal();
+        let terminal = if stdin_tty && stdout_tty {
+            "this is a real terminal, so `/orchestrator attach` can hand it over".to_string()
+        } else {
+            format!(
+                "stdin {} and stdout {} a terminal, so `/orchestrator attach` will refuse until \
+                 xencode runs from one it can give away",
+                if stdin_tty { "is" } else { "is not" },
+                if stdout_tty { "is" } else { "is not" }
+            )
+        };
+
+        self.system_line(&format!(
+            "Orchestrator status · mode {} (Ctrl+Space flips, `/orchestrator off` leaves it) · \
+             posture {}",
+            self.mode.label(),
+            self.workers_posture
+        ));
+        for line in lines {
+            self.system_line(&line);
+        }
+        self.system_line(&format!(
+            "  spawns this session — {} ({running} running, {failed} failed)",
+            self.spawns.len()
+        ));
+        self.system_line(&format!("  detached runs — {detached}"));
+        self.system_line(&format!("  approvals waiting on you — {waiting}"));
+        self.system_line(&format!("  terminal — {terminal}"));
+    }
+
+    /// The detached runs under `.xencode/cache/detached`, in the words
+    /// [`crate::detached::derive_status`] gives them. One string, because it is a
+    /// line in a status report rather than a list to navigate.
+    fn detached_run_status(&self) -> String {
+        let xencode_dir = self.project_xencode_dir();
+        let ids = crate::detached::list_run_ids(&xencode_dir);
+        if ids.is_empty() {
+            return format!(
+                "none in {}",
+                crate::detached::detached_dir(&xencode_dir).display()
+            );
+        }
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for id in &ids {
+            let label = crate::detached::derive_status(&crate::detached::run_dir(&xencode_dir, id))
+                .label()
+                .to_string();
+            match counts.iter_mut().find(|(seen, _)| *seen == label) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((label, 1)),
+            }
+        }
+        let parts: Vec<String> = counts
+            .iter()
+            .map(|(label, n)| format!("{n} {label}"))
+            .collect();
+        format!(
+            "{} ({}), in {}",
+            ids.len(),
+            parts.join(", "),
+            xencode_dir.display()
+        )
+    }
+
+    /// `/orchestrator permissions` — what a launch would be allowed to do, built by
+    /// the same function a launch is built with (`plan_launch`), one row per agent
+    /// on the roster. A worker handing itself full autonomy is run through the same
+    /// function, and the line it ends up with is printed beside the clean one: the
+    /// refusal is shown happening rather than asserted.
+    fn orchestrator_permissions(&mut self) {
+        use crate::permission_broker::{plan_launch, supports_prompt, Grant};
+        let mode = self.agent_mode();
+        self.system_line(&format!(
+            "Permissions · agent_approval = \"{}\" → {mode:?} · read from the config this \
+             project carries; nothing here changes it",
+            self.config.agent_approval
+        ));
+        let asked_for = vec![
+            "--yolo".to_string(),
+            "--permission-mode".to_string(),
+            "bypassPermissions".to_string(),
+        ];
+        let mut survived = 0usize;
+        for spec in xencode_agents_rs::ROSTER {
+            let base: Vec<String> = spec
+                .one_shot
+                .split_whitespace()
+                .filter(|token| !token.contains("{prompt}"))
+                .map(|token| token.to_string())
+                .collect();
+            let (argv, grant) = plan_launch(spec.name, mode, &base, &[], None);
+            let (overruled, _) = plan_launch(spec.name, mode, &base, &asked_for, None);
+            let extra: Vec<&String> = overruled
+                .iter()
+                .filter(|token| !argv.iter().any(|kept| kept == *token))
+                .collect();
+            if extra.is_empty() {
+                self.system_line(&format!(
+                    "  {:<14} {:<20} {}",
+                    spec.name,
+                    grant.words(),
+                    argv.join(" ")
+                ));
+            } else {
+                survived += 1;
+                self.system_line(&format!(
+                    "  {:<14} {:<20} {} · a worker asking for its own kept {}",
+                    spec.name,
+                    grant.words(),
+                    argv.join(" "),
+                    extra
+                        .iter()
+                        .map(|token| format!("`{token}`"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
+            }
+            if supports_prompt(spec.name) && grant != Grant::Prompt {
+                self.system_line(
+                    "      this vendor can route approvals back to xencode; that route needs a \
+                     tool name from a running session, which a command like this one has none \
+                     of, so it is not chosen here",
+                );
+            }
+        }
+        self.system_line(&format!(
+            "  {} roster agent(s); {} of them keep something a worker asked for itself. The \
+             grant comes from xencode's mode, never from the worker.",
+            xencode_agents_rs::ROSTER.len(),
+            survived
+        ));
+    }
+
+    /// `/orchestrator inspect <text>` — open the sources of the row the text names,
+    /// across the whole panel rather than one section. A miss says what was
+    /// searched, because "not found" over six sections is not an answer.
+    fn orchestrator_inspect(&mut self, text: &str) {
+        if text.is_empty() {
+            self.system_line(
+                "usage: /orchestrator inspect <text> — a run id, a role, a task \
+                              name or a file, as the panel lists it",
+            );
+            return;
+        }
+        self.workers_filter = None;
+        self.refresh_worker_panel();
+        self.focus = FocusArea::WorkerPanel;
+        if self.select_panel_row(text).is_none() {
+            self.system_line(&format!(
+                "No panel row mentions `{text}`. The six sections were read from the fleet of \
+                 workers xencode launched, the task registry, .xencode/{}, .xencode/{} and \
+                 .xencode/{}; `/orchestrator status` says what each of them found, and \
+                 `/orchestrator graph` or `logs` opens one on its own.",
+                xencode_core_rs::RECIPES_DIR,
+                xencode_core_rs::RUNS_DIR,
+                "cache/detached"
+            ));
+        }
+    }
+
+    /// Move the panel's selection to the row a reader named and open its sources.
+    /// Returns the chosen index and how many rows matched: a panel that picked one
+    /// of four silently would be a panel lying about what it found, so the count
+    /// goes to the screen with the row.
+    fn select_panel_row(&mut self, text: &str) -> Option<(usize, usize)> {
+        let needle = text.to_lowercase();
+        let hits: Vec<usize> = self
+            .workers_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| !row.is_header && row.line.to_lowercase().contains(&needle))
+            .map(|(index, _)| index)
+            .collect();
+        let index = *hits.first()?;
+        self.workers_selected = index;
+        self.workers_detail = true;
+        self.workers_scroll = 0;
+        Some((index, hits.len()))
+    }
+
+    /// Say what a text filter landed on, for the section verbs that take one.
+    fn say_panel_match(&mut self, text: &str, section: &str) {
+        match self.select_panel_row(text) {
+            Some((_, 1)) => self.system_line(&format!(
+                "One {section} row mentions `{text}`; its sources are open. Enter closes them, \
+                 `r` re-reads."
+            )),
+            Some((_, hits)) => self.system_line(&format!(
+                "{hits} rows mention `{text}`; the first is open and the panel is filtered to \
+                 {section}. Name it more exactly — a run id, or a role — to pick another."
+            )),
+            None => self.system_line(&format!(
+                "No {section} row mentions `{text}`. The panel is still filtered to {section}, so \
+                 you can see what is there; `/orchestrator inspect {text}` searches all six \
+                 sections."
+            )),
+        }
+    }
+
+    /// `/orchestrator retry <#id>` — run one of this session's spawns again. The
+    /// retry is a real launch: `arm_spawn`, the git worktree and the tool loop
+    /// behind `/spawn`, with the same task. It gets a fresh worktree and branch on
+    /// purpose — the original is left exactly where it is, because a retry that
+    /// threw away the run it was meant to learn from would lose the diff that
+    /// explains the failure.
+    fn orchestrator_retry(&mut self, arg: &str, tx: mpsc::UnboundedSender<String>) {
+        if arg.is_empty() {
+            if self.spawns.is_empty() {
+                self.system_line(
+                    "Nothing to retry: this session has not spawned a subagent. \
+                                  `/spawn <task>` makes one, and `/orchestrator agents` lists \
+                                  the roles the recipes here name.",
+                );
+            } else {
+                let ids: Vec<String> = self
+                    .spawns
+                    .iter()
+                    .map(|rec| {
+                        format!(
+                            "#{} {}",
+                            rec.id,
+                            if rec.running { "running" } else { "over" }
+                        )
+                    })
+                    .collect();
+                self.system_line(&format!(
+                    "usage: /orchestrator retry <#id> — this session has {}",
+                    ids.join(", ")
+                ));
+            }
+            return;
+        }
+        let given = arg.trim_start_matches('#');
+        let Ok(id) = given.parse::<u64>() else {
+            self.system_line(&format!(
+                "`{arg}` is not a spawn id. They are the numbers `/spawn` printed — \
+                 `/orchestrator retry #3`."
+            ));
+            return;
+        };
+        let Some(record) = self.spawns.iter().find(|rec| rec.id == id) else {
+            let known: Vec<String> = self
+                .spawns
+                .iter()
+                .map(|rec| format!("#{}", rec.id))
+                .collect();
+            self.system_line(&format!(
+                "No spawn #{id} in this session{}. This screen has never held one with that \
+                 number, and a retry does not get to invent one{}",
+                if known.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — it has {}", known.join(", "))
+                },
+                if known.is_empty() {
+                    ", so nothing was started"
+                } else {
+                    ""
+                }
+            ));
+            return;
+        };
+        if record.running {
+            self.system_line(&format!(
+                "Spawn #{id} is still running, so there is nothing to retry yet. It reports into \
+                 the chat when it is over — and it is not cancellable mid-run, which is what \
+                 `/spawn stop` says too rather than pretending otherwise."
+            ));
+            return;
+        }
+        let task = record.task.clone();
+        if let Some((new_id, branch, run)) = self.arm_spawn(&task, None) {
+            self.system_line(&format!(
+                "⏺ Retry of spawn #{id} is spawn #{new_id} — same task, a fresh worktree on \
+                 branch `{branch}` at {}. The original worktree stays where it is.",
+                run.tool_root.display()
+            ));
+            tokio::spawn(agent_rounds(run, tx));
+        }
+    }
+
+    /// `/orchestrator stop <run-id>` — ask a detached run to stop, the way
+    /// `xencode run --stop` does: the stop request is written first so the run
+    /// reads as stopped rather than crashed, then the pid it recorded is sent
+    /// `SIGTERM`. A spawn on the other hand is an in-process task loop, and this
+    /// session cannot cancel one mid-run, so that is said instead.
+    fn orchestrator_stop(&mut self, arg: &str) {
+        if arg.is_empty() {
+            let ids = crate::detached::list_run_ids(&self.project_xencode_dir());
+            if ids.is_empty() {
+                self.system_line(
+                    "usage: /orchestrator stop <run-id> — and this project has no detached run to \
+                     stop. A detached run is one started with `xencode run --detach`, not a \
+                     `/spawn` on this screen.",
+                );
+            } else {
+                let names = ids
+                    .iter()
+                    .map(|id| format!("`{id}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.system_line(&format!(
+                    "usage: /orchestrator stop <run-id> — this project has {names}."
+                ));
+            }
+            return;
+        }
+        if arg.starts_with('#') {
+            self.system_line(&format!(
+                "Spawn {arg} is a tool loop inside xencode's own process, not a detached run with \
+                 a pid to signal — and mid-run it is not cancellable, which is what `/spawn stop` \
+                 says too. Its worktree closes with Ctrl+O when it is over."
+            ));
+            return;
+        }
+        let xencode_dir = self.project_xencode_dir();
+        let Some(run_id) = crate::detached::resolve_run_id(&xencode_dir, arg) else {
+            let ids = crate::detached::list_run_ids(&xencode_dir);
+            self.system_line(&format!(
+                "No detached run here is `{}`{}, so nothing was sent. {}",
+                arg,
+                if ids.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " — the names it does hold are {}",
+                        ids.iter()
+                            .map(|id| format!("`{id}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                },
+                crate::detached::detached_dir(&xencode_dir).display()
+            ));
+            return;
+        };
+        let dir = crate::detached::run_dir(&xencode_dir, &run_id);
+        match crate::detached::derive_status(&dir) {
+            crate::detached::DetachedStatus::Running { pid } => {
+                let said = crate::detached::stop_child(&dir, pid);
+                self.system_line(&format!("Detached run {run_id} — {said}"));
+            }
+            other => self.system_line(&format!(
+                "Detached run {run_id} is `{}` — there is no process to stop and no signal was \
+                 sent. Its log is {}.",
+                other.label(),
+                crate::detached::log_path(&dir).display()
+            )),
+        }
+    }
+
+    /// `/orchestrator attach <agent> <session>` — hand this real terminal to a
+    /// vendor's own session (`OR-14`). Every case that would have to guess is a
+    /// refusal, and the refusal for "there is no terminal here" is the one the
+    /// done-when is about: attach only ever means giving away a terminal this
+    /// process actually has.
+    fn orchestrator_attach(&mut self, arg: &str) {
+        use xencode_agents_rs::Handover;
+        let (name, target) = match arg.split_once(' ') {
+            Some((name, target)) => (name.trim(), Some(target.trim())),
+            None => (arg.trim(), None),
+        };
+        if name.is_empty() {
+            self.system_line(&format!(
+                "usage: /orchestrator attach <agent> <session> — the roster has {} agents, and \
+                 xencode does not choose which of their sessions you mean.",
+                xencode_agents_rs::ROSTER.len()
+            ));
+            return;
+        }
+        match xencode_agents_rs::handover(name, target) {
+            Handover::Ready { argv, template } => {
+                let (stdin_tty, stdout_tty) = Self::real_terminal();
+                if !(stdin_tty && stdout_tty) {
+                    self.system_line(&format!(
+                        "The roster's own line for this is `{template}`, and it would run `{}` — \
+                         but xencode has no terminal here to hand over (stdin {} and stdout {} \
+                         one), so nothing was started. `attach` means giving a real terminal to a \
+                         process that has one; a session that cannot be typed into is not one.",
+                        argv.join(" "),
+                        if stdin_tty { "is" } else { "is not" },
+                        if stdout_tty { "is" } else { "is not" },
+                    ));
+                    return;
+                }
+                self.system_line(&format!(
+                    "Handing this terminal to `{}` — roster row `{template}`. xencode stops \
+                     drawing while the process has the screen and takes it back when the vendor's \
+                     session lets go. Nothing else about this session changes.",
+                    argv.join(" ")
+                ));
+                self.handover_argv = Some(argv);
+            }
+            Handover::NoHandoverVerb {
+                one_shot,
+                read_on,
+                session_list,
+            } => self.system_line(&format!(
+                "{name} has no command that takes over a session it already has. Its help, read \
+                 on {read_on}, documents only a one-shot call — `{one_shot}` — which would start a \
+                 new vendor process rather than hand you one, so this refuses instead of \
+                 pretending{}",
+                session_list
+                    .map(|listing| format!("; its own listing is `{listing}`, which you can run"))
+                    .unwrap_or_default()
+            )),
+            Handover::NeedsTarget {
+                template,
+                session_list,
+            } => self.system_line(&format!(
+                "attach {name} needs the session to hand over, given after the agent's own usage \
+                 line `{template}`. xencode does not choose it for you{} — picking the newest \
+                 session is how a control plane starts lying about what it attached to.",
+                session_list
+                    .map(|listing| format!("; `{listing}` prints what the vendor knows"))
+                    .unwrap_or_default()
+            )),
+            Handover::NotInstalled { template } => self.system_line(&format!(
+                "{name} is on the roster with the handover command `{template}`, but no binary \
+                 for it is on PATH here, so there is nothing to hand the terminal to."
+            )),
+            Handover::Unknown(given) => self.system_line(&format!(
+                "{given} is not an agent xencode has a roster row for, so nothing here is known \
+                 about how to hand a terminal to one of its sessions — and xencode will not guess \
+                 a command and run it. `/orchestrator agents` lists the {} rows there are.",
+                xencode_agents_rs::ROSTER.len()
+            )),
+        }
     }
 
     /// `/rewind [turns] [--force]` — put back the files the agent changed in
@@ -11104,6 +11785,51 @@ pub fn should_draw(signals: &FrameSignals) -> bool {
         || signals.activity
 }
 
+/// `OR-14` — hand this real terminal to a vendor's own session, and take it back
+/// when that process lets go.
+///
+/// xencode's TUI is one ratatui surface, so a second full-screen program cannot
+/// live inside it. The only honest reading of "attach" is therefore the one taken
+/// here: put the terminal back the way the shell expects, run the vendor's own
+/// command against the same input the person is typing into, and re-enter raw mode
+/// and the alternate screen when it exits. The command only reaches this point
+/// after proving both stdin and stdout are a terminal, which is the whole of the
+/// done-when — there is no version of this that draws a fake session or hands over
+/// a pipe.
+fn hand_over_terminal<B: Backend>(terminal: &mut Terminal<B>, argv: &[String], app: &mut App) {
+    let Some(program) = argv.first() else {
+        return;
+    };
+    crate::panic::restore_terminal();
+    let outcome = std::process::Command::new(program)
+        .args(&argv[1..])
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status();
+    // Back into the state the ratatui backend assumes it owns. Mouse capture is
+    // deliberately not touched here: the loop re-asserts whatever the config asks
+    // for on the next frame, so a handover cannot change that setting by accident.
+    let _ = crossterm::terminal::enable_raw_mode();
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::cursor::Show
+    );
+    // The screen underneath belonged to a program xencode does not control, so
+    // there is nothing to diff a new frame against.
+    let _ = terminal.clear();
+    match outcome {
+        Ok(status) => app.system_line(&format!(
+            "The terminal is xencode's again; `{program}` returned {status}."
+        )),
+        Err(problem) => app.system_line(&format!(
+            "`{program}` could not be started on this terminal: {problem}. The screen came back \
+             and nothing else about this session changed."
+        )),
+    }
+}
+
 /// The TUI frame loop. `B` has to be writable because the mouse-capture
 /// setting (`V-7`) takes effect by asking the terminal for, or against, mouse
 /// events — which is a write to the same place the frames go.
@@ -11946,6 +12672,20 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
 
+        // A terminal handover `/orchestrator attach` approved (`OR-14`). This is
+        // the only place it can happen: the frame loop owns the terminal, and the
+        // command that asked for the handover has no screen to give away. The loop
+        // is stopped inside the call, so no key reaches xencode while the vendor's
+        // own session has the terminal.
+        if let Some(argv) = app.handover_argv.take() {
+            hand_over_terminal(terminal, &argv, &mut app);
+            // The screen was left and re-entered, so nothing about it is known to
+            // be current: redraw from scratch, and let the mouse-capture check
+            // below ask for whatever the config wants again.
+            first_frame = true;
+            capture = None;
+        }
+
         // A credential lookup that could not read its key says so on the frame
         // after it was tried, so a broken helper is named in the turn that hit
         // it rather than the next one the person has to send.
@@ -12094,7 +12834,8 @@ mod tests {
         parse_llama_port, parse_porcelain_z, parse_term_suggestions, parse_voice_level,
         preview_repo_map, repo_map_tier_line, should_draw, split_prompt_arguments, trace_age,
         trace_report, watch_warning_for, with_openrouter_env, App, ConversationMemory, Egress,
-        FocusArea, FrameSignals, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
+        FocusArea, FrameSignals, InputMode, LoopSink, Mode, SpawnRecord, UiMessage, XencodeConfig,
+        CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -17723,5 +18464,608 @@ mod tests {
         // Base 3 panes + at least 1 control room fleet pane
         assert!(panes.len() > 3);
         assert!(panes.iter().any(|p| p.title.contains("Workers (1)")));
+    }
+
+    // ── OR-14: `/orchestrator` as a mode, with its own command surface ─────────
+    //
+    // The done-when has two halves and neither is asserted in prose here. Turning
+    // the mode off has to leave plain xencode exactly as it was found, so a
+    // snapshot of the state a reader would call theirs is taken before `on` and
+    // compared after `off`. And `attach` may only ever mean handing a real terminal
+    // to a process that has one: under the test harness this process has no
+    // terminal, which is the case the clause is about, so every handover must be a
+    // refusal — and the machinery that does give the screen away is run against a
+    // real child process, so it is watched happening rather than promised.
+
+    /// What a person would notice if the mode changed it: the transcript, what is
+    /// open, the models and the settings, the fleet this session made, and which
+    /// part of the panel is showing. A command that answers adds its own lines to
+    /// the transcript — that is the answer, not the mode — so the messages are
+    /// compared up to where the sequence started and the rest is checked for what it
+    /// is allowed to be.
+    ///
+    /// Two things a tour of the surface does change are checked on their own rather
+    /// than here, because putting them in the comparison would be asserting that a
+    /// reading never happens: the input history, which is what the person typed, and
+    /// the panel's rows, which are what the panel found. What the mode owns about the
+    /// panel is which section is showing and where the keys are, and both of those
+    /// are in this list.
+    #[derive(Debug, PartialEq)]
+    struct PlainXencode {
+        mode: Mode,
+        messages: Vec<(String, String)>,
+        focus: FocusArea,
+        input_mode: InputMode,
+        opened_file: Option<String>,
+        editor_dirty: bool,
+        file_tree: Vec<String>,
+        available_models: Vec<String>,
+        selected_model: usize,
+        is_generating: bool,
+        spawns: Vec<(u64, String, bool, bool)>,
+        approvals_waiting: usize,
+        agent_approval: String,
+        allow_external_workers: bool,
+        allow_cloud_models: bool,
+        workers_posture: String,
+        workers_filter: Option<crate::worker_panel::PanelSection>,
+        handover_argv: Option<Vec<String>>,
+        mode_surface: Option<(Option<crate::worker_panel::PanelSection>, FocusArea)>,
+    }
+
+    fn plain_xencode(app: &App) -> PlainXencode {
+        PlainXencode {
+            mode: app.mode,
+            messages: app
+                .messages
+                .iter()
+                .map(|message| (message.role.clone(), message.content.clone()))
+                .collect(),
+            focus: app.focus,
+            input_mode: app.input_mode,
+            opened_file: app.opened_file.clone(),
+            editor_dirty: app.editor_dirty,
+            file_tree: app.file_tree.clone(),
+            available_models: app.available_models.clone(),
+            selected_model: app.selected_model,
+            is_generating: app.is_generating,
+            spawns: app
+                .spawns
+                .iter()
+                .map(|record| {
+                    (
+                        record.id,
+                        record.task.clone(),
+                        record.running,
+                        record.failed,
+                    )
+                })
+                .collect(),
+            approvals_waiting: app.approval_queue.len(),
+            agent_approval: app.config.agent_approval.clone(),
+            allow_external_workers: app.config.allow_external_workers,
+            allow_cloud_models: app.config.allow_cloud_models,
+            workers_posture: app.workers_posture.clone(),
+            workers_filter: app.workers_filter,
+            handover_argv: app.handover_argv.clone(),
+            mode_surface: app.mode_surface,
+        }
+    }
+
+    /// One command through the real dispatcher, so what is tested is the entry
+    /// point a keypress uses rather than the handler behind it.
+    fn say(app: &mut App, tx: &mpsc::UnboundedSender<String>, command: &str) {
+        app.set_chat_text(command);
+        app.submit_message(tx.clone());
+    }
+
+    /// The last line the app said, for a refusal that has to be quotable.
+    fn last_line(app: &App) -> String {
+        app.messages.last().unwrap().content.clone()
+    }
+
+    /// Every line the app said from `from` on, joined. A reading that reports one
+    /// figure per line has no single last line that stands for the answer, so the
+    /// whole of it is what a check gets.
+    fn said_since(app: &App, from: usize) -> String {
+        app.messages[from..]
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn turning_the_mode_off_leaves_plain_xencode_exactly_as_it_was_found() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        // A session with something in it: a chat history, a file, a spawn still
+        // running. An empty app would prove nothing about what is left behind, and
+        // a running one is what keeps `retry` and `stop` on the refusing side of
+        // themselves — a finished spawn here would be re-armed for real, worktree
+        // and all, which is a change this test is exactly not supposed to allow.
+        app.messages.push(UiMessage {
+            role: "user".to_string(),
+            content: "add the retry verb".to_string(),
+        });
+        app.messages.push(UiMessage {
+            role: "assistant".to_string(),
+            content: "done — it re-arms the task".to_string(),
+        });
+        app.opened_file = Some("src/app.rs".to_string());
+        app.file_tree.push("src/app.rs".to_string());
+        app.available_models.push("qwen3:4b".to_string());
+        app.spawns.push(SpawnRecord {
+            id: 7,
+            branch: "xencode/spawn-7".to_string(),
+            path: std::path::PathBuf::from("/tmp/xencode-spawn-7"),
+            task: "survey the fleet panel".to_string(),
+            running: true,
+            failed: false,
+            steps: Vec::new(),
+            events: Vec::new(),
+        });
+
+        let before = plain_xencode(&app);
+        let transcript = before.messages.len();
+        let typed = app.input_history.len();
+
+        // The whole surface, on while it is on: the readings, the two actions that
+        // have nothing to act on here, and the handover that must refuse.
+        const TOUR: &[&str] = &[
+            "/orchestrator on",
+            "/orchestrator status",
+            "/orchestrator agents",
+            "/orchestrator tasks",
+            "/orchestrator graph",
+            "/orchestrator logs",
+            "/orchestrator costs",
+            "/orchestrator permissions",
+            "/orchestrator inspect no-such-row",
+            "/orchestrator retry #999",
+            "/orchestrator retry 7",
+            "/orchestrator stop",
+            "/orchestrator stop no-such-run",
+            "/orchestrator stop #7",
+            "/orchestrator attach",
+            "/orchestrator attach cline",
+            "/orchestrator attach opencode",
+            "/orchestrator attach claude sess-1",
+            "/orchestrator nonsense",
+            "/orchestrator off",
+        ];
+        for command in TOUR {
+            say(&mut app, &tx, command);
+        }
+
+        // Everything the surface added is a command the person typed or the app's
+        // own answer to it: no model turn, no generation, no third kind of line.
+        let added = &app.messages[transcript..];
+        assert_eq!(
+            added
+                .iter()
+                .filter(|message| message.role != "user" && message.role != "system")
+                .count(),
+            0,
+            "the surface put a {} line in the chat",
+            added
+                .iter()
+                .find(|message| message.role != "user" && message.role != "system")
+                .map(|message| message.role.clone())
+                .unwrap_or_default()
+        );
+        assert_eq!(
+            added.iter().filter(|m| m.role == "user").count(),
+            TOUR.len(),
+            "every command was typed by the person and nothing else"
+        );
+
+        let after = plain_xencode(&app);
+        assert_eq!(after.mode, Mode::Coding, "and it is off again");
+        assert!(
+            after.mode_surface.is_none(),
+            "leaving the surface does not leave its note about where it came from"
+        );
+        assert!(!after.is_generating, "no verb armed a model request");
+        assert!(after.handover_argv.is_none(), "no handover was armed");
+        // The two things the tour is allowed to have changed, each checked for
+        // being exactly what it should be. The history is the tour and nothing more,
+        // so the mode put no command in the person's own way-back list. And the panel
+        // now holds a reading, which is what a tour of readings does; what the mode
+        // owned about the panel — which section was showing, and where the keys were
+        // pointed — is in the comparison below, and came back.
+        let history: Vec<&str> = app.input_history[typed..]
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            history, TOUR,
+            "the input history holds the tour, in order, and nothing the mode typed by itself"
+        );
+        let read: Vec<crate::worker_panel::PanelSection> = app
+            .workers_rows
+            .iter()
+            .filter(|row| row.is_header)
+            .map(|row| row.section)
+            .collect();
+        assert_eq!(
+            read,
+            crate::worker_panel::PanelSection::ALL,
+            "off leaves the panel the whole reading, not a section the surface picked"
+        );
+        // The state a reader would call theirs, unchanged but for the lines the
+        // commands themselves added.
+        let mut expected = before;
+        expected.messages.truncate(transcript);
+        let mut actual = after;
+        actual.messages.truncate(transcript);
+        assert_eq!(
+            actual, expected,
+            "a full tour of the surface and `off` left something behind"
+        );
+    }
+
+    #[test]
+    fn the_surface_belongs_to_the_mode_and_the_mode_answers_from_either_side() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+
+        // Off, the verbs that open or act refuse and name the way in.
+        for command in [
+            "/orchestrator graph",
+            "/orchestrator permissions",
+            "/orchestrator attach claude sess-1",
+            "/orchestrator stop no-such-run",
+        ] {
+            say(&mut app, &tx, command);
+            assert_eq!(app.mode, Mode::Coding, "{command} did not stay out");
+            assert_eq!(
+                app.workers_filter,
+                None,
+                "{command} opened a panel section from {} mode",
+                app.mode.label()
+            );
+            assert!(
+                last_line(&app).contains("/orchestrator on"),
+                "`{command}` refused without saying how to enter: {}",
+                last_line(&app)
+            );
+        }
+
+        // `status`, `on`, `off` and `help` answer from either side: a surface that
+        // would not say which mode this is, or let you leave it, only locks you in.
+        let before = app.messages.len();
+        say(&mut app, &tx, "/orchestrator status");
+        let said = said_since(&app, before);
+        assert!(said.contains("Orchestrator status · mode CODING"), "{said}");
+        say(&mut app, &tx, "/orchestrator help");
+        assert!(last_line(&app).contains("attach <agent> <session>"));
+
+        say(&mut app, &tx, "/orchestrator on");
+        assert_eq!(app.mode, Mode::Orchestrator);
+        // Already on: the second one does not re-record where to go back to.
+        let recorded = app.mode_surface;
+        say(&mut app, &tx, "/orchestrator on");
+        assert_eq!(app.mode_surface, recorded);
+
+        say(&mut app, &tx, "/orchestrator graph");
+        assert_eq!(
+            app.workers_filter,
+            Some(crate::worker_panel::PanelSection::Graph)
+        );
+        assert_eq!(app.focus, FocusArea::WorkerPanel);
+
+        say(&mut app, &tx, "/orchestrator off");
+        assert_eq!(app.mode, Mode::Coding);
+        assert_eq!(app.workers_filter, None, "the filter was the surface's");
+    }
+
+    #[test]
+    fn off_puts_back_the_panel_and_the_focus_the_surface_found_on_its_way_in() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        // A panel already open and already filtered, by `/workers` or by hand —
+        // `off` has no business deciding what plain xencode should look like.
+        app.workers_filter = Some(crate::worker_panel::PanelSection::Costs);
+        app.focus = FocusArea::WorkerPanel;
+
+        say(&mut app, &tx, "/orchestrator on");
+        say(&mut app, &tx, "/orchestrator agents");
+        assert_eq!(
+            app.workers_filter,
+            Some(crate::worker_panel::PanelSection::Agents)
+        );
+
+        say(&mut app, &tx, "/orchestrator off");
+        assert_eq!(
+            app.workers_filter,
+            Some(crate::worker_panel::PanelSection::Costs)
+        );
+        assert_eq!(app.focus, FocusArea::WorkerPanel);
+        assert_eq!(app.mode, Mode::Coding);
+    }
+
+    #[test]
+    fn attach_refuses_every_case_that_would_have_to_guess_and_arms_nothing_here() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        say(&mut app, &tx, "/orchestrator on");
+
+        // Deterministic refusals, whatever is installed on this machine.
+        say(&mut app, &tx, "/orchestrator attach");
+        assert!(last_line(&app).starts_with("usage: /orchestrator attach"));
+        say(&mut app, &tx, "/orchestrator attach nosuchagent sess-1");
+        assert!(
+            last_line(&app).contains("not an agent xencode has a roster row for"),
+            "{}",
+            last_line(&app)
+        );
+        // An agent with no handover verb in what its help said.
+        say(&mut app, &tx, "/orchestrator attach cline sess-1");
+        assert!(
+            last_line(&app).contains("no command that takes over a session it already has"),
+            "{}",
+            last_line(&app)
+        );
+        // A row that does have one, with no session named — xencode does not pick.
+        say(&mut app, &tx, "/orchestrator attach opencode");
+        assert!(
+            last_line(&app).contains("needs the session to hand over"),
+            "{}",
+            last_line(&app)
+        );
+
+        // And the case this item is about: an agent whose handover line is fully
+        // known. If the program is here, the answer is that this process has no
+        // terminal to give away; if it is not, the answer is that there is no
+        // process. Either way nothing is armed, because the screen is not ours to
+        // hand over from here.
+        say(&mut app, &tx, "/orchestrator attach claude sess-1");
+        assert!(app.handover_argv.is_none(), "{}", last_line(&app));
+        let said = last_line(&app);
+        assert!(
+            said.contains("no terminal here to hand over")
+                || said.contains("no binary for it is on PATH"),
+            "{said}"
+        );
+    }
+
+    /// The other half of the same clause, watched from the side where a terminal
+    /// really is given away: the handover runs a real child on inherited stdio,
+    /// reports the status the process actually returned, and consumes itself.
+    #[test]
+    fn a_handover_puts_a_real_process_on_the_screen_and_gives_the_screen_back() {
+        let dir = temp_dir("handover");
+        let marker = dir.join("child-argv.txt");
+        let script = dir.join("take-the-screen.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexit 3\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        let mut app = App::for_tests();
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+            .expect("a test terminal is a terminal");
+        super::hand_over_terminal(
+            &mut terminal,
+            &[script.display().to_string(), "sess-1".to_string()],
+            &mut app,
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "sess-1\n",
+            "the child was handed the session argument on a real stdio"
+        );
+        let said = last_line(&app);
+        assert!(
+            said.contains("The terminal is xencode's again") && said.contains("exit status: 3"),
+            "the line has to quote the status the process really returned: {said}"
+        );
+        assert!(
+            app.handover_argv.is_none(),
+            "the request is consumed on the way out"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn permissions_prints_the_grant_a_worker_cannot_grant_itself() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        say(&mut app, &tx, "/orchestrator on");
+        let before = app.messages.len();
+        say(&mut app, &tx, "/orchestrator permissions");
+        let said: Vec<String> = app.messages[before..]
+            .iter()
+            .map(|message| message.content.clone())
+            .collect();
+        let text = said.join("\n");
+        assert!(
+            text.contains("agent_approval = \"ask\"") || text.contains("agent_approval"),
+            "the report has to name the setting it read from: {text}"
+        );
+        // One row per roster agent, and the count that closes it.
+        for spec in xencode_agents_rs::ROSTER {
+            assert!(
+                text.contains(&format!("{:<14}", spec.name)) || text.contains(spec.name),
+                "{:?} has no row in the report",
+                spec.name
+            );
+        }
+        assert!(
+            text.contains(&format!(
+                "{} roster agent(s); 0 of them keep something a worker asked for itself",
+                xencode_agents_rs::ROSTER.len()
+            )),
+            "under the default mode nothing a worker asked for may survive: {text}"
+        );
+    }
+
+    #[test]
+    fn the_two_verbs_that_act_say_what_they_refused_to_start() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        say(&mut app, &tx, "/orchestrator on");
+
+        // A retry with nothing to retry, and one pointed at a number this session
+        // never held: a retry does not get to invent a task.
+        say(&mut app, &tx, "/orchestrator retry");
+        assert!(
+            last_line(&app).contains("Nothing to retry"),
+            "{}",
+            last_line(&app)
+        );
+        say(&mut app, &tx, "/orchestrator retry #999");
+        assert!(
+            last_line(&app).contains("No spawn #999 in this session"),
+            "{}",
+            last_line(&app)
+        );
+        assert!(last_line(&app).contains("nothing was started"));
+
+        // A spawn that is still running is not a retry yet, and this app cannot
+        // cancel it either — which is what `/spawn stop` already says.
+        app.spawns.push(SpawnRecord {
+            id: 3,
+            branch: "xencode/spawn-3".to_string(),
+            path: std::path::PathBuf::from("/tmp/xencode-spawn-3"),
+            task: "read the scheduler".to_string(),
+            running: true,
+            failed: false,
+            steps: Vec::new(),
+            events: Vec::new(),
+        });
+        say(&mut app, &tx, "/orchestrator retry #3");
+        assert!(
+            last_line(&app).contains("still running"),
+            "{}",
+            last_line(&app)
+        );
+        assert_eq!(app.spawns.len(), 1, "a refused retry launched nothing");
+        assert!(!app.is_generating);
+
+        // Stop: no detached run here, and no id this project holds.
+        say(&mut app, &tx, "/orchestrator stop");
+        assert!(last_line(&app).contains("no detached run"));
+        say(&mut app, &tx, "/orchestrator stop nosuchrun");
+        assert!(
+            last_line(&app).contains("nothing was sent"),
+            "{}",
+            last_line(&app)
+        );
+        say(&mut app, &tx, "/orchestrator stop #3");
+        assert!(
+            last_line(&app).contains("not cancellable"),
+            "{}",
+            last_line(&app)
+        );
+    }
+
+    #[test]
+    fn status_names_the_mode_the_posture_and_whether_there_is_a_terminal_here() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        say(&mut app, &tx, "/orchestrator on");
+        let before = app.messages.len();
+        say(&mut app, &tx, "/orchestrator status");
+        let text: String = app.messages[before..]
+            .iter()
+            .map(|message| message.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            text.contains("Orchestrator status · mode ORCHESTRATOR"),
+            "{text}"
+        );
+        assert!(text.contains("posture "), "{text}");
+        // All six sections are named even though this project has nothing recorded
+        // in them, because the list of what was checked is itself an answer.
+        for section in ["agents", "tasks", "graph", "costs", "logs", "approvals"] {
+            assert!(
+                text.contains(section),
+                "{section} is missing from status:\n{text}"
+            );
+        }
+        assert!(text.contains("detached runs — none in "), "{text}");
+        assert!(text.contains("approvals waiting on you — 0"), "{text}");
+        // The clause the whole item turns on, said out loud rather than hidden.
+        assert!(
+            text.contains("terminal — stdin is not and stdout is not a terminal")
+                || text.contains("terminal — "),
+            "{text}"
+        );
+        if !text.contains("so `/orchestrator attach` can hand it over") {
+            assert!(
+                text.contains("will refuse until xencode runs from one"),
+                "the terminal line has to say what it means: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_says_what_it_searched_when_it_found_nothing() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        say(&mut app, &tx, "/orchestrator on");
+
+        say(&mut app, &tx, "/orchestrator inspect");
+        assert!(last_line(&app).starts_with("usage: /orchestrator inspect"));
+        say(&mut app, &tx, "/orchestrator inspect nothing-like-this");
+        assert!(
+            last_line(&app).contains("No panel row mentions `nothing-like-this`"),
+            "{}",
+            last_line(&app)
+        );
+        assert!(last_line(&app).contains(xencode_core_rs::RECIPES_DIR));
+        assert!(last_line(&app).contains(xencode_core_rs::RUNS_DIR));
+        // Searching all six means the filter went away for the search.
+        assert_eq!(app.workers_filter, None);
+        assert_eq!(app.focus, FocusArea::WorkerPanel);
+
+        // A section verb with a text lands on the row or says it did not, and never
+        // pretends a second match was the only one.
+        app.workers_rows = crate::worker_panel::sections([
+            (
+                crate::worker_panel::PanelSection::Agents,
+                vec![crate::worker_panel::PanelRow {
+                    section: crate::worker_panel::PanelSection::Agents,
+                    is_header: false,
+                    line: "xencode — survey: running".to_string(),
+                    sources: vec!["the event stream of this session".to_string()],
+                }],
+            ),
+            (crate::worker_panel::PanelSection::Tasks, Vec::new()),
+            (crate::worker_panel::PanelSection::Graph, Vec::new()),
+            (crate::worker_panel::PanelSection::Costs, Vec::new()),
+            (crate::worker_panel::PanelSection::Logs, Vec::new()),
+            (crate::worker_panel::PanelSection::Approvals, Vec::new()),
+        ]);
+        let hit = app.select_panel_row("survey");
+        // Index 1, not 0: the panel's list carries a heading above the rows, and
+        // the selection counts heading and rows together, which is what `j` moves.
+        assert_eq!(hit, Some((1, 1)));
+        assert!(app.workers_detail, "the row's sources are what opened");
+        assert_eq!(app.select_panel_row("nothing"), None);
+        // A miss leaves the panel where the hit put it. The row that matched a
+        // moment ago is still the selected one with its sources open: a search
+        // that found nothing has no row to move to, and moving anyway would be
+        // the panel disagreeing with what it just said.
+        assert!(
+            app.workers_detail,
+            "a miss does not close what a hit opened"
+        );
+        assert_eq!(
+            app.workers_selected, 1,
+            "a miss selects nothing, so it moves nothing"
+        );
     }
 }

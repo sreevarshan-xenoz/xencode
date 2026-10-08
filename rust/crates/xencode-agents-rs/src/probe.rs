@@ -1776,6 +1776,8 @@ Authorization: Bearer FAKEJwtNotARealToken.payload.sig\n";
             advertises_mcp: false,
             advertises_resume: false,
             advertises_approval: false,
+            attach: None,
+            session_list: None,
             parked: false,
             park_reason: None,
             read_on: "2026-09-28",
