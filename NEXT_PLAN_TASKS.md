@@ -2,7 +2,7 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
-> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates were last verified 2026-10-06.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates are not green as of 2026-10-08; see "Workspace gates" below.
 
 ## Rust Migration — Complete ✅
 
@@ -14,14 +14,14 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-07, after `OR-11`: it lists 53 subcommands — the
+  (verified against `xencode --help` on 2026-10-08, after `OR-14`: it lists 54 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
-  `computers`, `compete`, `team` — and clap's
-  built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2823 tests passing, zero warnings (re-verified 2026-10-08, after the `AR-3` verdict fix; 19 ignored, so 2843 in the run, counted over 97 result lines). One run is red for a machine reason and is excluded from the 2823: `roster::tests::an_agent_is_found_by_any_of_its_binary_names` asserts every roster row resolves to a binary on this machine, and `cline` was uninstalled from it after that row was written.
+  `computers`, `compete`, `team`, `orchestrator` — and clap's
+  built-in `help`, 55 entries in the list)
+- [ ] Workspace gates green — **not green as of 2026-10-08.** CI has not passed since 2026-09-27: the latest runs stopped at two roster tests that required every agent to be installed on the machine running them (fixed in `74d18f08`, not yet observed on CI, so whether the rest of the suite passes on Linux is unknown). The last full count written here was 16 crates, 2823 passing and 19 ignored on 2026-10-08, after the `AR-3` verdict fix, with one machine-dependent roster test left out of it; that run was not on CI and has not been repeated. On Windows (2026-10-08, after `PL-2`): 2723 passed, 19 ignored, 58 failed, sorted by cause under `PL-2`. The build itself has no compiler warnings on Windows.
 
 ## Model Catalog Honesty
 
@@ -2243,10 +2243,6 @@ never is.
   experiments would demand, since a hardcoded-string assertion would prove
   nothing. (The first version of that test *was* a hardcoded string, and it was
   replaced for exactly that reason.)
-- **CI-6 `what_breaks` impact analysis** — reverse-dependency list for an edit
-  target from the existing dep graph. M. Trap: regex-grade accuracy on call
-  sites, so label the confidence explicitly. Done-when: editing `symbols.rs`
-  surfaces its known consumers.
 - **CI-7 DAP debug loop through lldb-dap over MCP, not a custom client** —
   breakpoint / continue / inspect-locals as tools. M-L (~1-2 wk). Trap: a stateful
   subprocess against stateless tool calls, timeouts, and debug binaries required.
@@ -11295,7 +11291,11 @@ proposed an accessibility mode the shipped `UX-12` already covers.
 
 #### W15 progress
 
-- [ ] **`AR-1` — harness built; the measurement itself is still open.** `xencode
+- [x] **`AR-1` — harness built; the measurement itself is still open.**
+  *(Status corrected 2026-10-08: this note was written before the fan-out was
+  measured and was never updated. `AR-1` was closed on 2026-10-02 — see its
+  entry in §S-9, which records the fan-out timings and why the gate on `OR-`
+  items opened. Read what follows as the state on 2026-10-02, before that.)* `xencode
   interop` launches every installed agent headless on a read-only task in a
   scratch git repository and records what came back, with each cell marked
   `observed` or read from a help screen. The crate is `xencode-agents-rs`, which
@@ -12053,7 +12053,7 @@ must not enter a wave as commitments.
 - **A per-worker capability inferred from its name.** `AR-3` probes flags; nothing in the
   router may consult a table of vibes (that is `Q-14`'s objection in a new costume).
 
-### S-9 Tasks (drafted, none started — and none buildable before `AR-1`)
+### S-9 Tasks (drafted 2026-09-23 as "none started, and none buildable before `AR-1`"; `AR-1` closed 2026-10-02 and most of these have shipped since — each entry carries its own status)
 
 The prefixes follow the appendix convention: `AR-` for the runtime that talks to one
 worker, `OR-` for the thing that decides what workers to talk to.
@@ -13272,7 +13272,7 @@ the analyzer's own version of the fiction this plan keeps refusing. Label it
 
 ### U-2 — Runtime hazard analysis
 
-**Proposed.** Flag `std::fs::*`, `std::thread::sleep` and `std::process::Command`
+**Proposed; built 2026-09-28 in `5b1303b0` (`xencode analyze --runtime`).** Flag `std::fs::*`, `std::thread::sleep` and `std::process::Command`
 inside `async fn`; flag `std::sync::MutexGuard` held across `.await`; flag
 `unbounded_channel()`; flag `tokio::spawn` whose handle is discarded.
 
@@ -13308,7 +13308,7 @@ only under `#[cfg(test)]` is either excluded or labelled as such.
 
 ### U-3 — Configuration intelligence
 
-**Proposed.** Extract every `env::var` / `os.getenv` / `process.env` key from
+**Proposed; built 2026-09-28 and 2026-09-29 in `7df5f590` and `6960f3d6`.** Extract every `env::var` / `os.getenv` / `process.env` key from
 code, parse `.env.example` / `.env.template` / `.xencode.example.json`, and report
 keys read but undocumented, keys documented but unreferenced, and
 `env::var(...).unwrap()` in startup code. Broaden to a graph across code,
@@ -13516,7 +13516,7 @@ than blocked.
 
 ### U-6 — Red-to-green reproduction gate
 
-**Proposed.** For a bug fix, phase 1 restricts the agent to read tools plus writing
+**Proposed; built 2026-10-04 in `28fec44f`.** For a bug fix, phase 1 restricts the agent to read tools plus writing
 a reproduction test, runs it against the **unmodified** codebase, and rejects the
 turn if the test passes; phase 2 unlocks production edits and requires the
 reproduction to pass with the suite still green.
@@ -15433,7 +15433,11 @@ as where the product is going, and it must not be written as a feature list.
   name in the first brief that could not be confirmed, and it no longer needs to
   be asked about.
 - **`EVd-8` is a plan item, not permission to build it.** It sits in W6 behind
-  `EVd-1`, `EVd-2` and `EVd-3`, none of which is done.
+  `EVd-1`, `EVd-2` and `EVd-3`. *(Corrected 2026-10-08: this used to say none
+  of the three was done. `EVd-1` and `EVd-2` shipped on 2026-09-29 in
+  `f1990ac1`, the verification ledger. `EVd-3` has no commit of its own; the
+  result envelope `OR-16` built (`xencode-core-rs/src/result_envelope.rs`)
+  uses its verdict shape, which is not the same as `EVd-3` being done.)*
 - **One open question is left open, deliberately.** `ContextAtlas` sells per-query
   retrieval observability, and no item here requires it. It is not added as an ID
   because `QN-3`'s revert removed the fused-arm structure that would make "which
@@ -15998,7 +16002,7 @@ the brief.
 | the brief asks for | already recorded as | state |
 |---|---|---|
 | An evidence package a reviewer can check ("show me why") | `EVd-1`…`EVd-8`, `QA-1`, `OR-16` | the shape exists and nothing produces or reads it → **AE-1** |
-| The implementer never declares itself correct | `MA-1` clean-context reviewer, `MA-2` pipeline, `L-7` exit-code done-gate | open, as planned |
+| The implementer never declares itself correct | `MA-1` clean-context reviewer, `MA-2` pipeline, `L-7` exit-code done-gate | `MA-1` and `MA-2` open; `L-7` done (see its entry under Milestone L) |
 | Agents become disposable, with continuity | `AR-7`, `OR-7`; deterministic replay rejected in the P-10 register ("Temporal-style deterministic replay for goals — `GL-3` re-verification is the cheaper honest equivalent") | open |
 | Engine over TUI — one engine, many surfaces | fact `Q-1.15`, `WF-1`, `LF-4`, `M-5`/`M-7`; the VS Code extension declined at `:2694` | no public entry to the loop → **AE-7** |
 | A Project Truth Graph linking claims to evidence | `EVd-8`; a standalone persisted code-knowledge graph is in the P-10 register (`CI-2` + `LSP-2` produce the same edges on demand) | edges stay derived, not a product layer |

@@ -33,8 +33,8 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2823 tests,
-zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
+At its core is a fast, single-file **Rust** binary (16 crates, about 2,800
+tests) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
 ---
@@ -160,7 +160,7 @@ than believed, with a credential-shaped value taken out of what does get written
 - **xencode as an MCP server** — `xencode mcp serve` puts the same six tools an agent uses here (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command`) behind the official Rust MCP SDK on standard input and output, so an editor, a script or another agent can drive xencode's real executor instead of reimplementing it. A caller on a pipe has no approval prompt to answer, so the server starts **read-only**: the three reads run, and a file-changing or shell tool is refused with the one flag that would have permitted that tool (`--allow write_file`). Permitting one tool does not permit its class, and a `path` or `cwd` that leaves `--workspace` — or enters `.git` or your xencode config directory — is refused even for a tool you allowed, by the same boundary check the interactive gate uses. What that check cannot see is the text inside a command the caller was allowed to run, so `--allow run_command` hands over a shell, and the launch says so.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
 - Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
-- CLI with 53 subcommands, among them: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `remote`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `runs`, `run`, `deps`, `eval`, `plugin`, `mcp`, `llamacpp`, `hw`, `history`, `perf`, `prices`, `release-notes`, `test`, `merge`, `compete`, `computers`, `team`, `bootstrap`, `tui`.
+- CLI with 54 subcommands, among them: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `remote`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `runs`, `run`, `deps`, `eval`, `plugin`, `mcp`, `llamacpp`, `hw`, `history`, `perf`, `prices`, `release-notes`, `test`, `merge`, `compete`, `computers`, `team`, `orchestrator`, `bootstrap`, `tui`.
 
 ### Reliability + Ops
 - Two-tier cache (memory + disk) with LRU eviction.
@@ -805,7 +805,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2823 passing)
+cargo test                          # Full workspace suite (about 2,800 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
