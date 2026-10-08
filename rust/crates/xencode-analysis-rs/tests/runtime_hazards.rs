@@ -14,13 +14,10 @@ use xencode_analysis_rs::runtime_hazards::{
     analyze_runtime, EngineStatus, HazardClass, RuntimeHazard,
 };
 
+/// The same check the analysis makes, so the test cannot mistake Ubuntu's own
+/// `sg` (shadow-utils) for ast-grep and then fail on an empty result.
 fn ast_grep_installed() -> bool {
-    std::env::var_os("PATH")
-        .map(|path| {
-            std::env::split_paths(&path)
-                .any(|dir| dir.join("ast-grep").is_file() || dir.join("sg").is_file())
-        })
-        .unwrap_or(false)
+    xencode_analysis_rs::runtime_hazards::ast_grep_binary().is_ok()
 }
 
 fn scratch(label: &str) -> PathBuf {

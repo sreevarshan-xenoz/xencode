@@ -405,15 +405,29 @@ fn parse_matches(stdout: &str) -> Vec<Match> {
         .collect()
 }
 
-/// The `ast-grep` executable, or why there isn't one.
-fn ast_grep_binary() -> Result<String, String> {
-    let path_var = std::env::var_os("PATH").ok_or_else(|| "PATH is not set".to_string())?;
+/// The real `ast-grep` executable, or why there isn't one.
+///
+/// `sg` is ast-grep's short name and also a standard Unix command — shadow-utils'
+/// "run a command as another group", installed on Ubuntu by default. Taking the
+/// first `sg` on `PATH` ran that one instead, which matched nothing and read as
+/// "no hazards here". A candidate counts only when its `--version` says it is
+/// ast-grep.
+pub fn ast_grep_binary() -> Result<String, String> {
     for candidate in ["ast-grep", "sg"] {
-        for dir in std::env::split_paths(&path_var) {
-            let path = dir.join(candidate);
-            if path.is_file() {
-                return Ok(path.to_string_lossy().into_owned());
-            }
+        let Some(path) = xencode_core_rs::sys::which(candidate) else {
+            continue;
+        };
+        let says_ast_grep = std::process::Command::new(&path)
+            .arg("--version")
+            .output()
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .to_lowercase()
+                    .contains("ast-grep")
+            })
+            .unwrap_or(false);
+        if says_ast_grep {
+            return Ok(path.to_string_lossy().into_owned());
         }
     }
     Err(
