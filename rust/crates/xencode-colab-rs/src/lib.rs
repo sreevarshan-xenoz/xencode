@@ -53,6 +53,7 @@ pub use state::{remove_state, save_state, ColabState, STATE_FILENAME};
 pub(crate) mod testutil {
     use std::ffi::OsString;
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex, MutexGuard};
@@ -105,6 +106,7 @@ pub(crate) mod testutil {
         dir
     }
 
+    #[cfg(unix)]
     pub fn write_script(dir: &Path, name: &str, body: &str) {
         let path = dir.join(name);
         fs::write(&path, body).expect("write fake bin");

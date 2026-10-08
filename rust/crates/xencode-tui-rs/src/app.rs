@@ -13420,6 +13420,7 @@ mod tests {
     /// the command line, and the answer arrives on the same channel a generation
     /// uses. The server here is a real process answering real JSON-RPC.
     #[tokio::test]
+    #[cfg(unix)]
     async fn mcp_read_and_prompt_ask_the_running_server() {
         let (dir, spec) = crate::mcp::tests::live_documents_server();
         let mut app = App::for_tests();

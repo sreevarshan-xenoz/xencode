@@ -247,6 +247,7 @@ pub fn started_age_hours(started_at: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::testutil::{temp_dir, with_env, write_script};
 
     #[test]
@@ -263,6 +264,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_binaries_reports_missing_colab_with_a_fix() {
         let bin_dir = temp_dir("resolve-colab");
         write_script(&bin_dir, "ssh", "#!/bin/sh\nexit 0\n");
@@ -274,6 +276,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_binaries_reports_missing_ssh_with_a_fix() {
         let bin_dir = temp_dir("resolve-ssh");
         write_script(&bin_dir, "colab", "#!/bin/sh\nexit 0\n");
@@ -285,6 +288,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_binaries_finds_both_when_present() {
         let bin_dir = temp_dir("resolve-both");
         write_script(&bin_dir, "colab", "#!/bin/sh\nexit 0\n");
@@ -303,6 +307,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn pid_alive_tracks_a_spawned_process() {
         // /bin/sleep exists regardless of PATH; the pid probe uses the kernel.
         let mut child = std::process::Command::new("/bin/sleep")
@@ -319,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn terminate_kills_an_uncooperative_process() {
         let mut child = std::process::Command::new("/bin/sleep")
             .arg("30")

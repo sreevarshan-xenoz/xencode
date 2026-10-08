@@ -50,14 +50,7 @@ impl PreflightReport {
 
 /// First executable found on `PATH`, if any.
 pub fn which(bin: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(bin);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    xencode_core_rs::sys::which(bin)
 }
 
 /// Paths of the colab ed25519 key pair inside the xencode config dir.
@@ -340,11 +333,17 @@ fn first_line(s: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    // The fake-binary tests are Unix-only (they write `#!/bin/sh` scripts), so
+    // their helpers are unused when the module is built anywhere else.
+    #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
     use super::*;
-    use crate::testutil::{temp_dir, with_env, write_script};
+    #[cfg(unix)]
+    use crate::testutil::write_script;
+    use crate::testutil::{temp_dir, with_env};
     use std::path::Path;
 
     /// Fake google-colab-cli: a modern 0.7.2 that accepts `ssh`.
+    #[cfg(unix)]
     fn fake_colab_modern(dir: &Path) {
         write_script(
             dir,
@@ -361,6 +360,7 @@ esac
     }
 
     /// Fake google-colab-cli 0.6.0: version parses, but `ssh` is unknown.
+    #[cfg(unix)]
     fn fake_colab_060(dir: &Path) {
         write_script(
             dir,
@@ -378,6 +378,7 @@ esac
 
     /// Fake ssh-keygen that creates `<key>` and `<key>.pub` on disk, using
     /// only shell builtins (the hermetic test PATH hides mkdir/dirname).
+    #[cfg(unix)]
     fn fake_ssh_keygen(dir: &Path) {
         write_script(
             dir,
@@ -397,6 +398,7 @@ exit 0
         );
     }
 
+    #[cfg(unix)]
     fn fake_ssh(dir: &Path) {
         write_script(dir, "ssh", "#!/bin/sh\nexit 0\n");
     }
@@ -425,6 +427,7 @@ exit 0
     }
 
     #[test]
+    #[cfg(unix)]
     fn which_finds_a_binary_on_path() {
         let dir = temp_dir("which");
         write_script(&dir, "colab", "#!/bin/sh\nexit 0\n");
@@ -438,6 +441,7 @@ exit 0
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn modern_cli_with_generated_key_passes_everything() {
         let bin_dir = temp_dir("modern");
         fake_colab_modern(&bin_dir);
@@ -455,6 +459,7 @@ exit 0
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn missing_key_asks_for_generate_flag() {
         let bin_dir = temp_dir("nokey");
         fake_colab_modern(&bin_dir);
@@ -480,6 +485,7 @@ exit 0
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn the_060_build_is_rejected_on_version_and_ssh() {
         let bin_dir = temp_dir("old");
         fake_colab_060(&bin_dir);
@@ -508,6 +514,7 @@ exit 0
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn missing_cli_reports_unpowered_and_skips_backend_probes() {
         let bin_dir = temp_dir("no-cli");
         fake_ssh(&bin_dir);
@@ -540,6 +547,7 @@ exit 0
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn generation_without_ssh_keygen_is_reported_not_panicked() {
         let bin_dir = temp_dir("no-kg");
         fake_colab_modern(&bin_dir);

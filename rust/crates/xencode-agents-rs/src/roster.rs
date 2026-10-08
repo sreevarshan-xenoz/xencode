@@ -539,21 +539,22 @@ pub fn attach_argv(template: &str, target: &str, binary: &str) -> Vec<String> {
 /// on `PATH`, which is how an agent installed outside `PATH` is still found:
 /// `kilo` installs itself to `~/.kilo/bin/kilo` and adds nothing to the shell
 /// profile, so a bare `kilo` does not resolve while the binary is present and
-/// working. A `~` prefix is expanded against `$HOME`.
+/// working. A `~` prefix is expanded against `$HOME`, or `%USERPROFILE%` where
+/// no `HOME` is set. A bare name is looked up the way a shell would run it,
+/// including `claude.exe` and `claude.cmd` on Windows.
 pub fn which(binary: &str) -> Option<std::path::PathBuf> {
     if binary.contains('/') {
         let relative = binary.strip_prefix("~/").unwrap_or(binary);
         let full = match binary.strip_prefix("~/") {
-            Some(_) => std::env::var_os("HOME")?.into(),
+            Some(_) => std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))?
+                .into(),
             None => std::path::PathBuf::new(),
         }
         .join(relative);
         return full.is_file().then_some(full);
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(binary))
-        .find(|candidate| candidate.is_file())
+    xencode_core_rs::sys::which(binary)
 }
 
 /// Where the `PATH` lookup found an agent, or [`Provenance::NotInstalled`].
@@ -931,14 +932,18 @@ mod tests {
     /// lookup learned to check the documented location too.
     #[test]
     fn an_agent_installed_outside_path_is_still_found() {
-        let home = std::env::var("HOME").expect("HOME");
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .expect("HOME");
         // The lookup finds a path-shaped name, so a binary the vendor parked
-        // outside PATH is not invisible.
-        let found = which("~/.local/bin/agy");
-        assert_eq!(
-            found,
-            Some(std::path::PathBuf::from(format!("{home}/.local/bin/agy")))
-        );
+        // outside PATH is not invisible. Asserted only where agy is installed
+        // there, like kilo below.
+        if std::path::Path::new(&format!("{home}/.local/bin/agy")).is_file() {
+            assert_eq!(
+                which("~/.local/bin/agy"),
+                Some(std::path::PathBuf::from(home.clone()).join(".local/bin/agy"))
+            );
+        }
         // A real file outside PATH that is on this machine today. Asserted
         // against the machine only when it exists there, so the test still
         // means something on one without kilo.

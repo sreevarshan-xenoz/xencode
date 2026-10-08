@@ -5,6 +5,9 @@
 //! answers the JSON-RPC methods it is asked about, echoing the request id, so
 //! the client's request/response pairing is exercised for real.
 
+// Every fixture server here is a POSIX shell script, so the file runs only on Unix.
+#![cfg(unix)]
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

@@ -79,6 +79,10 @@ fn sandbox_home(tariff: Option<&str>) -> TempDir {
             .current_dir(home.path())
             .env("HOME", home.path())
             .env("XDG_CONFIG_HOME", home.path().join(".config"))
+            .env(
+                "XCODE_CONFIG_DIR",
+                home.path().join(".config").join("xencode"),
+            )
             .output()
             .expect("xencode ran");
         assert!(
@@ -96,6 +100,7 @@ fn run_in(dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
         .current_dir(dir)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XCODE_CONFIG_DIR", home.join(".config").join("xencode"))
         .output()
         .expect("xencode ran")
 }

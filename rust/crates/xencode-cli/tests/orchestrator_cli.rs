@@ -91,6 +91,10 @@ fn sandbox_home(settings: &[(&str, &str)]) -> TempDir {
             .current_dir(home.path())
             .env("HOME", home.path())
             .env("XDG_CONFIG_HOME", home.path().join(".config"))
+            .env(
+                "XCODE_CONFIG_DIR",
+                home.path().join(".config").join("xencode"),
+            )
             .output()
             .expect("xencode ran");
         assert!(
@@ -108,6 +112,7 @@ fn run_in(dir: &Path, home: &Path, args: &[&str]) -> Output {
         .current_dir(dir)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XCODE_CONFIG_DIR", home.join(".config").join("xencode"))
         .output()
         .expect("xencode ran")
 }
@@ -1294,6 +1299,10 @@ fn attach_refuses_every_case_that_would_have_to_guess() {
         .current_dir(dir.path())
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env(
+            "XCODE_CONFIG_DIR",
+            home.path().join(".config").join("xencode"),
+        )
         .env("PATH", &empty_path)
         .output()
         .expect("xencode ran");

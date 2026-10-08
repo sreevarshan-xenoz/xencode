@@ -609,14 +609,21 @@ async fn spawn_forward_ready<B: Backend>(
 
 #[cfg(test)]
 mod tests {
+    // The fake-binary tests are Unix-only (they write `#!/bin/sh` scripts), so
+    // their helpers are unused when the module is built anywhere else.
+    #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
     use super::*;
+    #[cfg(unix)]
     use crate::orchestrate::pid_alive;
-    use crate::testutil::{temp_dir, with_env, write_script};
+    #[cfg(unix)]
+    use crate::testutil::write_script;
+    use crate::testutil::{temp_dir, with_env};
 
     /// A fake `colab` that answers `sessions`, records `new`/`stop` calls, and
     /// flips a marker file so tests can assert the session was created/stopped.
     /// `colab new` argv is `new --gpu <gpu> -s <session>`, so `$1` is the
     /// subcommand, `$3` the gpu, `$5` the session.
+    #[cfg(unix)]
     fn fake_colab(dir: &Path) {
         write_script(
             dir,
@@ -653,6 +660,7 @@ esac
     /// anything else (the bootstrap exec) prints READY and exits. The forward
     /// must mirror the real argv (all values before `root@colab` are
     /// options/arguments; nothing extra matters to the fakes).
+    #[cfg(unix)]
     fn fake_ssh(dir: &Path) {
         write_script(
             dir,
@@ -794,6 +802,7 @@ esac
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn up_creates_the_session_bootstraps_and_writes_state() {
         let session = "life1";
         let bin_dir = temp_dir(&format!("up-{session}"));
@@ -863,6 +872,7 @@ esac
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn up_reuses_an_existing_session_and_resolves_runtime_port() {
         let session = "life2";
         let bin_dir = temp_dir(&format!("up-{session}"));
@@ -924,6 +934,7 @@ esac
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn reconnect_noops_when_the_endpoint_is_already_serving() {
         let session = "life7";
         let bin_dir = temp_dir(&format!("rc-{session}"));
@@ -978,6 +989,7 @@ esac
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn reconnect_recovers_the_forward_when_only_the_pid_died() {
         let session = "life8";
         let bin_dir = temp_dir(&format!("rc-{session}"));
@@ -1064,6 +1076,7 @@ esac
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn up_fails_cleanly_when_bootstrap_does_not_report_ready() {
         let session = "life6";
         let bin_dir = temp_dir(&format!("up-{session}"));
@@ -1102,6 +1115,7 @@ esac
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn down_kills_forward_stops_session_and_clears_state() {
         let session = "life4";
         let bin_dir = temp_dir(&format!("down-{session}"));

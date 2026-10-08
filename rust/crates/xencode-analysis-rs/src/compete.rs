@@ -572,6 +572,7 @@ mod tests {
     /// If the arm's commit is refused, its branch keeps the base code, and the
     /// two arms would verify identical trees while looking compared.
     #[test]
+    #[cfg(unix)]
     fn an_arm_that_cannot_be_committed_is_reported_rather_than_verified_empty() {
         use std::os::unix::fs::PermissionsExt;
         let (_temp, repo) = sample_repo("compete-commit-refused");

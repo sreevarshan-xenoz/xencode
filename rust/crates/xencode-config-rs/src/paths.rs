@@ -607,7 +607,11 @@ pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-#[cfg(test)]
+// Every test here fakes a home by setting `HOME` and the `XDG_*_HOME`
+// variables. Windows resolves these directories through the system instead, so
+// the fake would not hold there: the migration tests would read and move the
+// real profile's files. They run on Unix only.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::path::Path;

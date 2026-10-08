@@ -510,10 +510,12 @@ mod tests {
     /// `X`, exit-dead — between a thread exiting and its parent noticing. Both
     /// are terminal; `R` and `S` are not, and a process in either of those was
     /// not killed.
+    #[cfg(unix)]
     fn state_is_dead(state: Option<&str>) -> bool {
         matches!(state, Some("Z") | Some("X"))
     }
 
+    #[cfg(unix)]
     fn pid_is_dead(pid: i32) -> bool {
         match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
             Err(_) => true,
@@ -666,6 +668,9 @@ mod tests {
         assert!(m.list().is_empty());
     }
 
+    // The command backgrounds a POSIX `sleep` and the death check reads `/proc`,
+    // so this only measures anything on Linux.
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn wall_clock_limit_kills_task_and_marks_timeout() {
         let mut m = TaskManager::new();
@@ -677,15 +682,22 @@ mod tests {
             )
             .await
             .unwrap();
-        let child_pid = loop {
+        // Bounded, so a shell that never prints the pid fails the test instead
+        // of hanging the whole suite.
+        let mut child_pid = None;
+        for _ in 0..500 {
             let rec = m.poll(id).await.unwrap();
-            if let Some(line) = rec.output().last() {
-                if let Ok(pid) = line.trim().parse::<i32>() {
-                    break pid;
-                }
+            if let Some(pid) = rec
+                .output()
+                .last()
+                .and_then(|l| l.trim().parse::<i32>().ok())
+            {
+                child_pid = Some(pid);
+                break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
-        };
+        }
+        let child_pid = child_pid.expect("the task printed its child's pid within 5 seconds");
         tokio::time::sleep(Duration::from_millis(140)).await;
         // The watchdog must enforce the limit without depending on another
         // poll call to notice that the deadline has passed.
