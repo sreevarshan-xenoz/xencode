@@ -64,7 +64,7 @@ repository it finds 3 files that use it directly, and the semantic answer finds 
 
 The index comes from `rust-analyzer scip` and is kept in the workspace's
 `.xencode/scip/`. Building it takes minutes (164–205 seconds for this repository's 16
-crates), so `/init` starts it in the background, and `xencode impact --semantic` builds it
+crates) and runs the project's build scripts, so only `xencode impact --semantic` builds it,
 first when it has to and says so. It is never used once it no longer matches the code:
 a moved `HEAD`, a new Rust file, or any indexed file changed after the build began makes
 it stale, and the answer says why. The agent's `what_breaks` tool uses it when it is

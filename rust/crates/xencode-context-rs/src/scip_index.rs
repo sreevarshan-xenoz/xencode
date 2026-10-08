@@ -226,9 +226,34 @@ fn normalise(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Whether a path from the index or its record stays inside the workspace.
+///
+/// Both files sit in the project's `.xencode`, which a cloned repository can
+/// ship, so their paths are input like any other: an absolute path or a `..`
+/// would have `find_refs` read and print lines from files outside the project.
+fn stays_inside(path: &str) -> bool {
+    let path = normalise(path);
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains(':')
+        && path.split('/').all(|part| part != "..")
+}
+
 fn read_index(path: &Path) -> Result<scip::types::Index, ScipError> {
     let bytes = std::fs::read(path).map_err(|e| ScipError::Io(path.to_path_buf(), e))?;
-    scip::types::Index::parse_from_bytes(&bytes).map_err(|e| ScipError::Unreadable(e.to_string()))
+    let index = scip::types::Index::parse_from_bytes(&bytes)
+        .map_err(|e| ScipError::Unreadable(e.to_string()))?;
+    if let Some(doc) = index
+        .documents
+        .iter()
+        .find(|d| !stays_inside(&d.relative_path))
+    {
+        return Err(ScipError::Unreadable(format!(
+            "it names `{}`, which is outside the workspace, so none of it is used",
+            doc.relative_path
+        )));
+    }
+    Ok(index)
 }
 
 /// Whether the index on disk still describes `workspace`, and if not, why not.
@@ -243,6 +268,11 @@ pub fn freshness(workspace: &Path) -> Result<ScipMeta, ScipError> {
         Some(meta) if index.is_file() => meta,
         _ => return Err(ScipError::Missing(index)),
     };
+    if let Some(outside) = meta.files.iter().find(|f| !stays_inside(f)) {
+        return Err(ScipError::Unreadable(format!(
+            "its record names `{outside}`, which is outside the workspace, so none of it is used"
+        )));
+    }
     if let Some(indexed_head) = &meta.head {
         let now = crate::gitinfo::current_git_info(workspace).map(|info| info.head);
         if now.as_deref() != Some(indexed_head.as_str()) {
@@ -1010,6 +1040,52 @@ mod tests {
             Pick::Nothing(_)
         ));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A repository can ship its own `.xencode/scip/`, so an index that names a
+    /// file outside the workspace is refused whole — in its record or in the
+    /// index itself — rather than read from.
+    #[test]
+    fn an_index_that_points_outside_the_workspace_is_not_used() {
+        let dir = std::env::temp_dir().join(format!("xencode-scip-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "pub fn helper() {}\n").unwrap();
+        std::fs::create_dir_all(scip_dir(&dir)).unwrap();
+        let write_meta = |files: Vec<&str>| {
+            let meta = ScipMeta {
+                started_unix: now_unix() + 100_000,
+                head: None,
+                rust_analyzer: "crafted".into(),
+                seconds: 0.0,
+                files: files.into_iter().map(str::to_string).collect(),
+            };
+            std::fs::write(meta_path(&dir), serde_json::to_string(&meta).unwrap()).unwrap();
+        };
+        let write_index = |path: &str| {
+            let mut doc = scip::types::Document::new();
+            doc.relative_path = path.to_string();
+            let mut index = scip::types::Index::new();
+            index.documents.push(doc);
+            std::fs::write(index_path(&dir), index.write_to_bytes().unwrap()).unwrap();
+        };
+
+        write_index("src/lib.rs");
+        write_meta(vec!["../../outside.rs"]);
+        assert!(
+            matches!(freshness(&dir), Err(ScipError::Unreadable(_))),
+            "a record pointing out"
+        );
+
+        write_meta(vec!["src/lib.rs"]);
+        write_index("../../outside.rs");
+        assert!(
+            matches!(symbols_named(&dir, "helper"), Err(ScipError::Unreadable(_))),
+            "an index pointing out"
+        );
+        assert!(!stays_inside("C:/Windows/win.ini") && !stays_inside("/etc/passwd"));
+        assert!(stays_inside("crates/x/src/lib.rs"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
