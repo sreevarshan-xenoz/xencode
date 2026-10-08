@@ -38,4 +38,5 @@ rmcp = { version = "3.5.0", default-features = false, features = ["server", "tra
 
 [dev-dependencies]
 sha2 = "0.10"
+tempfile = "3"
 

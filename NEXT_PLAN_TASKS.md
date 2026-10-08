@@ -11533,7 +11533,7 @@ approval request instead of pre-granting one.
 | **AR-8** | Worker health, reported read-only | core | shows an expired login, never fixes one |
 | **AR-9** | The common event protocol every adapter normalises into | core | **derived from `AR-1`'s matrix**, not from the proposal's draft; file changes derived from our own diff (§S-12) |
 | **AR-10** | Agent Event TCK — the protocol replayed against the captured streams | core | after `AR-4`/`AR-5`; the regression firewall for the adapter layer; a variant no real stream has produced stays a declared gap, never a fabricated line (`permission_requested` and `permission_denied` as of 2026-10-08; `error` left the list when `claude_shape` began reading it) |
-| **OR-1** | Task decomposition, measured before it is trusted | core | gated on `EV-1` — the local planner is the weakest link (§S-4.2) |
+| **OR-1** | Task decomposition, measured before it is trusted | core | gated on `EV-1` — the local planner is the weakest link (§S-4.2); measured 2026-10-08 and it is: three blind local runs, best split owning 2 of 7 files and stating 1 of 2 orders, every one refused |
 | **OR-2** | The task graph and scheduler | core | capacity is `min(workers, verification throughput)`, not worker count, and parallelism is computed from independence + lease collision + cost (§S-12), not a fixed constant |
 | **OR-3** | The permission broker | core | real brokering for one vendor, pre-grant for the rest; never widens a mode itself |
 | **OR-15** | The task contract: done means what xencode said it means | core | `QI-3`'s machine-checkable slots in a real launch path; enforced by the lease and `SE-4`, not by asking |
@@ -11894,7 +11894,7 @@ option not otherwise in the tree; **narrowed** = survives only in a reduced form
 | 5 | Agent marketplace | reject | Same decision Milestone M already made for plugins: "distribution that already works is a git repo plus a manifest". Also: these are third-party binaries we do not own and must not resell a catalogue of (§S-8) |
 | 6 | Agent capability detection | narrowed | `AR-3` — a probe of each CLI's advertised flags, not an inferred capability table. The S-0 table *is* the output format; it is 20 minutes of `--help`, and it never claims a capability a probe did not see |
 | 7 | Agent profiles (Architect/Implementer/Researcher…) | planned | `MI-7` task-shaped model profiles, `AC-3` rule-based task-shape router. `MD-3`'s rejection (per-mode prompts void KV reuse) does not apply — a worker's prompt is not in our KV cache, which is the one place profiles are free |
-| 8 | Task decomposition into a master task tree | new | `OR-1`, **gated on `EV-1`** — decomposition quality must be measured on a real task before anything downstream trusts it (S-4.2) |
+| 8 | Task decomposition into a master task tree | new | `OR-1`, **gated on `EV-1`** — decomposition quality must be measured on a real task before anything downstream trusts it (S-4.2). The gate ran 2026-10-08 and the local planner did not clear it: three blind splits, best one owning 2 of 7 files and stating 1 of 2 build-forced orders, all refused |
 | 9 | Dependency-aware scheduling over the graph | new | `OR-2`. Revives `MA-5`'s scheduling for external workers only; §R-2's correction records that the `--parallel 1` reason for rejecting it does not apply to cloud workers |
 | 10 | Agents communicate only through Xencode, as structured events | planned | `WF-1`'s NDJSON stream + `EVd-1`'s ledger; new only in that `AR-4` must normalise vendor events into that schema first |
 | 11 | Shared project memory all workers read and challenge | planned | `EV-4`, `MEM-1`, `MEM-2`, `QM-1`, with `QK-3`'s source classes in front. One new consequence: memory written for one worker and read by another is a **wider injection surface** than our own context, and `SE-2`'s marking has to be per-worker (`OR-8`) |
@@ -12294,11 +12294,45 @@ worker, `OR-` for the thing that decides what workers to talk to.
       `session_started` for a run that produced none of those but the session.
       `permission_requested` and `permission_denied` stay asserted absent, with
       the reason stated in the test.
-- [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
+- [x] **OR-1 — task decomposition, measured.** Split one real task into a dependency
       tree, and score the split with `EV-1` before any router consumes it.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
       was compared against, and a worse-than-baseline result stops `OR-2`'s scheduling
       rather than shipping anyway.
+      **Delivered 2026-10-08** as `xencode-core-rs/src/decompose.rs` (the split, the
+      score, the baseline, the refusal), `xencode-tui-rs/src/decompose.rs` (the halves
+      that need a repository: the answer key read from `git show --name-only` plus
+      `cargo metadata`'s dependency edges, and the planner request itself), and
+      `xencode orchestrator split` on top of both. Eighteen tests on the pure layer,
+      nine on the repository layer, ten end-to-end CLI cases that build a real
+      three-crate workspace, commit it with git and run the command inside it — so the
+      order a split is judged against is the compiler's answer about that directory, and
+      a reader can run both commands there. The split is matched by the paths it owns,
+      never by its names, and every figure is quoted beside the flat baseline (one unit
+      per file, no edges), which owns the whole file set and orders nothing — so order is
+      the only figure a candidate can win on. Silence is scored as a disagreement, not as
+      neutrality: a pair the split says nothing about is a pair the scheduler would start
+      together, and it is named beside the pairs stated backwards. A split also cannot
+      hand itself extra work — a file it names that the change does not consist of is
+      refused by name, because that is a worker launched on something nobody decided
+      should change. The gate is on the screen that proposes a plan: `decide` refuses,
+      `xencode orchestrator split` exits non-zero and nothing is started, and the
+      scheduler still runs any graph it is handed, exactly as `OR-2` documents it.
+      *Measured, and the answer is no.* Three blind runs against this repository's own
+      history, local model (Qwen3-4B-Instruct, CPU, 3.6–4.9 tokens/s, no vendor call, no
+      spend), sampling pinned at temperature 0 and seed 42 the way `EV-1` pins it:
+      `9d12f011` (7 files) → 4 units, files owned **2/7**, orders stated **1/2**, refused
+      for five unowned files and two files it invented from the message's prose;
+      `71157e4c` (12 files) → 5 units, **0/12**, **0/8**, refused, every path written as
+      `rust/crates/…`; the same commit again after that prompt example was corrected to
+      the form the score reads → 5 units, **0/12**, **0/8**, refused with one file claimed
+      by five units, another by three, and four invented files. Each run beside its
+      baseline (`7/7` and `12/12` files owned, `0` orders stated), and each refused. The
+      planner is the weakest link, which is what §S-4.2 said to expect and what this row
+      was gated on; the gate caught all three, and `OR-2` was shown nothing. A
+      twenty-file change also died at the 1024-token answer limit, so the limit is 2048
+      with the timeout that matches it, and a truncated answer now reports the characters
+      that came back rather than only that it was not JSON.
 - [x] **OR-2 — the task graph and scheduler.** Nodes with dependencies, parallel
       readiness, and a queue whose capacity is `min(workers, verification throughput)`.
       **Done-when:** a four-node graph with two independent branches runs both and the

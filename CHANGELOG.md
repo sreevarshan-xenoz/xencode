@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-1`: a proposed split is scored against what the change really is, before anything schedules it
+
+Splitting one task into units that several workers can finish is the promise the rest
+of this track rests on, and a wrong split does not fail loudly. Two units with no edge
+between them simply start together, and the second loses a race against a file the
+first has not written yet. So a split coming from a model is now measured before the
+scheduler is shown it — and a measurement needs an answer key that is nobody's opinion.
+Two are read off this repository: the files a change actually touched come out of
+`git show --name-only`, and which of those files have to land first comes out of
+`cargo metadata`'s own dependency graph, which is the compiler's statement rather than
+the planner's. Two files in one crate assert no order and are not given a fake one; a
+file outside the workspace still has to be owned by somebody, but nothing here claims
+the build orders it.
+
+`xencode orchestrator split` is the surface. `--commit <sha>` is the honest mode: the
+commit's message becomes the task, its file set becomes the key, and the planner is
+never shown that file set, so an answer cannot be a copy of the question. `--task` with
+`--path` scores a change that has not happened yet, and `--answer <file>` scores a split
+off disk without asking any model, at no cost. Every split is quoted beside the flat
+baseline — one unit per file, no edges at all — because that is what sending the work to
+one worker looks like as a number, and it already owns the whole file set, so order is
+the only figure a split can win on. Both halves are always printed, and then every
+disagreement is named rather than averaged: a file nobody owns, two units reaching for
+one file, a pair stated backwards, a pair left silent, and a file the split plans that
+the change does not consist of. Silence is never read as agreement — a missing edge is
+the scheduler starting two units together, so it counts against the split and is named
+like a wrong one. Anything that does not strictly beat the baseline exits non-zero and
+is not scheduled; nothing is ever launched by this reading either way.
+
+Measured on this machine rather than assumed, with the local model doing the planning
+(Qwen3-4B-Instruct on CPU at 3.6–4.9 tokens per second, no vendor call, no spend):
+
+| change scored | units | files owned | orders stated | what happened |
+| --- | --- | --- | --- | --- |
+| `9d12f011` — 7 files | 4 | 2/7 | 1/2 | refused: five files nobody owned, and two files it wrote for symptoms described in the message that this change never touched |
+| `71157e4c` — 12 files | 5 | 0/12 | 0/8 | refused: every path written as `rust/crates/…`, which is not how this workspace names a file |
+| `71157e4c` again, after that instruction was corrected | 5 | 0/12 | 0/8 | refused: one file claimed by five units and another by three, plus four files the change does not consist of |
+
+So the state of this item is stated plainly: the measurement works, the refusal works,
+and the local planner does not yet produce a split worth scheduling for a real change
+here. That is the answer `OR-1` was gated on, and it is the number the gate exists to
+catch. The middle row is also why the last figure was added — that split was not
+planning so much as writing paths in a form the workspace does not use, and a report
+that only counted missed files could not show the difference between the two, so the
+prompt's example was changed to match the form the score reads and the run repeated.
+
+Two more things came out of watching it fail. A twenty-file change was cut off
+mid-answer by the 1024-token limit and came back as unreadable JSON, so the limit is
+2048 with the request timeout that goes with it — eight and a half minutes of CPU
+inference on this machine, and much less on a faster model. And an answer that runs out
+of tokens now says how many characters came back against the limit instead of only
+that it was not JSON.
+
+
 ### Fixed — `AR-3`: the contract probe reports only what it actually searched for
 
 `xencode agents --contract` reads each installed agent's live `--help` and rules

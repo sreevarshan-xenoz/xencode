@@ -1,4 +1,5 @@
 pub mod atomic;
+pub mod decompose;
 pub mod jsonl;
 pub mod lease;
 pub mod profile;
@@ -14,6 +15,7 @@ pub mod team_runs;
 pub mod workspace;
 
 pub use atomic::write_atomic;
+pub use decompose::{decide, Reference, Split, SplitDecision, SplitError, SplitScore, Subtask};
 pub use jsonl::{read_jsonl_tolerant, JsonlRead};
 pub use lease::{
     LeaseConflict, LeaseDecision, LeaseRegistry, ScheduleOutcome, WaitingRequest, WorkerLease,

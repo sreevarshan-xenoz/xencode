@@ -1427,6 +1427,19 @@ _arguments "${_arguments_options[@]}" : \
 '::recipe -- The recipe'\''s `name`, as written in the file:_default' \
 && ret=0
 ;;
+(split)
+_arguments "${_arguments_options[@]}" : \
+'(--commit)--task=[The change to split, in your own words. The planner sees this and the list of crates, and nothing else — so it cannot copy the answer]:TASK:_default' \
+'--commit=[Split the change a commit here already made\: its message is the task and the files it touched are what the split is scored against. This is the honest measurement, since neither the task nor the file set came from the planner]:COMMIT:_default' \
+'*--path=[The files the change touches, when no commit is named. Repeat once per file. Without this or \`--commit\`, the file set is the split'\''s own, and only the order half of the score means anything]:PATHS:_default' \
+'--answer=[Score the split in this file instead of asking a model\: the JSON the planner is asked for, as it came back. Needs no server and no spend]:ANSWER:_files' \
+'--verify=[The command that decides a unit is done, handed to every unit so a planner cannot pick an easier test than the baseline is graded by]:VERIFICATION:_default' \
+'--model=[Model to ask. Defaults to this project'\''s configured model]:MODEL:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (logs)
 _arguments "${_arguments_options[@]}" : \
 '--lines=[How many lines to read from the end]:LINES:_default' \
@@ -1509,6 +1522,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (graph)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(split)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -3085,6 +3102,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (graph)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(split)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -4691,6 +4712,7 @@ _xencode__subcmd__help__subcmd__orchestrator_commands() {
 'agents:The agents xencode has a roster row for\: whether each is installed, whether the posture refuses work handed to it, and whether it can be attached to' \
 'tasks:The two lists of processes xencode started here and still knows about\: the background task registry, and the detached runs of its own agent loop' \
 'graph:One recipe'\''s dependency graph as the scheduler sees it\: the waves, what each role waits on, the critical path, the bottleneck, and where each role ended the last time this exact recipe was recorded. With no recipe named, one row per run this project has recorded. Nothing is launched' \
+'split:Ask the planner to split one task into units, then score that split against what this workspace'\''s own build requires and against the flat baseline\: one node per file, no order at all. A split that does not beat the baseline is refused here and never reaches the scheduler, because a graph that orders no more than a file list is two workers editing one file at once for no reason anybody agreed to. Nothing is launched' \
 'logs:The newest lines of a run'\''s own log, naming the file they were read from. A detached run keeps a log; a recorded team run keeps timings and exit statuses and never captured its children'\''s output, and says which of the two it is rather than printing an empty block' \
 'permissions:What a launch of an agent would be allowed to do under this project'\''s approval mode — built by the same function a launch uses — beside the approvals this project'\''s records say a person actually answered' \
 'costs:What the model calls recorded here cost, priced only where a price is known, beside what the recorded team runs drew from the wall' \
@@ -4740,6 +4762,11 @@ _xencode__subcmd__help__subcmd__orchestrator__subcmd__permissions_commands() {
 _xencode__subcmd__help__subcmd__orchestrator__subcmd__retry_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help orchestrator retry commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__split_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__split_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator split commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__status_commands] )) ||
 _xencode__subcmd__help__subcmd__orchestrator__subcmd__status_commands() {
@@ -5655,6 +5682,7 @@ _xencode__subcmd__orchestrator_commands() {
 'agents:The agents xencode has a roster row for\: whether each is installed, whether the posture refuses work handed to it, and whether it can be attached to' \
 'tasks:The two lists of processes xencode started here and still knows about\: the background task registry, and the detached runs of its own agent loop' \
 'graph:One recipe'\''s dependency graph as the scheduler sees it\: the waves, what each role waits on, the critical path, the bottleneck, and where each role ended the last time this exact recipe was recorded. With no recipe named, one row per run this project has recorded. Nothing is launched' \
+'split:Ask the planner to split one task into units, then score that split against what this workspace'\''s own build requires and against the flat baseline\: one node per file, no order at all. A split that does not beat the baseline is refused here and never reaches the scheduler, because a graph that orders no more than a file list is two workers editing one file at once for no reason anybody agreed to. Nothing is launched' \
 'logs:The newest lines of a run'\''s own log, naming the file they were read from. A detached run keeps a log; a recorded team run keeps timings and exit statuses and never captured its children'\''s output, and says which of the two it is rather than printing an empty block' \
 'permissions:What a launch of an agent would be allowed to do under this project'\''s approval mode — built by the same function a launch uses — beside the approvals this project'\''s records say a person actually answered' \
 'costs:What the model calls recorded here cost, priced only where a price is known, beside what the recorded team runs drew from the wall' \
@@ -5693,6 +5721,7 @@ _xencode__subcmd__orchestrator__subcmd__help_commands() {
 'agents:The agents xencode has a roster row for\: whether each is installed, whether the posture refuses work handed to it, and whether it can be attached to' \
 'tasks:The two lists of processes xencode started here and still knows about\: the background task registry, and the detached runs of its own agent loop' \
 'graph:One recipe'\''s dependency graph as the scheduler sees it\: the waves, what each role waits on, the critical path, the bottleneck, and where each role ended the last time this exact recipe was recorded. With no recipe named, one row per run this project has recorded. Nothing is launched' \
+'split:Ask the planner to split one task into units, then score that split against what this workspace'\''s own build requires and against the flat baseline\: one node per file, no order at all. A split that does not beat the baseline is refused here and never reaches the scheduler, because a graph that orders no more than a file list is two workers editing one file at once for no reason anybody agreed to. Nothing is launched' \
 'logs:The newest lines of a run'\''s own log, naming the file they were read from. A detached run keeps a log; a recorded team run keeps timings and exit statuses and never captured its children'\''s output, and says which of the two it is rather than printing an empty block' \
 'permissions:What a launch of an agent would be allowed to do under this project'\''s approval mode — built by the same function a launch uses — beside the approvals this project'\''s records say a person actually answered' \
 'costs:What the model calls recorded here cost, priced only where a price is known, beside what the recorded team runs drew from the wall' \
@@ -5749,6 +5778,11 @@ _xencode__subcmd__orchestrator__subcmd__help__subcmd__retry_commands() {
     local commands; commands=()
     _describe -t commands 'xencode orchestrator help retry commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__split_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__split_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help split commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__status_commands] )) ||
 _xencode__subcmd__orchestrator__subcmd__help__subcmd__status_commands() {
     local commands; commands=()
@@ -5783,6 +5817,11 @@ _xencode__subcmd__orchestrator__subcmd__permissions_commands() {
 _xencode__subcmd__orchestrator__subcmd__retry_commands() {
     local commands; commands=()
     _describe -t commands 'xencode orchestrator retry commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__split_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__split_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator split commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__orchestrator__subcmd__status_commands] )) ||
 _xencode__subcmd__orchestrator__subcmd__status_commands() {
