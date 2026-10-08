@@ -161,6 +161,49 @@ pub struct CaseResult {
     /// without opening the case directory, and because it is the only thing the
     /// ranking judge is allowed to look at (EV-10). Capped, and says so.
     pub diff: String,
+    /// The last words the model streamed before the case ended, capped at
+    /// [`FINAL_ANSWER_CAP`] characters, with credential shapes redacted. Kept
+    /// here — in the evaluation's own results, never in the turn trace — because
+    /// a case that stops after reading a file is only diagnosable by what it
+    /// said: a fix described in prose and a run that gave up look identical in
+    /// the tool calls (SM-1). `None` in results written before this existed.
+    #[serde(default)]
+    pub final_answer: Option<String>,
+}
+
+/// Longest final answer kept on a case's result.
+pub const FINAL_ANSWER_CAP: usize = 600;
+
+/// What the model said in a run, rebuilt from the loop's messages: answer
+/// tokens arrive bare, while control messages open with a bracketed tag such
+/// as `[TOOL]` or `[DONE]`. The text after the last tool call is the final
+/// answer; the tail of it is kept.
+pub(crate) fn final_answer_from(messages: &[String]) -> Option<String> {
+    let mut answer = String::new();
+    for message in messages {
+        let tagged = message.starts_with('[')
+            && message[1..].find(']').is_some_and(|end| {
+                end > 0
+                    && message[1..1 + end]
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c == '_')
+            });
+        if tagged {
+            if message.starts_with("[TOOL]") {
+                answer.clear(); // what came before a tool call was not the end
+            }
+            continue;
+        }
+        answer.push_str(message);
+    }
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return None;
+    }
+    let chars: Vec<char> = answer.chars().collect();
+    let start = chars.len().saturating_sub(FINAL_ANSWER_CAP);
+    let tail: String = chars[start..].iter().collect();
+    Some(xencode_context_rs::redact_secrets(&tail))
 }
 
 impl CaseResult {
@@ -187,6 +230,7 @@ impl CaseResult {
             passed: false,
             error: Some(error),
             diff: String::new(),
+            final_answer: None,
         }
     }
 
@@ -654,19 +698,24 @@ async fn run_case(options: &TaskEvalOptions, shape: BugShape, attempt: usize) ->
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     agent_rounds(run, tx).await;
-    while rx.try_recv().is_ok() {}
+    let mut messages = Vec::new();
+    while let Ok(message) = rx.try_recv() {
+        messages.push(message);
+    }
 
     let row = read_recent_traces(&trace_dir, 1).pop();
     let changed = changed_against(&task.path, seed_head.as_deref());
     let diff = work_diff(&task.path, seed_head.as_deref());
-    grade(
+    let mut result = grade(
         task,
         attempt,
         row.as_ref(),
         changed,
         started.elapsed().as_millis() as u64,
         diff,
-    )
+    );
+    result.final_answer = final_answer_from(&messages);
+    result
 }
 
 /// Turn what happened on disk into a verdict.
@@ -758,6 +807,7 @@ fn grade(
         passed,
         error,
         diff,
+        final_answer: None,
     }
 }
 
@@ -881,12 +931,48 @@ pub(crate) fn test_case(shape: &str, attempt: usize, changed: &[&str], diff: &st
         passed: false,
         error: None,
         diff: diff.to_string(),
+        final_answer: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_final_answer_is_what_the_model_said_after_its_last_tool_call() {
+        let said = |items: &[&str]| {
+            final_answer_from(&items.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
+        let messages = [
+            "Let me look at the file.",
+            "[TOOL]→ read_file src/lib.rs",
+            "[TOOL]← done",
+            "The loop stops one ",
+            "reading short; change `0..n-1` to `0..n`.",
+            "[TIMINGS]{}",
+            "[DONE]",
+        ];
+        assert_eq!(
+            said(&messages).as_deref(),
+            Some("The loop stops one reading short; change `0..n-1` to `0..n`.")
+        );
+        assert_eq!(
+            said(&["[TOOL]→ list_dir .", "[DONE]"]),
+            None,
+            "a run that ended on a tool said nothing"
+        );
+        let long = "x".repeat(FINAL_ANSWER_CAP + 10);
+        assert_eq!(
+            said(&[long.as_str()]).unwrap().chars().count(),
+            FINAL_ANSWER_CAP
+        );
+        // A bracket that is not a control tag is part of what was said.
+        assert_eq!(
+            said(&["[1] first point"]).as_deref(),
+            Some("[1] first point")
+        );
+    }
     /// A scratch directory that cannot collide with another test process.
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -970,6 +1056,7 @@ mod tests {
                     passed: true,
                     error: None,
                     diff: "-for i in 0..n-1\n+for i in 0..n".to_string(),
+                    final_answer: None,
                 },
                 CaseResult {
                     shape: "swallowed-error".to_string(),
@@ -993,6 +1080,7 @@ mod tests {
                     passed: false,
                     error: Some("the model answered nothing".to_string()),
                     diff: String::new(),
+                    final_answer: None,
                 },
             ],
             judge: None,
@@ -1049,6 +1137,7 @@ mod tests {
             passed: false,
             error: None,
             diff: "+#[test] fn always_passes() {}".to_string(),
+            final_answer: None,
         };
         let line = case.line();
         assert!(line.contains("fail"), "{line}");
@@ -1169,6 +1258,7 @@ mod tests {
                 passed: true,
                 error: None,
                 diff: "-n - 1\n+n".to_string(),
+                final_answer: None,
             }],
             judge: None,
         };
