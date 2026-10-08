@@ -2,6 +2,7 @@ pub mod advisories;
 pub mod analyzer;
 pub mod compete;
 pub mod covdiff;
+pub mod dap;
 pub mod deps;
 pub mod envdrift;
 pub mod images;

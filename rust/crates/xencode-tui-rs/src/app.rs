@@ -10868,6 +10868,7 @@ fn offered_tools(
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
     tools.extend(xencode_providers_rs::command_tools());
+    tools.extend(xencode_providers_rs::debug_tools());
     tools.extend(xencode_providers_rs::plan_tools());
     tools.extend(xencode_providers_rs::repro_tools());
     // RS-1: the surface for reaching off this machine is opened by a config
@@ -13708,7 +13709,7 @@ mod tests {
         let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
             built_in.len(),
-            22,
+            23,
             "the built-in surface, uncounted before this: {built_in:?}"
         );
         assert!(!built_in.contains(&"load_skill"), "{built_in:?}");

@@ -2254,6 +2254,25 @@ never is.
   local's value. (There is no usable Rust DAP *client* crate; Microsoft's `dap`
   builds adapters. LLDB shipping an MCP mode is **UNVERIFIED** — the docs page
   could not be deep-fetched.)
+  - [x] **Done 2026-10-08 — the done-when, measured.** No MCP mode was needed:
+    `xencode-analysis-rs/src/dap.rs` is a Debug Adapter Protocol client of its
+    own (the framing is `Content-Length` headers over stdin/stdout, about forty
+    lines), and it talks to whichever adapter is installed — `lldb-dap` first,
+    otherwise GDB's built-in adapter (`gdb -i=dap`, GDB 14 and later). This
+    machine has no `lldb-dap` and has GDB 16.3 (MinGW), so that is what was
+    proved against. **The stateful-subprocess trap is stepped around, not
+    managed:** one `debug_test(test, file, line, package?)` call is a whole
+    session — `cargo test --no-run`, find the binary that lists the test,
+    `initialize` → `launch` → wait for `initialized` → `setBreakpoints` →
+    `configurationDone` → wait for `stopped` → `stackTrace` → `scopes` →
+    `variables` → end it — with one deadline over all of it (300 s). Nothing is
+    left running between calls. It is a shell-class tool, so it asks like
+    `run_command`. **Proved** twice on real GDB: a test asserting
+    `add(2, 3) == 6` stopped at its `assert_eq!` line with `total = 5` and
+    `expected = 6` read back; and through the agent tool, a test asserting a
+    three-element vector has length 4 stopped there with `seen = 3`, after
+    which no `gdb` or test process remained. Not run against `lldb-dap`, which
+    is not installed here; that branch is the same protocol and is unproved.
 
 ### N-2 — Developer workflow and product surface
 
