@@ -383,6 +383,21 @@ pub fn routes_to_ollama(model: &str) -> bool {
 /// - Automatic provider routing based on model prefix
 /// - Retry with exponential backoff on transient failures
 /// - Health tracking across all providers
+/// A server address fit to print: no `user:password@` and no query string,
+/// either of which can carry a credential. Unparseable text is not printed.
+fn display_url(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(mut parsed) => {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
+            parsed.set_query(None);
+            parsed.set_fragment(None);
+            parsed.to_string().trim_end_matches('/').to_string()
+        }
+        Err(_) => "the configured llama.cpp address".to_string(),
+    }
+}
+
 pub struct ProviderManager {
     ollama_client: OllamaClient,
     llama_cpp_client: Option<LlamaCppClient>,
@@ -1162,7 +1177,7 @@ impl ProviderManager {
                          The server at {} is serving {serving}. If that is the model you meant, \
                          start llama-server with `--alias {model}` (`xencode llamacpp start` \
                          passes it for you), or ask for it by the name it is serving",
-                        client.base_url()
+                        display_url(client.base_url())
                     ))
                 })
             }
@@ -1946,6 +1961,19 @@ pub fn ollama_request_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_printed_server_address_carries_no_credential() {
+        assert_eq!(
+            display_url("http://someone:FAKE-NOT-A-REAL-PASS@llm.example.test:8081/?key=FAKE-NOT-A-REAL-TEST-KEY"),
+            "http://llm.example.test:8081"
+        );
+        assert_eq!(
+            display_url("http://127.0.0.1:8081"),
+            "http://127.0.0.1:8081"
+        );
+        assert_eq!(display_url("not a url"), "the configured llama.cpp address");
+    }
 
     #[test]
     fn serialize_chat_message() {

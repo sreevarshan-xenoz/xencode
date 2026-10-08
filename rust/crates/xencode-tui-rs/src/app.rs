@@ -11662,7 +11662,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         xencode_context_rs::TurnTrace::new(turn_started.elapsed().as_millis() as u64, rounds)
             .with_identity(trace_identity);
     trace.failed = stopped_on_error;
-    trace.error = stop_error.map(|e| xencode_context_rs::redact_secrets(&e));
+    trace.error = stop_error.map(|e| xencode_context_rs::redact_error_for_trace(&e));
     trace.prompt_sha256 = prompt_digest;
     trace.tools = turn_tools;
     trace.completion_tokens = reported_tokens;

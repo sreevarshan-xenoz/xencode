@@ -229,6 +229,32 @@ fn pattern(source: &str) -> regex::Regex {
 
 /// Replace anything shaped like a credential with `[redacted]`, keeping the
 /// name it was assigned to so the row is still readable.
+/// Longest provider error kept on a trace row.
+pub const TRACE_ERROR_CAP: usize = 300;
+
+/// A provider's error message made fit for a trace row, which is kept on disk
+/// and read by other tools. Only the first line is kept, capped at
+/// [`TRACE_ERROR_CAP`] characters, because an error body can echo part of the
+/// request; credential shapes are redacted; and any URL loses its
+/// `user:password@` and its query string, where an API key can ride.
+pub fn redact_error_for_trace(text: &str) -> String {
+    static USERINFO: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(https?://)[^/\s@]+@").expect("valid")
+    });
+    static QUERY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(https?://[^\s?#]+)\?[^\s]*").expect("valid")
+    });
+    let first = text.lines().next().unwrap_or("").trim();
+    let redacted = redact_secrets(first);
+    let no_userinfo = USERINFO.replace_all(&redacted, "$1");
+    let clean = QUERY.replace_all(&no_userinfo, "$1?[query removed]");
+    let mut out: String = clean.chars().take(TRACE_ERROR_CAP).collect();
+    if clean.chars().count() > TRACE_ERROR_CAP {
+        out.push('…');
+    }
+    out
+}
+
 pub fn redact_secrets(text: &str) -> String {
     let text = PEM_KEY_RE.replace_all(text, "[redacted private key]");
     // The value is replaced, the `key =` part is kept: knowing that a turn
@@ -638,6 +664,22 @@ mod tests {
         // An unreadable allowlist file yields no entries, never a crash.
         let missing = temp_dir();
         assert!(load_secret_allowlist(&missing).is_empty());
+    }
+
+    #[test]
+    fn a_trace_error_keeps_one_short_line_with_no_credential_in_it() {
+        let said = "request to https://someone:FAKE-NOT-A-REAL-PASS@llm.example.test/v1?key=FAKE-NOT-A-REAL-TEST-KEY failed
+second line echoing the prompt";
+        let kept = redact_error_for_trace(said);
+        assert_eq!(
+            kept,
+            "request to https://llm.example.test/v1?[query removed] failed"
+        );
+        let long = "x".repeat(TRACE_ERROR_CAP + 50);
+        assert_eq!(
+            redact_error_for_trace(&long).chars().count(),
+            TRACE_ERROR_CAP + 1
+        );
     }
 
     #[test]
