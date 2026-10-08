@@ -6143,6 +6143,11 @@ context.
   candidate-generation → read → confirm-absence. Teach that shape in `TOOL_HINT`,
   optionally with an `exclude_pattern`. *Done-when:* three hand-written "without
   X" questions are solved within N rounds at a measured token cost.
+  - [ ] **Not measured yet, deliberately (2026-10-08).** The only local model
+    that runs well here, Qwen3-4B on the GPU, passes 0 of 8 seeded-defect cases;
+    a hint measured against a 0% floor on a 4B model says nothing about the
+    hint. This waits for a stronger model to measure with (a cloud provider, at
+    a real and stated cost), not for more code.
 - **QN-5 — A dense arm, conditionally.** `bge-small` int8 through `ort`, vectors
   on disk — **only if** QN-2/QN-3 lose to a dense arm on the conceptual probes.
   *Traps:* the existing embeddings rejection (`:1150`, "would regress quality
@@ -6279,6 +6284,17 @@ human's edit (LF-6's git-bus + GH-6).
   before any new retrieval tier. (Chart magnitudes were not machine-readable:
   UNVERIFIED.) *Done-when:* an EV-1 pass-rate A/B on order alone, with real
   runs.
+  - [ ] **Blocked, found 2026-10-08: the measurement this asks for cannot see the change.**
+    The EV-1 task evaluation hands the model no retrieved files (`task_eval.rs`:
+    "nothing, unless the seeded repository happens to carry an index"), so the
+    order of injected blocks never reaches a single run; an A/B on order alone
+    would compare two identical conditions. It needs an evaluation whose
+    seeded repositories carry an index first. Separately, the floor is too low
+    to read a small effect: on 2026-10-08 Qwen3-4B (Q4_K_M, all layers on an
+    RTX 3060 laptop GPU, 86 tokens/s) passed 0 of 8 cases in 678 s — it now
+    calls tools (eight calls on one case) but edited no file. The CPU
+    figure of 3.6–4.9 tokens/s this plan used elsewhere is about 20 times slower
+    than this machine's GPU.
 - **QM-4 — report disagreement, never resolve it.** *Effort: S–M.* Verify
   code-shaped facts against the index at inject time and emit one
   `sources disagree:` line instead of stuffing three contradictory facts in.
