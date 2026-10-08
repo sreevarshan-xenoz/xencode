@@ -21,7 +21,7 @@ keeps its IDs and history; nothing is renumbered.
 | 2 | **SM-1** | Diagnose why a 4B model stops before the edit: read each case's turn trace — tools called, the last thing it said, the round it stopped | the 0/8 shows *that* it fails, not *why*; changing prompts blind is guessing | a table of the eight cases with the stop point and a named cause each |
 | 3 | **SM-2** | Fix what SM-1 names — the edit protocol, the prompt, the step size — one change at a time, each A/B'd on the eval at temperature 0, seed 42 | this is the product | Qwen3-4B passes **4 of 8** or more, recorded by `xencode eval run` |
 | 4 | **SU-1** | `xencode setup`: detect the GPU and free memory, pick a GGUF that fits (or one already on disk), download it, pick a free port, start llama-server with `--alias`, write `llama_cpp_url` and `default_model` | an hour to first answer loses every new user | from an empty config to a working `xencode query` in one command, on this machine |
-| 5 | **PS-1** | `PLAN_STATUS.md`: one row per ID — wave, status, gate, commit — generated from this file by a script, so counts cannot drift | this file is 17,000 lines and status lives in prose | the script's output matches the wave tables and is committed |
+| 5 | **PS-1** ✅ | `PLAN_STATUS.md`: one row per ID — wave, status, gate, commit — generated from this file by a script, so counts cannot drift | this file is 17,000 lines and status lives in prose | the script's output matches the wave tables and is committed |
 | 6 | — | Back to wave order: `QA-6` (W5), then W6 | | |
 
 **Step 0 done 2026-10-08:** both workflows green on `d62843e4`, the first clean run since
