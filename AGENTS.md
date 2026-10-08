@@ -30,6 +30,14 @@
 - **Counts stay current**: crate/test counts in `README.md` and `NEXT_PLAN_TASKS.md` must match `cargo test --workspace` at the time of the docs commit.
 - **Sweep every few features**: after every 2–3 feature commits (or weekly, whichever comes first), re-check the entry-point docs for drift and correct everything in one docs commit.
 
+## 🧹 Disk Rule: Do Not Let Builds Eat the Disk
+
+- **`rust/target/` grows without limit.** Every rebuild leaves the previous build's test binaries beside the new ones; one working day reached **90 GiB** (2026-10-08), 71 GiB of it in `target/debug/deps`. A clean build of every target takes about 6.6 GiB.
+- **Keep the slim profile.** `rust/Cargo.toml` sets `[profile.dev] debug = "line-tables-only"` and no debug info for dependencies. Do not remove it to make a build "work". To run a real debugger on xencode itself, set `CARGO_PROFILE_DEV_DEBUG=true` for that session only.
+- **Measure, then clean.** Check `du -sh rust/target` after a run of builds or tests. Run `cargo clean` (from `rust/`) when it is above **20 GiB**, and once at the end of any session that ran the workspace test suite.
+- **Test the crate you changed, not the workspace,** while iterating (`cargo test -p <crate>`). Keep full `cargo test --workspace` runs for before a commit. On a laptop, pass `-j 4` so the machine stays usable.
+- **Leave nothing in the temp directory.** A test that creates a temporary directory removes it when it finishes, and a session cleans up any `xencode-*` directories its own runs left in the system temp directory.
+
 ## 🔐 Secret Fixture Rule: No Scanner-Flaggable Credentials In The Repo
 
 - **The repo is public open source, and secret scanners (GitGuardian "Internal secret detection") fire on credential *shapes*, not on intent.** A test fixture that matches a real vendor's key pattern is flagged as an incident even when it is a made-up value. That noise hides genuine leaks, so credential-shaped strings in this repo are held to a stricter bar than "it isn't a real key".
