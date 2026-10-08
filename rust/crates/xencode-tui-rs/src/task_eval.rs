@@ -710,11 +710,15 @@ fn grade(
             "no turn trace was written: the loop finished no request, so nothing was asked"
                 .to_string(),
         ),
-        Some(row) if row.failed => Some(
-            "the model request failed before it answered: check the server the case was run \
-             against, and the trace in the case directory"
+        Some(row) if row.failed => Some(match &row.error {
+            // The provider's own words: "failed before it answered" alone sent a
+            // reader to guess between a dead server, a wrong port and a name the
+            // server does not know.
+            Some(said) => format!("the model request failed before it answered: {said}"),
+            None => "the model request failed before it answered: check the server the case \
+                     was run against, and the trace in the case directory"
                 .to_string(),
-        ),
+        }),
         Some(_) => None,
     };
     let passed = error.is_none() && grader.passed && missing.is_empty() && unexpected.is_empty();

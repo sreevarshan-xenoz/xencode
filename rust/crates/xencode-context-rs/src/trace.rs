@@ -80,6 +80,11 @@ pub struct TurnTrace {
     /// `true` when the loop stopped on a provider error instead of an answer.
     #[serde(default)]
     pub failed: bool,
+    /// What the provider said when the loop stopped on an error, with anything
+    /// shaped like a credential taken out. `null` for a turn that ended normally,
+    /// and for one written before this field existed.
+    #[serde(default)]
+    pub error: Option<String>,
     /// Digest of the prompt that started the turn — never the prompt itself.
     #[serde(default)]
     pub prompt_sha256: Option<String>,
@@ -138,6 +143,7 @@ impl TurnTrace {
             rounds,
             tools: Vec::new(),
             failed: false,
+            error: None,
             prompt_sha256: None,
             session_id: None,
             model: None,

@@ -1146,8 +1146,23 @@ impl ProviderManager {
                     return Ok(());
                 }
                 client.load_model(model).await.map_err(|e| {
+                    // The common case is not a missing model but a server
+                    // started by hand: llama-server names its model by file
+                    // path unless given `--alias`, so the name in the config
+                    // never matches. Say what it is serving and both fixes.
+                    let serving: Vec<String> =
+                        loaded.iter().map(|m| format!("'{}'", m.id)).collect();
+                    let serving = if serving.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        serving.join(", ")
+                    };
                     ProviderError::api_message(format!(
-                        "llama.cpp model '{model}' is not loaded and could not be swapped in: {e}"
+                        "llama.cpp model '{model}' is not loaded and could not be swapped in: {e}. \
+                         The server at {} is serving {serving}. If that is the model you meant, \
+                         start llama-server with `--alias {model}` (`xencode llamacpp start` \
+                         passes it for you), or ask for it by the name it is serving",
+                        client.base_url()
                     ))
                 })
             }
