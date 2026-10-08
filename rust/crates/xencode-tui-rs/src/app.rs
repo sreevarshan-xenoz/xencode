@@ -18919,6 +18919,8 @@ mod tests {
     /// really is given away: the handover runs a real child on inherited stdio,
     /// reports the status the process actually returned, and consumes itself.
     #[test]
+    // The child is a #!/bin/sh script, which only Unix can execute.
+    #[cfg(unix)]
     fn a_handover_puts_a_real_process_on_the_screen_and_gives_the_screen_back() {
         let dir = temp_dir("handover");
         let marker = dir.join("child-argv.txt");

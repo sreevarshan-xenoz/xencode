@@ -1858,18 +1858,37 @@ fn preview_and_bound_files(root: &Path, call: &ToolCall) -> (String, Vec<(PathBu
             let Ok(current) = read_text(&full, p) else {
                 return (summarize_call(call), Vec::new());
             };
-            let count = current.matches(old).count();
-            let updated = if arg_bool(&args, "all") {
-                current.replace(old, new)
-            } else {
-                current.replacen(old, new, 1)
+            // The same computation the tool runs, so the diff approved here is the
+            // diff that gets written.
+            let (updated, note) = match plan_text_edit(&current, old, new, arg_bool(&args, "all")) {
+                PlannedEdit::Exact { updated, .. } => (updated, None),
+                PlannedEdit::Loose { updated } => (
+                    updated,
+                    Some(
+                        "\n(note: \"old\" matched one block only once each line's surrounding \
+                          whitespace was ignored; the new text takes the file's indentation)"
+                            .to_string(),
+                    ),
+                ),
+                PlannedEdit::NotFound => (
+                    current.clone(),
+                    Some(
+                        "\n(note: \"old\" is not in the file, even ignoring whitespace — the \
+                          edit would fail)"
+                            .to_string(),
+                    ),
+                ),
+                PlannedEdit::Ambiguous { count } => (
+                    current.clone(),
+                    Some(format!(
+                        "\n(note: \"old\" currently matches {count} times — the edit \
+                         would fail unless all=true)"
+                    )),
+                ),
             };
             let (mut preview, bound) = diff_for(p, &updated);
-            if count != 1 && !arg_bool(&args, "all") {
-                preview.push_str(&format!(
-                    "\n(note: \"old\" currently matches {count} times — the edit \
-                     would fail unless all=true)"
-                ));
+            if let Some(note) = note {
+                preview.push_str(&note);
             }
             (preview, bound)
         }
@@ -2161,6 +2180,100 @@ fn offset_of_line(text: &str, line_index: usize) -> usize {
     off
 }
 
+/// What an `edit_file` call would do to a file's text.
+#[derive(Debug, PartialEq)]
+enum PlannedEdit {
+    /// `old` was found as written; `count` replacements were made.
+    Exact { updated: String, count: usize },
+    /// `old` was found only once each line's surrounding whitespace was ignored,
+    /// at exactly one place; `new` was re-indented to match the file (SM-2).
+    Loose { updated: String },
+    /// Nowhere, even ignoring whitespace.
+    NotFound,
+    /// More than once as written, and `all` was not asked for.
+    Ambiguous { count: usize },
+}
+
+/// The one computation behind both the `edit_file` tool and its approval
+/// preview, so what a person approves is what gets written.
+///
+/// An exact match always wins. Only when there is none is the match retried line
+/// by line with each line's leading and trailing whitespace ignored, and only a
+/// single matching block is used: a small model reliably finds the right lines
+/// but not their exact indentation — on 2026-10-08 Qwen3-4B sent the same
+/// mis-indented 118 bytes twice after being told to copy them exactly (SM-1).
+fn plan_text_edit(text: &str, old: &str, new: &str, all: bool) -> PlannedEdit {
+    let count = text.matches(old).count();
+    if count > 1 && !all {
+        return PlannedEdit::Ambiguous { count };
+    }
+    if count >= 1 {
+        let updated = if all {
+            text.replace(old, new)
+        } else {
+            text.replacen(old, new, 1)
+        };
+        return PlannedEdit::Exact {
+            updated,
+            count: if all { count } else { 1 },
+        };
+    }
+    let wanted: Vec<&str> = old.lines().map(str::trim).collect();
+    let first = wanted.iter().position(|l| !l.is_empty());
+    let last = wanted.iter().rposition(|l| !l.is_empty());
+    let (Some(first), Some(last)) = (first, last) else {
+        return PlannedEdit::NotFound;
+    };
+    let wanted = &wanted[first..=last];
+    // Line starts and ends, so a match maps back to bytes in the original text.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0;
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        spans.push((start, start + body.len()));
+        start += line.len();
+    }
+    let matches: Vec<usize> = (0..spans.len().saturating_sub(wanted.len() - 1))
+        .filter(|&i| {
+            wanted
+                .iter()
+                .enumerate()
+                .all(|(k, w)| text[spans[i + k].0..spans[i + k].1].trim() == *w)
+        })
+        .collect();
+    let [at] = matches.as_slice() else {
+        return if matches.is_empty() {
+            PlannedEdit::NotFound
+        } else {
+            PlannedEdit::Ambiguous {
+                count: matches.len(),
+            }
+        };
+    };
+    let (block_start, _) = spans[*at];
+    let (_, block_end) = spans[*at + wanted.len() - 1];
+    // Re-indent `new` from the indentation `old` claimed to the one the file has.
+    let indent_of = |s: &str| s.len() - s.trim_start().len();
+    let file_line = &text[block_start..spans[*at].1];
+    let file_indent = &file_line[..indent_of(file_line)];
+    let old_first = old.lines().nth(first).unwrap_or("");
+    let old_indent = &old_first[..indent_of(old_first)];
+    let reindented: Vec<String> = new
+        .trim_matches('\n')
+        .lines()
+        .map(|line| match line.strip_prefix(old_indent) {
+            Some(rest) if !line.trim().is_empty() => format!("{file_indent}{rest}"),
+            _ => line.to_string(),
+        })
+        .collect();
+    let line_end = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut updated = String::with_capacity(text.len() + new.len());
+    updated.push_str(&text[..block_start]);
+    updated.push_str(&reindented.join(line_end));
+    updated.push_str(&text[block_end..]);
+    PlannedEdit::Loose { updated }
+}
+
 fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
     let Some(raw) = arg_str(args, "path") else {
         return err("edit_file needs a string \"path\"");
@@ -2182,37 +2295,41 @@ fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
         Ok(t) => t,
         Err(e) => return e,
     };
-    let count = text.matches(old).count();
-    let replace_all = arg_bool(args, "all");
-    if count == 0 {
-        return err(format!(
-            "\"old\" not found in {display} (0 matches).{}\nRe-issue edit_file with one \
-             block above copied exactly, indentation and all, or read_file {display} first.",
-            absence_candidates(&text, old)
-        ));
-    }
-    if count > 1 && !replace_all {
-        return err(format!(
-            "\"old\" appears {count} times in {display} — every match below. Pass more \
-             surrounding context to make \"old\" unique, or all=true to replace every \
-             occurrence.\n{}",
-            occurrence_context(&text, old, count)
-        ));
-    }
-    let updated = if replace_all {
-        text.replace(old, new)
-    } else {
-        text.replacen(old, new, 1)
+    let (updated, how) = match plan_text_edit(&text, old, new, arg_bool(args, "all")) {
+        PlannedEdit::Exact { updated, count } => {
+            (updated, format!("replaced {count} occurrence(s)"))
+        }
+        PlannedEdit::Loose { updated } => (
+            updated,
+            "replaced 1 block that matched once each line's surrounding whitespace was \
+             ignored; the new text was given the file's indentation"
+                .to_string(),
+        ),
+        PlannedEdit::NotFound => {
+            return err(format!(
+                "\"old\" not found in {display} (0 matches, even ignoring each line's \
+                 surrounding whitespace).{}\nRe-issue edit_file with lines taken from \
+                 read_file {display}.",
+                absence_candidates(&text, old)
+            ))
+        }
+        PlannedEdit::Ambiguous { count } => {
+            return err(format!(
+                "\"old\" appears {count} times in {display} — every match below. Pass more \
+                 surrounding context to make \"old\" unique, or all=true to replace every \
+                 occurrence.\n{}",
+                occurrence_context(&text, old, count)
+            ))
+        }
     };
     if let Err(e) = std::fs::write(&full, &updated) {
         return err(format!("cannot write {display}: {e}"));
     }
-    let n = if replace_all { count } else { 1 };
     let diff = unified_diff(&text, &updated);
     secret_guard(
         &display,
         &updated,
-        format!("edited {display}: replaced {n} occurrence(s)\n{diff}")
+        format!("edited {display}: {how}\n{diff}")
             .trim_end()
             .to_string(),
     )
@@ -9941,6 +10058,50 @@ patched = ["{fixed}"]
             holder
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- SM-2: `edit_file` tolerates the indentation a small model gets wrong ----
+
+    #[test]
+    fn the_right_lines_with_the_wrong_indentation_still_edit_once_and_keep_the_file_indent() {
+        // The shape SM-1 found: the model quotes the right lines at 4 spaces
+        // where the file has them at 8, and its replacement at the same 4.
+        let file = "fn run() {\n    loop {\n        if let Err(e) = step() {\n            continue;\n        }\n    }\n}\n";
+        let old = "    if let Err(e) = step() {\n        continue;\n    }";
+        let new = "    if let Err(e) = step() {\n        return Err(e);\n    }";
+        let PlannedEdit::Loose { updated } = plan_text_edit(file, old, new, false) else {
+            panic!("expected the whitespace-tolerant match");
+        };
+        assert_eq!(
+            updated,
+            "fn run() {\n    loop {\n        if let Err(e) = step() {\n            return Err(e);\n        }\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn an_exact_match_wins_and_two_loose_matches_are_refused() {
+        let file = "a\n  x = 1\nb\n  x = 1\n";
+        // Exact text, once: the exact path, untouched by the tolerant one.
+        assert_eq!(
+            plan_text_edit("p\nq\n", "q", "r", false),
+            PlannedEdit::Exact {
+                updated: "p\nr\n".to_string(),
+                count: 1
+            }
+        );
+        // Matching only loosely, but at two places: never guessed between.
+        assert_eq!(
+            plan_text_edit(file, "x = 1", "x = 2", false),
+            PlannedEdit::Ambiguous { count: 2 }
+        );
+        assert_eq!(
+            plan_text_edit(file, "y = 1", "y = 2", false),
+            PlannedEdit::NotFound
+        );
+        assert_eq!(
+            plan_text_edit(file, "   \n  ", "z", false),
+            PlannedEdit::NotFound
+        );
     }
 
     // ---- CI-7: `debug_test`, a whole debugger session in one call ----
