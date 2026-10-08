@@ -11182,6 +11182,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     let mut reported_tokens: Option<u64> = None;
     let mut last_timings = None;
     let mut stopped_on_error = false;
+    let mut stop_error: Option<String> = None;
     // L-7 repair gate state: did this turn actually edit workspace files,
     // how many failing checks have already been handed back, and what the
     // project's own commands are (discovered once, from disk, on first use).
@@ -11296,6 +11297,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             // so the panel says what failed.
             Err(e) => {
                 stopped_on_error = true;
+                stop_error = Some(e.to_string());
                 if let Some(id) = spawn_id {
                     let _ = tx.send(format!("{SPAWN_PREFIX}{id}:err:{e}"));
                 } else if sink == LoopSink::ByteBot {
@@ -11660,6 +11662,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         xencode_context_rs::TurnTrace::new(turn_started.elapsed().as_millis() as u64, rounds)
             .with_identity(trace_identity);
     trace.failed = stopped_on_error;
+    trace.error = stop_error.map(|e| xencode_context_rs::redact_secrets(&e));
     trace.prompt_sha256 = prompt_digest;
     trace.tools = turn_tools;
     trace.completion_tokens = reported_tokens;

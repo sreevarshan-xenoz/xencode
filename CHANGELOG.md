@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `AA-1` (follow-up): a llama.cpp server that knows the model by another name says so
+
+A `llama-server` started by hand names its model by its file path unless it is given
+`--alias`, so the name in xencode's config never matches it. Every request then failed,
+and the task evaluation reported only "the model request failed before it answered". The
+error now names what the server is serving and both fixes: start it with `--alias <name>`
+(as `xencode llamacpp start` already does), or ask for the model by the name it is
+serving. The turn trace keeps the provider's own message when a turn stops on an error,
+with anything shaped like a credential removed, and `xencode eval run` quotes it.
+
 ### Added — `CI-7`: the agent can stop a test in a debugger and read what it held
 
 `debug_test(test, file, line, package?)` builds the test binary, runs one Rust test under a
