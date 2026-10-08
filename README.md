@@ -39,7 +39,40 @@ and fix your code — driven entirely from your terminal.
 
 ---
 
-## ✨ Highlights
+## ⚡ At a glance
+
+- **Runs on your models.** llama.cpp or Ollama on your own machine, a Google Colab GPU you
+  bring up with one command, or a cloud provider only when you turn one on.
+- **Shows you before it touches anything.** Every file change and every command the agent
+  wants stops at a prompt with the exact diff or command line, and `/rewind` undoes a turn.
+- **Knows who uses your code.** `xencode impact <file> --semantic` answers from
+  rust-analyzer's own index. On this repository it found 7 files that use `impact.rs`
+  directly, where reading `use` lines found 3.
+- **Renames by meaning, not by spelling.** The agent's `rename` changes one item and its
+  uses — through re-exports — and leaves a field or local variable with the same name alone.
+- **Debugs for real.** `debug_test` stops a failing Rust test at a line under GDB or
+  lldb-dap and reads back what the variables actually held.
+- **Measures itself.** `xencode eval run` seeds eight real bugs and grades each fix with the
+  bug's own tests and the exact files it changed — and reports a failure as a failure.
+
+One Rust binary: 16 crates, 54 commands, 25 agent tools.
+
+## 📍 Where it stands, honestly
+
+Xencode is **0.1.0 and early**. What works is listed above and in the detail below; what
+does not yet:
+
+- **Small local models do not yet fix code with it.** On a laptop RTX 3060 (6 GB),
+  Qwen3-4B runs at 86 tokens/s but fixed **0 of 8** seeded bugs in `xencode eval run`: it
+  reads and searches, then stops short of the edit. Making small local models succeed is
+  the current priority.
+- **Install is from source** (`cargo build --release`, or `install.sh` / `install.ps1`).
+- **Windows builds and runs; Linux is where the full test suite is green.** Some tests
+  assume Unix and are being worked through.
+
+---
+
+## ✨ Highlights in detail
 
 - **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Google Colab GPU you bring up when you need one, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind` — and a git-backed record of those turns that stops the rewind from overwriting a file you edited yourself. A bug fix can be *earned*: `/gate bugfix` supervises one, and until a reproduction test has been run and actually seen failing against code nobody has touched yet, every write to a production file is refused — not asked about, refused — and the test that reproduced it is frozen once its failure is on record so it cannot be edited into proving the fix. A call whose arguments do not match the description that tool was offered with is answered back to the model instead of being run — including one whose arguments arrived as text that stopped halfway, which used to look like a call that asked for nothing. When a turn edited files, the model's claim of completion is not the gate: the workspace's own `cargo test` and `cargo clippy` run over the same approval gate and only exit `0` finishes the turn; failures come back to the model for up to `agent_repair_max_iters` repair rounds and past that the turn reports the task incomplete. A non-Rust workspace is not left unchecked: when there is no `Cargo.toml` but the turn edited files a language server covers, real diagnostics are pulled from that server (`clangd` for C and C++) and gate the turn the same way — an error feeds back for a repair round, a clean answer verifies it, and a workspace with no supported server is left untouched rather than given an unearned pass.
@@ -86,6 +119,8 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 
 ## 📋 Table of Contents
 
+- [At a glance](#-at-a-glance)
+- [Where it stands, honestly](#-where-it-stands-honestly)
 - [Features](#-features)
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
