@@ -15737,7 +15737,7 @@ the brief.
 | "Why is this code here?" | `GH-2`, `QT-1`…`QT-4` | open; causal-story prose and ADR-mining both rejected earlier on measured grounds |
 | Change impact / blast radius | `CI-6` (done), `QD-1`, `QD-2` | open; no edge for a CLI command or a manual → **AE-4** |
 | Hide complexity until needed; four levels, never mixed | `UX-7` first-run coach, Milestone `V`, `X-2`'s two modes over one shared state | the levels exist as intentions, not as data → **AE-5**. Checked: `UX-12`'s `--simple` is a **screen-reader** mode — a plain appending transcript with no alternate screen — not a novice tier, so nothing today defers a destination for a newcomer |
-| Ctrl+K command palette replacing the feature navigator | `UX-6` | open — verified there is no palette: `Ctrl+F` toggles the navigator (`keymap.rs:500`) and no binding for `Ctrl+K` exists |
+| Ctrl+K command palette replacing the feature navigator | `UX-6` | open — the navigator is `Ctrl+F` (`keymap.rs:512-520`) and no palette exists. **Corrected 2026-10-08:** this row's "verified there is no palette" was right but its second half was wrong — `Ctrl+K` *is* bound, to the background task panel (`keymap.rs:440`, tested at `:3265`), so the palette needs a chord decision, not a free key |
 | Stop putting emojis everywhere; reclassify the panels | `UX-4` | open — verified `FEATURE_LIST` has 19 emoji-prefixed entries (`focus.rs:407-427`) over 26 `FocusArea` variants (`focus.rs:52-83`), so `UX-4`'s own text ("an audit of all 25 focus areas", `:3881`) is one destination short of the tree |
 | Chat as the centre; Buddy/Project/Work/Review/Inspect/Settings | `UX-4`'s audit of every focus area | open, as planned |
 | A multimodal buddy: screenshots, PDF, audio | **shipped** — images ride as message parts, shrunk and recompressed, and PDF/DOCX parse to text (`QUICK_START.md:64`); a Voice Interface panel exists | no new row |
@@ -16121,3 +16121,220 @@ disposition table carries twelve groups of this brief's proposals onto IDs that 
 six rows here are what was left when each of them was checked against the tree. `AF-4` belongs in the same wave as `L-2`, which it extends;
 `AF-5` has no wave yet and should not get one before `CX-7`'s acting budgets exist, because
 fan-out that cannot be cost-limited is the third thing §S-4 says stops being free.
+
+## Milestone AG — the screen as a small number of workspaces (owner directive, 2026-10-08)
+
+The directive opens with the sentence it wants written on the wall — **"Simple by default.
+Powerful when you go looking for it."** — and its closing instruction is the one that decides
+the shape of everything below: **"Don't build a giant dashboard. Build a small number of
+workspaces with adaptive layouts."** The owner called this "probably the most important UI
+decision before we add the MiroFish/OpenDots/DeepSeek-Harness stuff", and the reason it matters
+is stated too: "how we can have an absurd amount of functionality without making Xencode feel
+absurd."
+
+What is proposed is eight screens instead of a hundred panels: **Home** ("ridiculously clean",
+"should not look like a cockpit"), **Work** (the coding screen, panels contextual — diagnostics
+while debugging, review while reviewing, task progress while running), **Project** (overview,
+then drilling into architecture, dependencies, security, performance, tests, history),
+**Review** (diff, AI review, git and blast radius inside it), **Inspect** ("the engineering
+microscope", where every advanced analyser lives), **Orchestrate** (its own screen, allowed to
+be information-dense "because the user intentionally entered Orchestrator"), **Simulate**
+(scenarios, hypotheses, worlds, outcomes) and **Settings** (grouped, not global). The mechanism
+is named: `Workspace → View → Panels → Context`, built on the layout tree with a layout template
+per workspace that an advanced user can customise. What the directive calls "the 25 destinations"
+are **demoted from product-level destinations to views and components** — "Nothing is necessarily
+lost. The mental model becomes dramatically smaller." The registry it would demote holds **27**
+rows, which is the first thing to know about it and is argued below. **Ctrl+K is the escape
+hatch**, and the
+principle behind it is given as "Don't make the user remember the architecture of Xencode". And
+**navigation is meant to be driven by intent**: "Find why the tests are flaky" opens Inspect →
+Testing by itself; "Get Claude and Codex to work on this" opens Orchestrate.
+
+The tree is closer to this than the proposal assumes, and further in two specific ways.
+
+Closer: the destination registry, the disclosure tiers, the layout templates and the named views
+all exist and already do most of the bookkeeping a workspace needs. `DESTINATIONS`
+(`xencode-tui-rs/src/focus.rs:557`) is one table of `{area, name, description, level, shortcut,
+command_name}`; `DisclosureLevel` (`focus.rs:94`) is the four tiers §AE-5 was written for;
+`templates.rs` states that "a new arrangement arrives as data — a `LayoutTemplate` value in the
+config file — with no code change"; `arrangement.rs` persists `<config dir>/layout.json`;
+`views.rs` gives named views on Ctrl+1…9. A workspace is a *grouping over the rows that already
+exist*, not a new subsystem.
+
+Further in two ways. First, the default contradicts the headline: `default_disclosure_level()`
+returns **4** (`xencode-config-rs/src/config.rs:1035`), so a fresh install is shipped at the
+specialist tier and "simple by default" is currently false by configuration — the tier system
+exists and nobody enters it. Second, **the key the directive names is already spent**: `keymap.rs:60-64`
+routes every control chord into `global_ctrl_chord` (`keymap.rs:286`), which matches on `key.code`
+alone, and `KeyCode::Char('k')` at `keymap.rs:440` is the background task panel that D2-01 shipped,
+asserted by `ctrl_k_toggles_task_panel_and_resets_cursor` (`keymap.rs:3265`). So §AE's disposition
+row is wrong where it says "no binding for `Ctrl+K` exists" — that row is corrected in place above.
+What the
+code comments call the "palette" (`feature_items_for_level`, `focus.rs:807`) is the `Ctrl+F` feature
+navigator, a filtered list, not a command palette. `UX-6` is that palette, still open, already
+placed in W14.
+
+### The disposition
+
+| the directive asks for | already recorded as | state |
+|---|---|---|
+| Workspaces replacing the flat destination list | `UX-4`'s audit of every focus area, `AE-5`'s tiers | the grouping does not exist as data → **AG-2**. Checked: `DESTINATIONS` carries **27 rows** over **27 `FocusArea` variants** while its own doc comment says "all 26 TUI destinations" (`focus.rs:555`) — the table drifts, which is the argument for deriving a workspace from it rather than typing a third list |
+| Orchestrate as a workspace, not a panel in the coding screen | `X-2` (two modes over one state, `Mode::{Coding, Orchestrator}`, `focus.rs:20`), `OR-14` (its command surface), `OR-12` (the worker panel) | **already the owner's own position, arrived at from the other end**: Ctrl+Space flips a mode today. The naming and the overlap are **AG-1** |
+| Ctrl+K palette as the escape hatch | `UX-6`, in W14 | open → **AG-3**, with the constraint evidence attached rather than re-litigated |
+| Context-adaptive panels in Work | `V-4`/`V-5`/`V-6` (views, templates, arrangement), `V-10` (worker-event → window bridge) | the substrate is there; the *automatic* half is **`V-11`**, parked on measured evidence, and the evidence says keep slots fixed → **AG-5** |
+| Project / Inspect / Review as drill-down screens | `QB-4`, `QB-6`, `QO-1`, `SE-6`, `U-5`, `DB-6` (health); `CI-6`, `QD-1`, `QD-2` (impact); `GH-2`, `QT-1…QT-4` (history) | the content rows exist and are open; what is missing is the grouping and one route into it → **AG-2**, **AG-4** |
+| Simulate as a workspace | `OR-10` (plan, simulate, dry-run by default), the §R simulation cluster, `X-3` | no scenario surface is built; the workspace would be an empty frame → sits behind `OR-10`, not in front of it |
+| Intent-driven navigation from typed English | `UX-6`'s matcher, `OR-11` (explain every routing choice) | the deterministic half is **AG-3**; the guessed half is **AG-6**, and the research says ship it second |
+| Settings grouped rather than global | the existing `SettingRow` list, the two posture rows §OR-13 added | grouping is a view over data that is already flat → **AG-4**'s neighbour, not a new item |
+| Layouts customisable by advanced users | `V-5` templates, `V-6` arrangement, `--dump-config` equivalent asked by `AF-3` | open as planned; a per-workspace template is one field on `LayoutTemplate` |
+
+Nothing in the directive is refused. Three of its parts are already scheduled under other IDs and
+are not re-numbered here.
+
+### Items
+
+- **AG-1 — decide what the axis is called, and where it meets the mode.** *Effort: S.*
+  "Workspace" is not free in this tree, and the collision is the kind §S-11 refused "agent
+  runtime" for: `xencode-collaboration-rs/src/workspace.rs:38` already defines `pub struct
+  Workspace` plus `WorkspaceManager` for Milestone G's team session, `xencode-core-rs/src/
+  workspace.rs:26` defines `WorkspaceEntry` for the file scan, `xencode-context-rs` runs a
+  `WorkspaceWatcher`, and the TUI **already puts the word on screen** meaning something else —
+  the file-tree panel is labelled `📁 Workspace (N files)` (`ui.rs:686`) and the project analyser
+  prints "Workspace Breakdown" (`ui.rs:2463`). A third meaning over the same word, on the same
+  screen, is a person's confusion paid for in advance. The second half is realer than naming: the
+  directive says Orchestrate is a workspace, and `X-2` already made Orchestrator a *mode* that
+  Ctrl+Space flips (`focus.rs:20-23`, `OR-14` shipped the surface on it). Two axes that both claim
+  one screen will disagree, and the disagreement will be visible. *Trap:* do not resolve this by
+  renaming the mode — `X-2`'s done-when is about a round trip that preserves task state, agents,
+  sessions, worktrees, diffs, approvals, event history, verification and git state, and it passed.
+  Pick one name for the grouping (the file-tree panel's label is the other candidate for change)
+  and write down which axis owns Orchestrate. *Done-when:* one identifier in the source for the
+  grouping, one sentence in `README.md` and `CLI_GUIDE.md` saying what it is and is not, and a
+  test that entering the orchestrator workspace and pressing Ctrl+Space cannot leave the two
+  axes holding different answers.
+
+- **AG-2 — one derived table: every destination belongs to exactly one workspace.** *Effort: M.*
+  The registry to group is `DESTINATIONS` (`focus.rs:557`), and the invariant this needs already
+  exists in a neighbouring form: `every_focus_area_variant_has_a_disclosure_level_and_table_entry`
+  (`focus.rs:922`) asserts each `FocusArea` has a level and that the level matches the table row.
+  The same discipline over workspace membership is the whole item. The demotion the owner named is
+  a mapping, and the names in it are approximate to the real table: `PerformanceDashboard →
+  Inspect/Performance`, `ProviderHealth → Settings/Models`, `SecurityAuditor → Inspect/Security`,
+  `ProjectAnalyzer → Project/Architecture`, `GitCommit → Review/Git`, `BlastRadius → Review/Impact`
+  (that destination is `FocusArea::ImpactPanel`), `TaskManager → Work/Tasks`. *Trap:* two
+  existing things must not be broken by making a third. `navigate_feature` (`focus.rs:862`) is
+  already a second hardcoded index→`FocusArea` list duplicating the registry; adding a workspace
+  table that is also typed by hand makes three lists that must agree, and `focus.rs:555`'s stale
+  "26" is what that looks like when it drifts. And demotion must not become removal: `app.rs:2126`
+  records the current rule that "all destinations remain reachable by name regardless of
+  disclosure level", and `AE-5`'s tiers only work because nothing became unreachable. *Done-when:*
+  the workspace of a destination is read from the same table as its level, a test like
+  `focus.rs:922`'s fails if any of the 27 areas is in zero workspaces or in two, `navigate_feature`
+  is generated from the registry or deleted, and every destination is still reachable by name from
+  the workspace that does not show it.
+
+- **AG-3 — the palette, which is what makes the rest of this affordable.** *Effort: M.* This is
+  `UX-6`, already in W14; it is restated here because the directive's own justification depends
+  on it — hiding panels is only safe if one keystroke reaches everything. What is absent is the
+  palette itself: the only discovery surface is the `Ctrl+F` feature navigator (`keymap.rs:512-520`),
+  `find_destination_by_name` (`focus.rs:786`) matches exact strings plus two
+  hand-written alias cases for `LearningMode` and `ByteBotPanel`, and `app.rs:2112-2114` filters
+  navigator items by level. What the outside evidence constrains, checked on 2026-10-08 rather
+  than recalled: VS Code registers **exactly three** quick-access providers
+  (`quickAccess.contribution.ts` on `main` — Help, View, Commands), teaching the prefix in the
+  placeholder rather than adding modes of entry; its scorer is `fuzzyScore`, boosting word starts,
+  camelCase and separators, because pure subsequence ranking is the documented failure — Obsidian's
+  palette has a standing complaint that letters matching anywhere produce nonsense order. The Rust
+  scorer to build on is `nucleo-matcher` 0.3.1 (helix-editor; crate last published 2024-02-20 with
+  4.69M downloads, repository 1,510★ and pushed 2026-06-24), whose two-stage inject/match API is
+  the thing to design around. On the key: the chord the owner named is occupied, and by something
+  that is not a palette — so this item has to choose a chord and say what moved, rather than
+  assuming `Ctrl+K` is free. It is also *not* free in the rest of the field: readline binds it to
+  kill-to-end-of-line, which is what a person's fingers do inside the composer this screen is built
+  around, and Cursor spends Cmd+K on inline editing while putting its palette on Cmd+Shift+P.
+  *Trap:* a palette that opens over the composer steals the keystroke from someone
+  mid-sentence; decide the input-mode precedence before binding it, and say the decision in help
+  text. *Done-when:* one chord reaches all 27 destinations, every slash command and every setting;
+  a query in ordinary words lands on a destination a person agrees with, watched by typing it; and
+  `xencode`'s existing keymap and approval tests pass unchanged, which is the proof the seam moved
+  plumbing and not behaviour.
+
+- **AG-4 — "simple by default" has to be the shipped default, not level 4.** *Effort: S.*
+  `default_disclosure_level()` returns 4 (`config.rs:1035`, with `disclosure_level: u8` at
+  `:394-395`), so `AE-5`'s tiers exist behind a setting nobody has to change; §AE's own row
+  records that `UX-12`'s `--simple` is a screen-reader mode and not a novice tier, so nothing
+  else defers a destination for a newcomer either. This item is that one-line change plus the
+  honesty about what appears. *Trap:* depth. The checked warning from the source the directive
+  itself cites for progressive disclosure (Nielsen on NN/g, 2006-12-03) is: "in practice, designs
+  that go beyond 2 disclosure levels typically have low usability because users often get lost
+  when moving between the levels. If you have so many features that you need 3 or more levels,
+  consider simplifying your design." The proposal's own stack — workspace → view → panel → context
+  — is three below the top row, and `DisclosureLevel` is four wide. The two axes must be made to
+  *replace* each other, not multiply, or xencode ships the exact thing the research says people
+  get lost in. And the other checked number cuts against hiding navigation: discoverability is
+  "cut almost in half" by hiding main navigation, and worse on desktop than on phones (NN/g,
+  2016-06-26) — which is why AG-3 is not a nice-to-have attached to this row but its precondition.
+  Ship AG-3 before AG-4 or the clean screen is a worse product than the cockpit. *Done-when:* a
+  fresh config directory lands on a Home that a first-time user can describe, `/level` still
+  raises every destination back into view, and the count of what is on screen at first start is
+  printed before and after the change from a real run — not asserted from the enum.
+
+- **AG-5 — change what a slot shows, not how many slots there are.** *Effort: L.* The directive
+  wants Work to show diagnostics while debugging and review while reviewing. The evidence says do
+  that as *contents*, on a user-triggered move, and the strongest example is a terminal app the
+  owner already likes: checked from the lazygit analysis on 2026-10-08 — "Most views are generally
+  visible, always, no matter what operation you are doing (unless you zoom in). You always have a
+  focus on one box… when you interact with boxes on the left, the right box changes." Fixed slots,
+  variable contents, explicit zoom. What is contraindicated is the screen rearranging itself: the
+  Firefox Proton backlash is the case study (an explicit removal of features that "annoyed some
+  people", a `browser.proton.enabled` escape hatch, and a 5,913★ repository whose only purpose is
+  pinning the UI back), and the standing citation is Horvitz, CHI '99 — adaptive interfaces must be
+  predictable, controllable and recoverable. This is also already this plan's position: **`V-11`**
+  ("layout that rearranges itself on engineering events") is parked on measured grounds, and the
+  user-triggered half is scheduled as `V-10`. *Trap:* the render path. Since `V-5`, `layout.rs` is
+  "**the reference, not the render path**" — templates arrive as `LayoutTemplate` data
+  (`templates.rs`) and only the arrangement persists (`arrangement.rs` writes `layout.json`). A
+  workspace switch that silently promotes a preset and re-renders the tree is the failure mode
+  `V-6` was written against; and Unity is the cautionary precedent for the *persistence*, not the
+  count — it dropped "perspectives" for plain saved layouts and was still fixing layout restore in
+  6000.4 (2026-03-18). *Done-when:* entering Review puts the diff, the review, git and the impact
+  panel into slots that were already in the tree, leaving it restores the arrangement exactly as it
+  was — asserted by comparing `layout.json` bytes before and after, watched in a real terminal —
+  and no panel on the screen moves because a test failed.
+
+- **AG-6 — typed intents first, guessed intents second.** *Effort: M.* "Get Claude and Codex to
+  work on this" opening Orchestrate is the part of the directive with the least support outside.
+  What actually ships today is *explicit* routing: VS Code's view picker is reached by the literal
+  word `view `; Copilot's participants are `@workspace`, `#var`, `/explain`; the MCP prompt spec
+  (2025-11-25) says prompts are "designed to be **user-controlled**", surfaced through
+  "user-initiated commands in the user interface" and gives a slash command as the example; Claude
+  Code skills are model-invoked from their descriptions with **no algorithmic router at all**, and
+  the Messages API caps a request at 20 skills ("Maximum Skills per request: 20"). Deterministic
+  on-device routing does exist and is the honest mechanism to borrow: `aurelio-labs/semantic-router`
+  (MIT, embedding plus keyword, no LLM call). What the published number actually measures is a
+  narrower question than this one — *When to Reason: Semantic Router for vLLM* (arXiv 2510.08731,
+  2025-10-09) reports **+10.2 points of accuracy on MMLU-Pro with −47.1% latency and −48.5% tokens**
+  by deciding *whether to run a model's reasoning mode at all*, not which screen a person meant. It
+  is evidence that a cheap classifier can beat guessing; it is not evidence about this destination
+  map. *Trap:* the cost of being wrong lands on
+  the person who is typing, not on the model. A guess that reorganises the screen is the same class
+  of failure AG-5 refuses, and the escape hatch has to be cheaper than the mistake: name the chosen
+  destination on screen, keep the typed text, put the alternatives one keystroke away, and let the
+  routing choice be explained the way `OR-11` requires every routing choice to be explained. Do
+  not ship this before AG-2 and AG-3 — an intent with no registry to resolve against is a keyword
+  search with better branding. *Done-when:* "why are the tests flaky" opens Inspect → Testing with
+  the destination named on screen and the next-best alternative visible; correcting it does not
+  lose the typed sentence; and a query the matcher cannot place leaves the screen exactly where it
+  was, watched by typing something that is not a feature.
+
+### Counting
+
+`AG-1`…`AG-6` add six rows over six new IDs. Together with `OR-18` from the lease correction on
+the same day, the pool goes from §AF's 342 rows over 339 unique IDs to **349 rows over 346 unique
+IDs**. None of the six is inserted into a wave table, for §AD's reason: appendix rows that claim a
+wave and never appear in it are how the §R-0 counts went wrong. Two of them are already placed
+under other names — AG-3 *is* `UX-6` in W14 and must not be scheduled twice, and AG-5 is `V-10`
+plus `V-11`'s parked half. The dependency the directive does not state is stated in AG-4: **the
+palette comes before the clean screen**, because hiding navigation costs discoverability and an
+escape hatch is what makes the saving repayable.
+

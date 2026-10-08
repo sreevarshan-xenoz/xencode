@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the plan now holds the workspace restructure as `AG-1`…`AG-6`
+
+No screen changed. What changed is that the owner's UI directive — *"Simple by default.
+Powerful when you go looking for it"*, eight workspaces (Home, Work, Project, Review, Inspect,
+Orchestrate, Simulate, Settings) instead of a hundred competing panels, reached through
+`Workspace → View → Panels → Context` — is written into `NEXT_PLAN_TASKS.md` as six items with
+the current tree checked against it, line by line.
+
+Three parts of it were already scheduled under other names and are not re-numbered: the
+Orchestrate workspace is the mode `Ctrl+Space` already flips, the command palette is `UX-6`, and
+the context-adaptive panel idea is `V-10` with its self-rearranging half parked as `V-11`. Four
+things the directive assumes turned out to be wrong, and the items say so:
+
+- The key it names is spent. `Ctrl+K` opens the background task panel
+  (`xencode-tui-rs/src/keymap.rs:440`, tested at `:3265`), so the palette has to choose a chord
+  and say what moved rather than take a free key. The earlier plan row claiming no binding
+  existed is corrected.
+- "Simple by default" is currently false by configuration: the shipped default disclosure level
+  is 4 (`xencode-config-rs/src/config.rs:1035`), the specialist tier.
+- The destination registry has 27 rows while its own doc comment says "all 26"
+  (`focus.rs:555`), and `navigate_feature` (`:862`) is a second hand-typed list of the same
+  thing. A third list would be the next drift, so `AG-2` asks for one derived table.
+- `Workspace` already means a team session (`xencode-collaboration-rs/src/workspace.rs:38`), a
+  file-scan entry (`xencode-core-rs/src/workspace.rs:26`) and, on screen, the file tree
+  (`📁 Workspace (N files)`), so `AG-1` is a naming decision before it is anything else.
+
+`AG-4` also records the argument against the directive's own order: hidden navigation roughly
+halves discoverability, so the palette (`AG-3`) ships before the clean screen, not after it.
+
 ### Fixed — three capabilities described as wired when nothing called them
 
 `OR-4`'s worker leases, `OR-15`'s task contract and `OR-16`'s result envelope were each
