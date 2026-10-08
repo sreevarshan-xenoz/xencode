@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Web Preview recorded as experimental, not as a screen
+
+The owner decided the browser-preview idea stays an experimental capability — *"No need to let this
+rabbit hole eat the main TUI. We can revisit it once the core TUIOS/workspace architecture is
+solid."* — and named five parts for it: live screenshot, dev-server detection, console output, DOM
+inspection, open interactive browser. Checking those against the tree produced `AH-1`…`AH-3`, and
+four of the five turned out to need no product code at all: the Playwright MCP recipe that shipped as
+`CU-2` already reaches `browser_take_screenshot`, `browser_console_messages`, `browser_snapshot` and
+`browser_evaluate`, all in the server's default tool group, with `--console-level` and
+`--snapshot-boxes` as flags rather than features.
+
+What is genuinely missing is dev-server detection, which is a socket question and not a browser one —
+nothing in the workspace reads listening ports today. That is `AH-2`, and it is the one part of this
+that can be built without waiting for anything, because the shipped recipe currently asks a person to
+type the dev-server URL by hand.
+
+Rendering a page inside the terminal is deliberately left unbuilt (`AH-3`, parked): the TUI has no
+image widget of any kind, and a preview that renders a page which calls the local API would be the
+first browser client for `xencode`'s server — whose missing CORS layer is an explicit decision guarded
+by a test (`xencode-server-rs/src/routes.rs:243-245`, `no_cors_headers_are_emitted`), so that half is
+a security choice rather than a UI one.
+
 ### Added — the plan now holds the workspace restructure as `AG-1`…`AG-6`
 
 No screen changed. What changed is that the owner's UI directive — *"Simple by default.
