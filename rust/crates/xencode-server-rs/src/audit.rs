@@ -15,6 +15,11 @@
 //! `xencode audit verify` prints that, and [`describe`] turns a problem into
 //! a sentence.
 //!
+//! Not every record starts life in a `WorkspaceManager`. A decision taken in a
+//! repository with no server running — lifting a merge veto, say — belongs in
+//! the same trail, and [`AuditSink::append_external`] links it in the same way,
+//! numbering it from the file rather than from a manager's counter.
+//!
 //! What a hash chain without a key cannot do, stated plainly: anyone who can
 //! rewrite the whole file can recompute the chain as they rewrite it, and
 //! nothing here would notice. Nor can it prove a server *omitted* an event it
@@ -100,9 +105,44 @@ impl AuditSink {
         state.path.is_some() && !matches!(&state.file, Some(None))
     }
 
-    /// Number of events this sink has written.
+    /// Number of events this sink has mirrored out of a `WorkspaceManager`.
+    /// Records appended with [`AuditSink::append_external`] are not counted
+    /// here: they follow the file's own numbering, not the manager's.
     pub fn written(&self) -> u64 {
         self.state.lock().unwrap().last_seq
+    }
+
+    /// Append one record that did not come from a `WorkspaceManager`.
+    ///
+    /// A merge decision is not a session: `xencode merge` runs inside a
+    /// repository, with no server and no workspace manager in the process, and
+    /// the trail it has to join is this same chained file. The caller builds
+    /// the record; the link is maintained here exactly as for a mirrored one,
+    /// so the digest the next line names as its `prev` advances either way and
+    /// `xencode audit verify` still walks one log rather than two.
+    ///
+    /// Returns the sequence written, or the reason it could not be. A caller
+    /// about to *remove* a block has to treat a failed write as fatal — the
+    /// point of the record is that the removal was not silent.
+    pub fn append_external(&self, event: &AuditEvent) -> Result<u64, String> {
+        let mut state = self.state.lock().unwrap();
+        let path = state
+            .path
+            .clone()
+            .ok_or_else(|| "the audit trail is disabled: no log path is configured".to_string())?;
+        let seq = next_external_seq(&path);
+        let mut record = event.clone();
+        record.seq = seq;
+        if !state.linked {
+            state.prev_link = continue_from(&path);
+            state.linked = true;
+        }
+        let (line, digest) = chained_line(&record, &state.prev_link)
+            .map_err(|e| format!("cannot serialize audit record {seq}: {e}"))?;
+        state.prev_link = digest;
+        Self::append(&mut state, &path, &line)
+            .map_err(|e| format!("cannot append to the audit trail: {e}"))?;
+        Ok(seq)
     }
 
     /// Mirror every event in the manager's trail newer than the last one
@@ -154,13 +194,16 @@ impl AuditSink {
                 return false;
             }
         };
-        Self::append(state, &path, &line)
+        Self::append(state, &path, &line).is_ok()
     }
 
     /// Open the file if needed and put one complete line at the end of it.
-    fn append(state: &mut State, path: &std::path::Path, line: &str) -> bool {
+    fn append(state: &mut State, path: &std::path::Path, line: &str) -> Result<(), String> {
         if matches!(&state.file, Some(None)) {
-            return false;
+            return Err(format!(
+                "this sink stopped writing to {} after an earlier failure",
+                path.display()
+            ));
         }
         if state.file.is_none() {
             state.file = Some(
@@ -173,24 +216,44 @@ impl AuditSink {
                 },
             );
         }
-        let Some(Some(file)) = state.file.as_mut() else {
-            return false;
+        let written = {
+            let Some(Some(file)) = state.file.as_mut() else {
+                return Err(format!("cannot open {} for appending", path.display()));
+            };
+            file.write_all(line.as_bytes())
+                .and_then(|_| file.write_all(b"\n"))
         };
-        match file
-            .write_all(line.as_bytes())
-            .and_then(|_| file.write_all(b"\n"))
-        {
-            Ok(()) => true,
+        match written {
+            Ok(()) => Ok(()),
             Err(e) => {
                 warn!(
                     "audit sink disabled: write to {} failed: {e}",
                     path.display()
                 );
                 state.file = Some(None);
-                false
+                Err(format!("write to {} failed: {e}", path.display()))
             }
         }
     }
+}
+
+/// The `seq` a record appended outside a session carries: one past the highest
+/// one already in the file. Lines that do not parse are skipped rather than
+/// trusted — a torn tail is reported by [`verify_chain`] as what it is, and
+/// restarting the numbering under it would make that worse to read.
+fn next_external_seq(path: &std::path::Path) -> u64 {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 1;
+    };
+    let mut highest = 0u64;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            if let Some(seq) = value.get("seq").and_then(|v| v.as_u64()) {
+                highest = highest.max(seq);
+            }
+        }
+    }
+    highest + 1
 }
 
 /// Build one record: the event's fields, plus the digest it links to and its

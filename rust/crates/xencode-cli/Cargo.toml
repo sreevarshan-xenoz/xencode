@@ -19,6 +19,7 @@ xencode-memory-rs = { path = "../xencode-memory-rs" }
 xencode-providers-rs = { path = "../xencode-providers-rs" }
 xencode-tui-rs = { path = "../xencode-tui-rs" }
 xencode-server-rs = { path = "../xencode-server-rs" }
+xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
@@ -38,4 +39,3 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 [dev-dependencies]
 tempfile = "3"
-xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }

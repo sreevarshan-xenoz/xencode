@@ -9,4 +9,6 @@ pub use wire::{
     ClientFrame, MemberInfo, ServerFrame, CLOSE_BAD_TOKEN, CLOSE_NO_SESSION, CLOSE_RBAC_DENIED,
     CLOSE_SESSION_FULL, MAX_SESSION_MEMBERS,
 };
-pub use workspace::{AuditAction, AuditEvent, Role, Workspace, WorkspaceError, WorkspaceManager};
+pub use workspace::{
+    audit_stamp, AuditAction, AuditEvent, Role, Workspace, WorkspaceError, WorkspaceManager,
+};

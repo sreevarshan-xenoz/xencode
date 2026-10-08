@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-17`: a review or verification outcome can block a merge, and the blocked worker cannot unblock it
+
+`xencode merge land` had one problem the plan it printed already described: it computed
+whether the workers' checks had passed, printed `All worker checks passed: false` in the
+plan, and then merged the branch anyway. The field was written, serialized and asserted in
+a test, and never read by the code that actually integrates anything. A land now has four
+requirements instead of two — a named human decided yes, no block is open on any branch in
+the plan, every recorded check passed (and a branch with no recorded check counts as
+unproven rather than green, the same rule the result envelope holds), and the tree merges
+clean. The open-block check reads the record again from disk rather than trusting the plan
+in hand, so a plan built before a reviewer objected is not a way around the objection.
+
+The block itself is `xencode merge veto <branch> --reason <text>`, stored per repository in
+`.xencode/vetoes.json`, and the worker it blocks is taken from that branch's commit author
+(`git log -1 --format=%an`) rather than typed in — the commit author is the only identity on
+this machine that was not supplied by whoever is asking. `xencode merge clear-veto <id>
+--by <name>` lifts it, and refuses a name that matches the blocked worker even in a
+different case, so `tester` cannot lift a block on `Tester`; it also refuses a stated policy
+that does not name the block it claims to clear. `xencode merge vetoes [--open]` lists what
+is on record. Recording a block succeeds even when the audit trail cannot be written, and
+says so, because the block holds either way; lifting one writes nothing until the trail has
+accepted the record, so a clear that cannot be audited leaves the branch blocked and never
+becomes a silent unblocking that has to be taken back. Lifting a block without leaving a
+trace is the thing this exists to prevent. Both halves land on the existing hash-chained
+audit log as `merge_vetoed` and `merge_veto_cleared`, and `xencode audit verify` reports
+them.
+
+Observed end to end in a scratch repository rather than only in tests: the same `merge land`
+command that committed `9c414ecc` with nothing on record refused with `merge refused: 1
+open veto(es), and a veto is not the worker's to lift` once a reviewer had objected, the
+worker's own attempt to clear it (`--by tester`, refused on a case-insensitive match against
+the commit author `Tester`) left the block listed as open, and after a second name cleared it
+the same command landed again — with `audit verify` reading `2 records, chain intact` and
+`2 records, chain broken — line 1: the contents do not match the digest recorded on this
+line` the moment one word of a stored record was edited. With the audit log made unwritable,
+the clear answered `'veto-0001' is still open and nothing was changed` and the veto file was
+byte-for-byte what it had been. A block against a branch that does not exist is refused, and
+a block file that does not parse is an error rather than an empty list.
+
 ### Added — fifty-one product directions sorted into what is new, what others already ship, and what is already here
 
 The owner sent two briefs — twenty-five directions, then twenty-six more plus an umbrella idea and a
