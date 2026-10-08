@@ -3565,11 +3565,18 @@ classifier that does not exist.
 - **VF-6 clippy `--message-format=json`** — the cheapest structured feedback
   channel that exists. **Already claimed as CI-5** (`:1535`); recorded so nobody
   double-counts it.
+  - [x] **Closed 2026-10-08 as done by `CI-5`**, which shipped on 2026-09-28: `xencode
+    toolchain lint` runs `cargo clippy --message-format=json` and reports the
+    count and the lints as structured evidence. No separate work remains.
 - **VF-7 `cargo-semver-checks` / `cargo-public-api --baseline-rev`** — a local
   git-rev baseline works without publishing anything. **S/M**. Trap: all 15
   crates sit at 0.1.0 unpublished with no external consumer, so semver checking
   is ceremony until "public surface = what MCP and plugin authors see" is
   actually defined. That definition is arguably M-milestone work.
+  - [ ] **Parked 2026-10-08 on its own trap.** All 16 crates are still 0.1.0 and
+    unpublished, and no "public surface" has been defined, so a semver check
+    would compare against nothing anyone depends on. It comes back when that
+    definition exists.
 
 **Rejected here:** ML/predictive test selection (Meta's version needs millions
 of historical CI runs; we have none — VF-5's `rdeps` is the honest
@@ -5008,6 +5015,11 @@ the ledger already.
 - **CU-1 — A verifier seam**: evidence-shaped pass/fail plus an artifact, feeding
   **MM-3**'s VLM check. *Effort: S–M.* Cheap now; the trap is generalizing it
   into an "external executor" framework.
+  - [ ] **Waits on what it feeds (2026-10-08).** Neither consumer exists yet:
+    `EVd-3` (the checks-ran verdict) has no commit of its own, and `MM-3` (the
+    local vision model) is not built. A seam with nothing on the far side would
+    be the speculative abstraction its trap warns about; it is built with the
+    first of the two.
 - **CU-2 — Browser verification as a Playwright-MCP recipe (**MM-11**)**, with
   zero product code. *Effort: S.* *Trap:* MCP tools are `ToolClass::External` —
   no preview, no undo — and screenshots burn a local model's context.
