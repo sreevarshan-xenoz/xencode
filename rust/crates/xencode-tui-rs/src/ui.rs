@@ -1294,8 +1294,11 @@ fn setting_display(app: &App, idx: usize) -> String {
         SettingKind::Action => {
             if app.settings_reset_active {
                 "✅ Reset to defaults!".to_string()
+            } else if app.settings_reset_armed {
+                "⚠️  Press Enter again to erase every setting — URLs, model, stored keys"
+                    .to_string()
             } else {
-                "⚠️  Reset to defaults (Enter to confirm)".to_string()
+                "⚠️  Reset to defaults (Enter, then Enter again)".to_string()
             }
         }
     }

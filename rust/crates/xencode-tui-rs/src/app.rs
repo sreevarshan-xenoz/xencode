@@ -771,6 +771,9 @@ pub struct App<'a> {
     // Settings interactive state
     pub settings_cursor: usize,
     pub settings_reset_active: bool,
+    /// Factory Reset has been asked for once; the next Enter on that row
+    /// performs it (TX-5). Any move off the row disarms it.
+    pub settings_reset_armed: bool,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -3081,6 +3084,7 @@ impl<'a> App<'a> {
 
             settings_cursor: 0,
             settings_reset_active: false,
+            settings_reset_armed: false,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -9460,13 +9464,12 @@ impl<'a> App<'a> {
                                 ));
                             }
                             Err(e) => {
-                                let _ =
-                                    tx.send(format!("[HEALTH]ollama|healthy|{}|{}", latency, e));
+                                let _ = tx.send(format!("[HEALTH]ollama|error|{}|{}", latency, e));
                             }
                         }
                     } else {
                         let _ = tx.send(format!(
-                            "[HEALTH]ollama|healthy|{}|Running (0 models installed)",
+                            "[HEALTH]ollama|unavailable|{}|Running (0 models installed)",
                             latency
                         ));
                     }
