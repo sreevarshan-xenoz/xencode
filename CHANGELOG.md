@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `TX-3`: `/` in the TUI now types the slash it opened the composer with
+
+Pressing `/` outside the composer opened it but dropped the slash, so `/init` typed
+that way reached the model as the word "init". The slash is now typed into an empty
+draft, so slash commands work from the first key. A draft that already has text is
+left unchanged.
+
 ### Fixed — `AA-1` (follow-up): a llama.cpp server that knows the model by another name says so
 
 A `llama-server` started by hand names its model by its file path unless it is given

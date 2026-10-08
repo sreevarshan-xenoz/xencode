@@ -643,6 +643,12 @@ fn global_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         KeyCode::Char('i') | KeyCode::Char('/') if !app.text_entry_active() => {
             app.input_mode = InputMode::Editing;
             app.focus = FocusArea::ChatInput;
+            // `/` is the start of a command, so it stays typed: dropping it sent
+            // `/init` to the model as "init". Only into an empty draft, so a
+            // half-written prompt is not changed by the key that reopens it.
+            if key.code == KeyCode::Char('/') && app.chat_input.is_empty() {
+                app.chat_input.insert_char('/');
+            }
         }
         KeyCode::Char('m') if !app.text_entry_active() => {
             app.focus = if app.focus == FocusArea::ModelSelector {
@@ -2044,6 +2050,27 @@ mod tests {
     fn press_with_mods(app: &mut App, code: KeyCode, mods: KeyModifiers) -> KeyFlow {
         let (tx, _rx) = mpsc::unbounded_channel();
         handle_key(app, KeyEvent::new(code, mods), &tx)
+    }
+
+    #[test]
+    fn slash_opens_the_composer_with_the_slash_typed() {
+        let mut app = app_with(FocusArea::FileExplorer);
+        app.input_mode = InputMode::Normal;
+        press(&mut app, KeyCode::Char('/'));
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert_eq!(app.chat_input.lines().join("
+"), "/");
+        for c in "init".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.chat_input.lines().join("
+"), "/init");
+
+        // A draft already there is left as it was.
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Char('/'));
+        assert_eq!(app.chat_input.lines().join("
+"), "/init");
     }
 
     #[test]
