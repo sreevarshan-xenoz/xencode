@@ -1344,6 +1344,174 @@ esac
     ;;
 esac
 ;;
+(orchestrator)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__orchestrator_commands" \
+"*::: :->orchestrator" \
+&& ret=0
+
+    case $state in
+    (orchestrator)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-orchestrator-command-$line[1]:"
+        case $line[1] in
+            (status)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(agents)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(tasks)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(graph)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::recipe -- The recipe'\''s `name`, as written in the file:_default' \
+&& ret=0
+;;
+(logs)
+_arguments "${_arguments_options[@]}" : \
+'--lines=[How many lines to read from the end]:LINES:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::run -- A detached run id or prefix, or a recorded team run id. Without it, the runs that have anything to read are listed and nothing is chosen for you:_default' \
+&& ret=0
+;;
+(permissions)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::agent -- The agent to build the launch line for. Without it every agent on the roster is shown, which is the honest width of the answer:_default' \
+&& ret=0
+;;
+(costs)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(inspect)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':target -- A task id, a detached run id or prefix, a team run id, or a recipe name:_default' \
+&& ret=0
+;;
+(retry)
+_arguments "${_arguments_options[@]}" : \
+'--approved-by=[Your name, for the record]:APPROVED_BY:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+':recipe -- The recipe'\''s `name`, as written in the file:_default' \
+':role -- The role inside that recipe to run again:_default' \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':target -- A task id, or a detached run id or prefix:_default' \
+&& ret=0
+;;
+(attach)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':agent -- The agent to attach to, by its roster name:_default' \
+'::target -- The session or server address its own listing command prints. Omit it to be told what to look up, and to get that command; xencode does not pick a session for you:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__orchestrator__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-orchestrator-help-command-$line[1]:"
+        case $line[1] in
+            (status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(agents)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(tasks)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(graph)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(logs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(permissions)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(costs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(inspect)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(retry)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(attach)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[Maximum findings to show (0 shows all)]:LIMIT:_default' \
@@ -2840,6 +3008,66 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(orchestrator)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__orchestrator_commands" \
+"*::: :->orchestrator" \
+&& ret=0
+
+    case $state in
+    (orchestrator)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-orchestrator-command-$line[1]:"
+        case $line[1] in
+            (status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(agents)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(tasks)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(graph)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(logs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(permissions)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(costs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(inspect)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(retry)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(attach)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (advise)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3252,7 +3480,8 @@ _xencode_commands() {
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
-'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it — and run one, but only under a name that approves it (OR-9, OR-10)' \
+'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it — and run one, but only under a name that approves it, and only where the Local-Only posture will allow the work to go (OR-9, OR-10, OR-13)' \
+'orchestrator:The orchestrator'\''s own control surface, run headless\: what the fleet is, what it is doing, what it cost, and what a launch would be allowed to do — plus stopping a task, re-running one role, and handing this terminal to a vendor'\''s own running session (OR-14)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -3831,7 +4060,8 @@ _xencode__subcmd__help_commands() {
 'computers:Manage and inspect registered computer backends (AF-4)' \
 'compete:Compete candidate implementations on isolated branches, verify each, and let a person pick one (AF-5)' \
 'merge:Evaluate merge conflicts with git merge-tree and land branches under a human approval gate (OR-5)' \
-'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it — and run one, but only under a name that approves it (OR-9, OR-10)' \
+'team:Read the team recipes this project keeps in \`.xencode/teams\`\: the roles, who plays each one, and which checks gate it — and run one, but only under a name that approves it, and only where the Local-Only posture will allow the work to go (OR-9, OR-10, OR-13)' \
+'orchestrator:The orchestrator'\''s own control surface, run headless\: what the fleet is, what it is doing, what it cost, and what a launch would be allowed to do — plus stopping a task, re-running one role, and handing this terminal to a vendor'\''s own running session (OR-14)' \
 'advise:Repository insights from the .xencode snapshot\: broken imports, import cycles, hub files and orphans' \
 'server:Start the collaboration server' \
 'analyze:Analyze code for issues and vulnerabilities' \
@@ -4383,6 +4613,78 @@ _xencode__subcmd__help__subcmd__models__subcmd__list_commands() {
 _xencode__subcmd__help__subcmd__mutants_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help mutants commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator_commands() {
+    local commands; commands=(
+'status:What way of working this is, where work is allowed to go, and how much of the fleet is on record right now' \
+'agents:The agents xencode has a roster row for\: whether each is installed, whether the posture refuses work handed to it, and whether it can be attached to' \
+'tasks:The two lists of processes xencode started here and still knows about\: the background task registry, and the detached runs of its own agent loop' \
+'graph:One recipe'\''s dependency graph as the scheduler sees it\: the waves, what each role waits on, the critical path, the bottleneck, and where each role ended the last time this exact recipe was recorded. With no recipe named, one row per run this project has recorded. Nothing is launched' \
+'logs:The newest lines of a run'\''s own log, naming the file they were read from. A detached run keeps a log; a recorded team run keeps timings and exit statuses and never captured its children'\''s output, and says which of the two it is rather than printing an empty block' \
+'permissions:What a launch of an agent would be allowed to do under this project'\''s approval mode — built by the same function a launch uses — beside the approvals this project'\''s records say a person actually answered' \
+'costs:What the model calls recorded here cost, priced only where a price is known, beside what the recorded team runs drew from the wall' \
+'inspect:One thing in full, with the file each figure came from\: a background task by its registry id, a detached run, a recorded team run, or a recipe by its name' \
+'retry:Re-run one role of a recipe as a real \`sh -c\` child of this process and report what it did. Your name is required, because a second run of somebody else'\''s work is a decision and not a retry button. The roles it waits on are not run, and the output says which ones were skipped' \
+'stop:Stop something xencode started\: a background task by its registry id, or a detached run by its id. This signals one process to stop, so it is only ever pointed at a task this machine recorded launching' \
+'attach:Hand this terminal to one of an agent'\''s own running sessions, and take it back when the vendor'\''s command ends. xencode prints nothing while it runs\: the vendor'\''s program has the keyboard, and this command waits for it to let go. Needs a real terminal, because that is the thing being handed over' \
+    )
+    _describe -t commands 'xencode help orchestrator commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__agents_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__agents_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator agents commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__attach_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__attach_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator attach commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__costs_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__costs_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator costs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__graph_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__graph_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator graph commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__inspect_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__inspect_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator inspect commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__logs_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__logs_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator logs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__permissions_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__permissions_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator permissions commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__retry_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__retry_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator retry commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__status_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator status commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__stop_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator stop commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__orchestrator__subcmd__tasks_commands] )) ||
+_xencode__subcmd__help__subcmd__orchestrator__subcmd__tasks_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help orchestrator tasks commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__paths_commands] )) ||
 _xencode__subcmd__help__subcmd__paths_commands() {
@@ -5239,6 +5541,157 @@ _xencode__subcmd__models__subcmd__list_commands() {
 _xencode__subcmd__mutants_commands() {
     local commands; commands=()
     _describe -t commands 'xencode mutants commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator_commands] )) ||
+_xencode__subcmd__orchestrator_commands() {
+    local commands; commands=(
+'status:What way of working this is, where work is allowed to go, and how much of the fleet is on record right now' \
+'agents:The agents xencode has a roster row for\: whether each is installed, whether the posture refuses work handed to it, and whether it can be attached to' \
+'tasks:The two lists of processes xencode started here and still knows about\: the background task registry, and the detached runs of its own agent loop' \
+'graph:One recipe'\''s dependency graph as the scheduler sees it\: the waves, what each role waits on, the critical path, the bottleneck, and where each role ended the last time this exact recipe was recorded. With no recipe named, one row per run this project has recorded. Nothing is launched' \
+'logs:The newest lines of a run'\''s own log, naming the file they were read from. A detached run keeps a log; a recorded team run keeps timings and exit statuses and never captured its children'\''s output, and says which of the two it is rather than printing an empty block' \
+'permissions:What a launch of an agent would be allowed to do under this project'\''s approval mode — built by the same function a launch uses — beside the approvals this project'\''s records say a person actually answered' \
+'costs:What the model calls recorded here cost, priced only where a price is known, beside what the recorded team runs drew from the wall' \
+'inspect:One thing in full, with the file each figure came from\: a background task by its registry id, a detached run, a recorded team run, or a recipe by its name' \
+'retry:Re-run one role of a recipe as a real \`sh -c\` child of this process and report what it did. Your name is required, because a second run of somebody else'\''s work is a decision and not a retry button. The roles it waits on are not run, and the output says which ones were skipped' \
+'stop:Stop something xencode started\: a background task by its registry id, or a detached run by its id. This signals one process to stop, so it is only ever pointed at a task this machine recorded launching' \
+'attach:Hand this terminal to one of an agent'\''s own running sessions, and take it back when the vendor'\''s command ends. xencode prints nothing while it runs\: the vendor'\''s program has the keyboard, and this command waits for it to let go. Needs a real terminal, because that is the thing being handed over' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode orchestrator commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__agents_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__agents_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator agents commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__attach_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__attach_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator attach commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__costs_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__costs_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator costs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__graph_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__graph_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator graph commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help_commands() {
+    local commands; commands=(
+'status:What way of working this is, where work is allowed to go, and how much of the fleet is on record right now' \
+'agents:The agents xencode has a roster row for\: whether each is installed, whether the posture refuses work handed to it, and whether it can be attached to' \
+'tasks:The two lists of processes xencode started here and still knows about\: the background task registry, and the detached runs of its own agent loop' \
+'graph:One recipe'\''s dependency graph as the scheduler sees it\: the waves, what each role waits on, the critical path, the bottleneck, and where each role ended the last time this exact recipe was recorded. With no recipe named, one row per run this project has recorded. Nothing is launched' \
+'logs:The newest lines of a run'\''s own log, naming the file they were read from. A detached run keeps a log; a recorded team run keeps timings and exit statuses and never captured its children'\''s output, and says which of the two it is rather than printing an empty block' \
+'permissions:What a launch of an agent would be allowed to do under this project'\''s approval mode — built by the same function a launch uses — beside the approvals this project'\''s records say a person actually answered' \
+'costs:What the model calls recorded here cost, priced only where a price is known, beside what the recorded team runs drew from the wall' \
+'inspect:One thing in full, with the file each figure came from\: a background task by its registry id, a detached run, a recorded team run, or a recipe by its name' \
+'retry:Re-run one role of a recipe as a real \`sh -c\` child of this process and report what it did. Your name is required, because a second run of somebody else'\''s work is a decision and not a retry button. The roles it waits on are not run, and the output says which ones were skipped' \
+'stop:Stop something xencode started\: a background task by its registry id, or a detached run by its id. This signals one process to stop, so it is only ever pointed at a task this machine recorded launching' \
+'attach:Hand this terminal to one of an agent'\''s own running sessions, and take it back when the vendor'\''s command ends. xencode prints nothing while it runs\: the vendor'\''s program has the keyboard, and this command waits for it to let go. Needs a real terminal, because that is the thing being handed over' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode orchestrator help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__agents_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__agents_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help agents commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__attach_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__attach_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help attach commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__costs_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__costs_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help costs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__graph_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__graph_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help graph commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__inspect_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__inspect_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help inspect commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__logs_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__logs_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help logs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__permissions_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__permissions_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help permissions commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__retry_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__retry_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help retry commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__status_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help status commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__stop_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help stop commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__help__subcmd__tasks_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__help__subcmd__tasks_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator help tasks commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__inspect_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__inspect_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator inspect commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__logs_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__logs_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator logs commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__permissions_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__permissions_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator permissions commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__retry_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__retry_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator retry commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__status_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator status commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__stop_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator stop commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__orchestrator__subcmd__tasks_commands] )) ||
+_xencode__subcmd__orchestrator__subcmd__tasks_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode orchestrator tasks commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__paths_commands] )) ||
 _xencode__subcmd__paths_commands() {

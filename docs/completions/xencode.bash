@@ -112,6 +112,9 @@ _xencode() {
             xencode,mutants)
                 cmd="xencode__subcmd__mutants"
                 ;;
+            xencode,orchestrator)
+                cmd="xencode__subcmd__orchestrator"
+                ;;
             xencode,paths)
                 cmd="xencode__subcmd__paths"
                 ;;
@@ -478,6 +481,9 @@ _xencode() {
             xencode__subcmd__help,mutants)
                 cmd="xencode__subcmd__help__subcmd__mutants"
                 ;;
+            xencode__subcmd__help,orchestrator)
+                cmd="xencode__subcmd__help__subcmd__orchestrator"
+                ;;
             xencode__subcmd__help,paths)
                 cmd="xencode__subcmd__help__subcmd__paths"
                 ;;
@@ -711,6 +717,39 @@ _xencode() {
                 ;;
             xencode__subcmd__help__subcmd__models,list)
                 cmd="xencode__subcmd__help__subcmd__models__subcmd__list"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,agents)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__agents"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,attach)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__attach"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,costs)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__costs"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,graph)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__graph"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,inspect)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__inspect"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,logs)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__logs"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,permissions)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__permissions"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,retry)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__retry"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,status)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__status"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,stop)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__stop"
+                ;;
+            xencode__subcmd__help__subcmd__orchestrator,tasks)
+                cmd="xencode__subcmd__help__subcmd__orchestrator__subcmd__tasks"
                 ;;
             xencode__subcmd__help__subcmd__perf,check)
                 cmd="xencode__subcmd__help__subcmd__perf__subcmd__check"
@@ -1042,6 +1081,78 @@ _xencode() {
             xencode__subcmd__models__subcmd__help,list)
                 cmd="xencode__subcmd__models__subcmd__help__subcmd__list"
                 ;;
+            xencode__subcmd__orchestrator,agents)
+                cmd="xencode__subcmd__orchestrator__subcmd__agents"
+                ;;
+            xencode__subcmd__orchestrator,attach)
+                cmd="xencode__subcmd__orchestrator__subcmd__attach"
+                ;;
+            xencode__subcmd__orchestrator,costs)
+                cmd="xencode__subcmd__orchestrator__subcmd__costs"
+                ;;
+            xencode__subcmd__orchestrator,graph)
+                cmd="xencode__subcmd__orchestrator__subcmd__graph"
+                ;;
+            xencode__subcmd__orchestrator,help)
+                cmd="xencode__subcmd__orchestrator__subcmd__help"
+                ;;
+            xencode__subcmd__orchestrator,inspect)
+                cmd="xencode__subcmd__orchestrator__subcmd__inspect"
+                ;;
+            xencode__subcmd__orchestrator,logs)
+                cmd="xencode__subcmd__orchestrator__subcmd__logs"
+                ;;
+            xencode__subcmd__orchestrator,permissions)
+                cmd="xencode__subcmd__orchestrator__subcmd__permissions"
+                ;;
+            xencode__subcmd__orchestrator,retry)
+                cmd="xencode__subcmd__orchestrator__subcmd__retry"
+                ;;
+            xencode__subcmd__orchestrator,status)
+                cmd="xencode__subcmd__orchestrator__subcmd__status"
+                ;;
+            xencode__subcmd__orchestrator,stop)
+                cmd="xencode__subcmd__orchestrator__subcmd__stop"
+                ;;
+            xencode__subcmd__orchestrator,tasks)
+                cmd="xencode__subcmd__orchestrator__subcmd__tasks"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,agents)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__agents"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,attach)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__attach"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,costs)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__costs"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,graph)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__graph"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,help)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__help"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,inspect)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__inspect"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,logs)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__logs"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,permissions)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__permissions"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,retry)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__retry"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,status)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__status"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,stop)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__stop"
+                ;;
+            xencode__subcmd__orchestrator__subcmd__help,tasks)
+                cmd="xencode__subcmd__orchestrator__subcmd__help__subcmd__tasks"
+                ;;
             xencode__subcmd__perf,check)
                 cmd="xencode__subcmd__perf__subcmd__check"
                 ;;
@@ -1295,7 +1406,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --dump-config --help --version scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
+            opts="-h -V --dump-config --help --version scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team orchestrator advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2767,7 +2878,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
+            opts="scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team orchestrator advise server analyze fetch interop anchor toolchain doctor session paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp hw history bootstrap tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4001,6 +4112,174 @@ _xencode() {
         xencode__subcmd__help__subcmd__mutants)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator)
+            opts="status agents tasks graph logs permissions costs inspect retry stop attach"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__agents)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__attach)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__costs)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__graph)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__inspect)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__logs)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__permissions)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__retry)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__stop)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__orchestrator__subcmd__tasks)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -6209,6 +6488,400 @@ _xencode() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator)
+            opts="-h --help status agents tasks graph logs permissions costs inspect retry stop attach help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__agents)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__attach)
+            opts="-h --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__costs)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__graph)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help)
+            opts="status agents tasks graph logs permissions costs inspect retry stop attach help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__agents)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__attach)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__costs)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__graph)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__inspect)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__logs)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__permissions)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__retry)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__stop)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__help__subcmd__tasks)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__inspect)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__logs)
+            opts="-h --lines --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --lines)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__permissions)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__retry)
+            opts="-h --approved-by --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --approved-by)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__status)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__stop)
+            opts="-h --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__orchestrator__subcmd__tasks)
+            opts="-h --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
                 --format)
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0

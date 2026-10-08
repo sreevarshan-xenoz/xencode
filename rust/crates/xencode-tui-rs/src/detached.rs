@@ -331,7 +331,10 @@ pub fn write_stop(dir: &Path) -> std::io::Result<()> {
     std::fs::write(stop_path(dir), "stop\n")
 }
 
-fn read_pid(dir: &Path) -> Option<u32> {
+/// The pid hint the child wrote when it started, when there is one. Stopping a
+/// run needs the same number the status was derived from, and reading `/proc`
+/// for another one would be a second answer to one question.
+pub fn read_pid(dir: &Path) -> Option<u32> {
     std::fs::read_to_string(pid_path(dir))
         .ok()?
         .trim()

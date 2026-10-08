@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 2765 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 2792 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -298,6 +298,11 @@ These twenty-four are the only strings the chat input intercepts (`SLASH_COMMAND
 /workers                    The fleet, your recipes' roles, tasks, recorded runs, newest events and
                             waiting approvals (Ctrl+A). Every figure names the row it was read from,
                             and a worker xencode cannot observe says unknown rather than idle
+/orchestrator <verb>        The same state as a way of working: on|off (Ctrl+Space flips the badge),
+                            status, agents, tasks, graph, logs, costs, permissions, inspect, retry,
+                            stop and attach. Turning it off leaves the session as it was found;
+                            attach hands this real terminal to a vendor's own running session and
+                            comes back with the exit status that process returned
 /bytebot <task>             Delegate the task to the agent loop and watch its real calls
 /spawn <task> [#branch]     Run the delegated loop in a fresh git worktree
 /spawn status               List registered spawn runs and where they live
@@ -352,6 +357,9 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Advise** | `xencode advise [FILTER] [--json] [--limit 40]` | Repo insights from the `.xencode` snapshot |
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
 | **Worktree** | `xencode worktree list` | List/add/remove git worktrees |
+| **Team** | `xencode team list` / `plan <name>` / `run <name> --approved-by <you>` | The recipes in `.xencode/teams/`: what each role waits on, the waves a run would schedule, and a run that starts nothing until your name is on it |
+| **Orchestrator** | `xencode orchestrator status` / `agents` / `graph` / `logs` / `permissions` / `inspect` | The fleet headless: the posture by name, what each roster agent may be handed, one recipe's dependency graph, a run's own log, the grant a launch would get — every reading says what it looked at and changes nothing |
+| **Orchestrator** | `xencode orchestrator retry` / `stop` / `attach` | Re-run one role under your name, signal one process xencode recorded starting, or hand this real terminal to a vendor's own running session and take it back with its exit status |
 | **Compete** | `xencode compete run "<question>" --arm a --arm b` | Two or three candidate implementations, each built on its own branch in its own worktree and put through the verification checklist, printed as `{ran, skipped, failed, evidence-ref}` per arm with no composite score; `xencode compete pick <run> <arm>` is the human's choice and leaves the other branch and its evidence on disk |
 | **Cache** | `xencode cache stats` | Show cache statistics |
 | **Audit** | `xencode audit verify [PATH]` | Check the server's audit log was not edited afterwards |
@@ -793,7 +801,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (2765 passing)
+cargo test                          # Full workspace suite (2792 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

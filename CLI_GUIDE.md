@@ -4219,6 +4219,91 @@ A recipe that has run here gets a quote instead of `no quote`, and the row label
 it as what it is — `a next run quoted at 900ms from rust-fix-1`, its first source
 reading `an estimate, not a measurement`.
 
+### TUI slash: `/orchestrator` (and `Ctrl+Space`)
+
+The same state `/workers` shows, seen as a way of working rather than a screen to
+look at. `Ctrl+Space` flips between `CODING` and `ORCHESTRATOR` in the status bar,
+and `/orchestrator on` and `/orchestrator off` are the same switch by name. The
+mode is one field on the app: nothing is copied, no second task list, no second
+session, and the badge is the only thing that moves.
+
+The verbs are the surface, and the four that report answer from either side — a
+mode that would not say which mode you are in, or let you leave, only locks you
+in. The rest belong to the surface and refuse while the mode is off, naming the
+way in:
+
+```
+/orchestrator on              enter the mode
+/orchestrator status          mode, posture, the six readings, spawns, detached
+                              runs, waiting approvals, and whether there is a
+                              real terminal here to hand over
+/orchestrator agents          the panel filtered to the fleet, one section per verb:
+/orchestrator tasks           agents · tasks · graph · logs · costs — each takes an
+/orchestrator graph           optional text and lands on the row it names
+/orchestrator logs
+/orchestrator costs
+/orchestrator permissions     the grant a launch to each roster agent would get, built
+                              by the same function a launch is built with
+/orchestrator inspect <text>  open the sources of the row the text names, searching all
+                              six sections
+/orchestrator retry <#id>     re-arm one of this session's spawns
+/orchestrator stop <run-id>   ask a detached run to stop, by the name its directory
+                              holds
+/orchestrator attach <agent> <session>
+                              hand this terminal to a vendor's own running session
+/orchestrator off             leave the mode
+```
+
+`attach` is the verb with a hard edge, and it is the reason the mode is not simply
+a nicer panel. xencode's screen is one drawing surface, so a second full-screen
+program cannot live inside it; the only honest meaning of "attach" is to put the
+terminal back the way the shell expects, run the vendor's own command against the
+keyboard you are typing on, and take the screen back when that process ends. Both
+standard input and standard output have to be a terminal for any of that to be
+true, which is why `/orchestrator status` prints which they are:
+
+```
+  terminal — this is a real terminal, so `/orchestrator attach` can hand it over
+```
+
+What it will not do is guess. A roster row that documents no command for taking
+over a session that already exists — seven of the ten rows here — is answered with
+the one-shot call the vendor does document and the reason it is refused:
+
+```
+error: codex has no command that takes over a session it already has. Its help,
+read on 2026-09-28, documents only a one-shot call — `codex exec {prompt}` — which
+would start a new vendor process rather than hand you one, so this command refuses
+instead of pretending.
+```
+
+The same applies to a session you have not named: xencode does not pick the newest
+one, because choosing the session is how a control plane starts lying about what it
+attached to. And a roster row whose program is not on `PATH` here says so.
+
+What happened when this was driven live, in a terminal that really was one:
+
+```
+Handing this terminal to `/home/sree/.local/bin/claude attach sess-1` — roster row
+`claude attach {id}`. xencode stops drawing while the process has the screen and
+takes it back when the vendor's session lets go. Nothing else about this session
+changes.
+
+The terminal is xencode's again; `/home/sree/.local/bin/claude` returned exit
+status: 1.
+```
+
+The second line is the whole point: the exit status is the one that process
+returned, the screen came back on its own, and the session around it was left
+alone. `/orchestrator off` then says what it did:
+
+```
+Orchestrator mode is off. The mode is one field on this app, never a setting, so it
+is not written down anywhere to be left behind: the panel filter and the focus are
+back where they were when you turned it on, and everything else was untouched the
+whole time.
+```
+
 ### `xencode removal <file> [--limit 15] [--format text|json]`
 
 What deleting this file would cost — the dependency graph with one node removed,
@@ -4568,6 +4653,76 @@ machine, not a promise.
 
 Two files claiming the same `name` are refused by path, because picking one by
 directory order would schedule a team nobody read.
+
+### `xencode orchestrator [status|agents|tasks|graph|logs|permissions|costs|inspect|retry|stop|attach] [--format text|json]`
+
+The orchestrator's control surface with no terminal in the way. It is the same
+state the TUI's `/orchestrator` mode works on — the roster, the posture in the
+config, the task registry, the recipes in `.xencode/teams/`, the recorded runs in
+`.xencode/team-runs/`, the detached runs under `.xencode/cache/detached`, the
+metrics and the price table — read by a command instead of a screen. Every verb
+takes `--format text|json` except `stop`.
+
+```
+xencode orchestrator status
+xencode orchestrator agents --format json
+xencode orchestrator graph docs-sweep
+xencode orchestrator logs rust-fix-1 --lines 40
+xencode orchestrator permissions claude
+xencode orchestrator inspect 7
+xencode orchestrator retry docs-sweep survey --approved-by sree
+xencode orchestrator stop 7
+xencode orchestrator attach claude sess-1
+```
+
+- `status` — the posture by name, and the counts it could actually read. A reading
+  with nothing behind it says which directory it looked in rather than printing an
+  empty table that would read as "checked and clear".
+- `agents` — one row per roster name: installed or not, whether the Local Only
+  posture refuses work handed to it, whether the vendor documents a command that
+  takes over one of its own running sessions, and what xencode would run it with.
+  Each cell was read from that program's `--help` on the date the row records, and
+  the footer says so; `xencode agents --health` is what asks a program whether it
+  answers.
+- `tasks` — the two lists of processes xencode started here: the background task
+  registry, and the detached runs of its own agent loop.
+- `graph [recipe]` — one recipe's dependency graph as the scheduler sees it: the
+  waves, what each role waits on, the critical path, the bottleneck, and where each
+  role ended the last time this exact recipe was recorded. With no recipe named,
+  one row per recorded run. Nothing is launched.
+- `logs [run] [--lines N]` — the newest lines of a run's own log, naming the file
+  they were read from. A detached run keeps a log; a recorded team run keeps
+  timings and exit statuses and never captured its children's output, and the
+  command says which of the two it is instead of printing an empty block. Without a
+  name it lists the runs that have anything to read and chooses nothing.
+- `permissions [agent]` — what a launch would be allowed to do under this project's
+  approval mode, built by the same function a launch is built with, beside the
+  approvals this project's records say a person actually answered.
+- `costs` — what the model calls recorded here cost, priced only where a price is
+  known, beside what the recorded team runs drew from the wall.
+- `inspect <target>` — one thing in full, with the file each figure came from: a
+  background task by its registry id, a detached run, a recorded team run, or a
+  recipe by its name. A prefix that could mean more than one thing says so rather
+  than picking.
+- `retry <recipe> <role> --approved-by <name>` — re-run one role as a real `sh -c`
+  child of this process and report what it did. Your name is required, because a
+  second run of somebody else's work is a decision, not a retry button. The roles
+  it waits on are not run, and the output names the ones it skipped. It writes no
+  run record: a retry is not a scheduled run of the team.
+- `stop <target>` — signal one process xencode recorded starting: a background task
+  by its registry id, or a detached run by its id. The line quotes the pid it was
+  given, and says what the pid actually is (the `sh -c` wrapper a task was started
+  with, so a program that wrapper spawned may still be running).
+- `attach <agent> [session]` — hand this terminal to one of an agent's own running
+  sessions and take it back when the vendor's command ends. It runs only a command
+  the vendor's own help documents as taking over a session that already exists;
+  it never resumes a saved conversation and calls that a handover, never picks the
+  session for you, and needs a real terminal because that is the thing being handed
+  over. The screen comes back with the exit status the process returned.
+
+Nothing in the reading verbs launches, stops or changes anything, and each of them
+says so on its last line. `xencode team run <recipe> --approved-by <name>` is what
+starts work; the orchestrator surface is what looks at it.
 
 ### `xencode test --isolate <substring> [--base HEAD] [--repeat 3]`
 
