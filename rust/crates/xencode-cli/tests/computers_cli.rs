@@ -103,8 +103,18 @@ fn computers_use_updates_active_computer_backend() {
 
 #[test]
 fn computers_probe_answers_honestly_when_machine_unreachable() {
+    // This is the unreachable case. Where a docker daemon answers — GitHub's
+    // runners run one — the probe rightly succeeds, which is a different test.
+    let reachable = std::process::Command::new("docker")
+        .arg("info")
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false);
+    if reachable {
+        eprintln!("skipping: a docker daemon answers here, so it is not unreachable");
+        return;
+    }
     let tmp = temp_dir("probe_docker");
-    // On this system, docker daemon is not accessible to normal user or stopped
     // The probe must answer honestly that it cannot reach the machine, not succeed
     let out = xencode(&tmp, &["computers", "probe", "docker"]);
     assert!(!out.status.success());
