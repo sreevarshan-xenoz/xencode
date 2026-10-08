@@ -11457,17 +11457,39 @@ fn run_contract(format: OutputFormat) -> Result<(), String> {
         .iter()
         .filter(|r| matches!(r.verdict, Verdict::Contradicted(_)))
         .count();
+    let untested = results
+        .iter()
+        .filter(|r| matches!(r.verdict, Verdict::Untestable(_)))
+        .count();
+    // A confirmed claim is not one kind: "the flag is there" and "the flag is
+    // not there, and here is the word we looked for" are opposite facts that
+    // happen to share a verdict. Counted apart, so a reader is not told that
+    // every one of these numbers is a capability.
+    let absences = results
+        .iter()
+        .filter(|r| !r.expected && matches!(r.verdict, Verdict::Confirmed))
+        .count();
+    let confirmed = results.len() - bad - untested;
     if matches!(format, OutputFormat::Json) {
         println!(
             "{}",
             serde_json::json!({
+                "summary": {
+                    "claims": results.len(),
+                    "confirmed": confirmed,
+                    "confirmed_absences": absences,
+                    "contradicted": bad,
+                    "untested": untested,
+                },
                 "claims": results.iter().map(|r| serde_json::json!({
                     "agent": r.agent,
                     "claim": r.claim,
                     "expected": r.expected,
                     "verdict": format!("{:?}", r.verdict),
+                    "found": r.found,
                     "missing": r.missing,
                     "sources": r.sources,
+                    "evidence": r.evidence_line(),
                 })).collect::<Vec<_>>(),
             })
         );
@@ -11483,8 +11505,11 @@ fn run_contract(format: OutputFormat) -> Result<(), String> {
                 }
             }
         }
-        let confirmed = results.len() - bad;
-        println!("\n  {confirmed} claims confirmed, {bad} contradicted");
+        println!(
+            "\n  {confirmed} claims confirmed ({} of them absences the probe searched for), \
+             {bad} contradicted, {untested} untested",
+            absences
+        );
     }
     if bad == 0 {
         Ok(())

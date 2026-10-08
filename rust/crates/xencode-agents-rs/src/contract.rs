@@ -12,11 +12,16 @@
 //!   subcommand's help, because that is exactly the invocation path the probe
 //!   uses. Anything a vendor documents elsewhere is invisible here, and the
 //!   report says which helps were read.
-//! - Absence is asserted only for `acp` and `mcp`, whose tokens are
-//!   unambiguous. There is no single word that means "daemon" (`serve` also
-//!   matches "MCP server names"), so a false daemon claim is reported as
-//!   unchecked rather than confirmed — asserting it would manufacture
-//!   contradictions out of substrings.
+//! - An absence is a measurement only when a token was searched for it. Where
+//!   the roster denies a capability and an evidence token is registered, the
+//!   probe says *not advertised* and names the words it looked for; where no
+//!   token is registered it says *could not be tested*, because reporting an
+//!   unexamined claim as a confirmed absence would hand the reader a fact
+//!   nobody measured. That is also why the opposite direction — a token found
+//!   under a denied claim — contradicts the roster only for `acp` and `mcp`:
+//!   there is no single word that means "daemon" (`serve` also matches "MCP
+//!   server names"), so an ambiguous word seen in help is reported as
+//!   untestable rather than as a contradiction manufactured out of a substring.
 
 use crate::roster::{which, AgentSpec, ROSTER};
 
@@ -80,6 +85,14 @@ impl ClaimResult {
             (Verdict::Confirmed, true) => {
                 format!("the roster asserts it and nothing contradicted it ({read})")
             }
+            (Verdict::Confirmed, false) if !self.missing.is_empty() => format!(
+                "not advertised — {} searched for and absent ({read})",
+                self.missing
+                    .iter()
+                    .map(|t| format!("`{t}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             (Verdict::Confirmed, false) => {
                 format!("not advertised — no token for it appeared ({read})")
             }
@@ -94,8 +107,12 @@ impl ClaimResult {
 }
 
 /// Evidence tokens per (agent, claim), taken from the roster comments and
-/// verified against live `--help` on 2026-09-28. A token here is a promise:
-/// the probe fails the claim if any one of them stops appearing.
+/// verified against live `--help` on 2026-09-28. A token here is a promise: the
+/// probe fails a claimed capability if the token stops appearing, and fails a
+/// denied one (for `acp` and `mcp`, the two words with no competing meaning) if
+/// it starts appearing. A (agent, claim) pair with no token listed has never
+/// been searched, and [`probe_contract`] reports it as untestable rather than
+/// as either a presence or an absence.
 fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
     match (agent, claim) {
         ("opencode", "stream") => &["--format"],
@@ -111,11 +128,19 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
         ("cline", "daemon") => &["hub", "zen"],
         ("cline", "approval") => &["auto-approve"],
         ("codex", "stream") => &["--json"],
+        // The roster denies codex an `acp` mode, and `acp` is one of the two
+        // words whose appearance in help means what it says. Measured absent
+        // from `codex --help` and `codex exec --help` on 2026-10-08, so the
+        // denial is now a searched absence rather than a sentence.
+        ("codex", "acp") => &["acp"],
         ("codex", "mcp") => &["mcp"],
         ("codex", "resume") => &["resume"],
         ("codex", "daemon") => &["app-server", "daemon"],
         ("codex", "approval") => &["--sandbox", "--ask-for-approval"],
         ("claude", "stream") => &["--output-format", "stream-json"],
+        // Denied, and searched: `acp` appears nowhere in `claude --help`
+        // (2026-10-08).
+        ("claude", "acp") => &["acp"],
         ("claude", "mcp") => &["mcp"],
         ("claude", "resume") => &["--resume", "--fork-session"],
         ("claude", "daemon") => &["attach", "--bg"],
@@ -125,9 +150,18 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
         ("gemini", "mcp") => &["mcp"],
         ("gemini", "resume") => &["--resume", "--session"],
         ("gemini", "approval") => &["--approval-mode"],
+        // Denied, and searched: the roster's own reading of `gemini --help` is
+        // that it has no daemon, and the word does not appear there (read again
+        // 2026-10-08). Unlike `serve`, `daemon` has no competing meaning in
+        // this screen.
+        ("gemini", "daemon") => &["daemon"],
         ("crush", "resume") => &["--session", "--continue", "session"],
         ("crush", "daemon") => &["server"],
         ("crush", "approval") => &["--yolo"],
+        // Both denied by the roster, and searched: neither `acp` nor `mcp`
+        // appears in `crush --help` or `crush run --help` (2026-10-08).
+        ("crush", "acp") => &["acp"],
+        ("crush", "mcp") => &["mcp"],
         // agy, read from `agy --help` on 2026-10-02. It prints the literal
         // `Usage of agy:` with no subcommand section under `--help`, so every
         // claim is checked against that one screen.
@@ -168,7 +202,12 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
     }
 }
 
-/// Whether an absence claim is checkable. Only unambiguous tokens qualify.
+/// Whether a token found under a *denied* claim contradicts it. Only the two
+/// unambiguous words qualify: `acp` and `mcp` mean one thing each in a help
+/// screen, while `serve`, `daemon`, `session` and the rest are words a vendor
+/// uses for several things, so seeing one proves nothing about the capability it
+/// was registered for. An absence is judged differently — by whether a token was
+/// searched at all — and does not need this.
 fn absence_checkable(claim: &str) -> bool {
     matches!(claim, "acp" | "mcp")
 }
@@ -294,26 +333,6 @@ pub fn probe_contract() -> Vec<ClaimResult> {
         }
         for (claim, expected) in claims {
             let tokens = markers(spec.name, claim);
-            if tokens.is_empty() {
-                // No evidence tokens defined: absence claims for vague words
-                // are not asserted (see module docs).
-                out.push(ClaimResult {
-                    agent: spec.name,
-                    claim,
-                    expected,
-                    found: Vec::new(),
-                    missing: Vec::new(),
-                    sources: sources.clone(),
-                    verdict: if expected {
-                        Verdict::Contradicted(
-                            "no evidence tokens defined for this claim".to_string(),
-                        )
-                    } else {
-                        Verdict::Confirmed
-                    },
-                });
-                continue;
-            }
             let mut found = Vec::new();
             let mut missing = Vec::new();
             for token in tokens {
@@ -323,31 +342,67 @@ pub fn probe_contract() -> Vec<ClaimResult> {
                     missing.push(token.to_string());
                 }
             }
-            let verdict = match (expected, missing.is_empty(), found.is_empty()) {
-                (true, true, _) => Verdict::Confirmed,
-                (true, false, _) => {
-                    Verdict::Contradicted(format!("missing from help: {}", missing.join(", ")))
-                }
-                (false, _, _) if !expected && absence_checkable(claim) && !found.is_empty() => {
-                    Verdict::Contradicted(format!(
-                        "present in help but roster says no: {}",
-                        found.join(", ")
-                    ))
-                }
-                (false, _, _) => Verdict::Confirmed,
-            };
             out.push(ClaimResult {
                 agent: spec.name,
                 claim,
                 expected,
+                sources: sources.clone(),
+                verdict: verdict_for(expected, claim, &found, &missing),
                 found,
                 missing,
-                sources: sources.clone(),
-                verdict,
             });
         }
     }
     out
+}
+
+/// What a token search proved, given what the roster asserts.
+///
+/// The four cases are the four ways this probe can be wrong, so they are worth
+/// naming rather than collapsing into "confirmed":
+///
+/// | searched | asserted | conclusion |
+/// |---|---|---|
+/// | nothing | yes | contradicted — an asserted capability with no evidence behind it |
+/// | nothing | no | untestable — an unexamined claim is not a confirmed absence |
+/// | something | yes | confirmed, or contradicted by the tokens that were missing |
+/// | something | no | confirmed absence, or untestable/contradicted by what turned up |
+fn verdict_for(expected: bool, claim: &str, found: &[String], missing: &[String]) -> Verdict {
+    if found.is_empty() && missing.is_empty() {
+        return if expected {
+            Verdict::Contradicted("no evidence tokens defined for this claim".to_string())
+        } else {
+            Verdict::Untestable(format!(
+                "no help token is registered for {claim} on this agent, so nothing was searched \
+                 for it"
+            ))
+        };
+    }
+    if expected {
+        return if missing.is_empty() {
+            Verdict::Confirmed
+        } else {
+            Verdict::Contradicted(format!("missing from help: {}", missing.join(", ")))
+        };
+    }
+    if !found.is_empty() {
+        return if absence_checkable(claim) {
+            Verdict::Contradicted(format!(
+                "present in help but roster says no: {}",
+                found.join(", ")
+            ))
+        } else {
+            Verdict::Untestable(format!(
+                "{claim} is denied by the roster and {} appeared in help, but that word carries \
+                 this claim neither way",
+                found.join(", ")
+            ))
+        };
+    }
+    // Every registered token was searched and none of it appeared: that is an
+    // absence with evidence behind it, and it names the words that were looked
+    // for so a reader can tell it from a claim nobody examined.
+    Verdict::Confirmed
 }
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -555,6 +610,107 @@ mod tests {
     }
 
     #[test]
+    fn a_claim_nobody_searched_is_reported_as_unexamined_not_as_an_absence() {
+        // The hole this closes: a denied capability with no registered token used
+        // to come back `Confirmed`, and its evidence line said "not advertised —
+        // no token for it appeared" about a claim no one had looked at. Five rows
+        // of the live report were written that way on 2026-10-08.
+        let verdict = verdict_for(false, "acp", &[], &[]);
+        assert!(
+            matches!(&verdict, Verdict::Untestable(why) if why.contains("nothing was searched")),
+            "{verdict:?}"
+        );
+        let line = ClaimResult {
+            agent: "crush",
+            claim: "acp",
+            expected: false,
+            found: vec![],
+            missing: vec![],
+            sources: vec!["--help".to_string()],
+            verdict,
+        }
+        .evidence_line();
+        assert!(
+            !line.contains("not advertised"),
+            "an unexamined claim was printed as an absence: {line}"
+        );
+    }
+
+    #[test]
+    fn a_searched_absence_names_the_words_it_looked_for() {
+        // The opposite case, which *is* a measurement: the token was registered,
+        // searched for, and did not appear. The line has to carry the word, so a
+        // reader can tell this from the row above without opening the source.
+        let searched = vec!["acp".to_string()];
+        assert_eq!(
+            verdict_for(false, "acp", &[], &searched),
+            Verdict::Confirmed
+        );
+        let line = ClaimResult {
+            agent: "claude",
+            claim: "acp",
+            expected: false,
+            found: vec![],
+            missing: searched,
+            sources: vec!["--help".to_string()],
+            verdict: Verdict::Confirmed,
+        }
+        .evidence_line();
+        assert_eq!(
+            line,
+            "not advertised — `acp` searched for and absent (read from `claude --help`)"
+        );
+    }
+
+    #[test]
+    fn a_word_that_proves_nothing_proves_nothing_in_both_directions() {
+        // Registered tokens that turn up under a denied claim: `acp` means one
+        // thing, so it contradicts the roster; `crew` is a word a vendor may use
+        // for anything, so it settles nothing and is said not to.
+        let found = vec!["acp".to_string()];
+        assert!(matches!(
+            verdict_for(false, "acp", &found, &[]),
+            Verdict::Contradicted(why) if why.contains("roster says no")
+        ));
+        let found = vec!["crew".to_string()];
+        assert!(
+            matches!(&verdict_for(false, "daemon", &found, &[]), Verdict::Untestable(why)
+                if why.contains("carries this claim neither way")),
+            "an ambiguous word was read as a contradiction or as an absence"
+        );
+    }
+
+    #[test]
+    fn an_asserted_capability_with_no_evidence_behind_it_is_still_a_contradiction() {
+        // The half that has fired before: on 2026-10-02 the probe refused `agy`'s
+        // claims because its tokens were not registered. A capability the roster
+        // asserts and the probe cannot search for is not a capability.
+        assert!(matches!(
+            verdict_for(true, "stream", &[], &[]),
+            Verdict::Contradicted(why) if why.contains("no evidence tokens")));
+    }
+
+    #[test]
+    fn every_absence_the_live_probe_confirms_was_searched_for() {
+        // The same rule, run against the machines this is checked out on: no row
+        // may report a denied capability as an absence without naming a token it
+        // looked for. On 2026-10-08 this failed for `codex acp`, `claude acp`,
+        // `gemini daemon`, `crush acp` and `crush mcp`.
+        for result in probe_contract() {
+            if result.expected || result.verdict != Verdict::Confirmed {
+                continue;
+            }
+            assert!(
+                !result.missing.is_empty(),
+                "{} {} is reported as a confirmed absence with no token searched: {:?}",
+                result.agent,
+                result.claim,
+                result.evidence_line()
+            );
+        }
+    }
+
+    #[test]
     fn the_roster_matches_live_help() {
         // The firewall: every installed agent's claims are re-read from its
         // own `--help` output, and a stale cell fails the build. On a machine
@@ -572,11 +728,12 @@ mod tests {
     }
 
     #[test]
-    fn absence_is_only_asserted_where_tokens_are_unambiguous() {
+    fn a_token_found_under_a_denied_claim_contradicts_only_for_unambiguous_words() {
         assert!(absence_checkable("acp"));
         assert!(absence_checkable("mcp"));
         assert!(!absence_checkable("daemon"));
         assert!(!absence_checkable("approval"));
         assert!(!absence_checkable("resume"));
+        assert!(!absence_checkable("stream"));
     }
 }

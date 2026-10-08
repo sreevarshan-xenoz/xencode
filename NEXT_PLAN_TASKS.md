@@ -21,7 +21,7 @@
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team` — and clap's
   built-in `help`, 54 entries in the list)
-- [x] Workspace gates green — 16 crates, 2817 tests passing, zero warnings (re-verified 2026-10-08, after the `AR-9` claude error fix; 19 ignored, so 2836 in the run, counted over 96 result lines)
+- [x] Workspace gates green — 16 crates, 2823 tests passing, zero warnings (re-verified 2026-10-08, after the `AR-3` verdict fix; 19 ignored, so 2843 in the run, counted over 97 result lines). One run is red for a machine reason and is excluded from the 2823: `roster::tests::an_agent_is_found_by_any_of_its_binary_names` asserts every roster row resolves to a binary on this machine, and `cline` was uninstalled from it after that row was written.
 
 ## Model Catalog Honesty
 
@@ -12057,7 +12057,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       sweep to do it, and two of the ten were only visible because of the
       resolution rules the probe learned the hard way — check a documented path
       when a vendor installs outside `PATH`, and accept several binary names.
-- [ ] **AR-3 — contract probe, not capability table.** For a discovered agent, extract
+- [x] **AR-3 — contract probe, not capability table.** For a discovered agent, extract
       the flags it actually advertises (headless mode, stream format, approval ladder,
       sandbox) into the S-0 row shape.
       **Done-when:** an agent whose help text lacks a flag is reported as *lacking* it,
@@ -12070,6 +12070,56 @@ worker, `OR-` for the thing that decides what workers to talk to.
       working. Both agents' cells are now verified against their own help on every
       run. Still open: only `--help` is consulted, so anything a vendor documents
       elsewhere remains invisible, and absence is only assertable for `acp`/`mcp`.
+
+      **2026-10-08 — closed, and the sentence above about absence was the last
+      thing standing in its way.** Both done-when clauses are met and tested, and
+      what fixed the second one is worth naming because the report was lying in a
+      way the wording hid. A capability the roster *denied* for an agent was
+      printed as `confirmed`, with an evidence line reading "not advertised — no
+      token for it appeared" — for five rows (`codex acp`, `claude acp`,
+      `gemini daemon`, `crush acp`, `crush mcp`) about a word nobody had
+      registered to look for, and the same wording for a denied claim whose
+      registered token *had* turned up, which is the opposite fact. The summary
+      then did `claims - contradicted`, so an agent whose help could not be read
+      at all — here a `cline` shim left dangling by an uninstalled tool — landed
+      in the confirmed count: `54 claims confirmed, 0 contradicted`, one of them
+      never tested. Neither the row nor the number said the probe had not looked.
+      The verdict table is now one function, `verdict_for`, with the four cases
+      separated: searched-and-found, searched-and-missing, denied-and-searched-
+      and-absent, and *nothing searched*, which is reported as untestable in both
+      directions rather than as a fact. The five denials above have tokens
+      registered after reading each screen on 2026-10-08 — `acp` appears nowhere in
+      `codex --help`, `codex exec --help`, `claude --help`, `crush --help` or
+      `crush run --help`; `mcp` nowhere in the two crush screens; `daemon` nowhere
+      in `gemini --help` — so they are searched absences now and their lines name
+      the word: `not advertised — acp searched for and absent (read from claude
+      --help)`. Measured after the change: `53 claims confirmed (8 of them
+      absences the probe searched for), 0 contradicted, 1 untested`, the untested
+      row printed by name — that reading was taken while `cline` was still on
+      `PATH` as a mise shim left behind by an uninstalled tool, and mise has since
+      pruned it, so the same command later the same day reads `53 confirmed (8
+      absences), 0 contradicted, 0 untested` with that one `cline` row gone and
+      nothing else moved. (The roster's own installation test now fails on `cline`:
+      it asserts every roster row resolves to a binary on this machine, and this
+      machine no longer has one. That is an environment fact about a tool the owner
+      uninstalled, not a defect in the probe, and it is the owner's call whether to
+      put `cline` back or drop its row.) Four tests in `contract.rs` hold the table, one of them
+      a live guard against any confirmed absence that names no searched token —
+      watched failing on those five rows before the fix — and
+      `xencode-cli/tests/agents_contract_cli.rs` runs the real command in both
+      formats.
+      What is *not* covered, stated rather than glossed: the claims are the
+      roster's six (`acp`, `mcp`, `resume`, `daemon`, `approval`, `stream`), so of
+      the four things this row's own wording names, **headless mode** is not a
+      probed claim — it is the one-shot form in `AgentSpec::one_shot`, which the
+      probe reads to decide *which* help screens to open, and a wrong one-shot form
+      surfaces as a failed run rather than as a verdict — and **sandbox** is not a
+      claim either, appearing only as one agent's evidence for the approval ladder
+      (`cursor-agent`'s `--sandbox`). Only `--help` is consulted, still, and a word
+      found under a denied claim contradicts the roster only for `acp` and `mcp`:
+      `serve`, `daemon` and `session` carry several meanings in a help screen and
+      settle nothing when seen, which is now reported as untestable instead of as
+      an absence.
 - [x] **AR-4 — capture, normalise, persist — and keep the raw.** 2026-10-02. The store is
       `xencode-agents-rs/src/capture.rs`: one run lands as `capture/raw.jsonl`
       (every vendor line, verbatim, numbered from one and gapless), `capture/normalized.jsonl`
@@ -15243,7 +15293,9 @@ protocol is built, but it carries two variants nothing has produced yet
 (`PermissionRequested`, `PermissionDenied`), which §X-4 still lists as open
 evidence gaps; `Error` left that list on 2026-10-08 — a real claude stream had
 been producing it since 2026-10-02 and the normaliser was throwing it away.
-`AR-3` is unchecked (`AR-7`, `AR-8` are done). So this clause is *mostly* true of the code.
+`AR-3` is done as of 2026-10-08 (`AR-7`, `AR-8` are done too), so every `AR-` item
+except `AR-9`'s two permission variants is closed. So this clause is *mostly* true
+of the code.
 **Context explainable** is true of one part only: `QD-1` and `QD-2` ship today and
 explain a change's blast radius, while `GH-2`'s `/why <file>:<line>` is planned in
 W10. **Actions policy-bound** is W7 (`CAP-*`, `SE-*`, `PR-*`), planned.
