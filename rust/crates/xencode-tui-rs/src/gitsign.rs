@@ -159,6 +159,37 @@ mod tests {
         String::from_utf8_lossy(&output.stdout).into_owned()
     }
 
+    /// The home folder in the form this machine's gpg accepts. Git for Windows
+    /// ships an MSYS gpg that cannot start its agent for a `C:\...` folder
+    /// but can for the same folder written `/c/...`; `cygpath` from the same
+    /// install converts it. A native gpg, and every Unix one, gets the path
+    /// unchanged.
+    fn gpg_home(home: &Path) -> std::ffi::OsString {
+        if cfg!(windows) {
+            if let Ok(out) = std::process::Command::new("cygpath")
+                .arg("-u")
+                .arg(home)
+                .output()
+            {
+                let posix = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if out.status.success() && !posix.is_empty() {
+                    return posix.into();
+                }
+            }
+        }
+        home.as_os_str().to_os_string()
+    }
+
+    /// Stop the agent gpg started for a throwaway home, so the test leaves no
+    /// process behind.
+    fn stop_agent(home: &Path) {
+        let _ = std::process::Command::new("gpgconf")
+            .arg("--homedir")
+            .arg(gpg_home(home))
+            .args(["--kill", "gpg-agent"])
+            .output();
+    }
+
     /// A throwaway keyring with one unprotected test key. `%no-protection`
     /// because a passphrase would need the very pinentry path under test.
     fn make_key(home: &Path) -> String {
@@ -170,7 +201,7 @@ mod tests {
         .unwrap();
         let output = std::process::Command::new("gpg")
             .arg("--homedir")
-            .arg(home)
+            .arg(gpg_home(home))
             .arg("--batch")
             .arg("--gen-key")
             .arg(&batch)
@@ -183,7 +214,7 @@ mod tests {
         );
         let list = std::process::Command::new("gpg")
             .arg("--homedir")
-            .arg(home)
+            .arg(gpg_home(home))
             .args(["--list-keys", "--with-colons"])
             .output()
             .unwrap();
@@ -219,7 +250,7 @@ mod tests {
 
         // The panel's exact path: GNUPGHOME the way a user session provides it.
         let prior = std::env::var("GNUPGHOME").ok();
-        std::env::set_var("GNUPGHOME", &gpghome);
+        std::env::set_var("GNUPGHOME", gpg_home(&gpghome));
         let committed = commit_signed(&repo, "agent commit", 60);
         match prior {
             Some(v) => std::env::set_var("GNUPGHOME", v),
@@ -231,7 +262,7 @@ mod tests {
         let verify = std::process::Command::new("git")
             .current_dir(&repo)
             .args(["verify-commit", "HEAD"])
-            .env("GNUPGHOME", &gpghome)
+            .env("GNUPGHOME", gpg_home(&gpghome))
             .output()
             .unwrap();
         assert!(
@@ -240,6 +271,7 @@ mod tests {
             String::from_utf8_lossy(&verify.stderr)
         );
 
+        stop_agent(&gpghome);
         let _ = std::fs::remove_dir_all(&repo);
         let _ = std::fs::remove_dir_all(&gpghome);
     }
@@ -268,7 +300,7 @@ mod tests {
         git(&repo, &["add", "f.txt"]);
 
         let prior = std::env::var("GNUPGHOME").ok();
-        std::env::set_var("GNUPGHOME", &gpghome);
+        std::env::set_var("GNUPGHOME", gpg_home(&gpghome));
         let started = std::time::Instant::now();
         let result = commit_signed(&repo, "agent commit", 60);
         match prior {
@@ -281,6 +313,7 @@ mod tests {
             "it hung instead of failing"
         );
         assert!(!err.is_empty(), "an empty error explains nothing");
+        stop_agent(&gpghome);
         let _ = std::fs::remove_dir_all(&repo);
         let _ = std::fs::remove_dir_all(&gpghome);
     }
