@@ -7896,6 +7896,60 @@ fn branch_author(repo: &std::path::Path, branch: &str) -> Option<String> {
     (!author.is_empty()).then_some(author)
 }
 
+/// The files `branch` changed since `base` that its lease did not give it, judged
+/// by the task contract (OR-18). `None` when the branch never ran under a lease
+/// or stayed inside it. A leases file that cannot be read is an error: landing
+/// past a check that could not run would be landing unchecked.
+fn lease_breaches(
+    root: &std::path::Path,
+    base: &str,
+    branch: &str,
+) -> Result<Option<Vec<String>>, String> {
+    let file = root
+        .join(xencode_context_rs::XENCODE_DIR)
+        .join("leases.json");
+    let registry = xencode_core_rs::LeaseRegistry::load(root.to_path_buf(), &file)?;
+    let Some(lease) = registry.lease_for_branch(branch) else {
+        return Ok(None);
+    };
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["diff", "--name-only", &format!("{base}...{branch}")])
+        .output()
+        .map_err(|e| format!("cannot run git diff for `{branch}`: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "cannot list what `{branch}` changed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let changed: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    let contract = xencode_core_rs::TaskContract {
+        task: lease.task_id.clone(),
+        lease: lease.lease_id.clone(),
+        workspace: root.to_path_buf(),
+        allowed_files: lease.declared_files.clone(),
+        forbidden_paths: vec![".git".to_string()],
+        deliverables: Vec::new(),
+        verification_commands: Vec::new(),
+    };
+    Ok(contract.check_finish(&changed).err().map(|breaches| {
+        breaches
+            .iter()
+            .map(|b| match b {
+                xencode_core_rs::Breach::OutsideLease { path }
+                | xencode_core_rs::Breach::Undeclared { path }
+                | xencode_core_rs::Breach::ForbiddenPath { path, .. } => path.clone(),
+            })
+            .collect()
+    }))
+}
+
 /// The trail a veto belongs to: the same chained `audit.jsonl` the server writes
 /// session events to, so `xencode audit verify` walks one log rather than two.
 fn veto_audit_sink() -> Result<xencode_server_rs::audit::AuditSink, String> {
@@ -8048,6 +8102,16 @@ fn run_merge(action: MergeAction) -> Result<(), String> {
             test_cmds,
             format,
         } => {
+            // OR-18: a branch that ran under a lease lands only if its changes
+            // stayed inside the files it was given.
+            for b in &branches {
+                if let Some(outside) = lease_breaches(&root, &base, b)? {
+                    return Err(format!(
+                        "refusing to land `{b}`: it changed files outside the ones its task was given — {}",
+                        outside.join(", ")
+                    ));
+                }
+            }
             let mut specs = Vec::new();
             for b in &branches {
                 let verify = std::process::Command::new("git")

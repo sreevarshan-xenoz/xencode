@@ -644,6 +644,9 @@ pub struct App<'a> {
     /// reads. Grows over the session; ids never collide.
     pub spawns: Vec<SpawnRecord>,
     pub spawn_next_id: u64,
+    /// Where `/spawn` makes its worktrees and keeps its leases; the workspace
+    /// root unless a test points it at a scratch repository.
+    pub(crate) spawn_root: Option<std::path::PathBuf>,
 
     // Project context (M0) state
     /// Whether the "run /init" hint was already shown this session, so a
@@ -3031,6 +3034,7 @@ impl<'a> App<'a> {
             bytebot_history: Vec::new(),
             spawns: Vec::new(),
             spawn_next_id: 1,
+            spawn_root: None,
             context_hint_shown: false,
             init_running: false,
             init_progress: 0.0,
@@ -4918,7 +4922,7 @@ impl<'a> App<'a> {
             return None;
         }
         let id = self.spawn_next_id;
-        let root = xencode_context_rs::default_root();
+        let root = self.spawn_root();
         let branch_name = branch
             .map(|b| {
                 b.strip_prefix('#')
@@ -4926,8 +4930,18 @@ impl<'a> App<'a> {
                     .replace([' ', '/', '\\'], "-")
             })
             .unwrap_or_else(|| format!("xencode/spawn-{id}"));
-        let worktree_path = match spawn_worktree(&root, id, &branch_name) {
-            Ok(path) => path,
+        // Files the person named with `@path` become this worker's lease (OR-18):
+        // a worker asking for a file another live worker holds is told to wait
+        // before anything is created. With no `@path` there is no lease to take.
+        let declared = spawn_declared_files(task);
+        let made = if declared.is_empty() {
+            spawn_worktree(&root, id, &branch_name).map(Some)
+        } else {
+            self.lease_and_make_worktree(&root, id, task, &branch_name, &declared)
+        };
+        let worktree_path = match made {
+            Ok(Some(path)) => path,
+            Ok(None) => return None,
             Err(e) => {
                 self.system_line(&format!("⏺ spawn #{id} could not start: {e}"));
                 return None;
@@ -4966,6 +4980,114 @@ impl<'a> App<'a> {
         Some((id, branch_name, run))
     }
 
+    /// The directory `/spawn` works from: the workspace root, unless a test set
+    /// a scratch repository.
+    fn spawn_root(&self) -> std::path::PathBuf {
+        self.spawn_root
+            .clone()
+            .unwrap_or_else(xencode_context_rs::default_root)
+    }
+
+    /// Ask the lease registry for `declared` before making the worktree (OR-18).
+    /// `Ok(Some(path))` when granted and the worktree exists; `Ok(None)` when
+    /// the worker has to wait or was refused, with the reason already said in
+    /// the chat; `Err` when the registry or the worktree could not be made. The
+    /// registry is read from and written back to `.xencode/leases.json`, so a
+    /// restart keeps every lease a live worker holds.
+    fn lease_and_make_worktree(
+        &mut self,
+        root: &std::path::Path,
+        id: u64,
+        task: &str,
+        branch: &str,
+        declared: &[String],
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        let file = leases_file(root);
+        let mut registry = xencode_core_rs::LeaseRegistry::load(root.to_path_buf(), &file)?;
+        let worker = format!("spawn-{id}");
+        let decision = registry.request_lease_with(&worker, task, branch, declared, |_| {
+            spawn_worktree(root, id, branch)
+        })?;
+        registry
+            .save(&file)
+            .map_err(|e| format!("cannot save {}: {e}", file.display()))?;
+        match decision {
+            xencode_core_rs::LeaseDecision::Granted(lease) => Ok(Some(lease.worktree_path)),
+            xencode_core_rs::LeaseDecision::WaitBeforeLaunch { conflict } => {
+                // The id is spent on the request so the two never get confused.
+                self.spawn_next_id += 1;
+                self.system_line(&format!(
+                    "⏸ spawn #{id} waits before launch: `{}` is held by {} (\"{}\") — it starts when that worker finishes",
+                    conflict.conflicting_file,
+                    conflict.held_by_worker,
+                    crate::agent_tools::truncate_one_line(&conflict.held_by_task, 60)
+                ));
+                Ok(None)
+            }
+            xencode_core_rs::LeaseDecision::Refused { reason } => {
+                self.system_line(&format!("⏺ spawn #{id} refused: {reason}"));
+                Ok(None)
+            }
+        }
+    }
+
+    /// A finished spawn: judge what it changed against the files it was given,
+    /// end its lease (keeping its worktree and branch), and hand back the first
+    /// waiting worker that can now start, armed and ready to launch.
+    fn finish_spawn_lease(&mut self, id: u64) -> Option<(u64, String, AgentRun)> {
+        let rec = self.spawns.iter().find(|s| s.id == id)?;
+        let (branch, path, task) = (rec.branch.clone(), rec.path.clone(), rec.task.clone());
+        let root = self.spawn_root();
+        let file = leases_file(&root);
+        let mut registry = match xencode_core_rs::LeaseRegistry::load(root.clone(), &file) {
+            Ok(registry) => registry,
+            Err(e) => {
+                self.system_line(&format!("⏺ spawn #{id}: {e}"));
+                return None;
+            }
+        };
+        let lease = registry
+            .active_leases()
+            .into_iter()
+            .find(|l| l.branch == branch)
+            .cloned()?;
+        let contract = xencode_core_rs::TaskContract {
+            task,
+            lease: lease.lease_id.clone(),
+            workspace: path.clone(),
+            allowed_files: lease.declared_files.clone(),
+            forbidden_paths: vec![".git".to_string()],
+            deliverables: Vec::new(),
+            verification_commands: Vec::new(),
+        };
+        match contract.check_finish(&worktree_changes(&path)) {
+            Ok(()) => self.system_line(&format!(
+                "✓ spawn #{id} changed only the files it was given: {}",
+                lease.declared_files.join(", ")
+            )),
+            Err(breaches) => self.system_line(&format!(
+                "✗ spawn #{id} changed files it was not given: {} — `xencode merge land` refuses its branch",
+                breaches
+                    .iter()
+                    .map(breach_path)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+        registry.end_lease(&lease.lease_id);
+        let next = registry.take_unblocked();
+        if let Err(e) = registry.save(&file) {
+            self.system_line(&format!("⏺ cannot save {}: {e}", file.display()));
+        }
+        let next = next?;
+        self.system_line(&format!(
+            "▶ the spawn waiting for `{}` can start now",
+            next.conflict.conflicting_file
+        ));
+        let branch = (!next.branch.starts_with("xencode/spawn-")).then_some(next.branch.as_str());
+        self.arm_spawn(&next.task_id, branch)
+    }
+
     /// Resolve the worktree for a `#[branch]`-suffixed `/spawn` task. Pure
     /// parsing, so the git call below can be held to one doc'd rule: the
     /// trailing token, when it starts with `#`, is the branch.
@@ -4984,10 +5106,8 @@ impl<'a> App<'a> {
 
     /// Apply one `/spawn` loop event. Pure state, tested without a model. A
     /// finished run posts its report into the chat transcript.
-    pub fn spawn_event(&mut self, id: u64, body: &str) {
-        let Some(i) = self.spawns.iter().position(|s| s.id == id) else {
-            return;
-        };
+    pub(crate) fn spawn_event(&mut self, id: u64, body: &str) -> Option<(u64, String, AgentRun)> {
+        let i = self.spawns.iter().position(|s| s.id == id)?;
         if let Some(summary) = body.strip_prefix("call:") {
             let rec = &mut self.spawns[i];
             rec.steps.push((summary.to_string(), "running".to_string()));
@@ -5002,7 +5122,7 @@ impl<'a> App<'a> {
                     call_id: Some(format!("spawn-{id}-step-{step_count}")),
                     origin: xencode_agents_rs::protocol::Origin::Observed,
                 });
-            return;
+            return None;
         }
         if let Some(outcome) = body.strip_prefix("done:") {
             let rec = &mut self.spawns[i];
@@ -5017,13 +5137,13 @@ impl<'a> App<'a> {
                     output: Some(outcome.to_string()),
                     origin: xencode_agents_rs::protocol::Origin::Observed,
                 });
-            return;
+            return None;
         }
         if let Some(text) = body.strip_prefix("log:") {
             // One-line model text while the run is live; not shown on /spawn
             // status, which answers the where/what/whether question.
             let _ = text;
-            return;
+            return None;
         }
         if let Some(text) = body.strip_prefix("err:") {
             self.spawns[i].failed = true;
@@ -5039,7 +5159,7 @@ impl<'a> App<'a> {
                     origin: xencode_agents_rs::protocol::Origin::Observed,
                 });
             self.system_line(&format!("⏺ spawn #{id} failed — {text}"));
-            return;
+            return None;
         }
         if let Some(text) = body.strip_prefix("finish:") {
             self.spawns[i].running = false;
@@ -5071,7 +5191,10 @@ impl<'a> App<'a> {
                     content: format!("(spawn #{id} · {task})\n{final_text}"),
                 });
             }
+            // OR-18: judge its changes, end its lease, start whoever waited.
+            return self.finish_spawn_lease(id);
         }
+        None
     }
 
     /// Handle `/spawn`, `/spawn status` and `/spawn <task> [#branch]`.
@@ -10331,6 +10454,61 @@ impl<'a> App<'a> {
 /// Create the git worktree a `/spawn` will work in: a sibling of `root`
 /// named `<dirname>-spawn-<id>[-<branch>]`, on a fresh branch. Returns the
 /// worktree path. Pure enough to test against a temp repo without the TUI.
+/// The files a `/spawn` task names with `@path`, which become its lease (OR-18).
+/// Only the person's own words set it: a worker cannot widen what it was given.
+pub(crate) fn spawn_declared_files(task: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    for word in task.split_whitespace() {
+        let Some(path) = word.strip_prefix('@') else {
+            continue;
+        };
+        let path = path.trim_end_matches([',', '.', ';', ':', ')']);
+        if !path.is_empty() && !files.iter().any(|f| f == path) {
+            files.push(path.to_string());
+        }
+    }
+    files
+}
+
+/// Where `/spawn` keeps its leases.
+fn leases_file(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(xencode_context_rs::XENCODE_DIR)
+        .join("leases.json")
+}
+
+/// What a worker changed in its worktree, relative to it: modified, staged and
+/// new files, as git itself reports them.
+fn worktree_changes(path: &std::path::Path) -> Vec<String> {
+    let Ok(out) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| line.len() > 3)
+        .map(|line| {
+            let name = &line[3..];
+            name.rsplit(" -> ")
+                .next()
+                .unwrap_or(name)
+                .trim_matches('"')
+                .to_string()
+        })
+        .collect()
+}
+
+fn breach_path(breach: &xencode_core_rs::Breach) -> String {
+    match breach {
+        xencode_core_rs::Breach::OutsideLease { path }
+        | xencode_core_rs::Breach::Undeclared { path }
+        | xencode_core_rs::Breach::ForbiddenPath { path, .. } => path.clone(),
+    }
+}
+
 pub fn spawn_worktree(
     root: &std::path::Path,
     id: u64,
@@ -12195,7 +12373,10 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                 // `<id>:<event>` — a `/spawn` subagent reporting in (I3-03).
                 if let Some((id, rest)) = body.split_once(':') {
                     if let Ok(id) = id.parse::<u64>() {
-                        app.spawn_event(id, rest);
+                        // A finished worker can free a file a waiting one asked for.
+                        if let Some((_, _, run)) = app.spawn_event(id, rest) {
+                            tokio::spawn(agent_rounds(run, tx.clone()));
+                        }
                     }
                 }
             } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
@@ -17130,6 +17311,118 @@ Content-Length: 0
                 prompt.name
             );
         }
+    }
+
+    /// OR-18, end to end: two `/spawn` workers asking for the same file. The
+    /// first runs for real (a full agent loop against a scripted local model
+    /// that writes the file it was given and one it was not); the second is told
+    /// to wait before anything is made; a restart still sees the first lease;
+    /// the finish refuses the file outside the lease through the task contract
+    /// and hands back the waiting worker, armed to launch.
+    #[tokio::test]
+    async fn two_spawns_for_one_file_run_one_and_queue_the_other() {
+        let tmp = std::env::temp_dir().join(format!("xencode-spawn-lease-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let repo = tmp.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        std::fs::write(
+            repo.join("a.rs"),
+            "fn a() {}
+",
+        )
+        .unwrap();
+        git(&repo, &["add", "a.rs"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-m",
+                "init",
+            ],
+        );
+
+        let mut app = App::for_tests();
+        app.spawn_root = Some(repo.clone());
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let (first_id, _, mut first_run) = app
+            .arm_spawn("tidy @a.rs", None)
+            .expect("the first worker gets the file");
+        assert!(app.arm_spawn("rename things in @a.rs", None).is_none());
+        let waited = app.messages.last().unwrap().content.clone();
+        assert!(waited.contains("waits before launch"), "{waited}");
+        assert!(waited.contains("`a.rs`"), "{waited}");
+        assert!(
+            !tmp.join(format!("proj-spawn-{}", first_id + 1)).exists(),
+            "a waiting worker had a worktree made for it"
+        );
+
+        // A restart reads the leases back: the running worker still holds a.rs.
+        let leases =
+            xencode_core_rs::LeaseRegistry::load(repo.clone(), &super::leases_file(&repo)).unwrap();
+        assert_eq!(leases.active_leases().len(), 1);
+        assert_eq!(leases.active_leases()[0].declared_files, vec!["a.rs"]);
+        assert_eq!(leases.waiting_queue().len(), 1);
+
+        // The first worker runs: it edits a.rs and also writes b.rs.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments": {"path": "a.rs", "content": "fn a() { }
+"}}},
+                    {"function": {"name": "write_file", "arguments": {"path": "b.rs", "content": "fn b() {}
+"}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "Tidied."}, "done": true}),
+            ],
+        ));
+        first_run.ollama_url = format!("http://{addr}");
+        first_run.max_repair_iters = 0;
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(first_run, tx).await;
+        let _ = server.await;
+        let mut next = None;
+        while let Ok(line) = rx.try_recv() {
+            if let Some(body) = line.strip_prefix(super::SPAWN_PREFIX) {
+                let (id, rest) = body.split_once(':').unwrap();
+                if let Some(armed) = app.spawn_event(id.parse().unwrap(), rest) {
+                    next = Some(armed);
+                }
+            }
+        }
+        let said: Vec<String> = app.messages.iter().map(|m| m.content.clone()).collect();
+        assert!(
+            said.iter()
+                .any(|m| m.contains("changed files it was not given: b.rs")),
+            "{said:?}"
+        );
+        let (next_id, _, next_run) = next.expect("the waiting worker is armed when a.rs frees");
+        assert!(
+            next_run.tool_root.exists(),
+            "the waiter now has its worktree"
+        );
+        let leases =
+            xencode_core_rs::LeaseRegistry::load(repo.clone(), &super::leases_file(&repo)).unwrap();
+        assert_eq!(leases.waiting_queue().len(), 0);
+        assert_eq!(leases.active_leases().len(), 1);
+        assert_eq!(
+            leases.active_leases()[0].worker_id,
+            format!("spawn-{next_id}")
+        );
+        // The first worker's tree and its work are still there.
+        assert!(tmp
+            .join(format!("proj-spawn-{first_id}"))
+            .join("b.rs")
+            .exists());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

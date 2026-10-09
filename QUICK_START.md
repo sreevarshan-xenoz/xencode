@@ -290,7 +290,7 @@ xencode remote show
 /lesson [status|set <words>|approve|drop] - The lesson a rewind, three failing checks or a refused call drafted; the lesson line stays blank until you write it, and `/lesson approve` is the only thing that appends to AGENTS.md
 /gate [bugfix [paths] | off] - Read, open or close the reproduction gate: with it open on a bug, the agent cannot touch a production file until `reproduce_bug` has been seen failing on unchanged code
 /mcp [status|stop]    - Connect all MCP servers declared in config, or ask about/stop them (read a listed resource with `/mcp read <server> <uri>`, ask for a prompt with `/mcp prompt <server> <name>`)
-/spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status)
+/spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status); name its files with @path to lease them, so a second spawn on the same file waits
 /plugin [reload]      - Show which plugins took effect, the prompt text and pinned commit each one contributes, or re-scan the plugin dir
 /skills [reload]      - Show which SKILL.md skills loaded, what they refuse and what the prompt pays for them, or re-scan both skill directories
 /trace [turns]        - Replay what the last agent turns did, from the local turn log
