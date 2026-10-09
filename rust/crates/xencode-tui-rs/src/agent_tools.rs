@@ -11060,16 +11060,27 @@ patched = ["{fixed}"]
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt as _;
+            use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
             loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
+                let Ok((stream, _)) = listener.accept().await else {
                     return;
                 };
+                // Read the request head before answering. Windows resets a
+                // socket that is closed with unread input in it, and the client
+                // then sees a reset instead of this page.
+                let (read_half, mut write_half) = stream.into_split();
+                let mut lines = BufReader::new(read_half).lines();
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) if !line.is_empty() => continue,
+                        _ => break,
+                    }
+                }
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                     body.len()
                 );
-                if stream.write_all(response.as_bytes()).await.is_err() {
+                if write_half.write_all(response.as_bytes()).await.is_err() {
                     continue;
                 }
             }
