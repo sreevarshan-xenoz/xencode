@@ -328,10 +328,12 @@ async fn the_context_panel_names_a_durable_fact_it_had_to_drop() {
         unsearchable_row.contains("1 not checkable here (not a searchable tree)"),
         "the panel blamed a missing commit on an unsearchable tree: {unsearchable_row}"
     );
+    // Leave the directory before deleting it: Windows will not remove the
+    // process's current directory.
+    std::env::set_current_dir(&root).unwrap();
     std::fs::remove_dir_all(&outside).unwrap();
 
     // ── AB-1: aged anchor proof reports warning in /ctx kv ────────────────────
-    std::env::set_current_dir(&root).unwrap();
     let aged_anchor_meta = xencode_context_rs::AnchorMeta {
         proved_at_unix_s: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
