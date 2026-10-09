@@ -604,6 +604,39 @@ starter model; inside the TUI nothing is installed for you.
 
 ## Advanced Features
 
+### The engine process
+
+The agent work for a project folder — chat turns, ByteBot tasks, approval
+prompts and questions — runs in a background process called the engine, not in
+the terminal. Opening `xencode` connects to the engine for the current folder,
+starting one when none is running, and the terminal becomes a window onto it.
+So:
+
+- closing the terminal, or losing it, does not stop a running task;
+- opening `xencode` in the same folder again shows the same transcript and
+  tasks;
+- the floating badge keeps showing what the engine is doing while no window is
+  open.
+
+The engine exits by itself ten seconds after the last window closed, once
+nothing is running and nothing is waiting for you. A task that stops to ask for
+an approval, an answer or a review while no window is open waits until you open
+one; the badge shows that it needs you. If the engine stops while a window is
+open, the window says "the engine stopped (…); starting a new one" and carries
+on with a new engine.
+
+Chat and the commands that change the agent's work run in the engine:
+`/bytebot`, `/spawn`, `/rewind`, `/gate`, `/plan`, `/lesson`, `/ctx`, `/model`,
+`/trust`, `/mcp`, `/plugin` and `/skills`. The other commands only show
+something in the window and run there; `/init`, `/advise`, `/verify` and
+`/orchestrator` among them, so their work stops when that window closes.
+
+`xencode tui --in-process` runs everything inside the terminal the way earlier
+versions did, and the terminal does the same, with a warning, when no engine
+can be started. `xencode engine` runs an engine by hand; see
+[CLI_GUIDE.md](../CLI_GUIDE.md) for where it listens and how it is kept to your
+own account.
+
 ### Floating badge
 
 A small round xencode logo that stays above other windows and shows what every

@@ -41,6 +41,12 @@ pipe, a redirect or a CI step and it says so, and names the commands that need n
 terminal at all. Run `/init` once per project for project-aware
 answers, then just ask.
 
+The agent work runs in a background engine for the project folder, which
+`xencode` starts by itself: closing the terminal does not stop a running task,
+and opening `xencode` in the same folder again picks it back up. The engine
+exits on its own once no window is open and nothing is running.
+`xencode tui --in-process` keeps everything inside the terminal instead.
+
 Local models need nothing else. For cloud models, `xencode config set
 openai_api_key <key>` stores the key in the `api_keys` object of `config.json`
 in the settings directory (`$XDG_CONFIG_HOME/xencode`, or `~/.xencode` before it

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EN-2`: agent work runs in its own process, so closing the terminal no longer stops it
+
+Opening `xencode` now connects to the project's *engine*, a background
+process that holds the chat, ByteBot tasks, approvals and questions for that
+project folder, and starts one when none is running. The terminal becomes a
+window onto it. Closing the terminal, or losing it, no longer stops a running
+task: the engine carries on, and the floating badge shows when it needs you or
+has finished. Opening `xencode` in the same folder again shows the same
+transcript and tasks.
+
+- `xencode engine [--project <folder>]` runs the engine yourself. One engine
+  runs per project folder; a second one for the same folder says "An engine
+  for <folder> is already running." and exits.
+- An engine with no window connected and nothing running or waiting exits on
+  its own after ten seconds.
+- `xencode tui --in-process` keeps the old way, with the agent work inside the
+  terminal. The terminal also falls back to it, with a warning, when no engine
+  can be started.
+- The engine listens only for the person's own account: on Windows a named
+  pipe that admits only that account, refuses connections from other machines
+  and is checked to be served by that same account before a window trusts it;
+  elsewhere a socket file in a folder only that account can open.
+- Chat, `/bytebot`, `/spawn`, `/rewind`, `/gate`, `/plan`, `/lesson`, `/ctx`,
+  `/model`, `/trust`, `/mcp`, `/plugin` and `/skills` run in the engine. Every
+  other command runs in the window; the lines it adds to the transcript are
+  passed to the engine, so every window shows the same transcript.
+- If the engine stops while a window is open, the window says "the engine
+  stopped (…); starting a new one" and connects to a new one.
+
+Not yet: a task that waits for an approval, an answer or a review while no
+window is open waits until a window connects (the badge shows that it needs
+you). Several windows on one engine work but are not yet finished: the rule
+that ends a wait after 30 minutes and the badge file written by the engine
+alone are the next stage (`EN-3`). `/init`, `/advise`, `/verify` and
+`/orchestrator` run in the window, so their work stops with it.
+
 ### Changed (internal) — `EN-1`: an engine boundary inside the terminal app
 
 No visible change. Every agent action the terminal app takes — sending a chat
