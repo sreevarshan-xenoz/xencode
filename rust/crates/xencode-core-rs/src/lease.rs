@@ -103,11 +103,19 @@ pub enum ScheduleOutcome<R> {
 }
 
 /// The registry managing worker leases and scheduling queues.
-#[derive(Debug, Clone)]
+///
+/// It is saved to disk ([`LeaseRegistry::save`], [`LeaseRegistry::load`]) because a
+/// worker can outlive the screen that launched it: a restart must not silently free
+/// every file a live worker holds (OR-18).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaseRegistry {
     repo_root: PathBuf,
     active_leases: BTreeMap<String, WorkerLease>,
     waiting_queue: Vec<WaitingRequest>,
+    /// Leases that ended, kept so a later merge can still check a branch's
+    /// changes against the file set it was given.
+    #[serde(default)]
+    released: Vec<WorkerLease>,
 }
 
 impl LeaseRegistry {
@@ -116,6 +124,7 @@ impl LeaseRegistry {
             repo_root,
             active_leases: BTreeMap::new(),
             waiting_queue: Vec::new(),
+            released: Vec::new(),
         }
     }
 
@@ -129,6 +138,38 @@ impl LeaseRegistry {
 
     pub fn waiting_queue(&self) -> &[WaitingRequest] {
         &self.waiting_queue
+    }
+
+    /// Read the registry saved at `file`. A missing file is an empty registry; a
+    /// file that cannot be read as one is an error, never a silent reset — an
+    /// empty registry would free every file a live worker holds.
+    pub fn load(repo_root: PathBuf, file: &Path) -> Result<Self, String> {
+        match std::fs::read_to_string(file) {
+            Ok(text) if text.trim().is_empty() => Ok(Self::new(repo_root)),
+            Ok(text) => {
+                let mut registry: Self = serde_json::from_str(&text)
+                    .map_err(|e| format!("cannot read the leases in {}: {e}", file.display()))?;
+                registry.repo_root = repo_root;
+                Ok(registry)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::new(repo_root)),
+            Err(e) => Err(format!("cannot read {}: {e}", file.display())),
+        }
+    }
+
+    /// Write the registry to `file` in one atomic step.
+    pub fn save(&self, file: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        crate::write_atomic(file, json.as_bytes())
+    }
+
+    /// The lease a branch runs under — the live one first, else the latest that
+    /// ended — so a merge can be checked against the file set it was given.
+    pub fn lease_for_branch(&self, branch: &str) -> Option<&WorkerLease> {
+        self.active_leases
+            .values()
+            .find(|l| l.branch == branch)
+            .or_else(|| self.released.iter().rev().find(|l| l.branch == branch))
     }
 
     /// Normalize relative path and reject climbing outside workspace.
@@ -166,6 +207,24 @@ impl LeaseRegistry {
         task_id: &str,
         branch: &str,
         declared_files: &[String],
+    ) -> Result<LeaseDecision, String> {
+        let root = self.repo_root.clone();
+        self.request_lease_with(worker_id, task_id, branch, declared_files, |lease_id| {
+            Self::provision_worktree(&root, lease_id, branch)
+        })
+    }
+
+    /// [`request_lease`](Self::request_lease) for a caller that makes the worktree
+    /// itself: `provision` is called with the lease id, only once the request is
+    /// granted, and returns where the worktree is. Nothing is created for a
+    /// request that has to wait or is refused.
+    pub fn request_lease_with(
+        &mut self,
+        worker_id: &str,
+        task_id: &str,
+        branch: &str,
+        declared_files: &[String],
+        provision: impl FnOnce(&str) -> Result<PathBuf, String>,
     ) -> Result<LeaseDecision, String> {
         if declared_files.is_empty() {
             return Ok(LeaseDecision::Refused {
@@ -209,42 +268,56 @@ impl LeaseRegistry {
             }
         }
 
-        // No conflicts: allocate dedicated worktree and grant lease
-        let lease = self.provision_worktree(worker_id, task_id, branch, normalized_files)?;
+        // No conflicts: allocate the worktree and grant the lease.
+        let lease_id = Self::lease_id(worker_id, task_id);
+        let worktree_path = provision(&lease_id)?;
+        let lease = WorkerLease {
+            lease_id,
+            worker_id: worker_id.to_string(),
+            task_id: task_id.to_string(),
+            worktree_path,
+            branch: branch.to_string(),
+            declared_files: normalized_files,
+            created_at_unix_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        };
         self.active_leases
             .insert(lease.lease_id.clone(), lease.clone());
         Ok(LeaseDecision::Granted(lease))
     }
 
+    fn lease_id(worker_id: &str, task_id: &str) -> String {
+        let safe_worker = worker_id.replace(['/', ' '], "-");
+        let safe_task = task_id.replace(['/', ' '], "-");
+        format!("lease-{safe_worker}-{safe_task}")
+    }
+
+    /// The registry's own worktree, for callers that do not make one: a sibling
+    /// of the repository, a git worktree on `branch` when the root is a git
+    /// checkout, a plain directory otherwise.
     fn provision_worktree(
-        &self,
-        worker_id: &str,
-        task_id: &str,
+        repo_root: &Path,
+        lease_id: &str,
         branch: &str,
-        declared_files: Vec<String>,
-    ) -> Result<WorkerLease, String> {
+    ) -> Result<PathBuf, String> {
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-
-        let safe_worker = worker_id.replace(['/', ' '], "-");
-        let safe_task = task_id.replace(['/', ' '], "-");
-        let lease_id = format!("lease-{safe_worker}-{safe_task}");
-
-        let repo_name = self
-            .repo_root
+        let repo_name = repo_root
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("repo");
-        let parent = self.repo_root.parent().unwrap_or(&self.repo_root);
+        let parent = repo_root.parent().unwrap_or(repo_root);
         let worktree_path = parent.join(format!("{repo_name}-{lease_id}-{timestamp_ms}"));
 
         // If repo_root has .git directory, use real git worktree add
-        if self.repo_root.join(".git").exists() {
+        if repo_root.join(".git").exists() {
             let status = std::process::Command::new("git")
                 .arg("-C")
-                .arg(&self.repo_root)
+                .arg(repo_root)
                 .args(["worktree", "add"])
                 .arg("-b")
                 .arg(branch)
@@ -253,7 +326,7 @@ impl LeaseRegistry {
                 .or_else(|_| {
                     std::process::Command::new("git")
                         .arg("-C")
-                        .arg(&self.repo_root)
+                        .arg(repo_root)
                         .args(["worktree", "add"])
                         .arg(&worktree_path)
                         .arg(branch)
@@ -265,7 +338,7 @@ impl LeaseRegistry {
                 // If branch creation failed (e.g. branch exists), try attaching without -b
                 let status_retry = std::process::Command::new("git")
                     .arg("-C")
-                    .arg(&self.repo_root)
+                    .arg(repo_root)
                     .args(["worktree", "add", "--detach"])
                     .arg(&worktree_path)
                     .status()
@@ -283,62 +356,50 @@ impl LeaseRegistry {
                 .map_err(|e| format!("cannot create worktree dir: {e}"))?;
         }
 
-        Ok(WorkerLease {
-            lease_id,
-            worker_id: worker_id.to_string(),
-            task_id: task_id.to_string(),
-            worktree_path,
-            branch: branch.to_string(),
-            declared_files,
-            created_at_unix_ms: timestamp_ms,
-        })
+        Ok(worktree_path)
     }
 
-    /// Release an active lease and unblock any waiting worker whose conflicts are cleared.
-    pub fn release_lease(&mut self, lease_id: &str) -> Result<Option<WorkerLease>, String> {
-        let removed = self.active_leases.remove(lease_id);
-        if let Some(ref lease) = removed {
-            // Clean up git worktree if git checkout
-            if self.repo_root.join(".git").exists() {
-                let _ = std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(&self.repo_root)
-                    .args(["worktree", "remove", "--force"])
-                    .arg(&lease.worktree_path)
-                    .output();
-            } else {
-                let _ = std::fs::remove_dir_all(&lease.worktree_path);
-            }
-        }
+    /// End a lease. The worktree and its branch are kept: a worker's unmerged
+    /// work is not bookkeeping's to delete, and removing a worktree is its own
+    /// named action that lets git refuse a dirty one (OR-18). The lease is kept
+    /// among the released ones so a later merge can still be checked against
+    /// the file set it was given.
+    pub fn end_lease(&mut self, lease_id: &str) -> Option<WorkerLease> {
+        let removed = self.active_leases.remove(lease_id)?;
+        self.released.push(removed.clone());
+        Some(removed)
+    }
 
-        // Check if any waiting request is now unblocked
-        let mut unblocked_idx = None;
-        for (i, req) in self.waiting_queue.iter().enumerate() {
-            let has_conflict = self.active_leases.values().any(|active| {
+    /// Take the first waiting request whose files no active lease holds any
+    /// more, so the caller can launch it. `None` while every waiter is blocked.
+    pub fn take_unblocked(&mut self) -> Option<WaitingRequest> {
+        let idx = self.waiting_queue.iter().position(|req| {
+            !self.active_leases.values().any(|active| {
                 req.declared_files
                     .iter()
                     .any(|f| active.declared_files.contains(f))
-            });
-            if !has_conflict {
-                unblocked_idx = Some(i);
-                break;
-            }
-        }
+            })
+        })?;
+        Some(self.waiting_queue.remove(idx))
+    }
 
-        if let Some(idx) = unblocked_idx {
-            let req = self.waiting_queue.remove(idx);
-            let next_lease = self.provision_worktree(
-                &req.worker_id,
-                &req.task_id,
-                &req.branch,
-                req.declared_files,
-            )?;
-            self.active_leases
-                .insert(next_lease.lease_id.clone(), next_lease.clone());
-            return Ok(Some(next_lease));
+    /// Release an active lease and grant the next waiting worker whose conflicts
+    /// are cleared, provisioning its worktree. Nothing is deleted: see
+    /// [`end_lease`](Self::end_lease).
+    pub fn release_lease(&mut self, lease_id: &str) -> Result<Option<WorkerLease>, String> {
+        self.end_lease(lease_id);
+        let Some(req) = self.take_unblocked() else {
+            return Ok(None);
+        };
+        match self.request_lease(
+            &req.worker_id,
+            &req.task_id,
+            &req.branch,
+            &req.declared_files,
+        )? {
+            LeaseDecision::Granted(lease) => Ok(Some(lease)),
+            LeaseDecision::WaitBeforeLaunch { .. } | LeaseDecision::Refused { .. } => Ok(None),
         }
-
-        Ok(None)
     }
 
     /// Schedule a worker task with lease protection.
@@ -403,7 +464,9 @@ mod tests {
     #[test]
     fn two_workers_requesting_same_file_tells_second_to_wait_before_launch() {
         let dir = tempdir().unwrap();
-        let repo = dir.path();
+        let repo_dir = dir.path().join("repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        let repo = repo_dir.as_path();
         init_git_repo(repo);
 
         let mut registry = LeaseRegistry::new(repo.to_path_buf());
@@ -506,6 +569,77 @@ mod tests {
 
         // Clean up Worker 2's lease
         let _ = registry.release_lease(&lease_2.lease_id);
+    }
+
+    /// OR-18: the registry survives a restart, a release keeps the worker's
+    /// worktree, a waiting request makes nothing, and an ended lease can still be
+    /// found by branch for the merge check.
+    #[test]
+    fn leases_are_saved_kept_on_release_and_found_by_branch() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let file = root.join(".xencode").join("leases.json");
+        let mut registry = LeaseRegistry::new(root.clone());
+        let tree_a = root.join("tree-a");
+        let first = registry
+            .request_lease_with(
+                "spawn-1",
+                "spawn-1",
+                "xencode/spawn-1",
+                &["src/a.rs".into()],
+                |_| {
+                    fs::create_dir_all(&tree_a).unwrap();
+                    Ok(tree_a.clone())
+                },
+            )
+            .unwrap();
+        let LeaseDecision::Granted(first) = first else {
+            panic!("{first:?}")
+        };
+        let mut made = false;
+        let second = registry
+            .request_lease_with(
+                "spawn-2",
+                "spawn-2",
+                "xencode/spawn-2",
+                &["src/a.rs".into()],
+                |_| {
+                    made = true;
+                    Ok(root.join("tree-b"))
+                },
+            )
+            .unwrap();
+        assert!(
+            matches!(second, LeaseDecision::WaitBeforeLaunch { .. }),
+            "{second:?}"
+        );
+        assert!(!made, "a waiting request created a worktree");
+        registry.save(&file).unwrap();
+
+        // A restart reads the same leases back.
+        let mut reloaded = LeaseRegistry::load(root.clone(), &file).unwrap();
+        assert_eq!(reloaded.active_leases().len(), 1);
+        assert_eq!(reloaded.waiting_queue().len(), 1);
+        assert_eq!(
+            reloaded.waiting_queue()[0].conflict.conflicting_file,
+            "src/a.rs"
+        );
+
+        // Ending the lease keeps the tree and frees the waiter.
+        reloaded.end_lease(&first.lease_id).unwrap();
+        assert!(tree_a.exists(), "release deleted the worker's worktree");
+        let next = reloaded.take_unblocked().expect("the waiter can start now");
+        assert_eq!(next.worker_id, "spawn-2");
+        assert_eq!(
+            reloaded
+                .lease_for_branch("xencode/spawn-1")
+                .map(|l| l.declared_files.clone()),
+            Some(vec!["src/a.rs".to_string()])
+        );
+
+        // A file that is not a registry is an error, not an empty registry.
+        fs::write(&file, "not json").unwrap();
+        assert!(LeaseRegistry::load(root, &file).is_err());
     }
 
     #[test]

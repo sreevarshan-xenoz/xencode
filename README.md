@@ -343,7 +343,7 @@ These twenty-four are the only strings the chat input intercepts (`SLASH_COMMAND
                             attach hands this real terminal to a vendor's own running session and
                             comes back with the exit status that process returned
 /bytebot <task>             Delegate the task to the agent loop and watch its real calls
-/spawn <task> [#branch]     Run the delegated loop in a fresh git worktree
+/spawn <task> [#branch]     Run the delegated loop in a fresh git worktree; @path in the task leases a file
 /spawn status               List registered spawn runs and where they live
 /plan [clear]               Pin the model's todo list (or drop it)
 /rewind [turns] [--force] Undo agent file writes for recent turns (refuses files edited by hand since)

@@ -12830,7 +12830,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       path and worker panel wire in (`X-3`, `OR-12`); the actual end-to-end spawn of a
       live Claude through the prompt tool is a paid call and is **not** claimed here —
       the two done-when clauses are met at xencode's gate, which is what they ask.
-- [ ] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
+- [x] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
       file set, and a conflict refused at scheduling time rather than discovered at merge
       time.
       **Done-when:** two workers asked for the same file and the second was told to wait
@@ -12846,6 +12846,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       `xencode/spawn-{id}` (`app.rs:10216`) and asks the registry nothing; `/spawn <task>`
       carries no file set. The registry's scheduling rule therefore cannot fire in the
       product, only inside its own tests. The missing half is **`OR-18`**.
+      *(Done 2026-10-09 by OR-18: the second worker is told to wait before launch, in `/spawn` itself.)*
 - [x] **OR-5 — the merge decision.** `git merge-tree` detection, a rendered conflict, an
       evidence-backed verdict per branch, and a human gate to land anything.
       **Done-when:** nothing merges without a decision a named human made, and a clean
@@ -13118,7 +13119,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       integration tests run against the built binary. Found and fixed on the way: a session
       with no events on the timeline lost the log section from the panel entirely, so
       "checked, nothing yet" was indistinguishable from "never looked at".
-- [ ] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
+- [x] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
       means, by xencode: the lease and its workspace, the allowed file set, the forbidden
       paths, the expected deliverables, the verification commands, and the completion
       condition. The worker does not get to redefine any of them.
@@ -13150,6 +13151,8 @@ worker, `OR-` for the thing that decides what workers to talk to.
       builds a contract and no merge path reads one — so the idea is not yet "living in a
       real launch path", which is what this row's done-when asks for. The wiring is
       **`OR-18`**.
+      *(Done 2026-10-09 by OR-18: `/spawn` builds a contract from the lease when a worker
+      finishes and denies its merge on a breach, and `xencode merge land` reads it.)*
 - [ ] **OR-16 — the result envelope.** Every finished task produces one machine-readable
       record: status, agent, task, changed files taken from the diff, the commands that
       ran with their exit codes, claims held apart from evidence, and a handoff state.
@@ -13264,6 +13267,23 @@ worker, `OR-` for the thing that decides what workers to talk to.
   whose diff leaves its declared set denies the merge through `TaskContract::check_finish`
   rather than through the contract's own test — with `OR-4` and `OR-15` checked again only when
   those three are seen happening.
+  *(Done 2026-10-09. The file set comes from the person: `@path` words in the `/spawn` task,
+  and nothing a worker says can add to it; a task with none takes no lease. `arm_spawn` asks the
+  registry before making the worktree — `request_lease_with` provisions only on a grant — so a
+  second worker on a held file gets "waits before launch: `a.rs` is held by spawn-1" and no
+  worktree. The registry is saved to `.xencode/leases.json` with `write_atomic` and re-read for
+  every decision, so a restart keeps a live worker's lease. `release_lease` no longer deletes
+  anything: `end_lease` keeps the worktree and branch and records the lease as released, and
+  removal stays the worktree panel's named action. On a worker's finish its real changes
+  (`git status` in its worktree) go through `TaskContract::check_finish`; files outside the set
+  are named in the chat, the lease ends, and the first waiter whose files are now free is armed
+  and launched. `xencode merge land` runs the same contract over `git diff base...branch` for any
+  branch with a lease and refuses the land on a breach. Proved: a TUI test runs the first worker
+  through the real agent loop — the model behind it is a scripted local server, because a real
+  model needs this machine's GPU — and checks the wait, the restart, the refusal of the stray
+  `b.rs` and the waiter being armed; and live, `xencode merge land` refused a leased branch that
+  committed `b.rs` and landed one that stayed inside `a.rs`. Not yet watched: the same two spawns
+  in the TUI against a real model.)*
 
 ### S-10 Where this sits in the wave order
 

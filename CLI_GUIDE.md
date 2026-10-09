@@ -121,7 +121,7 @@ git worktree next to the project, e.g. `proj-spawn-1` on branch
 agent's live steps stream in the transcript, its final answer is posted
 back with `(spawn #<id> · <task>)`, and `/spawn status` lists every
 registered run with its worktree location. Your main chat keeps working
-while the subagent works. Four more reach the same engines the CLI runs:
+while the subagent works. Name the files a subagent may change with `@path` in the task (`/spawn tidy the parser @src/parse.rs @src/lex.rs`): that set becomes its lease, kept in `.xencode/leases.json` so a restart does not free it. A second `/spawn` asking for a file a running one holds is told to wait before any worktree is made, and starts by itself when the first finishes. When a subagent finishes, the files it actually changed are checked against its set; anything outside it is named in the chat, and `xencode merge land` refuses that branch. Ending a lease never deletes the worktree or its branch. A task with no `@path` takes no lease. Four more reach the same engines the CLI runs:
 `/doctor [env|deps]` probes machine resources, GPUs, memory and environment
 facts, `/verify [skip...]` runs the machine-checkable checklist (fmt, lint,
 test), `/hotspots [limit]` ranks files by churn, size and bus factor, and
@@ -4613,7 +4613,7 @@ Build an evidence-backed integration plan evaluating candidate branches, checkin
 
 ### `xencode merge land --branch <branch>... --approved-by <name> [--base <base>] [--test-cmd <cmd>...] [--format text|json]`
 
-Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Four things must hold before anything is written: a named human approved it, no veto is open on any branch in the plan (re-read from disk, so a plan built before a veto landed is not a way around it), every recorded worker check passed, and the tree merges clean. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
+Integrate approved candidate branches into the target base branch under an explicit human approval requirement. Five things must hold before anything is written: a branch that ran under a `/spawn` lease changed only the files its task was given (judged by the task contract against `git diff base...branch`; a leases file that cannot be read refuses the land rather than skipping the check), a named human approved it, no veto is open on any branch in the plan (re-read from disk, so a plan built before a veto landed is not a way around it), every recorded worker check passed, and the tree merges clean. Re-runs post-integration test commands on the resulting combined tree and reports their real exit codes and outputs.
 
 ### `xencode merge veto <branch> [--source review|verification] [--raised-by <name>] [--worker <name>] --reason <text>`
 

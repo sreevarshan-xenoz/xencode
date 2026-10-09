@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OR-18`, `OR-4`, `OR-15`: `/spawn` file leases, checked before launch, at finish and at merge
+
+- Name the files a subagent may change with `@path` in the `/spawn` task. That set is
+  its lease, saved in `.xencode/leases.json` so a restart keeps it.
+- A second `/spawn` that asks for a file a running one holds is told to wait before any
+  worktree is made, and starts by itself when the first one finishes.
+- When a subagent finishes, the files it actually changed are checked against its set,
+  and anything outside it is named in the chat. `xencode merge land` refuses a leased
+  branch whose changes leave its set.
+- Ending a lease no longer deletes the worker's worktree or branch.
+
 ### Changed — `EVd-5`: a conversation fold is handed the runs that were recorded
 
 `/ctx fold` (and the prompt `/ctx archive` shows) now hands the model, beside the notes
