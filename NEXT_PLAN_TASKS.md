@@ -219,6 +219,8 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
     engine work did not change, from the causes listed under `PL-2`.
   - **2026-10-09, after EN-4:** 2946 passed, 35 failed, 22 ignored. No failure is new; the 35
     are the same causes as before, in crates EN-4 did not change.
+  - **2026-10-10, after RA-1 and RA-2:** 2951 passed, 35 failed, 23 ignored (three of the
+    ignored are the tests that need a running llama.cpp server). No failure is new.
 
 ## Model Catalog Honesty
 
@@ -17593,12 +17595,16 @@ program; the keys themselves are covered by their own tests.
     and read `stopped` with its worker gone. The live check found that a detached process held
     the starter's output pipe open (`out=$(xencode run --detach …)` waited 166 s); fixed in the
     launcher, after which the same line returned in under a second.
-- [ ] **RA-2 — a detached run whose model call failed reads as done.** `xencode run --show`
+- [x] **RA-2 — a detached run whose model call failed reads as done.** Done 2026-10-09: the
+  worker records a turn that ended in `[SPAWN]0:err:` as `Error` with the reason, and
+  `run --show` prints it on a `why:` line. `xencode run --show`
   says "exit: Done after 0 rounds" when the run's only model call failed with a network error;
   the error is only in the log. Found 2026-10-09 while testing EN-4.
-- [ ] **RA-1 — `run_agent` always returns an empty final answer.** It looks for
+- [x] **RA-1 — `run_agent` always returns an empty final answer.** It looks for
   `[SPAWN:0:finish:` while the loop sends `[SPAWN]0:finish:`, and `rounds` is hard-coded to 1.
-  Found while mapping DK-3.
+  Found while mapping DK-3. Done 2026-10-09: the answer is read from `[SPAWN]0:finish:` and
+  rounds are counted by the loop's round hook; checked against a real llama.cpp server
+  (Qwen3-4B) by an `#[ignore]`d test that needs `XENCODE_LIVE_LLAMACPP_URL`.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
