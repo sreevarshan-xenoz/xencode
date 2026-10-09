@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `readme.md` and `README.rst` was reported as having `README.md`, and the
   real `README.rst` was skipped. The lookup now compares against the names
   actually in the folder.
+- **The bug-fix reproduction check rejected every valid reproduction on
+  Windows.** A failing test there is reported at `tests\repro.rs`, which never
+  matched the reproduction file `tests/repro.rs` or the reported area of the
+  bug, so a correct reproduction was marked "suspect". Paths are now compared
+  with forward slashes, whichever way they were written.
 
 ### Changed — `AG-4`: a first start opens at disclosure level 2, not 4
 

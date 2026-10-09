@@ -256,7 +256,9 @@ pub fn panic_sites(output: &str) -> Vec<(String, u32, u32, String)> {
         else {
             continue;
         };
-        let file = file.as_str().trim().to_string();
+        // Windows prints `tests\repro.rs`; every comparison here is made in
+        // forward slashes, so the file is stored that way.
+        let file = file.as_str().trim().replace('\\', "/");
         if file.is_empty() {
             continue;
         }
@@ -297,8 +299,10 @@ pub fn failed_tests(output: &str) -> Vec<String> {
 }
 
 /// Strip `:line:col` off a panic location so it can be compared to a scope
-/// prefix, and normalise `./src/foo.rs` to `src/foo.rs`.
+/// prefix, and normalise `./src/foo.rs` and `src\foo.rs` to `src/foo.rs`.
 fn bare_location(location: &str) -> String {
+    let location = location.replace('\\', "/");
+    let location = location.as_str();
     let cut = location.rfind(':').map_or(location, |i| &location[..i]);
     let cut = cut.rfind(':').map_or(cut, |i| &cut[..i]);
     cut.trim_start_matches("./")
@@ -1234,6 +1238,23 @@ mod tests {
         ] {
             assert!(!is_test_path(production), "{production} is not a test file");
         }
+    }
+
+    #[test]
+    fn a_windows_panic_location_is_read_with_forward_slashes() {
+        let output =
+            "thread 'doubled_two_is_four' panicked at tests\\repro.rs:5:5:\nassertion failed\n";
+        let sites = panic_sites(output);
+        assert_eq!(sites[0].0, "tests/repro.rs");
+        assert!(same_file("tests\\repro.rs:5:5", "tests/repro.rs"));
+        assert!(in_neighbourhood(
+            "src\\auth\\login.rs:5:9",
+            &["src/auth".to_string()]
+        ));
+        assert!(in_neighbourhood(
+            "src/auth/login.rs:5:9",
+            &["src\\auth".to_string()]
+        ));
     }
 
     #[test]
