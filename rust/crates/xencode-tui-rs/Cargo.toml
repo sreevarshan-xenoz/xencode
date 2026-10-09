@@ -15,6 +15,7 @@ xencode-memory-rs = { path = "../xencode-memory-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
+xencode-live-rs = { path = "../xencode-live-rs" }
 xencode-mcp-rs = { path = "../xencode-mcp-rs" }
 xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }

@@ -15,6 +15,7 @@ pub mod gitsign;
 pub mod help;
 pub mod keymap;
 pub mod layout;
+pub mod live_status;
 pub mod lsp;
 pub mod markdown;
 pub mod mcp;
