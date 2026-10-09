@@ -38,6 +38,42 @@ const TICK: Duration = Duration::from_millis(33);
 /// gets a full view again when it reconnects.
 const WINDOW_QUEUE: usize = 256;
 
+/// When the engine ends waits for a person itself (EN-3). The clock runs
+/// while no window is connected and something waits; at the limit the
+/// waits are ended. After that, until a window connects, a new wait (the
+/// model asking again after a denial, say) is ended at once rather than
+/// given a whole new limit: nobody is coming to answer it.
+#[derive(Default)]
+struct UnattendedClock {
+    since: Option<Instant>,
+    fired: bool,
+}
+
+impl UnattendedClock {
+    /// Whether the waits should be ended now. `watched`: a window is
+    /// connected; `waiting`: something waits for a person.
+    fn tick(&mut self, now: Instant, watched: bool, waiting: bool, limit: Duration) -> bool {
+        if watched {
+            *self = UnattendedClock::default();
+            return false;
+        }
+        if !waiting {
+            self.since = None;
+            return false;
+        }
+        if self.fired {
+            return true;
+        }
+        let since = *self.since.get_or_insert(now);
+        if now.duration_since(since) >= limit {
+            self.fired = true;
+            self.since = None;
+            return true;
+        }
+        false
+    }
+}
+
 /// One connected window.
 struct Window {
     name: String,
@@ -132,12 +168,15 @@ pub async fn serve(project: PathBuf, wait_limit: Duration) -> Result<(), String>
     let mut windows: BTreeMap<u64, Window> = BTreeMap::new();
     let mut next_id = 0u64;
     let mut idle_since: Option<Instant> = None;
-    let mut unattended_since: Option<Instant> = None;
+    let mut clock = UnattendedClock::default();
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
+            // A window arriving is taken in before a tick that might end a
+            // wait the window was about to see.
+            biased;
             Some(conn) = conn_rx.recv() => {
                 next_id += 1;
                 windows.insert(next_id, open_window(next_id, conn, line_tx.clone()));
@@ -169,14 +208,11 @@ pub async fn serve(project: PathBuf, wait_limit: Duration) -> Result<(), String>
                     feed.heartbeat();
                 }
 
-                if windows.is_empty() && super::waits_on_a_person(&app) {
-                    let since = *unattended_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= wait_limit {
-                        super::unattended(&mut app, &tx);
-                        unattended_since = None;
-                    }
-                } else {
-                    unattended_since = None;
+                // Only a window that said hello can answer anything.
+                let watched = windows.values().any(|w| w.greeted);
+                let waiting = super::waits_on_a_person(&app);
+                if clock.tick(Instant::now(), watched, waiting, wait_limit) {
+                    super::unattended(&mut app, &tx);
                 }
 
                 if windows.is_empty() && !has_work(&app) {
@@ -322,7 +358,13 @@ fn on_line(
                     EngineMsg::ApprovalResolved { .. } | EngineMsg::QuestionAnswered { .. }
                 );
                 if for_everyone {
-                    for other in windows.values().filter(|w| w.greeted) {
+                    // The window that answered knows; the others are told
+                    // who did. Names are what clients call themselves, so
+                    // they are shown, never used to tell windows apart.
+                    for (_, other) in windows
+                        .iter()
+                        .filter(|(other, w)| **other != id && w.greeted)
+                    {
                         other.send(&reply);
                     }
                 } else if let Some(window) = windows.get(&id) {
@@ -330,5 +372,56 @@ fn on_line(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIMIT: Duration = Duration::from_secs(60);
+
+    #[test]
+    fn a_wait_ends_only_once_the_limit_has_passed() {
+        let start = Instant::now();
+        let mut clock = UnattendedClock::default();
+        assert!(!clock.tick(start, false, true, LIMIT));
+        assert!(!clock.tick(start + Duration::from_secs(59), false, true, LIMIT));
+        assert!(clock.tick(start + LIMIT, false, true, LIMIT));
+    }
+
+    #[test]
+    fn once_nobody_came_a_new_wait_ends_at_once() {
+        let start = Instant::now();
+        let mut clock = UnattendedClock::default();
+        clock.tick(start, false, true, LIMIT);
+        assert!(clock.tick(start + LIMIT, false, true, LIMIT));
+        // The denial is taken in; the model asks again a little later.
+        assert!(!clock.tick(start + LIMIT + Duration::from_secs(1), false, false, LIMIT));
+        assert!(clock.tick(start + LIMIT + Duration::from_secs(2), false, true, LIMIT));
+    }
+
+    #[test]
+    fn a_window_arriving_starts_the_clock_over() {
+        let start = Instant::now();
+        let mut clock = UnattendedClock::default();
+        clock.tick(start, false, true, LIMIT);
+        assert!(clock.tick(start + LIMIT, false, true, LIMIT));
+        assert!(!clock.tick(start + LIMIT, true, true, LIMIT));
+        // The window left again: the full limit applies to the next wait.
+        let later = start + LIMIT * 2;
+        assert!(!clock.tick(later, false, true, LIMIT));
+        assert!(!clock.tick(later + Duration::from_secs(59), false, true, LIMIT));
+        assert!(clock.tick(later + LIMIT, false, true, LIMIT));
+    }
+
+    #[test]
+    fn a_wait_answered_before_the_limit_starts_the_clock_over() {
+        let start = Instant::now();
+        let mut clock = UnattendedClock::default();
+        clock.tick(start, false, true, LIMIT);
+        assert!(!clock.tick(start + Duration::from_secs(50), false, false, LIMIT));
+        assert!(!clock.tick(start + Duration::from_secs(70), false, true, LIMIT));
+        assert!(clock.tick(start + Duration::from_secs(130), false, true, LIMIT));
     }
 }

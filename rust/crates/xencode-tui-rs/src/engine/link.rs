@@ -299,10 +299,13 @@ fn reconnected(app: &mut App) {
     app.engine_reconnect = None;
     match result {
         Ok((link, view)) => become_window(app, link, view),
-        Err(e) => app.push_toast(
-            crate::toast::ToastKind::Warning,
-            format!("no engine could be started ({e}); this window now runs the agent work itself"),
-        ),
+        Err(e) => {
+            app.take_over_engine_work();
+            app.push_toast(
+                crate::toast::ToastKind::Warning,
+                format!("no engine could be started ({e}); this window now runs the agent work itself and keeps its own records"),
+            );
+        }
     }
 }
 

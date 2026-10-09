@@ -619,7 +619,7 @@ async fn two_windows_racing_for_one_approval() {
         received(&mut a, Duration::from_secs(5)),
         received(&mut b, Duration::from_secs(5))
     );
-    let winners = |got: &[EngineMsg]| {
+    let told = |got: &[EngineMsg]| {
         got.iter()
             .filter_map(|m| match m {
                 EngineMsg::ApprovalResolved { id, by, .. } if *id == id_a => Some(by.clone()),
@@ -627,41 +627,29 @@ async fn two_windows_racing_for_one_approval() {
             })
             .collect::<Vec<_>>()
     };
-    let (won_a, won_b) = (winners(&got_a), winners(&got_b));
-    assert_eq!(won_a.len(), 1, "window a was told once: {got_a:?}");
-    assert_eq!(won_a, won_b, "both windows name the same winner");
+    let (told_a, told_b) = (told(&got_a), told(&got_b));
+    assert_eq!(
+        told_a.len() + told_b.len(),
+        1,
+        "only the window that did not win is told: {got_a:?} {got_b:?}"
+    );
+    let (loser, winner, winner_name) = if told_a.len() == 1 {
+        (&got_a, &got_b, "window b")
+    } else {
+        (&got_b, &got_a, "window a")
+    };
+    let named = told_a.into_iter().chain(told_b).next().unwrap();
+    assert_eq!(
+        named, winner_name,
+        "the window told names the one that answered"
+    );
     let refused = |got: &[EngineMsg]| {
         got.iter().any(|m| {
             matches!(m, EngineMsg::Error { message } if message == "that approval is no longer waiting")
         })
     };
-    let loser = if won_a[0] == "window a" {
-        &got_b
-    } else {
-        &got_a
-    };
-    let winner = if won_a[0] == "window a" {
-        &got_a
-    } else {
-        &got_b
-    };
     assert!(refused(loser), "the slower answer is refused: {loser:?}");
     assert!(!refused(winner), "{winner:?}");
-    assert_eq!(
-        link::answered_elsewhere(
-            &EngineMsg::ApprovalResolved {
-                id: id_a,
-                answer: proto::WireAnswer::Allow,
-                by: won_a[0].clone(),
-            },
-            if won_a[0] == "window a" {
-                "window b"
-            } else {
-                "window a"
-            }
-        ),
-        Some(format!("answered in {}: allow", won_a[0]))
-    );
 }
 
 #[tokio::test]

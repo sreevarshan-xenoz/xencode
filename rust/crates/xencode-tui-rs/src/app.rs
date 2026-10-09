@@ -2348,6 +2348,37 @@ impl<'a> App<'a> {
         Self::build(true)
     }
 
+    /// A window whose engine is gone for good runs the agent work itself
+    /// (EN-3), so it takes over what the engine kept: conversation memory
+    /// saved to disk, the badge status file, and the ByteBot task records,
+    /// read back from disk so tasks the engine left running are failed as
+    /// on any start.
+    pub fn take_over_engine_work(&mut self) {
+        if let Ok(mut memory) = ConversationMemory::with_persistence(self.config.max_memory_items) {
+            let session_id = memory.start_session(None);
+            self.memory = memory;
+            if let Ok(live) = xencode_live_rs::live_dir() {
+                let root = std::env::current_dir().unwrap_or_default();
+                self.live = Some(crate::live_status::LiveFeed::new(live, session_id, &root));
+                self.live_set(
+                    xencode_live_rs::LiveState::Idle,
+                    xencode_live_rs::LiveSource::Chat,
+                    "",
+                );
+            }
+        }
+        let store = crate::bytebot_tasks::TaskStore::new(&self.project_xencode_dir());
+        let (tasks, interrupted) = store.recover();
+        self.bytebot_tasks = tasks;
+        self.bytebot_store = Some(store);
+        if interrupted > 0 {
+            self.push_toast(
+                crate::toast::ToastKind::Warning,
+                interrupted_tasks_warning(interrupted),
+            );
+        }
+    }
+
     fn build(window: bool) -> Self {
         // A config this build cannot read is not a reason to refuse the session —
         // defaults are a usable session — but it is a reason to say so before the
