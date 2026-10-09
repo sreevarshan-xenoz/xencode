@@ -56,6 +56,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         }
         return done();
     }
+    // Only a second bare `q` confirms a quit; any other key withdraws it.
+    if !(key.code == KeyCode::Char('q') && key.modifiers.is_empty()) {
+        app.quit_armed = false;
+    }
     // Global Ctrl chords work in ALL input modes.
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         if let Some(flow) = global_ctrl_chord(app, key, tx) {
@@ -673,7 +677,19 @@ fn global_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
             app.help_visible = true;
             app.help_scroll = 0;
         }
-        KeyCode::Char('q') if !app.text_entry_active() => return quit(),
+        KeyCode::Char('q') if !app.text_entry_active() => {
+            // One stray `q` must not end the session: the first asks, the
+            // second quits, and any other key in between keeps going.
+            if app.quit_armed {
+                return quit();
+            }
+            app.quit_armed = true;
+            app.push_toast(
+                crate::toast::ToastKind::Info,
+                "Press q again to quit — any other key keeps the session".to_string(),
+            );
+            return done();
+        }
         _ => {}
     }
     done()
@@ -2547,9 +2563,45 @@ mod tests {
     }
 
     #[test]
-    fn plain_q_quits_but_not_while_typing() {
+    fn an_empty_session_opens_in_the_composer() {
+        let mut app = App::for_tests();
+        app.messages.retain(|m| m.role != "user");
+        app.input_mode = InputMode::Normal;
+        app.focus = FocusArea::FileExplorer;
+        app.start_in_composer_when_empty();
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        // So a typed sentence is text, not global keys.
+        for c in "quit smoke".chars() {
+            assert_eq!(press(&mut app, KeyCode::Char(c)), KeyFlow::Continue);
+        }
+        assert_eq!(app.chat_input.lines().join(""), "quit smoke");
+
+        // A restored conversation keeps the normal-mode start.
+        let mut app = App::for_tests();
+        app.messages.push(crate::app::UiMessage {
+            role: "user".into(),
+            content: "hi".into(),
+        });
+        app.input_mode = InputMode::Normal;
+        app.start_in_composer_when_empty();
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn plain_q_asks_once_then_quits_but_not_while_typing() {
         let mut app = app_with(FocusArea::ChatInput);
+        assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
+        assert!(app.quit_armed, "the first q asks");
         assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Quit);
+
+        // Any other key in between withdraws the question.
+        let mut app = app_with(FocusArea::ChatInput);
+        press(&mut app, KeyCode::Char('q'));
+        press(&mut app, KeyCode::Down);
+        assert!(!app.quit_armed);
+        assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
+
         let mut app = app_with(FocusArea::GitCommit);
         assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
         assert_eq!(app.commit_message, "q");

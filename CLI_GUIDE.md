@@ -64,7 +64,7 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 (session layout history; `Enter` shows the pane widths a change moved between) ·
 `Ctrl+Space` switch mode (`CODING` ⇄ `ORCHESTRATOR`; both read the same tasks,
 agents and git state, so nothing is lost in the switch) ·
-`Ctrl+C` or `q` quit. If the terminal has the mouse, a divider between two
+`Ctrl+C`, or `q` pressed twice, quits (a single `q` asks first, and any other key keeps the session). A session with nothing said yet opens in the composer, so the first thing typed is a prompt. If the terminal has the mouse, a divider between two
 side-by-side panes drags to resize them; if you want the terminal's own
 drag-select of text back, `xencode config set mouse_capture off` hands the
 mouse over (the same row lives on the Settings panel, and it takes effect on
