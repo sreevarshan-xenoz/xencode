@@ -456,6 +456,10 @@ is not a separate engine and it is not a demo —
   whole run's file changes back, and a plan it posts shows in the same strip.
 - if the provider fails, the panel prints the error it got and the open step
   goes `failed`. Nothing is reported as done that xencode did not observe.
+- a line starting with `/` typed in the panel runs that command exactly as
+  it would in chat — `/init`, `/help`, `/rewind` and the rest — instead of
+  being handed to the agent as a task. Its output appears where that command
+  always writes, and the panel's log says it ran.
 - `/model` typed in the panel opens a list of the models found (↑↓, Enter,
   Esc keeps the current one) without leaving the panel; `/model <name>`
   switches straight away. Every way of changing model — this list, `/model`
