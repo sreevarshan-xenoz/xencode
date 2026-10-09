@@ -14443,6 +14443,9 @@ fn show_detached_run(xencode_dir: &std::path::Path, given: &str) -> Result<(), S
     }
     if let xencode_tui_rs::detached::DetachedStatus::Finished(exit) = &status {
         println!("  exit: {:?} after {} rounds", exit.reason, exit.rounds);
+        if !exit.note.is_empty() {
+            println!("  why: {}", exit.note);
+        }
     }
     Ok(())
 }

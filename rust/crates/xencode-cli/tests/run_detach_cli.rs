@@ -82,6 +82,14 @@ fn a_detached_run_returns_at_once_and_finishes_on_its_own() {
         std::thread::sleep(Duration::from_millis(250));
     };
     assert!(shown.contains("prompt: write a note"), "{shown}");
+    // RA-2: a run whose model could not be reached did not get done.
+    assert!(shown.contains("exit: Error"), "{shown}");
+    assert!(
+        shown
+            .lines()
+            .any(|l| l.trim_start().starts_with("why:") && l.contains("127.0.0.1:9")),
+        "the reason is shown: {shown}"
+    );
     let log = text(&xencode(
         project.path(),
         config.path(),
