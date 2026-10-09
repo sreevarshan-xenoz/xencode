@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `EVd-5`: a conversation fold is handed the runs that were recorded
+
+`/ctx fold` (and the prompt `/ctx archive` shows) now hands the model, beside the notes
+pad, the newest rows of the run ledger and the checks recent turns ran, as exit codes,
+with an instruction that a claim in the conversation that disagrees with them is not a
+fact. A summary's "completed" can then rest on what ran rather than on what was said.
+
 ### Changed — `EVd-3`: checks are reported as passed, not "verified", and each turn records what ran
 
 - After a turn edits files, the chat used to print "✓ verified: cargo test, cargo clippy

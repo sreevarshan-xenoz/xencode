@@ -1319,7 +1319,12 @@ used to print, "state.md only changes when the model flags it", described a writ
 that did not exist), and `/ctx archive` only printed the fold prompt it would have
 sent.
 
-`/ctx fold` sends it. What comes back is a summary the model wrote out of whatever
+`/ctx fold` sends it. Beside the transcript and the notes pad, the fold is handed the
+newest rows of the run ledger and the checks recent turns ran, as exit codes, under a
+heading telling the model that a claim in the conversation that disagrees with them is
+not a fact.
+
+What comes back is a summary the model wrote out of whatever
 the transcript held — including pages it fetched and files it read — so the fold
 does not write `state.md`. It writes `.xencode/state.candidate.md` and says what it
 took out of the reply on the way:
