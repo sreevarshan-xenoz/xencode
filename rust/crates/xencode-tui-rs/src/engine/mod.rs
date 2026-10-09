@@ -87,6 +87,55 @@ fn approval_view(id: u64, request: &crate::agent_tools::ApprovalRequest) -> prot
     }
 }
 
+/// Whether something waits for a person: a question, an approval or a task
+/// waiting for review.
+pub fn waits_on_a_person(app: &App) -> bool {
+    app.question_id.is_some() || !app.approval_queue.is_empty() || app.bytebot_reviewing().is_some()
+}
+
+/// What the engine does when no window has been connected for the wait
+/// limit while something waited for a person (EN-3): a question is
+/// withdrawn and its task stopped, every approval is denied, and a task
+/// waiting for review is completed with its changes kept. Each thing done
+/// is said in the transcript; the lines are returned.
+pub fn unattended(app: &mut App, tx: &mpsc::UnboundedSender<String>) -> Vec<String> {
+    let mut said = Vec::new();
+    if app.question_id.is_some() {
+        handle(
+            app,
+            ClientMsg::Stop {
+                target: StopTarget::Bytebot,
+            },
+            tx,
+            "engine",
+        );
+        said.push(
+            "No window answered ByteBot's question in time: the question was withdrawn and its task stopped."
+                .to_string(),
+        );
+    }
+    let approvals = app.approval_queue.len();
+    if approvals > 0 {
+        while !app.approval_queue.is_empty() {
+            app.resolve_approval(crate::agent_tools::ApprovalAnswer::Denied);
+        }
+        said.push(format!(
+            "No window answered {approvals} approval prompt(s) in time: each was denied, and nothing was written."
+        ));
+    }
+    if app.bytebot_reviewing().is_some() {
+        app.bytebot_accept(tx.clone());
+        said.push(
+            "No window reviewed ByteBot's finished task in time: it was completed and its changes kept."
+                .to_string(),
+        );
+    }
+    for line in &said {
+        app.push_system_message(line.clone());
+    }
+    said
+}
+
 /// Carry out one action a window asked for. `by` names the window, so the
 /// others can be told who answered. Returns what the engine says back.
 pub fn handle(
@@ -216,6 +265,80 @@ mod tests {
         app.config.default_model = "llamacpp:none".into();
         app.config.llama_cpp_url = "http://127.0.0.1:9".into();
         app
+    }
+
+    #[tokio::test]
+    async fn a_question_nobody_answers_is_withdrawn_and_its_task_stopped() {
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let (help_tx, mut help_rx) = oneshot::channel::<String>();
+        app.bytebot_help = Some(help_tx);
+        app.question_id = Some(3);
+        app.question_text = Some("Which port?".into());
+        app.bytebot_running = true;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        app.bytebot_stop = Some(stop.clone());
+
+        let said = unattended(&mut app, &tx);
+        assert_eq!(app.question_id, None);
+        assert!(stop.load(Ordering::Relaxed), "the waiting task is stopped");
+        assert!(
+            help_rx.try_recv().is_err(),
+            "the question's answer channel is closed"
+        );
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("question"), "{said:?}");
+        assert!(app.messages.iter().any(|m| m.content == said[0]));
+    }
+
+    #[tokio::test]
+    async fn approvals_nobody_answers_are_denied() {
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut answers = Vec::new();
+        for (i, summary) in ["write a.rs", "write b.rs"].into_iter().enumerate() {
+            let (answer_tx, answer_rx) = oneshot::channel();
+            app.approval_queue.push_back((request(summary), answer_tx));
+            app.approval_ids.push_back(i as u64 + 1);
+            answers.push(answer_rx);
+        }
+        let said = unattended(&mut app, &tx);
+        for mut answer in answers {
+            assert_eq!(
+                answer.try_recv().unwrap(),
+                crate::agent_tools::ApprovalAnswer::Denied
+            );
+        }
+        assert!(app.approval_queue.is_empty() && app.approval_ids.is_empty());
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("2 approval"), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn a_review_nobody_answers_is_completed_with_its_changes_kept() {
+        use crate::bytebot_tasks::{ByteBotTask, TaskState};
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut task = ByteBotTask::new("write a note", "llamacpp:none");
+        task.state = TaskState::NeedsReview;
+        task.changed_files = vec!["note.md".into()];
+        task.this_session = true;
+        app.bytebot_tasks.push(task);
+        let said = unattended(&mut app, &tx);
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Completed);
+        assert_eq!(
+            app.bytebot_tasks[0].changed_files,
+            vec!["note.md".to_string()]
+        );
+        assert!(said[0].contains("kept"), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn nothing_waiting_means_nothing_done() {
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        assert!(unattended(&mut app, &tx).is_empty());
+        assert!(!waits_on_a_person(&app));
     }
 
     fn request(summary: &str) -> crate::agent_tools::ApprovalRequest {

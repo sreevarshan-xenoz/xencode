@@ -24,6 +24,10 @@ use crate::app::App;
 /// exits.
 pub const IDLE_EXIT: Duration = Duration::from_secs(10);
 
+/// How long something may wait for a person while no window is connected
+/// before the engine ends the wait itself (EN-3): thirty minutes.
+pub const WAIT_LIMIT: Duration = Duration::from_secs(30 * 60);
+
 /// How often the agent loop's reports are taken in and views sent: the
 /// terminal's own frame interval.
 const TICK: Duration = Duration::from_millis(33);
@@ -86,7 +90,7 @@ fn display(project: &Path) -> String {
 /// Run the engine for `project` until it has had no window and nothing to do
 /// for `IDLE_EXIT`. Returns at once, after saying so, if another engine for
 /// the same project is already running.
-pub async fn serve(project: PathBuf) -> Result<(), String> {
+pub async fn serve(project: PathBuf, wait_limit: Duration) -> Result<(), String> {
     let project = std::fs::canonicalize(&project)
         .map_err(|e| format!("cannot open the project folder {}: {e}", project.display()))?;
     let shown = display(&project);
@@ -128,6 +132,7 @@ pub async fn serve(project: PathBuf) -> Result<(), String> {
     let mut windows: BTreeMap<u64, Window> = BTreeMap::new();
     let mut next_id = 0u64;
     let mut idle_since: Option<Instant> = None;
+    let mut unattended_since: Option<Instant> = None;
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -164,6 +169,16 @@ pub async fn serve(project: PathBuf) -> Result<(), String> {
                     feed.heartbeat();
                 }
 
+                if windows.is_empty() && super::waits_on_a_person(&app) {
+                    let since = *unattended_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= wait_limit {
+                        super::unattended(&mut app, &tx);
+                        unattended_since = None;
+                    }
+                } else {
+                    unattended_since = None;
+                }
+
                 if windows.is_empty() && !has_work(&app) {
                     let since = *idle_since.get_or_insert_with(Instant::now);
                     if since.elapsed() >= IDLE_EXIT {
@@ -185,6 +200,7 @@ fn has_work(app: &App) -> bool {
         || app.bytebot_running
         || app.question_id.is_some()
         || !app.approval_queue.is_empty()
+        || app.bytebot_reviewing().is_some()
         || app
             .bytebot_tasks
             .iter()

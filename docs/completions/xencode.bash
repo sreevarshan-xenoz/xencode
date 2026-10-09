@@ -2740,13 +2740,17 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__engine)
-            opts="-h --project --help"
+            opts="-h --project --wait-limit --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
                 --project)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --wait-limit)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
