@@ -103,6 +103,16 @@ fn beginner_drive_reaches_committed_change_seeing_no_level_4_destination() {
     // 2. Start app at Level 2 (beginner / workflow tier)
     let mut app = App::for_tests();
     app.set_disclosure_level(DisclosureLevel::Level2);
+    // The explorer lists the folder the app started in, which for a test is
+    // xencode's own crate; show the beginner's repository instead, so file
+    // names in this source tree (src/bytebot_tasks.rs) cannot be read as a
+    // destination on screen.
+    app.file_tree = std::fs::read_dir(repo_path)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".git")
+        .collect();
 
     // 3. Inspect first-run welcome screen
     let welcome_screen = render_screen(&mut app);

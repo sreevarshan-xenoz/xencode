@@ -17507,7 +17507,10 @@ is **awaiting the owner's review**: nothing below is started.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
-- [ ] **BT-1 — ByteBot task records and a queue**, with the original project's seven states.
+- [x] **BT-1 — ByteBot task records and a queue**, with the original project's seven states.
+  Done 2026-10-09 (`xencode-tui-rs/src/bytebot_tasks.rs`): records in
+  `.xencode/bytebot/tasks/`, a queue that runs one task at a time, cancelled on Esc, failed on a
+  provider error with the error kept, and interrupted tasks failed on the next start.
 - [ ] **BT-2 — needs help:** an `ask_user` tool that pauses a task for an answer, or for the
   person to take over and type `/done`.
 - [ ] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).

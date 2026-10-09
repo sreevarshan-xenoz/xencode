@@ -848,6 +848,13 @@ pub struct App<'a> {
     pub(crate) bytebot_stop: Option<Arc<AtomicBool>>,
     /// The ByteBot panel's model list is open (BT-5), and which row is lit.
     pub bytebot_model_picker: bool,
+    /// ByteBot's tasks (BT-1), oldest first, as their records on disk say.
+    pub bytebot_tasks: Vec<crate::bytebot_tasks::ByteBotTask>,
+    /// Where the records live: the project's `.xencode`. `None` in tests that
+    /// do not ask for one, and then nothing is written.
+    pub bytebot_store: Option<crate::bytebot_tasks::TaskStore>,
+    /// The provider error that ended the running task, from its `err:` event.
+    pub(crate) bytebot_error: Option<String>,
     pub bytebot_model_selected: usize,
     /// This session's live status file (DK-1), read by the floating badge.
     /// `None` in tests that do not ask for one.
@@ -2304,6 +2311,20 @@ impl<'a> App<'a> {
         if app.config.badge_autostart {
             app.start_badge();
         }
+        // BT-1: ByteBot's task list comes back with the project. A task that
+        // was running or waiting for help when xencode exited cannot resume.
+        let store = crate::bytebot_tasks::TaskStore::new(&app.project_xencode_dir());
+        let interrupted = store.recover();
+        app.bytebot_tasks = store.load_all();
+        app.bytebot_store = Some(store);
+        if interrupted > 0 {
+            app.push_toast(
+                crate::toast::ToastKind::Warning,
+                format!(
+                    "{interrupted} ByteBot task(s) were interrupted when xencode last exited;                      they are marked failed"
+                ),
+            );
+        }
         app.load_plugins();
         app.load_skills();
         // V-6: the window arrangement comes back with the app. A file this
@@ -3225,6 +3246,9 @@ impl<'a> App<'a> {
             turn_stop: None,
             bytebot_stop: None,
             bytebot_model_picker: false,
+            bytebot_tasks: Vec::new(),
+            bytebot_store: None,
+            bytebot_error: None,
             bytebot_model_selected: 0,
             live: None,
             live_turn_error: None,
@@ -3932,9 +3956,7 @@ impl<'a> App<'a> {
                 .unwrap_or("")
                 .trim()
                 .to_string();
-            if let Some(run) = self.arm_bytebot(&task) {
-                tokio::spawn(agent_rounds(run, tx));
-            }
+            self.bytebot_enqueue(&task, tx);
             return;
         }
 
@@ -5058,9 +5080,135 @@ impl<'a> App<'a> {
             self.dispatch_prompt(task, tx);
             return;
         }
-        if let Some(run) = self.arm_bytebot(&task) {
-            tokio::spawn(agent_rounds(run, tx));
+        self.bytebot_enqueue(&task, tx);
+    }
+
+    /// Add a ByteBot task (BT-1). It starts now when nothing is running, and
+    /// otherwise waits its turn as `pending`.
+    pub(crate) fn bytebot_enqueue(&mut self, text: &str, tx: mpsc::UnboundedSender<String>) {
+        let text = text.trim();
+        if text.is_empty() {
+            self.system_line("usage: /bytebot <task>   (or Ctrl+B to open the panel)");
+            return;
         }
+        let task = crate::bytebot_tasks::ByteBotTask::new(text, &self.config.default_model);
+        self.bytebot_save(&task);
+        self.bytebot_tasks.push(task);
+        if self.bytebot_running {
+            self.bytebot_command.clear();
+            self.bytebot_cursor = 0;
+            self.bytebot_log.push(format!("queued: {text}"));
+            self.focus = FocusArea::ByteBotPanel;
+        } else {
+            self.bytebot_start_next(tx);
+        }
+    }
+
+    fn bytebot_save(&self, task: &crate::bytebot_tasks::ByteBotTask) {
+        if let Some(store) = &self.bytebot_store {
+            // A record that cannot be written costs the list after a restart,
+            // never the run itself.
+            let _ = store.save(task);
+        }
+    }
+
+    /// The task ByteBot is on: running, waiting for help or waiting for review.
+    pub(crate) fn bytebot_current_index(&self) -> Option<usize> {
+        use crate::bytebot_tasks::TaskState;
+        self.bytebot_tasks.iter().position(|t| {
+            matches!(
+                t.state,
+                TaskState::Running | TaskState::NeedsHelp | TaskState::NeedsReview
+            )
+        })
+    }
+
+    /// Start the oldest pending task, if any and if nothing is running.
+    pub(crate) fn bytebot_start_next(&mut self, tx: mpsc::UnboundedSender<String>) {
+        use crate::bytebot_tasks::TaskState;
+        if self.bytebot_running {
+            return;
+        }
+        let Some(i) = self
+            .bytebot_tasks
+            .iter()
+            .position(|t| t.state == TaskState::Pending)
+        else {
+            return;
+        };
+        let text = self.bytebot_tasks[i].text.clone();
+        self.bytebot_error = None;
+        let Some(run) = self.arm_bytebot(&text) else {
+            let task = &mut self.bytebot_tasks[i];
+            task.state = TaskState::Failed;
+            task.note = Some("the task could not be started".to_string());
+            let task = task.clone();
+            self.bytebot_save(&task);
+            return;
+        };
+        let model = self.config.default_model.clone();
+        let task = &mut self.bytebot_tasks[i];
+        task.state = TaskState::Running;
+        task.model = model;
+        task.turn = Some(run.approval.turn);
+        task.started_at = Some(xencode_live_rs::now_secs());
+        let task = task.clone();
+        self.bytebot_save(&task);
+        tokio::spawn(agent_rounds(run, tx));
+    }
+
+    /// A ByteBot run ended (`[BYTEBOT_DONE]`): record how, then start the next
+    /// pending task. Stopped with Esc is `cancelled`; a provider error or a
+    /// failed step is `failed`; anything else is `completed`.
+    pub fn bytebot_run_finished(&mut self, tx: mpsc::UnboundedSender<String>) {
+        use crate::bytebot_tasks::TaskState;
+        let stopped = self.live_turn_stopped;
+        let error = self.bytebot_error.take().or_else(|| {
+            self.bytebot_steps
+                .iter()
+                .any(|(_, status)| status == "failed")
+                .then(|| "a step failed".to_string())
+        });
+        if let Some(i) = self
+            .bytebot_tasks
+            .iter()
+            .position(|t| t.state == TaskState::Running)
+        {
+            let steps = self.bytebot_steps.clone();
+            let task = &mut self.bytebot_tasks[i];
+            task.steps = steps;
+            task.ended_at = Some(xencode_live_rs::now_secs());
+            if stopped {
+                task.state = TaskState::Cancelled;
+                task.note = Some("stopped".to_string());
+            } else if let Some(e) = &error {
+                task.state = TaskState::Failed;
+                task.note = Some(e.clone());
+            } else {
+                task.state = TaskState::Completed;
+            }
+            let task = task.clone();
+            self.bytebot_save(&task);
+        }
+        // Read while the source is still "bytebot".
+        if !stopped {
+            self.live_turn_error = error;
+        }
+        self.live_turn_finished();
+        self.bytebot_running = false;
+        // Whatever came back is what there is: the bar and the closing line
+        // read the step rows, so an aborted run cannot claim 100%.
+        self.bytebot_progress = bytebot_progress(&self.bytebot_steps);
+        let done = self
+            .bytebot_steps
+            .iter()
+            .filter(|(_, status)| status == "done")
+            .count();
+        self.bytebot_log.push(format!(
+            "■ run over: {done}/{} call(s) completed",
+            self.bytebot_steps.len()
+        ));
+        self.bytebot_start_next(tx);
     }
 
     /// Start an autonomous ByteBot run (I2-04). This is the ordinary chat tool
@@ -5556,6 +5704,7 @@ impl<'a> App<'a> {
                 last.1 = outcome.to_string();
             }
         } else if let Some(text) = body.strip_prefix("err:") {
+            self.bytebot_error = Some(text.to_string());
             self.bytebot_log.push(format!("❌ {text}"));
             if let Some(last) = self.bytebot_steps.last_mut() {
                 if last.1 == "running" {
@@ -12750,29 +12899,7 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
             } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
                 app.bytebot_event(body);
             } else if token == "[BYTEBOT_DONE]" {
-                // Read the steps while the source is still "bytebot".
-                if !app.live_turn_stopped
-                    && app
-                        .bytebot_steps
-                        .iter()
-                        .any(|(_, status)| status == "failed")
-                {
-                    app.live_turn_error = Some("a step failed".to_string());
-                }
-                app.live_turn_finished();
-                app.bytebot_running = false;
-                // Whatever came back is what there is: the bar and the closing
-                // line read the step rows, so an aborted run cannot claim 100%.
-                app.bytebot_progress = bytebot_progress(&app.bytebot_steps);
-                let done = app
-                    .bytebot_steps
-                    .iter()
-                    .filter(|(_, status)| status == "done")
-                    .count();
-                app.bytebot_log.push(format!(
-                    "■ run over: {done}/{} call(s) completed",
-                    app.bytebot_steps.len()
-                ));
+                app.bytebot_run_finished(tx.clone());
             } else if token == "[INIT_DONE]" {
                 app.init_running = false;
                 app.init_progress = 1.0;
@@ -18739,6 +18866,73 @@ Content-Length: 0
             .filter(|message| message.role == "system")
             .map(|message| message.content.clone())
             .collect()
+    }
+
+    /// BT-1: ByteBot tasks queue and run one at a time, oldest first. Each
+    /// record says how its run ended, on disk as well as in the panel.
+    #[tokio::test]
+    async fn bytebot_tasks_queue_and_run_one_at_a_time() {
+        use crate::bytebot_tasks::{TaskState, TaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_tests();
+        app.bytebot_store = Some(TaskStore::new(dir.path()));
+        // Nothing listens on port 9; the runs' own requests fail in the
+        // background and only the record keeping is checked here.
+        app.config.default_model = "llamacpp:none".into();
+        app.config.llama_cpp_url = "http://127.0.0.1:9".into();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let states = |app: &App| {
+            app.bytebot_tasks
+                .iter()
+                .map(|t| t.state)
+                .collect::<Vec<_>>()
+        };
+
+        app.bytebot_command = "first".into();
+        app.run_bytebot(tx.clone());
+        app.bytebot_command = "second".into();
+        app.run_bytebot(tx.clone());
+        assert_eq!(states(&app), vec![TaskState::Running, TaskState::Pending]);
+        assert!(app.bytebot_running);
+        assert!(
+            app.bytebot_tasks[0].turn.is_some(),
+            "the run's checkpoint group is kept"
+        );
+
+        app.bytebot_event("call:read_file a.rs");
+        app.bytebot_event("done:done");
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(states(&app), vec![TaskState::Completed, TaskState::Running]);
+        assert_eq!(app.bytebot_tasks[0].steps.len(), 1);
+        assert!(app.bytebot_tasks[0].ended_at.is_some());
+
+        app.bytebot_event("err:llamacpp:none failed: connection refused");
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(app.bytebot_tasks[1].state, TaskState::Failed);
+        assert!(app.bytebot_tasks[1]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("connection refused")));
+        assert!(!app.bytebot_running, "nothing left to run");
+
+        // Stopped with Esc: the run reports [STOPPED] before it ends.
+        app.chat_input.insert_str("/bytebot third");
+        app.submit_message(tx.clone());
+        assert_eq!(
+            app.bytebot_tasks[2].state,
+            TaskState::Running,
+            "/bytebot queues too"
+        );
+        app.live_turn_stopped = true;
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(app.bytebot_tasks[2].state, TaskState::Cancelled);
+
+        let on_disk = TaskStore::new(dir.path()).load_all();
+        assert_eq!(
+            on_disk.iter().map(|t| t.state).collect::<Vec<_>>(),
+            states(&app),
+            "the records on disk say the same"
+        );
     }
 
     /// BT-4: a slash command typed in the ByteBot panel runs like it does in

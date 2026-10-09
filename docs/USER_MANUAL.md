@@ -456,6 +456,14 @@ is not a separate engine and it is not a demo —
   whole run's file changes back, and a plan it posts shows in the same strip.
 - if the provider fails, the panel prints the error it got and the open step
   goes `failed`. Nothing is reported as done that xencode did not observe.
+- every task is kept as a record in the project's `.xencode/bytebot/tasks/`
+  folder, with the original Bytebot project's states: `pending`, `running`,
+  `needs help`, `needs review`, `completed`, `cancelled` and `failed`. The
+  panel lists the newest five, the current one marked `›`. Typing a new task
+  while one runs queues it; tasks run one at a time, oldest first. Esc on a
+  running task cancels it, a provider error fails it with the error kept in
+  the record, and a task that was running when xencode exited is marked
+  failed the next time xencode starts, with a warning saying so.
 - a line starting with `/` typed in the panel runs that command exactly as
   it would in chat — `/init`, `/help`, `/rewind` and the rest — instead of
   being handed to the agent as a task. Its output appears where that command
