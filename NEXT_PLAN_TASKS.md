@@ -6721,6 +6721,10 @@ and PR-1: refuse at the source class, never grade with a classifier.
   trailer plus a local `runs.jsonl` joining run-id → model → approvals →
   artifacts, extended from the EVd family rather than duplicated. in-toto/SLSA/
   Sigstore need a second party; there is none.
+  *(Done 2026-10-03 in `da8869cc`, recorded here 2026-10-09: `runledger.rs` writes
+  `.xencode/cache/runs.jsonl`, one row per run with its id, model and the approval answers
+  given while it ran, and `xencode runs list|show|trailer` reads it back; `runs show` joins a
+  session's check rows (AE-2). No signing — there is no second party.)*
 - **QTR-6 — SE-1, immediately.** *Effort: S.* Config is 644 **today** with
   plaintext keys (fact Q-1.2): create-temp 0600 + atomic rename, then the DB-3
   keyring tier as an optional upgrade — the Secret Service is available here
@@ -10665,7 +10669,11 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
   project with nothing marked creates no file and asks git nothing. **What this does not do:** it
   gives a fact no confidence score a model assigned, it does not touch `AGENTS.md`, and it says
   nothing about whether a fact's *reasoning* holds — a why-fact passes this check forever.
-  `QK-5`'s value proxy is still blocked on `AC-5`'s real tokenizer.
+  `QK-5`'s value proxy is still blocked on `AC-5`'s real tokenizer. *(2026-10-09: that
+  blocker is stale — `AC-5` was done on 2026-09-24, `/tokenize` is asked once per turn. What is
+  missing now is a done-when: the row names its inputs (`retrieved_files`, prompt and cached
+  tokens) but not what the proxy must show, so it waits on one being written rather than on
+  code.)*
 - [x] `QK-2` — 2026-10-06, as `## Lessons` and `## Preferences` lifted out of the root
   `AGENTS.md` before its cap is applied and sent on `PREFERENCES_CAP_TOKENS` of their own.
   Four things the row did not say. **(1)** "Inside AC-4's ceiling" describes a constraint the
