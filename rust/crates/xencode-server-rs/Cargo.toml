@@ -17,6 +17,7 @@ sha2 = "0.10"
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-models-rs = { path = "../xencode-models-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
+xencode-core-rs = { path = "../xencode-core-rs" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

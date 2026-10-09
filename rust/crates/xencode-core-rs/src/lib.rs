@@ -1,4 +1,5 @@
 pub mod atomic;
+pub mod chain;
 pub mod decompose;
 pub mod jsonl;
 pub mod lease;

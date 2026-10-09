@@ -403,7 +403,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Orchestrator** | `xencode orchestrator retry` / `stop` / `attach` | Re-run one role under your name, signal one process xencode recorded starting, or hand this real terminal to a vendor's own running session and take it back with its exit status |
 | **Compete** | `xencode compete run "<question>" --arm a --arm b` | Two or three candidate implementations, each built on its own branch in its own worktree and put through the verification checklist, printed as `{ran, skipped, failed, evidence-ref}` per arm with no composite score; `xencode compete pick <run> <arm>` is the human's choice and leaves the other branch and its evidence on disk |
 | **Cache** | `xencode cache stats` | Show cache statistics |
-| **Audit** | `xencode audit verify [PATH]` | Check the server's audit log was not edited afterwards |
+| **Audit** | `xencode audit verify [PATH]` | Check the server's audit log, or the run ledger, was not edited afterwards |
 | **Server** | `xencode server` | Start collaboration server (local-first: `127.0.0.1:8765`; TLS opt-in) |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
