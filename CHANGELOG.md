@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `EVd-3`: checks are reported as passed, not "verified", and each turn records what ran
+
+- After a turn edits files, the chat used to print "✓ verified: cargo test, cargo clippy
+  exited 0". An exit code says the checks passed, not that the change is right, so it
+  now says "✓ checks passed: …".
+- Each such turn now records on its trace row which checks ran, which failed, which
+  were due but never ran, and which tool row holds the output. `/trace` shows it as one
+  line, for example `checks: 2 ran, 1 failed, 0 skipped — failed: cargo clippy`.
+- The security scanner's findings are labelled as a pattern scan: `xencode analyze`
+  prints "Pattern scan: N possible issue(s) in FILE", and the Security Auditor panel's
+  title says "pattern scan, not a review".
+
 ### Added — `EVd-7`: the run ledger is hash-chained, and `xencode audit verify` checks it
 
 Each row of `.xencode/ledger.jsonl` (written by `xencode test`) now carries the digest

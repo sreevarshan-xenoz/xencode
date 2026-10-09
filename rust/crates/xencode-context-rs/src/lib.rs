@@ -229,8 +229,8 @@ pub use redact::{Redactor, Vault};
 pub use trace::{
     allowlisted_by, append_trace, arguments_preview, contains_secret, load_secret_allowlist,
     path_skips_secret_scan, prompt_digest, read_recent_traces, redact_error_for_trace,
-    redact_secrets, scan_secrets, secret_spans, tail_preview, trace_path, SecretHit, ToolTrace,
-    TurnTrace, TRACE_ARGUMENTS_CAP, TRACE_TAIL_CAP,
+    redact_secrets, scan_secrets, secret_spans, tail_preview, trace_path, ChecksVerdict, SecretHit,
+    ToolTrace, TurnTrace, TRACE_ARGUMENTS_CAP, TRACE_TAIL_CAP,
 };
 pub use trust::{
     agents_content_is_trusted, agents_sha256, read_agents_md, read_scoped_agents_md,

@@ -132,6 +132,53 @@ pub struct TurnTrace {
     /// before a prompt edit and one after are not compared as if they were alike.
     #[serde(default)]
     pub prompt_version: Option<String>,
+    /// What the checks run after this turn's edits found (EVd-3), when any ran.
+    /// `None` when the turn edited nothing or no check applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checks: Option<ChecksVerdict>,
+}
+
+/// The checks-ran verdict (EVd-3), in JUnit's terms: a check that did not run
+/// did not pass. `failed` is a subset of `ran`; `skipped` lists checks that were
+/// due and never ran — a denial, a timeout, no toolchain, or an earlier
+/// failure that stopped the run. Nothing here says "verified": an exit code
+/// says the checks passed, not that the change is right.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChecksVerdict {
+    pub ran: Vec<String>,
+    pub failed: Vec<String>,
+    pub skipped: Vec<String>,
+    /// Where the output is kept: `tools[N]` names this turn's own tool row
+    /// whose tail holds the last check's output.
+    #[serde(default)]
+    pub evidence_ref: Option<String>,
+}
+
+impl ChecksVerdict {
+    /// Every check that was due ran, and none failed.
+    pub fn all_passed(&self) -> bool {
+        !self.ran.is_empty() && self.failed.is_empty() && self.skipped.is_empty()
+    }
+
+    /// One line for `/trace`: counts first, then the names that matter.
+    pub fn summary(&self) -> String {
+        let mut line = format!(
+            "checks: {} ran, {} failed, {} skipped",
+            self.ran.len(),
+            self.failed.len(),
+            self.skipped.len()
+        );
+        if !self.failed.is_empty() {
+            line.push_str(&format!(" — failed: {}", self.failed.join(", ")));
+        }
+        if !self.skipped.is_empty() {
+            line.push_str(&format!(" — not run: {}", self.skipped.join(", ")));
+        }
+        if let Some(evidence) = &self.evidence_ref {
+            line.push_str(&format!(" (output: {evidence})"));
+        }
+        line
+    }
 }
 
 impl TurnTrace {
@@ -155,6 +202,7 @@ impl TurnTrace {
             retrieved_files: Vec::new(),
             is_decision: false,
             prompt_version: Some(crate::prompts::set_version().to_string()),
+            checks: None,
         }
     }
 
@@ -767,6 +815,37 @@ second line echoing the prompt";
         assert!(rows[0].retrieved_files.is_empty());
         assert!(!rows[0].is_decision);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_checks_verdict_says_what_ran_failed_and_never_ran() {
+        let verdict = ChecksVerdict {
+            ran: vec!["cargo test".into(), "cargo clippy".into()],
+            failed: vec!["cargo clippy".into()],
+            skipped: vec![],
+            evidence_ref: Some("tools[3]".into()),
+        };
+        assert!(!verdict.all_passed());
+        assert_eq!(
+            verdict.summary(),
+            "checks: 2 ran, 1 failed, 0 skipped — failed: cargo clippy (output: tools[3])"
+        );
+        // A check that never ran is not a pass.
+        let unrun = ChecksVerdict {
+            skipped: vec!["cargo test".into()],
+            ..Default::default()
+        };
+        assert!(!unrun.all_passed());
+        assert!(unrun.summary().contains("not run: cargo test"));
+        assert!(!unrun.summary().contains("verified"));
+
+        // A row written before the field existed reads as "no checks".
+        let old: TurnTrace =
+            serde_json::from_str(r#"{"ts_unix_ms":1,"duration_ms":2,"rounds":1}"#).unwrap();
+        assert_eq!(old.checks, None);
+        // And a row without checks does not grow an empty field on disk.
+        let line = serde_json::to_string(&TurnTrace::new(1, 1)).unwrap();
+        assert!(!line.contains("checks"), "{line}");
     }
 
     #[test]

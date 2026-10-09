@@ -14469,7 +14469,13 @@ fn run_analyze(
             // Run security scan (stderr: stdout stays valid JSON).
             if let Ok(findings) = VulnerabilityScanner::scan_file(fp) {
                 if !findings.is_empty() {
-                    eprintln!("  Security: {} issues in {}", findings.len(), fp.display());
+                    // A pattern scan, not a security verdict (EVd-3): these are
+                    // lines that match a rule, for a person to read.
+                    eprintln!(
+                        "  Pattern scan: {} possible issue(s) in {}",
+                        findings.len(),
+                        fp.display()
+                    );
                 }
             }
         }
