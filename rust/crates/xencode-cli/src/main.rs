@@ -1034,7 +1034,12 @@ enum Commands {
     },
 
     /// Launch the Terminal User Interface
-    Tui,
+    Tui {
+        /// Run the agent work inside this terminal instead of in the
+        /// project's engine process
+        #[arg(long)]
+        in_process: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2199,7 +2204,7 @@ async fn async_main() {
     }
 
     // Bare `xencode` launches the TUI, as documented in the README
-    let result = match cli.command.unwrap_or(Commands::Tui) {
+    let result = match cli.command.unwrap_or(Commands::Tui { in_process: false }) {
         Commands::Scan {
             path,
             hidden,
@@ -2485,7 +2490,7 @@ async fn async_main() {
             check,
             format,
         } => run_bootstrap(&path, check, format),
-        Commands::Tui => run_tui().await,
+        Commands::Tui { in_process } => run_tui(in_process).await,
     };
 
     if let Err(error) = result {
@@ -15008,7 +15013,7 @@ async fn run_engine(project: Option<PathBuf>) -> Result<(), String> {
     std::process::exit(0);
 }
 
-async fn run_tui() -> Result<(), String> {
+async fn run_tui(in_process: bool) -> Result<(), String> {
     use std::io::IsTerminal;
     // A panic from here on would otherwise leave raw mode and the alternate
     // screen switched on, hiding its own message: restore the terminal first
@@ -15033,7 +15038,7 @@ async fn run_tui() -> Result<(), String> {
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
-    let res = xencode_tui_rs::run_app(&mut terminal).await;
+    let res = xencode_tui_rs::run_app(&mut terminal, in_process).await;
 
     // Restore terminal
     crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;

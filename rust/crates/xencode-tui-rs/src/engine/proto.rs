@@ -40,6 +40,8 @@ pub enum ClientMsg {
     SetModel {
         name: String,
     },
+    /// Carry on with ByteBot's queue after a stop paused it.
+    ResumeTasks,
     /// A line a window-side command added to the transcript, so every
     /// window's transcript stays the same.
     Note {
@@ -199,6 +201,7 @@ mod tests {
             ClientMsg::SetModel {
                 name: "llamacpp:qwen3-4b".into(),
             },
+            ClientMsg::ResumeTasks,
             ClientMsg::Note {
                 role: "system".into(),
                 content: "Theme: dark".into(),

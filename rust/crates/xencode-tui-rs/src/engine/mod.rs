@@ -4,6 +4,7 @@
 //! local socket to an engine in its own process.
 
 pub mod address;
+pub mod link;
 pub mod proto;
 pub mod server;
 pub mod transport;
@@ -16,10 +17,15 @@ use tokio::sync::mpsc;
 use crate::app::App;
 use proto::{ClientMsg, EngineMsg, ReviewDecision, StopTarget, PROTOCOL_VERSION};
 
-/// The terminal app's way of asking the engine for an agent action: the
-/// message goes through `handle` as the window "terminal", and an error the
-/// engine answers with is shown as a warning toast.
+/// The terminal app's way of asking the engine for an agent action. In a
+/// window onto an engine (EN-2) the message goes over the link; otherwise it
+/// goes through `handle` as the window "terminal", and an error the engine
+/// answers with is shown as a warning toast.
 pub fn act(app: &mut App, msg: ClientMsg, tx: &mpsc::UnboundedSender<String>) {
+    if app.engine_link.is_some() {
+        link::act(app, msg, tx);
+        return;
+    }
     for reply in handle(app, msg, tx, "terminal") {
         if let EngineMsg::Error { message } = reply {
             app.push_toast(crate::toast::ToastKind::Warning, message);
@@ -182,6 +188,10 @@ pub fn handle(
         }
         ClientMsg::SetModel { name } => {
             app.set_model(&name, tx.clone());
+            Vec::new()
+        }
+        ClientMsg::ResumeTasks => {
+            app.bytebot_start_next(tx.clone());
             Vec::new()
         }
         ClientMsg::Note { role, content } => {
