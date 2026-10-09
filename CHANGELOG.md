@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `TX-10`: each TUI panel goes by one name
+
+Three panels were called different things in different places: the agent panel was
+"ByteBot", "Agent" and "ByteBot Agent"; the insights panel was "Insights", "Advice"
+and "Insights & Advice"; the impact panel was "Impact" and "Blast Radius". Each now
+has one name — ByteBot, Insights, Impact — in its title, the feature palette, the
+welcome shortcuts and `/goto` replies, all read from the one destination table. The
+old names still work with `/goto`.
+
 ### Added — `TX-8`: `NO_COLOR` support, and focus marked in text
 
 Starting the TUI with `NO_COLOR` set to any non-empty value now draws it without

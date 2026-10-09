@@ -123,7 +123,7 @@ one of them is a reason a new user leaves in the first five minutes. Quick wins 
 | **TX-7** ✅ | At 80 columns the footer's `?:help` is cut off behind the status block; the welcome text never mentions `?`, `/` or `Ctrl+F` (`ui.rs:482`, `ui.rs:785`) | `?:help` first; the empty screen shows provider status and "? keys · / commands · Ctrl+F all panels" |
 | **TX-8** ✅ | No `NO_COLOR` handling anywhere (verified); focus shown by border colour only | honour `NO_COLOR`; mark the focused pane in text |
 | **TX-9** ✅ | Global Ctrl chords fire while typing (Ctrl+A/E/K/U/W open panels or cycle layout; Ctrl+C quits with no way to cancel a running turn) | pass readline keys to the composer while editing; Esc/Ctrl+C cancel the turn first, quit only when idle |
-| **TX-10** | 27 destinations at the default disclosure level 4, and one panel under several names ("ByteBot"/"Agent", "Advice"/"Insights & Advice", "Impact"/"Blast Radius") | one name per destination from `DESTINATIONS`; with `AG-3`/`AG-4`, a lower default level and a palette |
+| **TX-10** ✅ (the names; the lower default level waits on `AG-3`/`AG-4`) | 27 destinations at the default disclosure level 4, and one panel under several names ("ByteBot"/"Agent", "Advice"/"Insights & Advice", "Impact"/"Blast Radius") | one name per destination from `DESTINATIONS`; with `AG-3`/`AG-4`, a lower default level and a palette |
 
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.

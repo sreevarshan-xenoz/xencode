@@ -3112,7 +3112,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = format!(
-        " {} ByteBot Agent [{}]{} (Enter:run, Esc:close) ",
+        " {} ByteBot [{}]{} (Enter:run, Esc:close) ",
         "\u{1F916}", status_icon, status_str
     );
     let block = Block::default()

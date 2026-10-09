@@ -234,7 +234,7 @@ fn turning_disclosure_off_restores_plain_xencode_identically() {
     // disclosure off reaches it from the palette like every other pane.
     assert!(palette.iter().any(|(_, _, a)| *a == FocusArea::WorkerPanel));
 
-    // Welcome shortcuts line includes /bytebot=agent
+    // Welcome shortcuts line includes /bytebot, under the panel's one name (TX-10)
     let shortcuts = xencode_tui_rs::focus::first_run_shortcuts_line(DisclosureLevel::Level4);
-    assert!(shortcuts.contains("/bytebot=agent"));
+    assert!(shortcuts.contains("/bytebot=bytebot"), "{shortcuts}");
 }
