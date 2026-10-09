@@ -302,7 +302,7 @@ xencode remote show
 /trust [status|forget] [path] - Follow an AGENTS.md as instructions — the workspace's, or a directory's like src/auth/AGENTS.md — or report/withdraw (trust is per content hash)
 /egress [text]         - Show where the next turn would send your prompt and what redaction holds back, without sending it
 /goto <destination>    - Switch focus directly to any panel destination by name (also `/nav`); every feature stays reachable whatever disclosure level is set
-/level [1-4]           - Read or set the progressive disclosure tier — 1 Core, 2 Workflow, 3 Advanced, 4 All — which governs what the feature navigator (`Ctrl+F`) and welcome line show; the command palette (`Ctrl+X`) always lists everything
+/level [1-4]           - Read or set the progressive disclosure tier — 1 Core, 2 Workflow, 3 Advanced, 4 All — which governs what the feature navigator (`Ctrl+F`) and welcome line show. A first start opens at 2; the command palette (`Ctrl+X`) always lists everything
 /help                  - Open the help overlay (the same as `?`). A `/word` that is not a command is answered with "Unknown command" instead of being sent to the model
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
