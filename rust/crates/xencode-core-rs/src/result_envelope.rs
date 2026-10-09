@@ -134,6 +134,79 @@ pub struct ReviewerView<'a> {
     pub unverified_claims: &'a [Claim],
 }
 
+impl ReviewerView<'_> {
+    /// What a reviewer reads (AE-1): the decided status, the evidence, and the
+    /// worker's claims last, under a heading that says nobody checked them.
+    pub fn render(&self) -> String {
+        let mut out = format!(
+            "status: {}
+agent: {}
+task: {}
+",
+            self.status.label(),
+            self.agent,
+            self.task
+        );
+        out.push_str(&render_evidence(self.evidence));
+        if !self.unverified_claims.is_empty() {
+            out.push_str(
+                "unverified claims (the worker's own words, not checked):
+",
+            );
+            for claim in self.unverified_claims {
+                out.push_str(&format!(
+                    "  {}
+",
+                    claim.text
+                ));
+            }
+        }
+        out
+    }
+}
+
+/// Evidence as text, the one rendering both the quotable view and the reviewer
+/// view use.
+fn render_evidence(evidence: &Evidence) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "changed files ({}):
+",
+        evidence.changed_files.len()
+    ));
+    for f in &evidence.changed_files {
+        out.push_str(&format!(
+            "  {f}
+"
+        ));
+    }
+    out.push_str(&format!(
+        "commands run ({}):
+",
+        evidence.commands.len()
+    ));
+    for c in &evidence.commands {
+        out.push_str(&format!(
+            "  {} -> exit {} ({})
+",
+            c.command, c.exit_code, c.evidence_ref
+        ));
+    }
+    if !evidence.artifact_refs.is_empty() {
+        out.push_str(
+            "artifacts:
+",
+        );
+        for a in &evidence.artifact_refs {
+            out.push_str(&format!(
+                "  {a}
+"
+            ));
+        }
+    }
+    out
+}
+
 /// A claim phrase that must never be presented as fact. Used to prove the
 /// separation actually holds in the quotable view.
 impl ResultEnvelope {
@@ -141,31 +214,7 @@ impl ResultEnvelope {
     /// worker's own claim text can never appear here, so quoting this cannot
     /// launder an assertion into fact.
     pub fn evidence_quotable(&self) -> String {
-        let mut out = String::new();
-        out.push_str(&format!(
-            "changed files ({}):\n",
-            self.evidence.changed_files.len()
-        ));
-        for f in &self.evidence.changed_files {
-            out.push_str(&format!("  {f}\n"));
-        }
-        out.push_str(&format!(
-            "commands run ({}):\n",
-            self.evidence.commands.len()
-        ));
-        for c in &self.evidence.commands {
-            out.push_str(&format!(
-                "  {} -> exit {} ({})\n",
-                c.command, c.exit_code, c.evidence_ref
-            ));
-        }
-        if !self.evidence.artifact_refs.is_empty() {
-            out.push_str("artifacts:\n");
-            for a in &self.evidence.artifact_refs {
-                out.push_str(&format!("  {a}\n"));
-            }
-        }
-        out
+        render_evidence(&self.evidence)
     }
 
     /// Every command that ran exited zero AND at least one ran. Mirrors

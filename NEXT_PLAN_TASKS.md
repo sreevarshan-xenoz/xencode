@@ -13153,7 +13153,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **`OR-18`**.
       *(Done 2026-10-09 by OR-18: `/spawn` builds a contract from the lease when a worker
       finishes and denies its merge on a breach, and `xencode merge land` reads it.)*
-- [ ] **OR-16 — the result envelope.** Every finished task produces one machine-readable
+- [x] **OR-16 — the result envelope.** Every finished task produces one machine-readable
       record: status, agent, task, changed files taken from the diff, the commands that
       ran with their exit codes, claims held apart from evidence, and a handoff state.
       **Done-when:** claims and evidence sit in different fields and only the evidence
@@ -13185,6 +13185,7 @@ worker, `OR-` for the thing that decides what workers to talk to.
       agent is handed this record instead of prose, which is the row's second done-when
       clause. `AE-1` is already open for exactly that half and is where the work belongs;
       the shape itself is finished and tested.
+      *(Done 2026-10-09 by AE-1: `xencode review --session` hands a reviewer the envelope built from the ledger.)*
 - [x] **OR-17 — the veto.** A review or verification outcome can block a merge, and the
       block cannot be lifted by the worker that caused it. Only a named reviewer, the
       human, or a policy that says out loud what it clears.
@@ -16452,6 +16453,14 @@ appear in it are how the §R-0 counts went wrong.
   by a run that happened. *Done-when:* `/review` renders a `ReviewerView` whose every exit code
   matches a `ledger.jsonl` row for the same run, and a run that executed no check prints
   `Blocked` or `Failed` rather than `Completed`, watched by handing it a session with no checks.
+  *(Done 2026-10-09. `envelope_for_session` in `ledger.rs` is the producer: one `RanCommand` per
+  ledger row the session wrote, its `evidence_ref` the row's line in `ledger.jsonl` and, for a
+  chained row, its digest, so a reference resolves to a run that happened. No rows is `Blocked`,
+  any non-zero exit `Failed`. `xencode review --session <id>` renders the `ReviewerView` (the
+  plan says `/review`; the review command is the CLI's `xencode review`, so it lives there).
+  Watched live in a scratch crate: a passing `xencode test --session green` rendered
+  `completed`, exit 0, `ledger.jsonl line 1, digest 64fe9225…`, matching row 1; a failing
+  session rendered `failed`, exit 1, line 2; a session with no checks rendered `blocked`.)*
 
 - [x] **Item AE-2 — join a run to the checks it ran, and have the interactive loop file them.** — done 2026-10-06 in `xencode-analysis-rs/src/toolchain.rs`, `xencode-tui-rs/src/app.rs`, and `xencode-cli/src/main.rs`. Added `run_checklist_for_session` to accept an explicit session ID while defaulting to `'cli'`; updated TUI `/verify` handler to forward the active session ID, storing verification artifacts under `artifacts/<session_id>/` and recording ledger entries with that session tag; added `--session` flag to CLI `xencode verify` and `xencode test`; verified that `xencode runs show <run_id>` joins session checks for verified sessions and reports `checks: none — nothing verified this run` for sessions without checks in unit tests and integration tests in `tests/runs_cli.rs`. *Effort: S.*
 
