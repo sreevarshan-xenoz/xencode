@@ -557,7 +557,7 @@ enum Commands {
         /// is connected; then the question is withdrawn and its task
         /// stopped, the approval denied, or the review completed with its
         /// changes kept
-        #[arg(long, default_value_t = 1800)]
+        #[arg(long, default_value_t = xencode_tui_rs::engine::server::WAIT_LIMIT.as_secs())]
         wait_limit: u64,
     },
 
