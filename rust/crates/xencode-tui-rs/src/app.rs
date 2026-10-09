@@ -4507,7 +4507,11 @@ impl<'a> App<'a> {
         }
         self.history_index = None;
         self.history_draft.clear();
-        self.dispatch_prompt(prompt, tx);
+        crate::engine::act(
+            self,
+            crate::engine::proto::ClientMsg::SubmitChat { prompt },
+            &tx,
+        );
     }
 
     /// Everything a submitted line does once it has left the composer: a slash
@@ -5709,7 +5713,11 @@ impl<'a> App<'a> {
             let name = name.trim().to_string();
             self.bytebot_command.clear();
             self.bytebot_cursor = 0;
-            self.set_model(&name, tx);
+            crate::engine::act(
+                self,
+                crate::engine::proto::ClientMsg::SetModel { name: name.clone() },
+                &tx,
+            );
             self.bytebot_log.push(format!("model: {name}"));
             return;
         }
@@ -5721,10 +5729,18 @@ impl<'a> App<'a> {
             self.bytebot_cursor = 0;
             self.bytebot_log
                 .push(format!("ran {word} — its output is in the chat"));
-            self.dispatch_prompt(task, tx);
+            crate::engine::act(
+                self,
+                crate::engine::proto::ClientMsg::SubmitChat { prompt: task },
+                &tx,
+            );
             return;
         }
-        self.bytebot_enqueue(&task, tx);
+        crate::engine::act(
+            self,
+            crate::engine::proto::ClientMsg::EnqueueTask { text: task },
+            &tx,
+        );
     }
 
     /// Add a ByteBot task (BT-1). It starts now when nothing is running, and
