@@ -356,8 +356,12 @@ mod tests {
     /// filesystem — the file is never written.
     #[test]
     fn a_denied_write_is_recorded_at_the_gate_and_never_touches_disk() {
-        let root = std::env::temp_dir().join(format!("xencode-broker-deny-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        // Removed when the test ends, pass or fail.
+        let dir = tempfile::Builder::new()
+            .prefix("xencode-broker-deny-")
+            .tempdir()
+            .unwrap();
+        let root = dir.path().to_path_buf();
         let outside = root.join("..").join("definitely-outside-xencode.rs");
 
         let mut broker = PermissionBroker::new(ApprovalMode::Ask);
@@ -408,8 +412,12 @@ mod tests {
     /// broker's refusal is about the boundary, not about refusing all writes.
     #[test]
     fn a_write_inside_the_workspace_is_asked_not_refused() {
-        let root = std::env::temp_dir().join(format!("xencode-broker-ask-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        // Removed when the test ends, pass or fail.
+        let dir = tempfile::Builder::new()
+            .prefix("xencode-broker-ask-")
+            .tempdir()
+            .unwrap();
+        let root = dir.path().to_path_buf();
         let inside: PathBuf = root.join("notes.md");
 
         let mut broker = PermissionBroker::new(ApprovalMode::Ask);
