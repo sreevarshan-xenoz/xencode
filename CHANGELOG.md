@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `BT-4`: slash commands typed in the ByteBot panel run as commands
+
+A line starting with `/` in the ByteBot panel's command box used to be handed
+to the agent as a task, so `/init` there became a request to the model. It now
+runs the same command handler as the chat: `/init`, `/help`, `/rewind` and the
+others do exactly what they do in chat, an unknown command is answered as
+unknown, and a draft in the chat composer is left alone.
+
 ### Added — `BT-5`: `/model`, and switching model inside the ByteBot panel
 
 `/model <name>` switches model from the chat; `/model` alone lists the models

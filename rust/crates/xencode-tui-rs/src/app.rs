@@ -3842,7 +3842,14 @@ impl<'a> App<'a> {
         }
         self.history_index = None;
         self.history_draft.clear();
+        self.dispatch_prompt(prompt, tx);
+    }
 
+    /// Everything a submitted line does once it has left the composer: a slash
+    /// command runs here, anything else becomes a chat turn. The ByteBot panel
+    /// calls this for the slash commands typed into it (BT-4), so they behave
+    /// exactly as in chat without touching the chat composer.
+    pub fn dispatch_prompt(&mut self, prompt: String, tx: mpsc::UnboundedSender<String>) {
         self.messages.push(UiMessage {
             role: "user".to_string(),
             content: prompt.clone(),
@@ -5038,6 +5045,17 @@ impl<'a> App<'a> {
             self.bytebot_cursor = 0;
             self.set_model(&name, tx);
             self.bytebot_log.push(format!("model: {name}"));
+            return;
+        }
+        // BT-4: every other slash command runs as it does in chat; its output
+        // goes where that command always writes.
+        if crate::app::unknown_slash_command(&task).is_some() {
+            let word = task.split_whitespace().next().unwrap_or("").to_string();
+            self.bytebot_command.clear();
+            self.bytebot_cursor = 0;
+            self.bytebot_log
+                .push(format!("ran {word} — its output is in the chat"));
+            self.dispatch_prompt(task, tx);
             return;
         }
         if let Some(run) = self.arm_bytebot(&task) {
@@ -18721,6 +18739,40 @@ Content-Length: 0
             .filter(|message| message.role == "system")
             .map(|message| message.content.clone())
             .collect()
+    }
+
+    /// BT-4: a slash command typed in the ByteBot panel runs like it does in
+    /// chat, instead of being handed to the model as a task, and leaves a draft
+    /// in the chat composer alone.
+    #[tokio::test]
+    async fn a_slash_command_in_the_bytebot_panel_runs_the_command_not_a_task() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.focus = FocusArea::ByteBotPanel;
+        app.chat_input.insert_str("my draft");
+        app.bytebot_command = "/help".into();
+        app.run_bytebot(tx.clone());
+        assert!(app.help_visible, "/help opened the help overlay");
+        assert!(!app.bytebot_running, "no task was started");
+        assert!(app.bytebot_command.is_empty());
+        assert_eq!(
+            app.chat_input.lines().join(""),
+            "my draft",
+            "the chat draft is untouched"
+        );
+        assert!(
+            app.bytebot_log.iter().any(|l| l.contains("ran /help")),
+            "{:?}",
+            app.bytebot_log
+        );
+
+        // An unknown command is answered, not sent as a task either.
+        app.bytebot_command = "/frobnicate".into();
+        app.run_bytebot(tx);
+        assert!(!app.bytebot_running);
+        assert!(system_lines(&app)
+            .iter()
+            .any(|l| l.contains("Unknown command /frobnicate")));
     }
 
     /// BT-5: a model change forgets the context window measured for the old

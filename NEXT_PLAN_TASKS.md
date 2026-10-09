@@ -17511,7 +17511,9 @@ is **awaiting the owner's review**: nothing below is started.
 - [ ] **BT-2 — needs help:** an `ask_user` tool that pauses a task for an answer, or for the
   person to take over and type `/done`.
 - [ ] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).
-- [ ] **BT-4 — slash commands in the ByteBot panel** run the same handler as chat.
+- [x] **BT-4 — slash commands in the ByteBot panel** run the same handler as chat. Done
+  2026-10-09: `submit_message` is split, and its second half, `dispatch_prompt`, runs a line that
+  has already left the composer; the panel calls it for every `/word` line except `/model`.
 - [x] **BT-5 — `/model` and an in-panel model list**, with every model change going through one
   function that also clears the old model's measured context window. Done 2026-10-09:
   `App::set_model` is used by the Models screen, `/model` and the ByteBot panel's list; tests
