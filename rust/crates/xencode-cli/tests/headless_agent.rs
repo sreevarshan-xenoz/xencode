@@ -157,3 +157,40 @@ async fn headless_agent_drives_one_round_asserts_diff_and_ledger_rows() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RA-1: against a real llama.cpp server named by XENCODE_LIVE_LLAMACPP_URL,
+/// the headless agent returns the model's final answer and how many rounds
+/// it actually took.
+#[tokio::test]
+#[ignore = "needs a running llama.cpp server: XENCODE_LIVE_LLAMACPP_URL"]
+async fn headless_agent_returns_its_answer_and_round_count() {
+    let url = std::env::var("XENCODE_LIVE_LLAMACPP_URL")
+        .expect("set XENCODE_LIVE_LLAMACPP_URL to a running llama.cpp server");
+    let model =
+        std::env::var("XENCODE_LIVE_MODEL").unwrap_or_else(|_| "llamacpp:qwen3-4b".to_string());
+    let dir = unique_dir("headless-live");
+    let options = AgentRunOptions {
+        tool_root: dir.clone(),
+        prompt: "Create a file named hello.txt containing the word hi, then say you are done."
+            .to_string(),
+        model: Some(model),
+        approval_mode: Some(ApprovalMode::AllAllow),
+        headless_policy: Some(HeadlessPolicy::new(vec!["write_file".to_string()])),
+        max_rounds: 4,
+        xencode_dir: Some(dir.join(".xencode")),
+        run_id: None,
+        session_id: None,
+        ollama_url: None,
+        llama_cpp_url: Some(url),
+    };
+    let output = run_agent(options).await.expect("run_agent succeeds");
+    let written = std::fs::read_to_string(dir.join("hello.txt")).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!output.final_answer.trim().is_empty(), "no final answer");
+    assert!(
+        (1..=4).contains(&output.rounds),
+        "rounds counted from the loop: {}",
+        output.rounds
+    );
+    assert_eq!(written.trim(), "hi");
+}

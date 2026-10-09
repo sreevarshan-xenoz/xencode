@@ -12843,17 +12843,21 @@ pub async fn run_agent(options: AgentRunOptions) -> Result<AgentRunOutput, Agent
         run.approval.prompts = tx;
     }
 
+    // Each round the loop completes is reported to the round hook.
+    let rounds = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let counted = rounds.clone();
+    run.round_hook = Some(Arc::new(move |_: &crate::detached::RoundReport| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }));
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     agent_rounds(run, tx).await;
+    let rounds = rounds.load(std::sync::atomic::Ordering::Relaxed);
 
-    let mut final_answer = String::new();
+    let mut lines = Vec::new();
     while let Ok(line) = rx.try_recv() {
-        if line.starts_with("[SPAWN:0:finish:") {
-            if let Some(rest) = line.strip_prefix("[SPAWN:0:finish:") {
-                final_answer = rest.trim_end_matches(']').to_string();
-            }
-        }
+        lines.push(line);
     }
+    let final_answer = final_answer_from(lines);
 
     let diff = std::process::Command::new("git")
         .args(["diff"])
@@ -12889,12 +12893,57 @@ pub async fn run_agent(options: AgentRunOptions) -> Result<AgentRunOutput, Agent
     Ok(AgentRunOutput {
         run_id,
         session_id,
-        rounds: 1,
+        rounds,
         diff,
         edited_files,
         ledger_file,
         final_answer,
     })
+}
+
+/// The agent's final answer among the loop's report lines.
+fn final_answer_from(lines: impl IntoIterator<Item = String>) -> String {
+    let mut final_answer = String::new();
+    for line in lines {
+        // The loop ends a delegated run with `[SPAWN]<id>:finish:<answer>`;
+        // a headless run is spawn 0.
+        if let Some(rest) = line.strip_prefix("[SPAWN]0:finish:") {
+            final_answer = rest.to_string();
+        }
+    }
+    final_answer
+}
+
+#[cfg(test)]
+mod run_agent_answer_tests {
+    use super::final_answer_from;
+
+    /// The lines are the agent loop's own, as a detached run logged them
+    /// against a real llama.cpp server (Qwen3-4B), 2026-10-09.
+    #[test]
+    fn the_final_answer_is_read_from_the_loops_finish_line() {
+        let lines = [
+            r#"[SPAWN]0:call:write_file({"content": "hello from a detached run", "path": "notes.txt"})"#,
+            "[SPAWN]0:done:done",
+            "[SPAWN]0:log:The file `notes.txt` has been successfully created",
+            "[SPAWN]0:finish:The file `notes.txt` has been successfully created with the content:\n```\nhello from a detached run\n```",
+        ]
+        .map(String::from);
+        assert_eq!(
+            final_answer_from(lines),
+            "The file `notes.txt` has been successfully created with the content:\n```\nhello from a detached run\n```"
+        );
+    }
+
+    #[test]
+    fn a_run_that_never_finished_has_no_answer() {
+        let lines = [
+            "[SPAWN]0:err:network error: connection refused",
+            "[SPAWN]0:finish:",
+        ]
+        .map(String::from);
+        assert_eq!(final_answer_from(lines), "");
+    }
 }
 
 /// Resolves once `flag` is set; never, when there is no flag.
