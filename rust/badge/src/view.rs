@@ -189,7 +189,11 @@ impl Badge {
         if let Some(card) = self.card {
             let rows = self.view.rows.clone();
             let skipped = self.view.skipped.clone();
-            let _ = card.update(cx, |card, _, cx| {
+            let height = card::height(rows.len(), skipped.len());
+            let _ = card.update(cx, |card, window, cx| {
+                // Grow or shrink with the sessions, so a session that starts
+                // while the card is open is not cut off.
+                window.resize(size(px(card::WIDTH), px(height)));
                 card.rows = rows;
                 card.skipped = skipped;
                 cx.notify();
