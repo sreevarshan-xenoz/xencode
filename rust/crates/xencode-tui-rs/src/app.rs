@@ -641,6 +641,8 @@ pub struct App<'a> {
     /// answer that arrives late cannot land on the next prompt.
     pub(crate) approval_ids: std::collections::VecDeque<u64>,
     pub(crate) question_id: Option<u64>,
+    /// The waiting question's text, kept with its id for the engine.
+    pub(crate) question_text: Option<String>,
     next_agent_id: u64,
     /// Receive end, taken once by `run_app` and drained each frame.
     pub approval_rx: Option<
@@ -3149,6 +3151,7 @@ impl<'a> App<'a> {
             bytebot_help: None,
             approval_ids: std::collections::VecDeque::new(),
             question_id: None,
+            question_text: None,
             next_agent_id: 1,
             memory,
             event_bus,
@@ -3816,6 +3819,7 @@ impl<'a> App<'a> {
         }
         for (question, reply) in asked {
             self.question_id = Some(self.next_agent_id);
+            self.question_text = Some(question.clone());
             self.next_agent_id += 1;
             self.bytebot_needs_help(question, reply);
         }
@@ -5841,6 +5845,7 @@ impl<'a> App<'a> {
             return;
         }
         self.question_id = None;
+        self.question_text = None;
         let Some(reply) = self.bytebot_help.take() else {
             return;
         };
@@ -5871,6 +5876,7 @@ impl<'a> App<'a> {
     /// there was one.
     pub fn bytebot_withdraw_question(&mut self) -> bool {
         self.question_id = None;
+        self.question_text = None;
         self.bytebot_help.take().is_some()
     }
 
@@ -5888,6 +5894,7 @@ impl<'a> App<'a> {
         });
         self.bytebot_help = None;
         self.question_id = None;
+        self.question_text = None;
         let mut review: Option<usize> = None;
         if let Some(i) = self
             .bytebot_tasks
@@ -13738,13 +13745,12 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
         crate::toast::prune(&mut app.toasts, current_timestamp());
 
         // Drain async messages
-        while let Ok(token) = rx.try_recv() {
-            signals.messages += 1;
-            app.apply_token(&token, &tx);
-        }
-
-        // Approval prompts from the tool loop (I1-03) and ByteBot questions.
-        signals.approvals += app.drain_agent_channels();
+        // Everything the agent loops reported, then approval prompts (I1-03)
+        // and ByteBot questions, through the engine (EN-1). In process the
+        // engine's outgoing messages have no other window to go to yet.
+        let pumped = crate::engine::pump(&mut app, &mut rx, &tx);
+        signals.messages += pumped.messages;
+        signals.approvals += pumped.approvals;
 
         // Poll events (~30fps)
         if event::poll(Duration::from_millis(33))? {
