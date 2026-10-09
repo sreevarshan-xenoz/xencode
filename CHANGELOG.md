@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `TX-2`: a new session opens in the composer, and a stray `q` no longer quits
+
+The TUI used to start in Normal mode, where a sentence typed before pressing `i`
+fired global keys: `q` quit, `s` opened Settings, `m` opened Models. A session with
+nothing said yet now opens in the composer, so the first thing typed is a prompt. In
+Normal mode a single `q` now asks first ("Press q again to quit"); a second `q`
+quits and any other key keeps the session. `Ctrl+C` still quits at once.
+
 ### Fixed — `TX-1`: a failed model call says so in the chat
 
 When the model call behind a chat turn failed, for example because the server was

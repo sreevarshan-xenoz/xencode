@@ -13,7 +13,7 @@ use ratatui::{
 type Binding = (&'static str, &'static str);
 
 pub(crate) const GLOBAL: &[Binding] = &[
-    ("Ctrl+C / q", "quit"),
+    ("Ctrl+C / q q", "quit (a bare q asks once; any other key keeps going)"),
     (
         "Ctrl+Space",
         "Coding ⇄ Orchestrator mode (one view of the same session)",

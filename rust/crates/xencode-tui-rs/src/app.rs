@@ -825,6 +825,9 @@ pub struct App<'a> {
     /// Factory Reset has been asked for once; the next Enter on that row
     /// performs it (TX-5). Any move off the row disarms it.
     pub settings_reset_armed: bool,
+    /// A bare `q` was pressed once; the next `q` quits, any other key keeps
+    /// the session (TX-2).
+    pub quit_armed: bool,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -3136,6 +3139,7 @@ impl<'a> App<'a> {
             settings_cursor: 0,
             settings_reset_active: false,
             settings_reset_armed: false,
+            quit_armed: false,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -3562,6 +3566,16 @@ impl<'a> App<'a> {
                 true
             }
             None => false,
+        }
+    }
+
+    /// A session with nothing said yet opens in the composer, so the first
+    /// sentence typed is a prompt rather than a string of global keys (`q`
+    /// quit, `s` Settings, `m` Models).
+    pub fn start_in_composer_when_empty(&mut self) {
+        if self.messages.iter().all(|m| m.role != "user") {
+            self.input_mode = InputMode::Editing;
+            self.focus = FocusArea::ChatInput;
         }
     }
 
@@ -11999,6 +12013,7 @@ fn hand_over_terminal<B: Backend>(terminal: &mut Terminal<B>, argv: &[String], a
 pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    app.start_in_composer_when_empty();
 
     // Query installed Ollama models and check provider health immediately on startup
     app.refresh_models(tx.clone());
