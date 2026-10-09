@@ -1,0 +1,31 @@
+[package]
+name = "xencode-badge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "The floating xencode badge: shows what running xencode sessions are doing"
+
+# Its own workspace: the main one, and its CI, never build GPUI.
+[workspace]
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "f0b38ac75ea769b75287ff1370242d88b3878c2d" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "f0b38ac75ea769b75287ff1370242d88b3878c2d", features = ["font-kit"] }
+xencode-live-rs = { path = "../crates/xencode-live-rs" }
+xencode-config-rs = { path = "../crates/xencode-config-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+raw-window-handle = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

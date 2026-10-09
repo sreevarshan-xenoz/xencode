@@ -18,6 +18,9 @@ members = [
     "crates/xencode-colab-rs",
     "crates/xencode-agents-rs",
 ]
+# The floating badge is its own workspace, so this one and its CI never
+# build the GPU interface library it uses.
+exclude = ["badge"]
 resolver = "2"
 
 [workspace.package]

@@ -13,7 +13,17 @@ Every running terminal session now keeps a small status file for the floating
 badge: idle, working, needs you, finished or failed, with a one-line headline
 that passes through secret redaction first. `xencode badge` starts the badge
 program, detached from the terminal, and Settings → `Floating Badge` starts it
-with the terminal app. The badge program itself is built separately.
+with the terminal app.
+
+The badge program, `xencode-badge`, is a small window built with GPUI and kept
+in its own Cargo workspace under `rust/badge`. It floats above other windows and
+shows the most urgent state across sessions: a dim logo when nothing runs, a
+turning ring while working, amber when a session needs you, green for a minute
+after one finishes, red after a failure until you hover over it, and a grey dot
+for a session that stopped responding. Hovering opens a card with one row per
+session. It can be dragged and remembers where it was left, right-click closes
+it, and only one runs per user. Watched on Windows 11; macOS is built in CI
+only.
 
 ### Fixed — `PL-2`: Windows bugs found while fixing the Windows test failures
 
