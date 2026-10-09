@@ -3463,7 +3463,10 @@ mod tests {
         app.bytebot_help = Some(reply);
         type_text(&mut app, "   ");
         press(&mut app, KeyCode::Enter);
-        assert!(answer.try_recv().is_err(), "a blank line was sent as the answer");
+        assert!(
+            answer.try_recv().is_err(),
+            "a blank line was sent as the answer"
+        );
         assert!(app.bytebot_help.is_some(), "the question is still waiting");
         type_text(&mut app, "postgres");
         press(&mut app, KeyCode::Enter);

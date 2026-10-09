@@ -23,7 +23,7 @@ fn route(app: &mut App, token: &str, tx: &tokio::sync::mpsc::UnboundedSender<Str
         app.bytebot_event(body);
     } else if token == "[BYTEBOT_DONE]" {
         app.bytebot_run_finished(tx.clone());
-    } else if token == "[STOPPED]" {
+    } else if token == "[STOPPED]" || token == "[BYTEBOT_STOPPED]" {
         app.live_stopped();
     }
 }
