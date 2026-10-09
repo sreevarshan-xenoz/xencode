@@ -146,7 +146,7 @@ pub async fn open(addr: &Address, client: &str) -> Result<(EngineLink, View), St
 /// to `START_WAIT` for it to answer.
 pub async fn connect_or_start(
     addr: &Address,
-    start: &dyn Fn() -> io::Result<()>,
+    start: &(dyn Fn() -> io::Result<()> + Send + Sync),
 ) -> Result<(EngineLink, View), String> {
     if let Ok(linked) = open(addr, "terminal").await {
         return Ok(linked);
@@ -187,6 +187,12 @@ pub struct Frame {
 /// the engine as notes, then everything the engine sent is applied.
 pub fn frame(app: &mut App) -> Frame {
     let mut done = Frame::default();
+    if app.engine_link.is_none() {
+        reconnected(app);
+        if app.engine_link.is_some() {
+            done.views += 1;
+        }
+    }
     let Some(mut link) = app.engine_link.take() else {
         return done;
     };
@@ -224,16 +230,44 @@ pub fn lost_warning(why: &str) -> String {
     format!("the engine stopped ({why}); starting a new one")
 }
 
-/// After the engine went away: say so, and connect to a new one once. When
-/// that fails too the window carries on with the agent work itself.
-pub async fn recover(
-    app: &mut App<'_>,
-    addr: &Address,
-    start: &dyn Fn() -> io::Result<()>,
-    why: &str,
-) {
+/// How a window starts an engine: shared with the reconnecting task.
+pub type Starter = std::sync::Arc<dyn Fn() -> io::Result<()> + Send + Sync>;
+
+/// A reconnection running in the background, checked by `frame`.
+pub type Reconnecting = tokio::sync::oneshot::Receiver<Result<(EngineLink, View), String>>;
+
+/// After the engine went away: say so, and connect to a new one once, in the
+/// background so the window keeps drawing and taking keys meanwhile. `frame`
+/// picks up the result. When that fails too the window carries on with the
+/// agent work itself.
+pub fn recover(app: &mut App<'_>, addr: &Address, start: Starter, why: &str) {
     app.push_toast(crate::toast::ToastKind::Warning, lost_warning(why));
-    match connect_or_start(addr, start).await {
+    let addr = addr.clone();
+    let (done, waiting) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        // One outer limit, so a slow start and a slow answer cannot add up.
+        let result = tokio::time::timeout(START_WAIT * 2, connect_or_start(&addr, &*start))
+            .await
+            .unwrap_or_else(|_| Err("no engine answered in time".to_string()));
+        let _ = done.send(result);
+    });
+    app.engine_reconnect = Some(waiting);
+}
+
+/// Take in a finished reconnection, if one was running.
+fn reconnected(app: &mut App) {
+    let Some(waiting) = app.engine_reconnect.as_mut() else {
+        return;
+    };
+    let result = match waiting.try_recv() {
+        Ok(result) => result,
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return,
+        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+            Err("the reconnection stopped".to_string())
+        }
+    };
+    app.engine_reconnect = None;
+    match result {
         Ok((link, view)) => become_window(app, link, view),
         Err(e) => app.push_toast(
             crate::toast::ToastKind::Warning,

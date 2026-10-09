@@ -407,15 +407,29 @@ async fn a_lost_engine_is_said_in_words() {
     };
     assert!(app.engine_link.is_none());
 
-    let started = std::sync::Mutex::new(Vec::<Engine>::new());
-    let begin = || {
-        started
-            .lock()
-            .unwrap()
-            .push(Engine::start(project.path(), config.path()));
-        Ok(())
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Engine>::new()));
+    let begin: link::Starter = {
+        let started = started.clone();
+        let (project, config) = (project.path().to_path_buf(), config.path().to_path_buf());
+        std::sync::Arc::new(move || {
+            started
+                .lock()
+                .unwrap()
+                .push(Engine::start(&project, &config));
+            Ok(())
+        })
     };
-    link::recover(&mut app, &addr, &begin, &why).await;
+    let asked = Instant::now();
+    link::recover(&mut app, &addr, begin, &why);
+    assert!(
+        asked.elapsed() < Duration::from_millis(500),
+        "the window froze for {:?} while a new engine started",
+        asked.elapsed()
+    );
+    frames_until(&mut app, Duration::from_secs(20), |app| {
+        app.engine_link.is_some()
+    })
+    .await;
     let said: Vec<_> = app.toasts.iter().map(|t| t.message.clone()).collect();
     assert!(
         said.iter()
@@ -426,4 +440,100 @@ async fn a_lost_engine_is_said_in_words() {
         app.engine_link.is_some(),
         "a new engine was reached: {said:?}"
     );
+}
+
+#[tokio::test]
+async fn a_window_never_changes_the_engines_model_by_itself() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let mut app = window_onto(&addr).await;
+    assert_eq!(app.config.default_model, "llamacpp:none");
+    // The window's own model list does not hold the engine's model; it used
+    // to switch to the first model it found and save that to the settings.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    app.apply_token(r#"[MODELS]["ollama:something-else"]"#, &tx);
+    assert_eq!(app.config.default_model, "llamacpp:none");
+    assert_eq!(
+        app.available_models,
+        vec!["ollama:something-else".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn a_window_that_stops_reading_is_let_go() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let (mut stalled, _) = join(&addr, "stalled").await;
+    let (busy, _) = join(&addr, "busy").await;
+    let (mut busy_in, mut busy_out) = busy.split();
+    let drain = tokio::spawn(async move { while let Ok(Some(_)) = busy_in.recv().await {} });
+    // The busy window keeps the transcript growing; the stalled one reads
+    // nothing, as a suspended terminal would.
+    let text = "x".repeat(4000);
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(20) {
+        let note = ClientMsg::Note {
+            role: "system".into(),
+            content: text.clone(),
+        };
+        busy_out.send(&proto::encode(&note)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let ended = tokio::time::timeout(Duration::from_secs(30), async {
+        while let Ok(Some(_)) = stalled.recv().await {}
+    })
+    .await;
+    drain.abort();
+    assert!(
+        ended.is_ok(),
+        "the engine kept queueing for a window that stopped reading"
+    );
+}
+
+#[tokio::test]
+async fn a_window_whose_engine_cannot_come_back_stays_responsive() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let mut engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let mut app = window_onto(&addr).await;
+    engine.child.kill().unwrap();
+    engine.child.wait().unwrap();
+    let start = Instant::now();
+    let why = loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the loss was never noticed"
+        );
+        if let Some(why) = link::frame(&mut app).lost {
+            break why;
+        }
+        tokio::time::sleep(Duration::from_millis(33)).await;
+    };
+    // Starting succeeds but no engine ever answers.
+    let nothing: link::Starter = std::sync::Arc::new(|| Ok(()));
+    let asked = Instant::now();
+    link::recover(&mut app, &addr, nothing, &why);
+    assert!(
+        asked.elapsed() < Duration::from_millis(500),
+        "the window froze for {:?} waiting for an engine",
+        asked.elapsed()
+    );
+    let given_up = Instant::now();
+    while !app
+        .toasts
+        .iter()
+        .any(|t| t.message.starts_with("no engine could be started"))
+    {
+        assert!(
+            given_up.elapsed() < Duration::from_secs(20),
+            "never gave up"
+        );
+        let _ = link::frame(&mut app);
+        tokio::time::sleep(Duration::from_millis(33)).await;
+    }
 }
