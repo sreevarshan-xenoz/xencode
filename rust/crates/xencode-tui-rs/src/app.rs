@@ -14673,8 +14673,10 @@ mod tests {
             format!(
                 r#"{{ "name": "marker", "version": "1.0.0",
                       "permissions": ["hooks"],
-                      "hooks": {{ "after": {{ "write_file": "touch {}" }} }} }}"#,
-                plugin.join("ran").display()
+                      "hooks": {{ "after": {{ "write_file": "touch '{}'" }} }} }}"#,
+                // Forward slashes: a Windows path's backslashes are escapes in
+                // both the JSON string and the `sh -c` command the hook runs.
+                plugin.join("ran").to_string_lossy().replace('\\', "/")
             ),
         )
         .unwrap();
@@ -18351,9 +18353,20 @@ Content-Length: 0
                 messages
             );
         }
-        assert!(messages
-            .iter()
-            .any(|m| m.starts_with("[PROFILER]gauge:cpu|")));
+        // The rate is read from `/proc`, which only Linux has. Elsewhere the
+        // panel must say why the gauge is missing rather than draw one.
+        if std::path::Path::new("/proc/self/stat").exists() {
+            assert!(messages
+                .iter()
+                .any(|m| m.starts_with("[PROFILER]gauge:cpu|")));
+        } else {
+            assert!(
+                messages
+                    .iter()
+                    .any(|m| m.starts_with("[PROFILER]note:cpu unavailable")),
+                "{messages:?}"
+            );
+        }
         // The recorded turn, straight out of metrics.jsonl.
         assert!(
             messages.iter().any(|m| {
