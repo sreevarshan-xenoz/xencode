@@ -52,3 +52,17 @@ fn a_waiting_question_is_shown_with_how_to_answer_it() {
     assert!(screen.contains("/done"), "{screen}");
     assert!(screen.contains("needs help  pick a database"), "{screen}");
 }
+
+#[test]
+fn a_task_waiting_for_review_lists_its_files_and_the_keys() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::ByteBotPanel;
+    let mut reviewing = task("write a note", TaskState::NeedsReview);
+    reviewing.changed_files = vec!["src/lib.rs".into(), "note.txt".into()];
+    app.bytebot_tasks = vec![reviewing];
+    let screen = rendered(&mut app, 140, 45);
+    assert!(screen.contains("Review 2 changed file(s)"), "{screen}");
+    assert!(screen.contains("src/lib.rs"), "{screen}");
+    assert!(screen.contains("a accepts"), "{screen}");
+    assert!(screen.contains("u undoes"), "{screen}");
+}

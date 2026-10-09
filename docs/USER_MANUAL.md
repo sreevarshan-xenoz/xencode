@@ -467,6 +467,15 @@ is not a separate engine and it is not a demo —
   was still waiting its turn is cancelled rather than started: xencode only
   runs task text typed in this session, never text read back from disk.
   Secrets are removed from a record before it is written.
+- a task that changed files ends as `needs review` rather than `completed`.
+  The panel lists the files it changed, the floating badge shows "needs you",
+  and the queue waits. With the command box empty, `a` accepts the changes and
+  the task is completed; `u` undoes them, putting every file the task wrote
+  back as it was, and the task is cancelled. Undo is refused once a later turn
+  has changed files too, because it would then undo that turn instead; use
+  `/rewind` to step back through the later turns first. While a review waits,
+  a new task cannot start with the letter `a` or `u`, because those keys
+  answer the review; settle it first.
 - a ByteBot task can stop and ask you a question. The task shows as `needs
   help`, the floating badge turns amber, and the panel shows the question.
   Type an answer and press Enter to carry on; type `/done` instead if you did
