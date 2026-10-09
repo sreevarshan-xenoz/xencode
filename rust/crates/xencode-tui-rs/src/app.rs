@@ -3780,6 +3780,563 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Apply one message from the agent loop or another background task to
+    /// the app (EN-1): the text of a reply, a tool line, a ByteBot step, the
+    /// end of a run. `run_app` calls this for every message it drains, and so
+    /// will the engine, so both handle a message the same way.
+    pub fn apply_token(&mut self, token: &str, tx: &mpsc::UnboundedSender<String>) {
+        if let Some(body) = token.strip_prefix("[REVIEW]") {
+            self.append_review(body);
+        } else if let Some(body) = token.strip_prefix("[SPAWN]") {
+            // `<id>:<event>` — a `/spawn` subagent reporting in (I3-03).
+            if let Some((id, rest)) = body.split_once(':') {
+                if let Ok(id) = id.parse::<u64>() {
+                    // A finished worker can free a file a waiting one asked for.
+                    if let Some((_, _, run)) = self.spawn_event(id, rest) {
+                        tokio::spawn(agent_rounds(run, tx.clone()));
+                    }
+                }
+            }
+        } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
+            self.bytebot_event(body);
+        } else if token == "[BYTEBOT_DONE]" {
+            self.bytebot_run_finished(tx.clone());
+        } else if token == "[INIT_DONE]" {
+            self.init_running = false;
+            self.init_progress = 1.0;
+        } else if let Some(body) = token.strip_prefix("[INIT]") {
+            if body.starts_with("step:") {
+                let parts: Vec<&str> = body.splitn(4, ':').collect();
+                if parts.len() >= 4 {
+                    let idx = parts[1].parse::<usize>().unwrap_or(0);
+                    if idx < self.init_steps.len() {
+                        self.init_steps[idx].1 = parts[2].to_string();
+                    }
+                }
+            } else if body.starts_with("progress:") {
+                if let Some(pct) = body.strip_prefix("progress:") {
+                    self.init_progress = pct.trim().parse::<f64>().unwrap_or(0.0);
+                }
+            } else if body.starts_with("log:") {
+                if let Some(msg) = body.strip_prefix("log:") {
+                    self.init_log.push(msg.to_string());
+                }
+            }
+        } else if token == "[CTX_START]" || token == "[ADVISE_START]" || token == "[VERIFY_START]" {
+            // Open a fresh assistant message that the matching
+            // [CTX]/[ADVISE]/[VERIFY] tokens populate line by line.
+            self.messages.push(UiMessage {
+                role: "assistant".to_string(),
+                content: String::new(),
+            });
+        } else if let Some(body) = token.strip_prefix("[ADVISE]") {
+            if let Some(last) = self.messages.last_mut() {
+                if last.role == "assistant" {
+                    if !last.content.is_empty() {
+                        last.content.push('\n');
+                    }
+                    last.content.push_str(body);
+                }
+            }
+        } else if let Some(body) = token.strip_prefix("[VERIFY]") {
+            if let Some(last) = self.messages.last_mut() {
+                if last.role == "assistant" {
+                    if !last.content.is_empty() {
+                        last.content.push('\n');
+                    }
+                    last.content.push_str(body);
+                }
+            }
+        } else if let Some(err) = token.strip_prefix("[VERIFY_ERR]") {
+            self.push_toast(
+                crate::toast::ToastKind::Warning,
+                format!("Verify failed: {err}"),
+            );
+            self.system_line(&format!("❌ Verification error: {err}"));
+        } else if let Some(body) = token.strip_prefix("[CTX]") {
+            if let Some(last) = self.messages.last_mut() {
+                if last.role == "assistant" {
+                    if !last.content.is_empty() {
+                        last.content.push('\n');
+                    }
+                    last.content.push_str(body);
+                }
+            }
+        } else if let Some(body) = token.strip_prefix("[COLLAB]") {
+            self.apply_collab_token(body);
+        } else if let Some(body) = token.strip_prefix("[HEALTH]") {
+            let parts: Vec<&str> = body.splitn(4, '|').collect();
+            if parts.len() >= 3 {
+                let provider = parts[0].to_string();
+                let status = parts[1].to_string();
+                let latency = parts[2].parse::<f64>().unwrap_or(0.0);
+                let error = if parts.len() > 3 && !parts[3].is_empty() {
+                    Some(parts[3].to_string())
+                } else {
+                    None
+                };
+                self.ollama_health_entries
+                    .insert(provider, (status.clone(), latency, error));
+                // Update average latency across all providers
+                if status == "healthy" {
+                    let total: f64 = self
+                        .ollama_health_entries
+                        .values()
+                        .map(|(s, l, _)| if s == "healthy" { *l } else { 0.0 })
+                        .sum();
+                    let count = self
+                        .ollama_health_entries
+                        .values()
+                        .filter(|(s, _, _)| s == "healthy")
+                        .count() as f64;
+                    self.average_latency = if count > 0.0 { total / count } else { 0.0 };
+                }
+            }
+        } else if token == "[REFRESH_MODELS]" {
+            self.refresh_models(tx.clone());
+        } else if let Some(body) = token.strip_prefix("[LLAMACPP_MSG]") {
+            self.llamacpp_action_msg = body.to_string();
+        } else if let Some(body) = token.strip_prefix("[DOWNLOAD]") {
+            // Empty clears the line: the download is over, one way or another.
+            self.model_download = if body.is_empty() {
+                None
+            } else {
+                Some(body.to_string())
+            };
+        } else if let Some(body) = token.strip_prefix("[MODEL_CHECK]") {
+            self.model_integrity = if body.is_empty() {
+                None
+            } else {
+                Some(body.to_string())
+            };
+        } else if let Some(body) = token.strip_prefix("[VOICE]") {
+            if let Some(s) = body.strip_prefix("status:") {
+                let new_status = s.to_string();
+                if new_status == "idle" {
+                    self.voice_finish();
+                } else {
+                    self.voice_status = new_status;
+                }
+            } else if let Some(l) = body.strip_prefix("level:") {
+                self.voice_apply_level(l);
+            } else if let Some(p) = body.strip_prefix("peak:") {
+                self.voice_peak = p.trim().parse::<f64>().unwrap_or(self.voice_peak);
+            } else if let Some(c) = body.strip_prefix("clip:") {
+                self.voice_apply_clip(c);
+            } else if let Some(t) = body.strip_prefix("transcript:") {
+                self.voice_apply_transcript(t);
+            } else if let Some(n) = body.strip_prefix("note:") {
+                self.voice_apply_note(n);
+            } else if let Some(e) = body.strip_prefix("err:") {
+                self.voice_apply_error(e);
+            }
+        } else if let Some(body) = token.strip_prefix("[TERM]") {
+            if let Some(json) = body.strip_prefix("suggestion:") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+                    self.term_asst_typing = false;
+                    self.term_asst_suggestions.push((
+                        v["command"].as_str().unwrap_or_default().to_string(),
+                        v["risk"].as_str().unwrap_or_default().to_string(),
+                        v["why"].as_str().unwrap_or_default().to_string(),
+                    ));
+                }
+            } else if let Some(json) = body.strip_prefix("ran:") {
+                self.term_asst_busy = false;
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+                    let command = v["command"].as_str().unwrap_or_default().to_string();
+                    let risk = v["risk"].as_str().unwrap_or_default().to_string();
+                    let result = v["result"].as_str().unwrap_or_default().to_string();
+                    self.term_asst_history
+                        .push((command.clone(), risk, result.clone()));
+                    self.term_asst_output = format!("{} — {}", command, result);
+                }
+            } else if let Some(msg) = body.strip_prefix("raw:") {
+                self.term_asst_typing = true;
+                self.term_asst_output =
+                    format!("The model did not answer with commands. It said: {}", msg);
+            } else if let Some(msg) = body.strip_prefix("error:") {
+                self.term_asst_typing = true;
+                // One line, because the status box is one line tall.
+                self.term_asst_output = crate::agent_tools::truncate_one_line(msg, 300);
+            } else if body == "ready" {
+                self.term_asst_busy = false;
+                if self.term_asst_suggestions.is_empty() {
+                    self.term_asst_typing = true;
+                }
+            }
+        } else if let Some(body) = token.strip_prefix("[LANG]") {
+            if let Some(json) = body.strip_prefix("row:") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+                    self.lang_detection_results.push((
+                        v["language"].as_str().unwrap_or_default().to_string(),
+                        v["files"].as_u64().unwrap_or(0),
+                        v["lines"].as_u64().unwrap_or(0),
+                        v["share"].as_f64().unwrap_or(0.0),
+                    ));
+                }
+            } else if let Some(note) = body.strip_prefix("note:") {
+                self.lang_notes.push(note.to_string());
+            } else if let Some(why) = body.strip_prefix("failed:") {
+                self.lang_notes
+                    .push(format!("the walk did not finish: {why}"));
+                self.lang_busy = false;
+            } else if body == "done" {
+                self.lang_busy = false;
+            }
+        } else if let Some(body) = token.strip_prefix("[TRANS]") {
+            self.lang_busy = false;
+            // Both arms write the same field on purpose: what came back,
+            // answer or error, is the panel's output line.
+            if let Some(reply) = body.strip_prefix("out:") {
+                self.lang_translate_error = false;
+                self.lang_translate_output = reply.to_string();
+            } else if let Some(err) = body.strip_prefix("error:") {
+                self.lang_translate_error = true;
+                self.lang_translate_output = err.to_string();
+            }
+        } else if let Some(body) = token.strip_prefix("[LEARN]") {
+            if let Some(reply) = body.strip_prefix("quiz:") {
+                self.learn_apply_quiz(reply);
+            } else if let Some(err) = body.strip_prefix("err:") {
+                self.learn_busy = false;
+                self.learn_status = format!(
+                    "provider said: {}",
+                    crate::agent_tools::truncate_one_line(err, 200)
+                );
+            }
+        } else if let Some(body) = token.strip_prefix("[PROFILE]") {
+            self.models_busy = false;
+            // The reply and the failure share one line on purpose: the
+            // panel's status is the provider's own words either way.
+            if let Some(reply) = body.strip_prefix("ok:") {
+                self.models_status = format!("reply: {reply}");
+            } else if let Some(err) = body.strip_prefix("err:") {
+                self.models_status = format!("test failed: {err}");
+            }
+        } else if let Some(body) = token.strip_prefix("[SECURITY]") {
+            if body.starts_with("progress:") {
+                if let Some(p) = body.strip_prefix("progress:") {
+                    self.sec_scan_progress = p.trim().parse::<f64>().unwrap_or(0.0);
+                }
+            } else if body.starts_with("finding:") {
+                if let Some(f) = body.strip_prefix("finding:") {
+                    let parts: Vec<&str> = f.splitn(4, '|').collect();
+                    if parts.len() >= 4 {
+                        let severity = parts[0].to_string();
+                        let category = parts[1].to_string();
+                        let location = parts[2].to_string();
+                        let detail = parts[3].to_string();
+                        self.sec_scan_results.push((
+                            severity.clone(),
+                            category.clone(),
+                            location.clone(),
+                        ));
+                        self.sec_scan_log.push(detail);
+                        // Update summary counts
+                        let (mut c, mut h, mut m, mut l) = self.sec_scan_summary;
+                        match severity.as_str() {
+                            "Critical" => c += 1,
+                            "High" => h += 1,
+                            "Medium" => m += 1,
+                            _ => l += 1,
+                        }
+                        self.sec_scan_summary = (c, h, m, l);
+                    }
+                }
+            } else if let Some(msg) = body.strip_prefix("note:") {
+                self.sec_scan_log.push(msg.to_string());
+            } else if let Some(msg) = body.strip_prefix("failed:") {
+                self.sec_scan_log.push(format!("scan failed: {}", msg));
+                self.sec_scan_active = false;
+            } else if let Some(msg) = body.strip_prefix("done:") {
+                self.sec_scan_progress = 1.0;
+                // The scan's own totals win over the per-line count: the
+                // list is capped on screen, the findings are not.
+                let (summary, text) = match msg.split_once('|') {
+                    Some((text, counts)) => {
+                        let c: Vec<u32> = counts
+                            .split(',')
+                            .filter_map(|v| v.trim().parse().ok())
+                            .collect();
+                        let totals = if c.len() == 4 {
+                            (c[0], c[1], c[2], c[3])
+                        } else {
+                            self.sec_scan_summary
+                        };
+                        (totals, text)
+                    }
+                    None => (self.sec_scan_summary, msg),
+                };
+                self.sec_scan_summary = summary;
+                self.sec_scan_log.push(text.to_string());
+                self.sec_scan_active = false;
+            }
+        } else if let Some(body) = token.strip_prefix("[PROFILER]") {
+            if body.starts_with("gauge:") {
+                if let Some(g) = body.strip_prefix("gauge:") {
+                    let parts: Vec<&str> = g.splitn(2, '|').collect();
+                    if parts.len() >= 2 {
+                        let val = parts[1].parse::<f64>().ok();
+                        match parts[0] {
+                            "cpu" => self.profiler_gauge_cpu = val,
+                            "mem" => self.profiler_gauge_mem = val,
+                            "memtotal" => self.profiler_gauge_mem_total = val,
+                            "latency" => self.profiler_gauge_latency = val,
+                            _ => {}
+                        }
+                    }
+                }
+            } else if let Some(r) = body.strip_prefix("row:") {
+                let parts: Vec<&str> = r.splitn(3, '|').collect();
+                if parts.len() == 3 {
+                    self.profiler_rows.push((
+                        parts[0].to_string(),
+                        parts[1].to_string(),
+                        parts[2].to_string(),
+                    ));
+                }
+            } else if let Some(msg) = body.strip_prefix("note:") {
+                self.profiler_notes.push(msg.to_string());
+            } else if let Some(msg) = body.strip_prefix("failed:") {
+                self.profiler_notes
+                    .push(format!("profiling failed: {}", msg));
+                self.profiler_running = false;
+            } else if body == "done" {
+                self.profiler_running = false;
+            }
+        } else if let Some(body) = token.strip_prefix("[MODELS]") {
+            if let Ok(models) = serde_json::from_str::<Vec<String>>(body) {
+                if !models.is_empty() {
+                    self.available_models = models;
+                    if let Some(pos) = self
+                        .available_models
+                        .iter()
+                        .position(|m| m == &self.config.default_model)
+                    {
+                        self.selected_model = pos;
+                    } else {
+                        // If current default_model is not installed, select first installed model from Ollama
+                        if let Some(first) = self.available_models.first().cloned() {
+                            self.config.default_model = first;
+                            self.selected_model = 0;
+                            self.save_config();
+                        }
+                    }
+                }
+            }
+        } else if let Some(body) = token.strip_prefix("[CTXSTATS]") {
+            let parts: Vec<&str> = body.splitn(2, '|').collect();
+            if parts.len() == 2 {
+                self.last_ctx_total_tokens = parts[0].parse().unwrap_or(0);
+                self.last_ctx_retrieved_files = parts[1].parse().unwrap_or(0);
+            }
+        } else if let Some(body) = token.strip_prefix("[CTXWINDOW]") {
+            if let Ok(tokens) = body.trim().parse::<u32>() {
+                self.server_context_window = Some(tokens);
+            }
+        } else if let Some(body) = token.strip_prefix("[OLLAMAWINDOW]") {
+            // Checked before `[OLLAMA]`, whose prefix this starts with: a
+            // window number arriving as a transcript line would be both
+            // wrong on screen and lost as a budget.
+            if let Ok(tokens) = body.trim().parse::<u32>() {
+                self.ollama_window = Some(tokens);
+            }
+        } else if let Some(body) = token.strip_prefix("[TURNPROFILE]") {
+            // A saved profile took this turn, or a matching one was declined
+            // and this says why (MI-7). A turn that ran on a model the user did
+            // not pick has to be visible, not inferred from an answer that
+            // seemed unlike the usual one.
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("ℹ️ {body}"),
+            });
+        } else if let Some(body) = token.strip_prefix("[OLLAMA]") {
+            // What a request to Ollama asked for and did not get (MI-2): a
+            // window the model's own weights cannot hold, a round of thinking
+            // the model never claimed. The turn still runs — this says what it
+            // ran without.
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("ℹ️ {body}"),
+            });
+        } else if let Some(body) = token.strip_prefix("[CTXOVER]") {
+            // The server counted the prompt bigger than the window it says it
+            // has. Both numbers are the server's own, so this is not a
+            // warning about an estimate.
+            let parts: Vec<&str> = body.splitn(2, '|').collect();
+            if parts.len() == 2 {
+                self.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "⚠ the prompt was counted at {} tokens by the server, which is running a {}-token window",
+                        parts[0], parts[1]
+                    ),
+                });
+            }
+        } else if let Some(body) = token.strip_prefix("[LLAMACPP]") {
+            self.llamacpp_action_msg = body.to_string();
+            // Loading or swapping a model can leave the server running
+            // something else than it was asked to; ask its window again
+            // instead of keeping the number from before.
+            self.probe_context_window(tx.clone());
+        } else if let Some(body) = token.strip_prefix("[POWER]") {
+            // What the machine drew while the turn ran, read from the kernel's
+            // energy counter at both ends of it. A package-wide figure — a
+            // compile running beside xencode is in the same total — so it is
+            // labelled an estimate here and in the row it is kept in, and a
+            // machine that reports no counter is said so rather than drawn as
+            // a turn that cost nothing.
+            match serde_json::from_str::<xencode_context_rs::power::PowerUse>(body) {
+                Ok(use_) => {
+                    let line = xencode_context_rs::power::power_line(
+                        &use_,
+                        self.config.power_cents_per_kwh,
+                    );
+                    self.pending_power = Some(use_);
+                    self.messages.push(UiMessage {
+                        role: "system".to_string(),
+                        content: format!("⚡ {line}"),
+                    });
+                }
+                Err(e) => {
+                    // A window that could not be read back is dropped, not
+                    // guessed at: the row keeps its empty energy fields, which
+                    // is the same answer a machine with no counter gives.
+                    self.pending_power = None;
+                    self.messages.push(UiMessage {
+                        role: "system".to_string(),
+                        content: format!("⚡ the power reading for this turn was unusable: {e}"),
+                    });
+                }
+            }
+        } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
+            if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
+                self.last_llamacpp_timings = Some(ts.clone());
+                // What this turn cost, in the server's own tokens, is the
+                // only advance notice the next turn gets about how much room
+                // its retrieval has (AC-4).
+                self.prompt_overhead.observe(
+                    ts.prompt_tokens,
+                    self.last_prompt_retrieved_chars,
+                    self.last_prompt_chars,
+                );
+                // Record a §13 metrics row: `cached_tokens` is how much of
+                // the prompt the server said it did not have to evaluate.
+                // Where the server reported a prompt at all, both numbers are
+                // its own; where it reported none, the size of the prompt
+                // xencode built is all there is and is labelled an estimate by
+                // having no evaluated count to subtract from it.
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let profile = self.hardware.profile;
+                let prompt_tokens = if ts.prompt_tokens > 0 {
+                    ts.prompt_tokens
+                } else {
+                    self.last_ctx_total_tokens
+                };
+                let mut m = xencode_context_rs::RequestMetrics::from_timings(
+                    profile.name(),
+                    profile.ctx_tokens() as u32,
+                    prompt_tokens.min(u32::MAX as u64) as u32,
+                    ts.tokens_evaluated.min(u32::MAX as u64) as u32,
+                    ts.tokens_generated.min(u32::MAX as u64) as u32,
+                    ts.predicted_per_second as f32,
+                    ts.prompt_per_second as f32,
+                    self.last_ctx_retrieved_files,
+                );
+                // The model as it was configured for this turn; llama.cpp
+                // reports timings for whatever it has loaded, which is the
+                // same thing unless the server was changed underneath.
+                self.metrics_identity(&self.config.default_model.clone())
+                    .apply(&mut m);
+                // What this turn was told to sample at. The timings arrive
+                // for a generation the TUI sent with exactly these values, so
+                // the row describes the request that produced them rather
+                // than a guess about it — and a row with neither field says
+                // plainly that nothing was pinned.
+                m.temperature = self.config.llama_cpp_temperature;
+                m.seed = self.config.llama_cpp_seed;
+                // The window taken here is the one that closed with this turn,
+                // on the same channel a moment earlier. `take`, not `clone`:
+                // the next turn brings its own, and a row priced from a
+                // previous turn's electricity would be a wrong number rather
+                // than a missing one.
+                if let Some(use_) = self.pending_power.take() {
+                    use_.apply_to(self.config.power_cents_per_kwh, &mut m);
+                }
+                let _ = xencode_context_rs::append_metrics(&xencode, &m);
+            }
+        } else if token == "[HEALTH_DONE]" {
+            self.health_check_in_progress = false;
+            self.last_health_check = current_timestamp();
+        } else if let Some(body) = token.strip_prefix("[GIT_COMMIT_OK]") {
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("✓ Commit: {body}"),
+            });
+            self.refresh_git();
+        } else if let Some(body) = token.strip_prefix("[GIT_COMMIT_ERR]") {
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("✗ Commit failed: {body}"),
+            });
+            self.refresh_git();
+        } else if let Some(body) = token.strip_prefix("[TASKS]") {
+            self.handle_tasks_command(body);
+        } else if let Some(body) = token.strip_prefix("[TOOL]") {
+            if let Some(call) = body.strip_prefix("→ ") {
+                self.live_tool_started(call.trim());
+            }
+            // Tool-loop lines arrive mid-stream (D1-02); the next token
+            // opens a fresh assistant bubble, so each round stays visible.
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("⚙{body}"),
+            });
+        } else if let Some(body) = token.strip_prefix("[MCP]") {
+            // `/mcp` reports (I3-01) arrive from the connect/status task.
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("◈ {body}"),
+            });
+        } else if token == "[BYTEBOT_STOPPED]" {
+            self.bytebot_stopped = true;
+            self.live_stopped();
+        } else if token == "[STOPPED]" {
+            self.live_stopped();
+            self.live_turn_stopped = true;
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: "■ Turn stopped.".to_string(),
+            });
+        } else if let Some(body) = token.strip_prefix(TURN_ERROR_PREFIX) {
+            self.live_turn_error = Some(body.to_string());
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: body.to_string(),
+            });
+        } else if let Some(body) = token.strip_prefix("[FALLBACK]") {
+            // Provider fallback chain (I4-01): the primary model failed
+            // before emitting anything, so the turn is retried on the next
+            // configured model. `⚠` keeps it a system note, not a bubble.
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("⚠ {body}"),
+            });
+        } else if let Some(body) = token.strip_prefix("[WATCHOFF]") {
+            // The real-time watcher could not start, so no `⚠ stale context`
+            // warning will ever arrive on its own. Say so once, plainly.
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("⚠ file watching is off: {body}"),
+            });
+        } else if let Some(body) = token.strip_prefix("[WATCH]") {
+            self.handle_watch_event(body);
+        } else {
+            self.append_generation(token);
+        }
+    }
+
     /// Record this session's state in its live status file (DK-1). The feed
     /// redacts and clips the headline itself.
     pub(crate) fn live_set(
@@ -13138,561 +13695,7 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
         // Drain async messages
         while let Ok(token) = rx.try_recv() {
             signals.messages += 1;
-            if let Some(body) = token.strip_prefix("[REVIEW]") {
-                app.append_review(body);
-            } else if let Some(body) = token.strip_prefix("[SPAWN]") {
-                // `<id>:<event>` — a `/spawn` subagent reporting in (I3-03).
-                if let Some((id, rest)) = body.split_once(':') {
-                    if let Ok(id) = id.parse::<u64>() {
-                        // A finished worker can free a file a waiting one asked for.
-                        if let Some((_, _, run)) = app.spawn_event(id, rest) {
-                            tokio::spawn(agent_rounds(run, tx.clone()));
-                        }
-                    }
-                }
-            } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
-                app.bytebot_event(body);
-            } else if token == "[BYTEBOT_DONE]" {
-                app.bytebot_run_finished(tx.clone());
-            } else if token == "[INIT_DONE]" {
-                app.init_running = false;
-                app.init_progress = 1.0;
-            } else if let Some(body) = token.strip_prefix("[INIT]") {
-                if body.starts_with("step:") {
-                    let parts: Vec<&str> = body.splitn(4, ':').collect();
-                    if parts.len() >= 4 {
-                        let idx = parts[1].parse::<usize>().unwrap_or(0);
-                        if idx < app.init_steps.len() {
-                            app.init_steps[idx].1 = parts[2].to_string();
-                        }
-                    }
-                } else if body.starts_with("progress:") {
-                    if let Some(pct) = body.strip_prefix("progress:") {
-                        app.init_progress = pct.trim().parse::<f64>().unwrap_or(0.0);
-                    }
-                } else if body.starts_with("log:") {
-                    if let Some(msg) = body.strip_prefix("log:") {
-                        app.init_log.push(msg.to_string());
-                    }
-                }
-            } else if token == "[CTX_START]"
-                || token == "[ADVISE_START]"
-                || token == "[VERIFY_START]"
-            {
-                // Open a fresh assistant message that the matching
-                // [CTX]/[ADVISE]/[VERIFY] tokens populate line by line.
-                app.messages.push(UiMessage {
-                    role: "assistant".to_string(),
-                    content: String::new(),
-                });
-            } else if let Some(body) = token.strip_prefix("[ADVISE]") {
-                if let Some(last) = app.messages.last_mut() {
-                    if last.role == "assistant" {
-                        if !last.content.is_empty() {
-                            last.content.push('\n');
-                        }
-                        last.content.push_str(body);
-                    }
-                }
-            } else if let Some(body) = token.strip_prefix("[VERIFY]") {
-                if let Some(last) = app.messages.last_mut() {
-                    if last.role == "assistant" {
-                        if !last.content.is_empty() {
-                            last.content.push('\n');
-                        }
-                        last.content.push_str(body);
-                    }
-                }
-            } else if let Some(err) = token.strip_prefix("[VERIFY_ERR]") {
-                app.push_toast(
-                    crate::toast::ToastKind::Warning,
-                    format!("Verify failed: {err}"),
-                );
-                app.system_line(&format!("❌ Verification error: {err}"));
-            } else if let Some(body) = token.strip_prefix("[CTX]") {
-                if let Some(last) = app.messages.last_mut() {
-                    if last.role == "assistant" {
-                        if !last.content.is_empty() {
-                            last.content.push('\n');
-                        }
-                        last.content.push_str(body);
-                    }
-                }
-            } else if let Some(body) = token.strip_prefix("[COLLAB]") {
-                app.apply_collab_token(body);
-            } else if let Some(body) = token.strip_prefix("[HEALTH]") {
-                let parts: Vec<&str> = body.splitn(4, '|').collect();
-                if parts.len() >= 3 {
-                    let provider = parts[0].to_string();
-                    let status = parts[1].to_string();
-                    let latency = parts[2].parse::<f64>().unwrap_or(0.0);
-                    let error = if parts.len() > 3 && !parts[3].is_empty() {
-                        Some(parts[3].to_string())
-                    } else {
-                        None
-                    };
-                    app.ollama_health_entries
-                        .insert(provider, (status.clone(), latency, error));
-                    // Update average latency across all providers
-                    if status == "healthy" {
-                        let total: f64 = app
-                            .ollama_health_entries
-                            .values()
-                            .map(|(s, l, _)| if s == "healthy" { *l } else { 0.0 })
-                            .sum();
-                        let count = app
-                            .ollama_health_entries
-                            .values()
-                            .filter(|(s, _, _)| s == "healthy")
-                            .count() as f64;
-                        app.average_latency = if count > 0.0 { total / count } else { 0.0 };
-                    }
-                }
-            } else if token == "[REFRESH_MODELS]" {
-                app.refresh_models(tx.clone());
-            } else if let Some(body) = token.strip_prefix("[LLAMACPP_MSG]") {
-                app.llamacpp_action_msg = body.to_string();
-            } else if let Some(body) = token.strip_prefix("[DOWNLOAD]") {
-                // Empty clears the line: the download is over, one way or another.
-                app.model_download = if body.is_empty() {
-                    None
-                } else {
-                    Some(body.to_string())
-                };
-            } else if let Some(body) = token.strip_prefix("[MODEL_CHECK]") {
-                app.model_integrity = if body.is_empty() {
-                    None
-                } else {
-                    Some(body.to_string())
-                };
-            } else if let Some(body) = token.strip_prefix("[VOICE]") {
-                if let Some(s) = body.strip_prefix("status:") {
-                    let new_status = s.to_string();
-                    if new_status == "idle" {
-                        app.voice_finish();
-                    } else {
-                        app.voice_status = new_status;
-                    }
-                } else if let Some(l) = body.strip_prefix("level:") {
-                    app.voice_apply_level(l);
-                } else if let Some(p) = body.strip_prefix("peak:") {
-                    app.voice_peak = p.trim().parse::<f64>().unwrap_or(app.voice_peak);
-                } else if let Some(c) = body.strip_prefix("clip:") {
-                    app.voice_apply_clip(c);
-                } else if let Some(t) = body.strip_prefix("transcript:") {
-                    app.voice_apply_transcript(t);
-                } else if let Some(n) = body.strip_prefix("note:") {
-                    app.voice_apply_note(n);
-                } else if let Some(e) = body.strip_prefix("err:") {
-                    app.voice_apply_error(e);
-                }
-            } else if let Some(body) = token.strip_prefix("[TERM]") {
-                if let Some(json) = body.strip_prefix("suggestion:") {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-                        app.term_asst_typing = false;
-                        app.term_asst_suggestions.push((
-                            v["command"].as_str().unwrap_or_default().to_string(),
-                            v["risk"].as_str().unwrap_or_default().to_string(),
-                            v["why"].as_str().unwrap_or_default().to_string(),
-                        ));
-                    }
-                } else if let Some(json) = body.strip_prefix("ran:") {
-                    app.term_asst_busy = false;
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-                        let command = v["command"].as_str().unwrap_or_default().to_string();
-                        let risk = v["risk"].as_str().unwrap_or_default().to_string();
-                        let result = v["result"].as_str().unwrap_or_default().to_string();
-                        app.term_asst_history
-                            .push((command.clone(), risk, result.clone()));
-                        app.term_asst_output = format!("{} — {}", command, result);
-                    }
-                } else if let Some(msg) = body.strip_prefix("raw:") {
-                    app.term_asst_typing = true;
-                    app.term_asst_output =
-                        format!("The model did not answer with commands. It said: {}", msg);
-                } else if let Some(msg) = body.strip_prefix("error:") {
-                    app.term_asst_typing = true;
-                    // One line, because the status box is one line tall.
-                    app.term_asst_output = crate::agent_tools::truncate_one_line(msg, 300);
-                } else if body == "ready" {
-                    app.term_asst_busy = false;
-                    if app.term_asst_suggestions.is_empty() {
-                        app.term_asst_typing = true;
-                    }
-                }
-            } else if let Some(body) = token.strip_prefix("[LANG]") {
-                if let Some(json) = body.strip_prefix("row:") {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-                        app.lang_detection_results.push((
-                            v["language"].as_str().unwrap_or_default().to_string(),
-                            v["files"].as_u64().unwrap_or(0),
-                            v["lines"].as_u64().unwrap_or(0),
-                            v["share"].as_f64().unwrap_or(0.0),
-                        ));
-                    }
-                } else if let Some(note) = body.strip_prefix("note:") {
-                    app.lang_notes.push(note.to_string());
-                } else if let Some(why) = body.strip_prefix("failed:") {
-                    app.lang_notes
-                        .push(format!("the walk did not finish: {why}"));
-                    app.lang_busy = false;
-                } else if body == "done" {
-                    app.lang_busy = false;
-                }
-            } else if let Some(body) = token.strip_prefix("[TRANS]") {
-                app.lang_busy = false;
-                // Both arms write the same field on purpose: what came back,
-                // answer or error, is the panel's output line.
-                if let Some(reply) = body.strip_prefix("out:") {
-                    app.lang_translate_error = false;
-                    app.lang_translate_output = reply.to_string();
-                } else if let Some(err) = body.strip_prefix("error:") {
-                    app.lang_translate_error = true;
-                    app.lang_translate_output = err.to_string();
-                }
-            } else if let Some(body) = token.strip_prefix("[LEARN]") {
-                if let Some(reply) = body.strip_prefix("quiz:") {
-                    app.learn_apply_quiz(reply);
-                } else if let Some(err) = body.strip_prefix("err:") {
-                    app.learn_busy = false;
-                    app.learn_status = format!(
-                        "provider said: {}",
-                        crate::agent_tools::truncate_one_line(err, 200)
-                    );
-                }
-            } else if let Some(body) = token.strip_prefix("[PROFILE]") {
-                app.models_busy = false;
-                // The reply and the failure share one line on purpose: the
-                // panel's status is the provider's own words either way.
-                if let Some(reply) = body.strip_prefix("ok:") {
-                    app.models_status = format!("reply: {reply}");
-                } else if let Some(err) = body.strip_prefix("err:") {
-                    app.models_status = format!("test failed: {err}");
-                }
-            } else if let Some(body) = token.strip_prefix("[SECURITY]") {
-                if body.starts_with("progress:") {
-                    if let Some(p) = body.strip_prefix("progress:") {
-                        app.sec_scan_progress = p.trim().parse::<f64>().unwrap_or(0.0);
-                    }
-                } else if body.starts_with("finding:") {
-                    if let Some(f) = body.strip_prefix("finding:") {
-                        let parts: Vec<&str> = f.splitn(4, '|').collect();
-                        if parts.len() >= 4 {
-                            let severity = parts[0].to_string();
-                            let category = parts[1].to_string();
-                            let location = parts[2].to_string();
-                            let detail = parts[3].to_string();
-                            app.sec_scan_results.push((
-                                severity.clone(),
-                                category.clone(),
-                                location.clone(),
-                            ));
-                            app.sec_scan_log.push(detail);
-                            // Update summary counts
-                            let (mut c, mut h, mut m, mut l) = app.sec_scan_summary;
-                            match severity.as_str() {
-                                "Critical" => c += 1,
-                                "High" => h += 1,
-                                "Medium" => m += 1,
-                                _ => l += 1,
-                            }
-                            app.sec_scan_summary = (c, h, m, l);
-                        }
-                    }
-                } else if let Some(msg) = body.strip_prefix("note:") {
-                    app.sec_scan_log.push(msg.to_string());
-                } else if let Some(msg) = body.strip_prefix("failed:") {
-                    app.sec_scan_log.push(format!("scan failed: {}", msg));
-                    app.sec_scan_active = false;
-                } else if let Some(msg) = body.strip_prefix("done:") {
-                    app.sec_scan_progress = 1.0;
-                    // The scan's own totals win over the per-line count: the
-                    // list is capped on screen, the findings are not.
-                    let (summary, text) = match msg.split_once('|') {
-                        Some((text, counts)) => {
-                            let c: Vec<u32> = counts
-                                .split(',')
-                                .filter_map(|v| v.trim().parse().ok())
-                                .collect();
-                            let totals = if c.len() == 4 {
-                                (c[0], c[1], c[2], c[3])
-                            } else {
-                                app.sec_scan_summary
-                            };
-                            (totals, text)
-                        }
-                        None => (app.sec_scan_summary, msg),
-                    };
-                    app.sec_scan_summary = summary;
-                    app.sec_scan_log.push(text.to_string());
-                    app.sec_scan_active = false;
-                }
-            } else if let Some(body) = token.strip_prefix("[PROFILER]") {
-                if body.starts_with("gauge:") {
-                    if let Some(g) = body.strip_prefix("gauge:") {
-                        let parts: Vec<&str> = g.splitn(2, '|').collect();
-                        if parts.len() >= 2 {
-                            let val = parts[1].parse::<f64>().ok();
-                            match parts[0] {
-                                "cpu" => app.profiler_gauge_cpu = val,
-                                "mem" => app.profiler_gauge_mem = val,
-                                "memtotal" => app.profiler_gauge_mem_total = val,
-                                "latency" => app.profiler_gauge_latency = val,
-                                _ => {}
-                            }
-                        }
-                    }
-                } else if let Some(r) = body.strip_prefix("row:") {
-                    let parts: Vec<&str> = r.splitn(3, '|').collect();
-                    if parts.len() == 3 {
-                        app.profiler_rows.push((
-                            parts[0].to_string(),
-                            parts[1].to_string(),
-                            parts[2].to_string(),
-                        ));
-                    }
-                } else if let Some(msg) = body.strip_prefix("note:") {
-                    app.profiler_notes.push(msg.to_string());
-                } else if let Some(msg) = body.strip_prefix("failed:") {
-                    app.profiler_notes
-                        .push(format!("profiling failed: {}", msg));
-                    app.profiler_running = false;
-                } else if body == "done" {
-                    app.profiler_running = false;
-                }
-            } else if let Some(body) = token.strip_prefix("[MODELS]") {
-                if let Ok(models) = serde_json::from_str::<Vec<String>>(body) {
-                    if !models.is_empty() {
-                        app.available_models = models;
-                        if let Some(pos) = app
-                            .available_models
-                            .iter()
-                            .position(|m| m == &app.config.default_model)
-                        {
-                            app.selected_model = pos;
-                        } else {
-                            // If current default_model is not installed, select first installed model from Ollama
-                            if let Some(first) = app.available_models.first().cloned() {
-                                app.config.default_model = first;
-                                app.selected_model = 0;
-                                app.save_config();
-                            }
-                        }
-                    }
-                }
-            } else if let Some(body) = token.strip_prefix("[CTXSTATS]") {
-                let parts: Vec<&str> = body.splitn(2, '|').collect();
-                if parts.len() == 2 {
-                    app.last_ctx_total_tokens = parts[0].parse().unwrap_or(0);
-                    app.last_ctx_retrieved_files = parts[1].parse().unwrap_or(0);
-                }
-            } else if let Some(body) = token.strip_prefix("[CTXWINDOW]") {
-                if let Ok(tokens) = body.trim().parse::<u32>() {
-                    app.server_context_window = Some(tokens);
-                }
-            } else if let Some(body) = token.strip_prefix("[OLLAMAWINDOW]") {
-                // Checked before `[OLLAMA]`, whose prefix this starts with: a
-                // window number arriving as a transcript line would be both
-                // wrong on screen and lost as a budget.
-                if let Ok(tokens) = body.trim().parse::<u32>() {
-                    app.ollama_window = Some(tokens);
-                }
-            } else if let Some(body) = token.strip_prefix("[TURNPROFILE]") {
-                // A saved profile took this turn, or a matching one was declined
-                // and this says why (MI-7). A turn that ran on a model the user did
-                // not pick has to be visible, not inferred from an answer that
-                // seemed unlike the usual one.
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("ℹ️ {body}"),
-                });
-            } else if let Some(body) = token.strip_prefix("[OLLAMA]") {
-                // What a request to Ollama asked for and did not get (MI-2): a
-                // window the model's own weights cannot hold, a round of thinking
-                // the model never claimed. The turn still runs — this says what it
-                // ran without.
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("ℹ️ {body}"),
-                });
-            } else if let Some(body) = token.strip_prefix("[CTXOVER]") {
-                // The server counted the prompt bigger than the window it says it
-                // has. Both numbers are the server's own, so this is not a
-                // warning about an estimate.
-                let parts: Vec<&str> = body.splitn(2, '|').collect();
-                if parts.len() == 2 {
-                    app.messages.push(UiMessage {
-                        role: "system".to_string(),
-                        content: format!(
-                            "⚠ the prompt was counted at {} tokens by the server, which is running a {}-token window",
-                            parts[0], parts[1]
-                        ),
-                    });
-                }
-            } else if let Some(body) = token.strip_prefix("[LLAMACPP]") {
-                app.llamacpp_action_msg = body.to_string();
-                // Loading or swapping a model can leave the server running
-                // something else than it was asked to; ask its window again
-                // instead of keeping the number from before.
-                app.probe_context_window(tx.clone());
-            } else if let Some(body) = token.strip_prefix("[POWER]") {
-                // What the machine drew while the turn ran, read from the kernel's
-                // energy counter at both ends of it. A package-wide figure — a
-                // compile running beside xencode is in the same total — so it is
-                // labelled an estimate here and in the row it is kept in, and a
-                // machine that reports no counter is said so rather than drawn as
-                // a turn that cost nothing.
-                match serde_json::from_str::<xencode_context_rs::power::PowerUse>(body) {
-                    Ok(use_) => {
-                        let line = xencode_context_rs::power::power_line(
-                            &use_,
-                            app.config.power_cents_per_kwh,
-                        );
-                        app.pending_power = Some(use_);
-                        app.messages.push(UiMessage {
-                            role: "system".to_string(),
-                            content: format!("⚡ {line}"),
-                        });
-                    }
-                    Err(e) => {
-                        // A window that could not be read back is dropped, not
-                        // guessed at: the row keeps its empty energy fields, which
-                        // is the same answer a machine with no counter gives.
-                        app.pending_power = None;
-                        app.messages.push(UiMessage {
-                            role: "system".to_string(),
-                            content: format!(
-                                "⚡ the power reading for this turn was unusable: {e}"
-                            ),
-                        });
-                    }
-                }
-            } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
-                if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
-                    app.last_llamacpp_timings = Some(ts.clone());
-                    // What this turn cost, in the server's own tokens, is the
-                    // only advance notice the next turn gets about how much room
-                    // its retrieval has (AC-4).
-                    app.prompt_overhead.observe(
-                        ts.prompt_tokens,
-                        app.last_prompt_retrieved_chars,
-                        app.last_prompt_chars,
-                    );
-                    // Record a §13 metrics row: `cached_tokens` is how much of
-                    // the prompt the server said it did not have to evaluate.
-                    // Where the server reported a prompt at all, both numbers are
-                    // its own; where it reported none, the size of the prompt
-                    // xencode built is all there is and is labelled an estimate by
-                    // having no evaluated count to subtract from it.
-                    let root = xencode_context_rs::default_root();
-                    let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-                    let profile = app.hardware.profile;
-                    let prompt_tokens = if ts.prompt_tokens > 0 {
-                        ts.prompt_tokens
-                    } else {
-                        app.last_ctx_total_tokens
-                    };
-                    let mut m = xencode_context_rs::RequestMetrics::from_timings(
-                        profile.name(),
-                        profile.ctx_tokens() as u32,
-                        prompt_tokens.min(u32::MAX as u64) as u32,
-                        ts.tokens_evaluated.min(u32::MAX as u64) as u32,
-                        ts.tokens_generated.min(u32::MAX as u64) as u32,
-                        ts.predicted_per_second as f32,
-                        ts.prompt_per_second as f32,
-                        app.last_ctx_retrieved_files,
-                    );
-                    // The model as it was configured for this turn; llama.cpp
-                    // reports timings for whatever it has loaded, which is the
-                    // same thing unless the server was changed underneath.
-                    app.metrics_identity(&app.config.default_model.clone())
-                        .apply(&mut m);
-                    // What this turn was told to sample at. The timings arrive
-                    // for a generation the TUI sent with exactly these values, so
-                    // the row describes the request that produced them rather
-                    // than a guess about it — and a row with neither field says
-                    // plainly that nothing was pinned.
-                    m.temperature = app.config.llama_cpp_temperature;
-                    m.seed = app.config.llama_cpp_seed;
-                    // The window taken here is the one that closed with this turn,
-                    // on the same channel a moment earlier. `take`, not `clone`:
-                    // the next turn brings its own, and a row priced from a
-                    // previous turn's electricity would be a wrong number rather
-                    // than a missing one.
-                    if let Some(use_) = app.pending_power.take() {
-                        use_.apply_to(app.config.power_cents_per_kwh, &mut m);
-                    }
-                    let _ = xencode_context_rs::append_metrics(&xencode, &m);
-                }
-            } else if token == "[HEALTH_DONE]" {
-                app.health_check_in_progress = false;
-                app.last_health_check = current_timestamp();
-            } else if let Some(body) = token.strip_prefix("[GIT_COMMIT_OK]") {
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("✓ Commit: {body}"),
-                });
-                app.refresh_git();
-            } else if let Some(body) = token.strip_prefix("[GIT_COMMIT_ERR]") {
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("✗ Commit failed: {body}"),
-                });
-                app.refresh_git();
-            } else if let Some(body) = token.strip_prefix("[TASKS]") {
-                app.handle_tasks_command(body);
-            } else if let Some(body) = token.strip_prefix("[TOOL]") {
-                if let Some(call) = body.strip_prefix("→ ") {
-                    app.live_tool_started(call.trim());
-                }
-                // Tool-loop lines arrive mid-stream (D1-02); the next token
-                // opens a fresh assistant bubble, so each round stays visible.
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("⚙{body}"),
-                });
-            } else if let Some(body) = token.strip_prefix("[MCP]") {
-                // `/mcp` reports (I3-01) arrive from the connect/status task.
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("◈ {body}"),
-                });
-            } else if token == "[BYTEBOT_STOPPED]" {
-                app.bytebot_stopped = true;
-                app.live_stopped();
-            } else if token == "[STOPPED]" {
-                app.live_stopped();
-                app.live_turn_stopped = true;
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: "■ Turn stopped.".to_string(),
-                });
-            } else if let Some(body) = token.strip_prefix(TURN_ERROR_PREFIX) {
-                app.live_turn_error = Some(body.to_string());
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: body.to_string(),
-                });
-            } else if let Some(body) = token.strip_prefix("[FALLBACK]") {
-                // Provider fallback chain (I4-01): the primary model failed
-                // before emitting anything, so the turn is retried on the next
-                // configured model. `⚠` keeps it a system note, not a bubble.
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("⚠ {body}"),
-                });
-            } else if let Some(body) = token.strip_prefix("[WATCHOFF]") {
-                // The real-time watcher could not start, so no `⚠ stale context`
-                // warning will ever arrive on its own. Say so once, plainly.
-                app.messages.push(UiMessage {
-                    role: "system".to_string(),
-                    content: format!("⚠ file watching is off: {body}"),
-                });
-            } else if let Some(body) = token.strip_prefix("[WATCH]") {
-                app.handle_watch_event(body);
-            } else {
-                app.append_generation(&token);
-            }
+            app.apply_token(&token, &tx);
         }
 
         // Approval prompts from the tool loop (I1-03): queue them; the
@@ -19447,6 +19450,25 @@ Content-Length: 0
         app.bytebot_needs_help("Which port?".into(), reply);
         assert!(app.bytebot_withdraw_question());
         assert!(answer.await.is_err(), "the waiting tool call is released");
+    }
+
+    /// EN-1: the loop's tokens are applied by one App method, the same one
+    /// `run_app` calls, so the engine can call it too.
+    #[tokio::test]
+    async fn apply_token_is_what_the_main_loop_does_with_a_token() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.is_generating = true;
+        app.apply_token("hello ", &tx);
+        app.apply_token("world", &tx);
+        app.apply_token("[TOOL]→ read_file a.rs", &tx);
+        app.apply_token("[STOPPED]", &tx);
+        app.apply_token("[DONE]", &tx);
+        let text: Vec<String> = app.messages.iter().map(|m| m.content.clone()).collect();
+        assert!(text.iter().any(|t| t == "hello world"), "{text:?}");
+        assert!(text.iter().any(|t| t == "⚙→ read_file a.rs"), "{text:?}");
+        assert!(text.iter().any(|t| t == "■ Turn stopped."), "{text:?}");
+        assert!(!app.is_generating);
     }
 
     /// A stopped chat turn and a ByteBot run each have their own stop: a chat
