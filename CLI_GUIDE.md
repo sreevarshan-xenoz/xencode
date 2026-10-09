@@ -148,7 +148,7 @@ a file read off disk, a fetched page, an `AGENTS.md` whose bytes have not been
 trusted — so a preview cannot read as though your own sentence and a webpage were
 the same kind of thing. Files pinned in the Explorer with `Space` are read through
 the same intake a real turn uses, so they are counted here too.
-`/level [1-4]` selects the progressive disclosure tier (Level 1 Core, Level 2 Workflow, Level 3 Advanced, Level 4 Specialist/All), governing the visible entries in the feature palette (`Ctrl+F`) and first-run welcome shortcuts line without removing deferred tooling.
+`/level [1-4]` selects the progressive disclosure tier (Level 1 Core, Level 2 Workflow, Level 3 Advanced, Level 4 Specialist/All), governing the visible entries in the feature navigator (`Ctrl+F`) and first-run welcome shortcuts line without removing deferred tooling. The command palette (`Ctrl+X`) ignores the tier and lists every panel, slash command and setting.
 
 `/help` opens the help overlay, the same one `?` opens. A `/word` that is not a command (`/model`, `/clear`) is answered with "Unknown command" and a pointer to `/help`, instead of being sent to the model as a prompt. A first word that contains a second `/`, such as an absolute path, is still sent as a prompt.
 `/goto <destination>` switches focus directly to any panel destination by name or command, keeping all features reachable regardless of active disclosure tier.

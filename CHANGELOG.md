@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AG-3` / `UX-6`: a command palette on Ctrl+X
+
+Ctrl+X opens a palette that lists every panel, every slash command and every
+setting, whatever the disclosure level is set to. Typing a few words filters
+and ranks the list; a match on an entry's name ranks above a match found only
+in its description, so "theme" lands on the Theme setting. Enter opens a panel,
+opens Settings on the chosen row, or puts a slash command in the composer for
+you to finish and send. A draft already in the composer is saved to the prompt
+history first, where Alt+Up brings it back. Esc or Ctrl+X closes the palette
+and leaves focus, mode and the composer exactly as they were.
+
+The palette has its own query line, so typing into it never reaches the
+composer or fires single-letter keys such as `q`. Its rows come from the panel
+table, the help overlay's command list and the settings list that already
+exist, so nothing can be listed in one place and missing from another.
+
+Ctrl+K, the chord most editors use for this, stays the background tasks panel
+and still deletes to the end of the line while typing a prompt. Ctrl+X was
+unbound. Inside the composer it no longer reaches the text area's cut action.
+
 ### Changed — `UX-14`: Esc stops a running turn, as the screen already promised
 
 Three refusals in the TUI ("can't change the gate / rewind while the agent is

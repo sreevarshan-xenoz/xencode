@@ -300,6 +300,31 @@ fn renders_at_any_terminal_size() {
     );
 }
 
+/// The command palette is modal too, with a query line above its list; both
+/// an empty query and one that matches nothing must survive the size sweep.
+#[test]
+fn renders_command_palette_at_any_terminal_size() {
+    let mut failures = Vec::new();
+    for query in ["", "set", "zzqqxxj"] {
+        let mut app = populated(FocusArea::ChatInput);
+        app.palette_visible = true;
+        app.palette_query = query.to_string();
+        app.palette_selected = 3;
+        for &width in WIDTHS {
+            for &height in HEIGHTS {
+                let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap();
+                }));
+                if rendered.is_err() {
+                    failures.push(format!("palette {query:?} at {width}x{height}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// The help overlay is topmost and modal; it must survive the same size sweep.
 #[test]
 fn renders_help_overlay_at_any_terminal_size() {

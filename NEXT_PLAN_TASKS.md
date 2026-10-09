@@ -11643,7 +11643,7 @@ proposed an accessibility mode the shipped `UX-12` already covers.
 | **UX-3** | Leader-style "show the keys for this panel" reusing the per-focus | ecology | leader-style key hints |
 | **UX-4** | `NO_COLOR`/`FORCE_COLOR`/`CLICOLOR` honoured, plus a monochrome | ecology | NO_COLOR / contrast honouring (PL-3 is the same probe) |
 | **UX-5** | A WCAG contrast test over `ThemeColors` | ecology | WCAG contrast test |
-| **UX-6** | A fuzzy command palette over slash commands, panels and settings | ecology | command palette |
+| **UX-6** | A fuzzy command palette over slash commands, panels and settings | ecology | command palette — shipped 2026-10-09 as `AG-3` on `Ctrl+X`; see that item for the chord, the ranking and the half not yet watched in a live terminal |
 | **UX-7** | A first-run setup coach | ecology | first-run coach (pairs with MI-6/LF-7) |
 | **UX-8** | `:help <topic>` prose plus a generated man page, both | ecology | fold into WF-6 |
 | **UX-9** | Mouse ergonomics — click-to-cursor in inputs, double-click word | ecology | mouse ergonomics |
@@ -16967,6 +16967,25 @@ are not re-numbered here.
   a query in ordinary words lands on a destination a person agrees with, watched by typing it; and
   `xencode`'s existing keymap and approval tests pass unchanged, which is the proof the seam moved
   plumbing and not behaviour.
+  - [x] **Shipped 2026-10-09, except the live watch.** The chord is `Ctrl+X`: `Ctrl+K` stayed
+    the background tasks panel and the composer's delete-to-end, and `Ctrl+X` was unbound, so
+    nothing moved. The palette is a modal overlay with its own query line, ahead of every global
+    chord, so typing into it never reaches the composer or fires `q`; Esc returns focus, mode and
+    draft untouched. It lists all 27 destinations whatever the level, every row of the help
+    overlay's command list and every `SETTINGS_ITEMS` row, read from those tables (new module
+    `palette.rs`, no fourth list). Scorer: `nucleo-matcher` 0.3.1 with whole-word atoms, not
+    subsequence. The first version used subsequence matching and reproduced the documented
+    failure on the first try: "undo" ranked Rounded Borders first, "cost" ranked the
+    `/orchestrator` usage line above `/cost`. Now: exact name, then name holds every word, then
+    description holds them; commands match on their name, not their argument list. Rankings
+    printed from the real tables: background → Background Tasks; health → Provider Health;
+    commit → Git Commit; undo → `/rewind`; cost → `/cost`; review → PR Review, Code Review;
+    "dark theme", "api key" and "temperature" → nothing, shown as "0 match" rather than a guess.
+    The existing keymap and approval tests pass unchanged. One UI test changed: it assumed the
+    whole help overlay fits a 100-row terminal, and the new `Ctrl+X` row made it one line too
+    long, so it now uses 140 rows. **Not done:** a person watching it in a
+    real terminal. It was exercised through the real key handler and the real renderer at every
+    small size, which is not the same thing, so that half of the done-when stays open.
 
 - **AG-4 — "simple by default" has to be the shipped default, not level 4.** *Effort: S.*
   `default_disclosure_level()` returns 4 (`config.rs:1035`, with `disclosure_level: u8` at

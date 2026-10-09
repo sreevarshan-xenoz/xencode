@@ -116,6 +116,9 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
     if app.help_visible {
         draw_help_overlay(f, app, f.area());
     }
+    if app.palette_visible {
+        draw_palette_overlay(f, app, f.area());
+    }
     if app.agent_stack_visible {
         draw_agent_stack_overlay(f, app, f.area());
     }
@@ -299,6 +302,74 @@ fn draw_agent_stack_overlay(f: &mut Frame, app: &App, area: Rect) {
         .block(block)
         .wrap(Wrap { trim: false });
     f.render_widget(para, popup_area);
+}
+
+/// The command palette (AG-3): a query line, how many rows match, and the
+/// ranked rows. Each row starts with its kind in words and the highlighted row
+/// carries a `›` marker, so the screen reads the same without colour.
+fn draw_palette_overlay(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(70, 70, area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" Command palette — type to filter · Enter opens · Esc closes ");
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let matches = app.palette_matches();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(inner);
+    let header = vec![
+        Line::from(vec![
+            Span::styled("› ", Style::default().fg(app.theme.accent)),
+            Span::styled(app.palette_query.clone(), Style::default().fg(app.theme.fg)),
+            Span::styled("▏", Style::default().fg(app.theme.accent)),
+        ]),
+        Line::from(Span::styled(
+            if app.palette_query.is_empty() {
+                format!("{} panels, commands and settings", matches.len())
+            } else {
+                format!("{} match", matches.len())
+            },
+            Style::default().fg(app.theme.message_system),
+        )),
+    ];
+    f.render_widget(Paragraph::new(header), rows[0]);
+
+    let items: Vec<ListItem> = matches
+        .iter()
+        .map(|entry| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{:<8}", entry.kind()),
+                    Style::default().fg(app.theme.message_system),
+                ),
+                Span::styled(entry.label, Style::default().fg(app.theme.fg)),
+                Span::styled(
+                    format!("  {}", entry.detail),
+                    Style::default().fg(app.theme.message_system),
+                ),
+            ]))
+        })
+        .collect();
+    let list = List::new(items).highlight_symbol("› ").highlight_style(
+        Style::default()
+            .fg(app.theme.highlight_fg)
+            .bg(app.theme.highlight)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    if !matches.is_empty() {
+        state.select(Some(app.palette_selected.min(matches.len() - 1)));
+    }
+    f.render_stateful_widget(list, rows[1], &mut state);
 }
 
 fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
@@ -5284,12 +5355,14 @@ mod tests {
         // offset must clamp to a positive maximum rather than vanish to 0.
         assert!(shrunk[0] > 0);
 
-        clamp_scrolls_on_resize(&mut app, 200, 100);
+        // Tall enough for the whole help overlay: at 100 rows its key list
+        // outgrew the popup by one line when the palette's Ctrl+X row arrived.
+        clamp_scrolls_on_resize(&mut app, 200, 140);
         let grown = scrolls(&app);
         for (before, after) in shrunk.iter().zip(grown.iter()) {
             assert!(*after <= *before, "re-inflated on grow");
         }
-        // Everything fits in a 200x100 terminal.
+        // Everything fits in a 200x140 terminal.
         assert_eq!(grown, [0; 5]);
     }
 

@@ -176,6 +176,7 @@ Global (work in every panel, any mode):
 | `Ctrl+K` | Background tasks panel |
 | `Ctrl+O` | Worktree panel (list/add/remove git worktrees) |
 | `Ctrl+L` | Insights panel (live refactor suggestions & warnings) |
+| `Ctrl+X` | Command palette: type a few words to reach any panel, slash command or setting, whatever the disclosure level. `Enter` opens a panel or setting, or puts a command in the composer for you to finish; a draft already there goes to the prompt history (`Alt+Up`). `Esc` closes it and leaves everything as it was |
 | `Ctrl+F` | Feature Navigator (17 panels) |
 | `Ctrl+D` | Performance dashboard |
 | `Ctrl+P` | Project analyzer |

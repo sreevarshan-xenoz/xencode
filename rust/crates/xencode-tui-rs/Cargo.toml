@@ -35,6 +35,7 @@ libc = "0.2"
 similar = "2"
 regex = "1"
 rmcp = { version = "3.5.0", default-features = false, features = ["server", "transport-io"] }
+nucleo-matcher = "=0.3.1"
 
 [dev-dependencies]
 sha2 = "0.10"

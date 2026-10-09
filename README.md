@@ -308,7 +308,7 @@ xencode plugin install <git-url>   # shows what it declares, and the commit it p
 xencode plugin list                # the TUI's /plugin reports the same load
 ```
 
-**TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+F` opens the Feature Navigator.
+**TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+X` opens the command palette (every panel, slash command and setting, by typing a few words) · `Ctrl+F` opens the Feature Navigator.
 
 ---
 
