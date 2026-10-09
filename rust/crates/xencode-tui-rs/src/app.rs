@@ -267,6 +267,15 @@ impl SpawnRecord {
 /// What the ByteBot progress bar means: the share of calls made so far that
 /// came back. It can move backwards when the model makes another call — which
 /// is honest, unlike a bar that hits 100% because a script promised six steps.
+/// The token a stopped run reports. ByteBot has its own, so a chat turn and a
+/// ByteBot task running side by side cannot take each other's stop.
+fn stopped_token(sink: LoopSink) -> &'static str {
+    match sink {
+        LoopSink::ByteBot => "[BYTEBOT_STOPPED]",
+        _ => "[STOPPED]",
+    }
+}
+
 /// The warning shown at startup when ByteBot tasks were cut off by an exit.
 fn interrupted_tasks_warning(interrupted: usize) -> String {
     format!(
@@ -888,6 +897,8 @@ pub struct App<'a> {
     pub live_turn_error: Option<String>,
     /// The person stopped the running turn; its end keeps the status "idle".
     pub(crate) live_turn_stopped: bool,
+    /// The person stopped the running ByteBot task (`[BYTEBOT_STOPPED]`).
+    pub(crate) bytebot_stopped: bool,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -3279,6 +3290,7 @@ impl<'a> App<'a> {
             live: None,
             live_turn_error: None,
             live_turn_stopped: false,
+            bytebot_stopped: false,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -5266,7 +5278,7 @@ impl<'a> App<'a> {
     /// failed step is `failed`; anything else is `completed`.
     pub fn bytebot_run_finished(&mut self, tx: mpsc::UnboundedSender<String>) {
         use crate::bytebot_tasks::TaskState;
-        let stopped = self.live_turn_stopped;
+        let stopped = std::mem::take(&mut self.bytebot_stopped);
         let error = self.bytebot_error.take().or_else(|| {
             self.bytebot_steps
                 .iter()
@@ -5309,11 +5321,11 @@ impl<'a> App<'a> {
             let task = task.clone();
             self.bytebot_save(&task);
         }
-        // Read while the source is still "bytebot".
+        // Read while the source is still "bytebot". The chat's own stop and
+        // error flags are left for the chat's own end.
         if !stopped {
-            self.live_turn_error = error;
+            self.live_turn_ended(error.as_deref());
         }
-        self.live_turn_finished();
         self.bytebot_running = false;
         // Whatever came back is what there is: the bar and the closing line
         // read the step rows, so an aborted run cannot claim 100%.
@@ -12388,7 +12400,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             .as_ref()
             .is_some_and(|flag| flag.load(Ordering::Relaxed))
         {
-            let _ = tx.send("[STOPPED]".to_string());
+            let _ = tx.send(stopped_token(sink).to_string());
             break;
         }
         round_tokens = None;
@@ -12416,7 +12428,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             () = until_stopped(stop_flag.clone()) => None,
         };
         let Some(raced) = raced else {
-            let _ = tx.send("[STOPPED]".to_string());
+            let _ = tx.send(stopped_token(sink).to_string());
             break;
         };
         let step = match raced {
@@ -13645,6 +13657,9 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                     role: "system".to_string(),
                     content: format!("◈ {body}"),
                 });
+            } else if token == "[BYTEBOT_STOPPED]" {
+                app.bytebot_stopped = true;
+                app.live_stopped();
             } else if token == "[STOPPED]" {
                 app.live_stopped();
                 app.live_turn_stopped = true;
@@ -19312,7 +19327,7 @@ Content-Length: 0
         app.run_bytebot(tx.clone());
         app.bytebot_command = "second".into();
         app.run_bytebot(tx.clone());
-        app.live_turn_stopped = true;
+        app.bytebot_stopped = true;
         app.bytebot_run_finished(tx.clone());
         assert_eq!(app.bytebot_tasks[0].state, TaskState::Cancelled);
         assert_eq!(app.bytebot_tasks[1].state, TaskState::Pending);
@@ -19434,6 +19449,35 @@ Content-Length: 0
         assert!(answer.await.is_err(), "the waiting tool call is released");
     }
 
+    /// A stopped chat turn and a ByteBot run each have their own stop: a chat
+    /// turn stopped while a ByteBot task finishes does not cancel the task.
+    #[tokio::test]
+    async fn a_stopped_chat_turn_does_not_cancel_a_bytebot_task() {
+        use crate::bytebot_tasks::{TaskState, TaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_tests();
+        app.bytebot_store = Some(TaskStore::new(dir.path()));
+        app.config.default_model = "llamacpp:none".into();
+        app.config.llama_cpp_url = "http://127.0.0.1:9".into();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "a job".into();
+        app.run_bytebot(tx.clone());
+        // The chat's turn was stopped; its own end has not arrived yet.
+        app.live_turn_stopped = true;
+        app.bytebot_run_finished(tx);
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Completed);
+        assert!(
+            app.live_turn_stopped,
+            "the chat's stop is still the chat's to consume"
+        );
+    }
+
+    #[test]
+    fn each_kind_of_run_reports_its_own_stop() {
+        assert_eq!(super::stopped_token(LoopSink::Chat), "[STOPPED]");
+        assert_eq!(super::stopped_token(LoopSink::ByteBot), "[BYTEBOT_STOPPED]");
+    }
+
     /// BT-1: ByteBot tasks queue and run one at a time, oldest first. Each
     /// record says how its run ended, on disk as well as in the panel.
     #[tokio::test]
@@ -19489,7 +19533,7 @@ Content-Length: 0
             TaskState::Running,
             "/bytebot queues too"
         );
-        app.live_turn_stopped = true;
+        app.bytebot_stopped = true;
         app.bytebot_run_finished(tx.clone());
         assert_eq!(app.bytebot_tasks[2].state, TaskState::Cancelled);
 
