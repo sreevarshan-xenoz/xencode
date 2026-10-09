@@ -55,7 +55,7 @@ and fix your code — driven entirely from your terminal.
 - **Measures itself.** `xencode eval run` seeds eight real bugs and grades each fix with the
   bug's own tests and the exact files it changed — and reports a failure as a failure.
 
-One Rust binary: 16 crates, 54 commands, 25 agent tools.
+One Rust binary: 17 crates, 55 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
 
 ## 📍 Where it stands, honestly
 
@@ -844,7 +844,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (about 2,800 tests)
+cargo test                          # Full workspace suite (about 2,900 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
