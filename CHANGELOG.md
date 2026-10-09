@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `TX-8`: `NO_COLOR` support, and focus marked in text
+
+Starting the TUI with `NO_COLOR` set to any non-empty value now draws it without
+colour. Anything that stood out only by its background, such as a selected row or the
+status bar, is shown in reverse video so it is still told apart. The focused pane's
+title now starts with `▶`, so focus no longer depends on seeing a border colour.
+
 ### Changed — `TX-7`, `TX-6`: the first screen says how to start, help is never cut off, and the status bar names the provider in use
 
 - The status bar starts with `?:help`, so it is still on screen in an 80-column

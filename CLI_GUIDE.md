@@ -68,7 +68,7 @@ agents and git state, so nothing is lost in the switch) ·
 side-by-side panes drags to resize them; if you want the terminal's own
 drag-select of text back, `xencode config set mouse_capture off` hands the
 mouse over (the same row lives on the Settings panel, and it takes effect on
-the next frame). Slash commands: `/init`, `/ctx`, `/advise`,
+the next frame). The focused pane's title starts with `▶`, so focus does not depend on border colour, and starting the TUI with `NO_COLOR` set (any non-empty value, per no-color.org) draws it without colour: anything that stood out by its background, such as a selected row or the status bar, is shown in reverse video instead. Slash commands: `/init`, `/ctx`, `/advise`,
 `/impact <file>` (open the blast-radius panel over `xencode impact`'s three
 layers),
 `/bytebot`, `/plan` (pin or clear the agent's todo list, or accept/decline proposed tasks from failing-check observations or insights via `/plan accept` / `/plan decline`),

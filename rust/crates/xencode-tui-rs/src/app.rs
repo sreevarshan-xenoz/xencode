@@ -828,6 +828,8 @@ pub struct App<'a> {
     /// A bare `q` was pressed once; the next `q` quits, any other key keeps
     /// the session (TX-2).
     pub quit_armed: bool,
+    /// `NO_COLOR` was set when the TUI started: frames are drawn without colour.
+    pub no_color: bool,
     /// The running chat turn's stop flag: `Ctrl+C` sets it to cancel the turn
     /// before it is ever read as quit (TX-9).
     pub(crate) turn_stop: Option<Arc<AtomicBool>>,
@@ -3143,6 +3145,7 @@ impl<'a> App<'a> {
             settings_reset_active: false,
             settings_reset_armed: false,
             quit_armed: false,
+            no_color: std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
             turn_stop: None,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
