@@ -543,6 +543,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand session; and __fish_seen
 complete -c xencode -n "__fish_xencode_using_subcommand session; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand badge" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand engine" -l project -d 'The project folder (default: the current folder)' -r -F
+complete -c xencode -n "__fish_xencode_using_subcommand engine" -l wait-limit -d 'Seconds a question, approval or review may wait while no window is connected; then the question is withdrawn and its task stopped, the approval denied, or the review completed with its changes kept' -r
 complete -c xencode -n "__fish_xencode_using_subcommand engine" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand paths" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"

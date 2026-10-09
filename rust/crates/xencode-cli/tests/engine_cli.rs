@@ -43,9 +43,14 @@ impl Drop for Engine {
 
 impl Engine {
     fn start(project: &Path, config: &Path) -> Engine {
+        Engine::start_with(project, config, &[])
+    }
+
+    fn start_with(project: &Path, config: &Path, extra: &[&str]) -> Engine {
         let mut child = Command::new(env!("CARGO_BIN_EXE_xencode"))
             .args(["engine", "--project"])
             .arg(project)
+            .args(extra)
             .env("XCODE_CONFIG_DIR", config)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -676,7 +681,10 @@ async fn a_window_speaking_another_version_is_told_and_let_go() {
     .await;
     match next(&mut conn).await {
         EngineMsg::Error { message } => {
-            assert!(message.contains('1') && message.contains("999"), "{message}")
+            assert!(
+                message.contains('1') && message.contains("999"),
+                "{message}"
+            )
         }
         other => panic!("expected an error in words, got {other:?}"),
     }
@@ -684,4 +692,44 @@ async fn a_window_speaking_another_version_is_told_and_let_go() {
         .await
         .expect("the engine ends the connection after saying why");
     assert!(matches!(end, Ok(None) | Err(_)), "{end:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs a running llama.cpp server: XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_wait_with_no_window_ends_by_the_limit() {
+    let project = tempfile::tempdir().unwrap();
+    let config = live_settings();
+    let mut engine = Engine::start_with(project.path(), config.path(), &["--wait-limit", "5"]);
+    let addr = engine.address();
+    {
+        let (mut window, _) = join(&addr, "leaves").await;
+        send(
+            &mut window,
+            ClientMsg::EnqueueTask {
+                text: "Create a file named left.txt containing exactly the word: left".into(),
+            },
+        )
+        .await;
+        approval_shown(&mut window, Duration::from_secs(180)).await;
+        // The window goes away with the approval still waiting.
+    }
+    let left = Instant::now();
+    let status = tokio::task::spawn_blocking(move || {
+        let status = engine.exits_within(Duration::from_secs(300));
+        (status, engine)
+    })
+    .await
+    .unwrap();
+    let (status, _engine) = status;
+    let status = status.expect("the engine ended the waits and exited");
+    assert!(status.success(), "{status:?}");
+    assert!(
+        left.elapsed() >= Duration::from_secs(5),
+        "nothing ends before the limit: {:?}",
+        left.elapsed()
+    );
+    assert!(
+        !project.path().join("left.txt").exists(),
+        "a denied approval writes nothing"
+    );
 }

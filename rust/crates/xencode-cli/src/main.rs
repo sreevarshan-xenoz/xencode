@@ -552,6 +552,13 @@ enum Commands {
         /// The project folder (default: the current folder)
         #[arg(long)]
         project: Option<PathBuf>,
+
+        /// Seconds a question, approval or review may wait while no window
+        /// is connected; then the question is withdrawn and its task
+        /// stopped, the approval denied, or the review completed with its
+        /// changes kept
+        #[arg(long, default_value_t = 1800)]
+        wait_limit: u64,
     },
 
     /// Where xencode keeps its own files: settings, session records, cache and
@@ -2313,7 +2320,10 @@ async fn async_main() {
         } => run_doctor(env, deps, selfcheck, format).await,
         Commands::Session { action } => run_session(action),
         Commands::Badge => run_badge(),
-        Commands::Engine { project } => run_engine(project).await,
+        Commands::Engine {
+            project,
+            wait_limit,
+        } => run_engine(project, wait_limit).await,
         Commands::Paths { format } => run_paths(format),
         Commands::Migrate { dry_run } => run_migrate(dry_run),
         Commands::Verify {
@@ -14999,14 +15009,15 @@ const NO_TERMINAL: &str = concat!(
     "`xencode scan`, `xencode analyze`, `xencode doctor`. `xencode --help` lists the rest."
 );
 
-async fn run_engine(project: Option<PathBuf>) -> Result<(), String> {
+async fn run_engine(project: Option<PathBuf>, wait_limit: u64) -> Result<(), String> {
     let project = match project {
         Some(project) => project,
         None => {
             std::env::current_dir().map_err(|e| format!("cannot read the current folder: {e}"))?
         }
     };
-    xencode_tui_rs::engine::server::serve(project).await?;
+    xencode_tui_rs::engine::server::serve(project, std::time::Duration::from_secs(wait_limit))
+        .await?;
     // The model list and health checks may still have work in flight that
     // nobody will read; the engine is finished, so the process ends now
     // rather than waiting for them.

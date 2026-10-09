@@ -1733,6 +1733,7 @@ _arguments "${_arguments_options[@]}" : \
 (engine)
 _arguments "${_arguments_options[@]}" : \
 '--project=[The project folder (default\: the current folder)]:PROJECT:_files' \
+'--wait-limit=[Seconds a question, approval or review may wait while no window is connected; then the question is withdrawn and its task stopped, the approval denied, or the review completed with its changes kept]:WAIT_LIMIT:_default' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0
