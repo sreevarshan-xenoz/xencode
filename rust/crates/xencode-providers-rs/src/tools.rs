@@ -1125,7 +1125,7 @@ pub fn search_tools() -> Vec<ToolDefinition> {
 pub fn ask_user_tool() -> ToolDefinition {
     ToolDefinition {
         name: "ask_user".to_string(),
-        description: "Stop and ask the person one question when you cannot continue                       without their answer. The task pauses until they reply. They may                       instead do the step themselves, and you will be told so."
+        description: "Stop and ask the person one question when you cannot continue without their answer. The task pauses until they reply. They may instead do the step themselves, and you will be told so."
             .to_string(),
         parameters: serde_json::json!({
             "type": "object",
@@ -1293,6 +1293,7 @@ mod tests {
         assert_eq!(tool.name, "ask_user");
         assert_eq!(tool.parameters["required"], serde_json::json!(["question"]));
         assert_eq!(tool.parameters["properties"]["question"]["type"], "string");
+        assert!(!tool.description.contains("  "), "{}", tool.description);
     }
 
     use super::*;

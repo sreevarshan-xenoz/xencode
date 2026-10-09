@@ -267,6 +267,14 @@ impl SpawnRecord {
 /// What the ByteBot progress bar means: the share of calls made so far that
 /// came back. It can move backwards when the model makes another call — which
 /// is honest, unlike a bar that hits 100% because a script promised six steps.
+/// The warning shown at startup when ByteBot tasks were cut off by an exit.
+fn interrupted_tasks_warning(interrupted: usize) -> String {
+    format!(
+        "{interrupted} ByteBot task(s) were interrupted when xencode last exited; \
+         they are marked failed"
+    )
+}
+
 /// A path as the ByteBot panel lists it: relative to the folder xencode runs
 /// in when it is inside it, with forward slashes on every platform.
 fn project_relative(path: &std::path::Path) -> String {
@@ -2336,9 +2344,7 @@ impl<'a> App<'a> {
         if interrupted > 0 {
             app.push_toast(
                 crate::toast::ToastKind::Warning,
-                format!(
-                    "{interrupted} ByteBot task(s) were interrupted when xencode last exited;                      they are marked failed"
-                ),
+                interrupted_tasks_warning(interrupted),
             );
         }
         app.load_plugins();
@@ -5068,6 +5074,8 @@ impl<'a> App<'a> {
     pub fn run_bytebot(&mut self, tx: mpsc::UnboundedSender<String>) {
         let task = self.bytebot_command.trim().to_string();
         if task.is_empty() {
+            // Enter on an empty box carries on with a queue a stop paused.
+            self.bytebot_start_next(tx);
             return;
         }
         // BT-5: the model is chosen without leaving the panel.
@@ -5314,6 +5322,19 @@ impl<'a> App<'a> {
             "■ run over: {done}/{} call(s) completed",
             self.bytebot_steps.len()
         ));
+        if stopped {
+            let waiting = self
+                .bytebot_tasks
+                .iter()
+                .filter(|t| t.state == TaskState::Pending && t.this_session)
+                .count();
+            if waiting > 0 {
+                self.bytebot_log.push(format!(
+                    "{waiting} task(s) still queued — Enter on an empty command box carries on"
+                ));
+            }
+            return;
+        }
         if let Some(files) = review {
             self.bytebot_log.push(format!(
                 "review {files} changed file(s): a accepts · u undoes"
@@ -5362,6 +5383,16 @@ impl<'a> App<'a> {
         &mut self,
         tx: mpsc::UnboundedSender<String>,
     ) -> Result<crate::agent_tools::RewindReport, String> {
+        self.bytebot_undo_at(&xencode_context_rs::default_root(), tx)
+    }
+
+    /// `bytebot_undo` against the repository at `root`, which the hand-edit
+    /// check reads; a parameter so a test can give it a real repository.
+    pub fn bytebot_undo_at(
+        &mut self,
+        root: &std::path::Path,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> Result<crate::agent_tools::RewindReport, String> {
         let Some(i) = self.bytebot_reviewing() else {
             return Err("no ByteBot task is waiting for review".to_string());
         };
@@ -5375,7 +5406,32 @@ impl<'a> App<'a> {
                     .to_string(),
             );
         }
+        // The same guard `/rewind` has: a file changed by hand since the task
+        // wrote it is not overwritten. Without the checkpoint branch to
+        // compare against, the undo goes ahead and says the check was skipped.
+        let touched = self.checkpoints.pending_paths(1);
+        let mut unchecked = None;
+        match crate::ckptgit::human_edits(root, &touched) {
+            Ok(edited) if !edited.is_empty() => {
+                return Err(format!(
+                    "Not undone: {} file(s) changed by hand since the task wrote them ({}), \
+                     and undoing would overwrite those edits. `/rewind 1 --force` restores \
+                     them anyway.",
+                    edited.len(),
+                    edited.join(", ")
+                ));
+            }
+            Ok(_) => {}
+            Err(why) => {
+                unchecked = Some(crate::ckptgit::unavailable_reason(root).unwrap_or(why));
+            }
+        }
         let report = self.checkpoints.rewind(1);
+        self.refresh_editor_after_rewind(&report);
+        if let Some(why) = unchecked {
+            self.bytebot_log
+                .push(format!("hand edits were not checked ({why})"));
+        }
         let task = &mut self.bytebot_tasks[i];
         task.state = crate::bytebot_tasks::TaskState::Cancelled;
         task.note = Some("changes undone".to_string());
@@ -19181,6 +19237,100 @@ Content-Length: 0
         app.bytebot_command = "next job".into();
         app.run_bytebot(tx);
         assert!(app.bytebot_running);
+    }
+
+    /// Final review, finding 1: ByteBot's undo checks for hand edits the way
+    /// `/rewind` does, and refuses rather than overwrite one.
+    #[tokio::test]
+    async fn undo_refuses_to_overwrite_a_hand_edit_made_during_review() {
+        use crate::bytebot_tasks::TaskState;
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path().to_path_buf();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .expect("git is on PATH");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "."]);
+        git(&["config", "user.name", "tester"]);
+        git(&["config", "user.email", "tester@example.invalid"]);
+        std::fs::write(dir.join("note.txt"), "yours\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "base"]);
+
+        let store = tempfile::tempdir().unwrap();
+        let mut app = review_app(store.path());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "rewrite the note".into();
+        app.run_bytebot(tx.clone());
+        let turn = app.bytebot_tasks[0].turn.unwrap();
+        write_in_turn(&app, &dir, turn, "the agent's version\n").await;
+        // What the agent loop does at the end of every run.
+        let written = app.checkpoints.group_paths(turn);
+        assert!(crate::ckptgit::write_turn(&dir, turn, &written)
+            .unwrap()
+            .is_some());
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsReview);
+
+        std::fs::write(dir.join("note.txt"), "a hand edit\n").unwrap();
+        let refused = app
+            .bytebot_undo_at(&dir, tx)
+            .expect_err("a hand edit is in the way");
+        assert!(refused.contains("by hand"), "{refused}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("note.txt")).unwrap(),
+            "a hand edit\n"
+        );
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsReview);
+    }
+
+    /// Final review, finding 4: Esc stops the task and the queue with it;
+    /// Enter on an empty command box carries on with the next task.
+    #[tokio::test]
+    async fn esc_pauses_the_queue_and_enter_on_an_empty_box_resumes_it() {
+        use crate::bytebot_tasks::{TaskState, TaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_tests();
+        app.bytebot_store = Some(TaskStore::new(dir.path()));
+        app.config.default_model = "llamacpp:none".into();
+        app.config.llama_cpp_url = "http://127.0.0.1:9".into();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "first".into();
+        app.run_bytebot(tx.clone());
+        app.bytebot_command = "second".into();
+        app.run_bytebot(tx.clone());
+        app.live_turn_stopped = true;
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Cancelled);
+        assert_eq!(app.bytebot_tasks[1].state, TaskState::Pending);
+        assert!(!app.bytebot_running, "a stop does not start the next task");
+        assert!(
+            app.bytebot_log.iter().any(|l| l.contains("still queued")),
+            "{:?}",
+            app.bytebot_log
+        );
+        app.bytebot_command.clear();
+        app.run_bytebot(tx);
+        assert_eq!(app.bytebot_tasks[1].state, TaskState::Running);
+    }
+
+    /// Final review, finding 6: the startup warning reads as one sentence.
+    #[test]
+    fn the_interrupted_tasks_warning_has_no_run_of_spaces() {
+        let text = super::interrupted_tasks_warning(2);
+        assert!(!text.contains("  "), "{text}");
+        assert!(
+            text.starts_with("2 ByteBot task(s) were interrupted"),
+            "{text}"
+        );
     }
 
     /// BT-3: undo refuses once a later turn has changed files, because
