@@ -1730,6 +1730,13 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(engine)
+_arguments "${_arguments_options[@]}" : \
+'--project=[The project folder (default\: the current folder)]:PROJECT:_files' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (paths)
 _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
@@ -2574,6 +2581,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (tui)
 _arguments "${_arguments_options[@]}" : \
+'--in-process[Run the agent work inside this terminal instead of in the project'\''s engine process]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0
@@ -3214,6 +3222,10 @@ esac
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(engine)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (paths)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3578,6 +3590,7 @@ _xencode_commands() {
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'badge:Start the floating badge that shows what running xencode sessions are doing and when one needs you' \
+'engine:Run the agent work for one project in its own process, for the terminal app and other windows to connect to. It exits on its own once no window is connected and nothing is running' \
 'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
@@ -4075,6 +4088,11 @@ _xencode__subcmd__doctor_commands() {
     local commands; commands=()
     _describe -t commands 'xencode doctor commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__engine_commands] )) ||
+_xencode__subcmd__engine_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode engine commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__envcheck_commands] )) ||
 _xencode__subcmd__envcheck_commands() {
     local commands; commands=()
@@ -4164,6 +4182,7 @@ _xencode__subcmd__help_commands() {
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'badge:Start the floating badge that shows what running xencode sessions are doing and when one needs you' \
+'engine:Run the agent work for one project in its own process, for the terminal app and other windows to connect to. It exits on its own once no window is connected and nothing is running' \
 'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
@@ -4425,6 +4444,11 @@ _xencode__subcmd__help__subcmd__deps_commands() {
 _xencode__subcmd__help__subcmd__doctor_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help doctor commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__engine_commands] )) ||
+_xencode__subcmd__help__subcmd__engine_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help engine commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__envcheck_commands] )) ||
 _xencode__subcmd__help__subcmd__envcheck_commands() {

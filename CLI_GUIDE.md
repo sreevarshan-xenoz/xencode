@@ -48,7 +48,25 @@ error: the interactive screen needs a terminal to draw on, and standard output h
 ```
 
 That is the live output of the command above, and it exits non-zero: the screen
-was asked for and cannot be shown. Every other subcommand is unaffected — the
+was asked for and cannot be shown.
+
+**The agent work runs in the project's engine.** The terminal app connects to
+the engine for the current folder (see `xencode engine` below), starting one
+in the background when none is running, and works as a window onto it. Closing
+the terminal does not stop a running chat turn or ByteBot task. When the engine
+cannot be started, a warning says why and the terminal runs the agent work
+itself. `xencode tui --in-process` asks for that from the start:
+
+```
+$ xencode tui --help
+Launch the Terminal User Interface
+
+Usage: xencode tui [OPTIONS]
+
+Options:
+      --in-process  Run the agent work inside this terminal instead of in the project's engine process
+  -h, --help        Print help
+``` Every other subcommand is unaffected — the
 whole CLI works headless, and `xencode run --detach` is built for the case where
 the terminal may disappear mid-task (directly invoking the worker via `run_agent` without re-executing binaries).
 Programs can also drive the agent loop directly as a library call through `xencode_tui_rs::run_agent`.
@@ -2433,6 +2451,41 @@ running." and starts nothing.
 
 Settings → `Floating Badge` (`badge_autostart`) starts it with the terminal app
 instead.
+
+### `xencode engine [--project <folder>]`
+Run the agent work for one project folder (default: the current folder) in a
+process of its own, for the terminal app and other windows to connect to. The
+terminal app starts it by itself when needed, so running it by hand is only
+useful for watching it:
+
+```
+$ xencode engine --project E:\work\demo
+xencode engine for E:\work\demo listening on \\.\pipe\xencode-engine-<user>-<16 hex characters>
+```
+
+- **One per project.** A second engine for the same folder prints "An engine
+  for <folder> is already running." and exits with success.
+- **It exits on its own** ten seconds after the last window has gone, once
+  nothing is running and nothing waits for an answer or an approval.
+- **Where it listens.** On Windows a named pipe,
+  `\\.\pipe\xencode-engine-<user>-<fingerprint>`, that only your own account
+  may open and that refuses connections from other machines; a window also
+  checks that the process serving the pipe runs under your account before
+  trusting it. Elsewhere a socket file, `<state dir>/engine/<fingerprint>.sock`,
+  readable only by you, in a folder only you can open. The fingerprint is the
+  first 16 hex characters of the SHA-256 of the folder's full path. A lock file
+  beside it, `<state dir>/engine/<fingerprint>.lock`, keeps it to one engine per
+  folder.
+- **What windows send.** One JSON message per line, protocol version 1. A window
+  says `hello` first and gets the whole state it draws; after that it gets only
+  what changed. Chat, `/bytebot`, `/spawn`, `/rewind`, `/gate`, `/plan`,
+  `/lesson`, `/ctx`, `/model`, `/trust`, `/mcp`, `/plugin` and `/skills` run in
+  the engine; the other commands run in the window, and the lines they add to
+  the transcript are sent to the engine so every window shows the same
+  transcript.
+- **Not yet.** A task waiting for an approval, an answer or a review while no
+  window is open waits until a window connects; the floating badge shows that
+  it needs you.
 
 ### `xencode paths [--format text|json]`
 Print where each kind of file is read from, and name the ones that are still in

@@ -189,13 +189,13 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-09, after `DK-2`: it lists 55 subcommands — the
+  (verified against `xencode --help` on 2026-10-09, after `EN-2`: it lists 56 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
-  `computers`, `compete`, `team`, `orchestrator`, `badge` — and clap's
-  built-in `help`, 56 entries in the list)
+  `computers`, `compete`, `team`, `orchestrator`, `badge`, `engine` — and clap's
+  built-in `help`, 57 entries in the list)
 - [ ] Workspace gates green — **not green as of 2026-10-08.** CI has not passed since 2026-09-27: the latest runs stopped at two roster tests that required every agent to be installed on the machine running them (fixed in `74d18f08`, not yet observed on CI, so whether the rest of the suite passes on Linux is unknown). The last full count written here was 16 crates, 2823 passing and 19 ignored on 2026-10-08, after the `AR-3` verdict fix, with one machine-dependent roster test left out of it; that run was not on CI and has not been repeated. On Windows (2026-10-08, after `PL-2`): 2723 passed, 19 ignored, 58 failed, sorted by cause under `PL-2`. The build itself has no compiler warnings on Windows.
   - **2026-10-09, Windows, after DK-1/DK-2 and BT-1 to BT-5:** `cargo test --workspace` with
     `XCODE_CONFIG_DIR` set: 17 crates, 2872 passed, 35 failed, 20 ignored. The terminal UI crate has
@@ -208,6 +208,12 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
     and `a_file_that_does_not_hash_to_the_expected_checksum_is_thrown_away`. Run alone, the first
     failed once and passed once and the second passed twice: both are intermittent and not yet
     explained.
+  - **2026-10-09, after EN-2:** 2922 passed, 37 failed, 20 ignored (the run gave 38; the extra one
+    was the shell completions, regenerated for `xencode engine` and `tui --in-process` in the docs
+    commit and passing since). The TUI crate has no failures and `xencode-cli`'s engine tests all
+    pass. The 37 are in crates EN-2 did not change; this time the two intermittent
+    `xencode-models-rs` download failures were `a_partial_file_larger_than_the_file_is_not_trusted_with_a_range`
+    and `a_partial_file_only_needs_the_rest_of_the_disk_to_be_let_through`.
 
 ## Model Catalog Honesty
 
@@ -17526,7 +17532,7 @@ program; the keys themselves are covered by their own tests.
   - [ ] **macOS:** built and tested by the `badge` CI job only; not watched on a Mac.
 - [ ] **DK-3 — engine process.** The engine moves out of the terminal app into a background
   process; the terminal app becomes its first client. Needs its own design first. Designed 2026-10-09 in
-  `docs/superpowers/specs/2026-10-09-engine-process-design.md` (awaiting the owner's review): one
+  `docs/superpowers/specs/2026-10-09-engine-process-design.md` (approved by the owner): one
   engine per project, running while a window is connected or a task works, over a local socket
   (named pipe on Windows, socket file elsewhere), owning all agent work. Stages:
   - [x] **EN-1 — engine boundary, in process.** Done 2026-10-09
@@ -17538,8 +17544,23 @@ program; the keys themselves are covered by their own tests.
     by id. The terminal app's main loop calls `pump`, and every agent action from its keys goes
     through `handle`. No visible change: the TUI suite passed with nothing but four test setups
     adjusted to give their prompt or question an id.
-  - [ ] **EN-2 — the socket and `xencode engine`.** Start on demand, reconnect; closing the
-    terminal no longer stops a task.
+  - [x] **EN-2 — the socket and `xencode engine`.** Done 2026-10-09
+    (`docs/superpowers/plans/2026-10-09-en2-engine-process.md`). `xencode engine [--project]`
+    holds a project's agent work; the terminal app connects to it over a named pipe (Windows) or
+    socket file (elsewhere), starting it detached when none runs, and works as a window that
+    draws the engine's *view* (sent whole on connect, then as changes). `xencode tui
+    --in-process` keeps the old mode. The Windows pipe admits only the user's own account,
+    refuses remote clients, is created as the first instance (so a name another process holds
+    first is refused), and a window checks the serving process's account before trusting it.
+    **Watched on Windows 11** with a real llama.cpp server (Qwen3-4B): the terminal app started
+    an engine; a client added a ByteBot task; the terminal was closed and the engine went on;
+    the task stopped for permission to write `hello.txt` and the badge's status file said
+    "waiting for you to allow: write_file hello.txt"; after the answer the file held `hi`, the
+    task waited for review ("review 1 changed file(s)"), and the engine exited by itself about
+    ten seconds later, removing its status file. **Not verified:** the Unix socket path (no
+    Unix machine here; covered by code reading and the CI build), and a connection attempt from a
+    second Windows account. Left for EN-3: a task waiting on an approval, answer or review while
+    no window is open waits with no time limit.
   - [ ] **EN-3 — several windows per engine.** Snapshot on connect, first-answer-wins approvals
     and questions, the idle and 30-minute rules, the engine writing the badge's status file.
   - [ ] **EN-4 — a detached launcher that works on Windows,** shared by the badge, the engine and
