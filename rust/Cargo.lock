@@ -4360,6 +4360,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tui-textarea",
+ "windows-sys 0.61.2",
  "xencode-agents-rs",
  "xencode-analysis-rs",
  "xencode-colab-rs",

@@ -5,6 +5,7 @@
 
 pub mod address;
 pub mod proto;
+pub mod transport;
 
 use std::sync::atomic::Ordering;
 
