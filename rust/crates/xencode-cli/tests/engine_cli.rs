@@ -658,3 +658,30 @@ async fn two_windows_racing_for_one_approval() {
         Some(format!("answered in {}: allow", won_a[0]))
     );
 }
+
+#[tokio::test]
+async fn a_window_speaking_another_version_is_told_and_let_go() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let mut conn = connect(&addr).await.unwrap();
+    send(
+        &mut conn,
+        ClientMsg::Hello {
+            version: 999,
+            client: "from the future".into(),
+        },
+    )
+    .await;
+    match next(&mut conn).await {
+        EngineMsg::Error { message } => {
+            assert!(message.contains('1') && message.contains("999"), "{message}")
+        }
+        other => panic!("expected an error in words, got {other:?}"),
+    }
+    let end = tokio::time::timeout(Duration::from_secs(5), conn.recv())
+        .await
+        .expect("the engine ends the connection after saying why");
+    assert!(matches!(end, Ok(None) | Err(_)), "{end:?}");
+}

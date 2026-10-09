@@ -40,7 +40,8 @@ struct Window {
     out: mpsc::Sender<String>,
     watcher: Watcher,
     greeted: bool,
-    tasks: [tokio::task::JoinHandle<()>; 2],
+    /// The reading task, then the writing task.
+    tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl Window {
@@ -48,6 +49,18 @@ impl Window {
     /// or it has stopped reading.
     fn send(&self, msg: &EngineMsg) -> bool {
         self.out.try_send(proto::encode(msg)).is_ok()
+    }
+}
+
+impl Window {
+    /// Stop reading from the window, and close its connection once what is
+    /// already queued for it has been written.
+    fn close_after_sending(mut self) {
+        let reading = self.tasks.remove(0);
+        reading.abort();
+        // The writing task ends when the queue is dropped with this window,
+        // after writing what the queue holds; it is not stopped here.
+        self.tasks.clear();
     }
 }
 
@@ -227,7 +240,7 @@ fn open_window(id: u64, conn: Conn, lines: mpsc::UnboundedSender<(u64, Option<St
         out,
         watcher: Watcher::default(),
         greeted: false,
-        tasks: [reading, writing],
+        tasks: vec![reading, writing],
     }
 }
 
@@ -259,7 +272,15 @@ fn on_line(
             for reply in &replies {
                 window.send(reply);
             }
-            if greeted {
+            if !greeted {
+                // Nothing more from a window speaking another protocol is
+                // acted on: it has been told why, and is let go.
+                if let Some(window) = windows.remove(&id) {
+                    window.close_after_sending();
+                }
+                return;
+            }
+            {
                 window.name = name;
                 window.greeted = true;
                 let view = window.watcher.full(app);
