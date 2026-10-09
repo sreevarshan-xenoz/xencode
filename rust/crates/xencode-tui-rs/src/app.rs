@@ -636,6 +636,12 @@ pub struct App<'a> {
     pub ask_rx: Option<mpsc::UnboundedReceiver<(String, tokio::sync::oneshot::Sender<String>)>>,
     /// The answer channel of the question the current task is waiting on.
     pub(crate) bytebot_help: Option<tokio::sync::oneshot::Sender<String>>,
+    /// Ids of the queued approvals, in the same order as `approval_queue`,
+    /// and of the waiting question (EN-1): a window answers by id, so an
+    /// answer that arrives late cannot land on the next prompt.
+    pub(crate) approval_ids: std::collections::VecDeque<u64>,
+    pub(crate) question_id: Option<u64>,
+    next_agent_id: u64,
     /// Receive end, taken once by `run_app` and drained each frame.
     pub approval_rx: Option<
         mpsc::UnboundedReceiver<(
@@ -3141,6 +3147,9 @@ impl<'a> App<'a> {
             ask_tx,
             ask_rx: Some(ask_rx),
             bytebot_help: None,
+            approval_ids: std::collections::VecDeque::new(),
+            question_id: None,
+            next_agent_id: 1,
             memory,
             event_bus,
             event_rx,
@@ -3617,6 +3626,7 @@ impl<'a> App<'a> {
     /// session grant for "always allow", and record the decision in the
     /// chat transcript using the same ⚙ grammar as the tool-loop lines.
     pub fn resolve_approval(&mut self, answer: crate::agent_tools::ApprovalAnswer) {
+        self.approval_ids.pop_front();
         let Some((request, responder)) = self.approval_queue.pop_front() else {
             return;
         };
@@ -3791,6 +3801,8 @@ impl<'a> App<'a> {
                 approvals += 1;
                 waiting = Some(request.summary.clone());
                 self.approval_queue.push_back((request, responder));
+                self.approval_ids.push_back(self.next_agent_id);
+                self.next_agent_id += 1;
             }
         }
         if let Some(summary) = waiting {
@@ -3803,6 +3815,8 @@ impl<'a> App<'a> {
             }
         }
         for (question, reply) in asked {
+            self.question_id = Some(self.next_agent_id);
+            self.next_agent_id += 1;
             self.bytebot_needs_help(question, reply);
         }
         approvals
@@ -5826,6 +5840,7 @@ impl<'a> App<'a> {
         if answer.is_empty() {
             return;
         }
+        self.question_id = None;
         let Some(reply) = self.bytebot_help.take() else {
             return;
         };
@@ -5855,6 +5870,7 @@ impl<'a> App<'a> {
     /// that nobody answered, so a stop can reach the loop. Returns whether
     /// there was one.
     pub fn bytebot_withdraw_question(&mut self) -> bool {
+        self.question_id = None;
         self.bytebot_help.take().is_some()
     }
 
@@ -5871,6 +5887,7 @@ impl<'a> App<'a> {
                 .then(|| "a step failed".to_string())
         });
         self.bytebot_help = None;
+        self.question_id = None;
         let mut review: Option<usize> = None;
         if let Some(i) = self
             .bytebot_tasks
