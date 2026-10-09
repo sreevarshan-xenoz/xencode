@@ -11512,6 +11512,9 @@ async fn until_stopped(flag: Option<Arc<AtomicBool>>) {
     }
 }
 
+/// How many plan-only steps a turn may take without spending a round.
+const FREE_PLAN_STEPS: usize = 2;
+
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -11655,7 +11658,15 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         LoopSink::Spawn(id) => Some(id),
         _ => None,
     };
-    for round in 0..=max_rounds {
+    // A step that only updated the plan does not spend the turn's round budget
+    // (SM-2: measured 2026-10-09, plan updates were eating the rounds a small
+    // model needed for its edit). Capped, so a model that only plans still ends.
+    let mut plan_only_steps = 0usize;
+    for step_index in 0..=max_rounds + FREE_PLAN_STEPS {
+        let round = step_index - plan_only_steps;
+        if round > max_rounds {
+            break;
+        }
         // A detached child sets this when a cap is spent (LF-4). The check
         // sits before the round is counted, so an untaken round is not one.
         if stop_flag
@@ -11716,6 +11727,12 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                 break;
             }
         };
+        if plan_only_steps < FREE_PLAN_STEPS
+            && !step.tool_calls.is_empty()
+            && step.tool_calls.iter().all(|c| c.name == "update_plan")
+        {
+            plan_only_steps += 1;
+        }
         // Take, don't peek: a turn can make several llama.cpp requests and each
         // must add its tokens once. The last one taken is also what the
         // `[TIMINGS]` line at the end of the run reports, as before.
@@ -16462,6 +16479,73 @@ edition = \"2021\"
             .evidence_ref
             .as_deref()
             .is_some_and(|r| r.starts_with("tools[")));
+    }
+
+    /// SM-2: steps that only update the plan do not spend the round budget, so
+    /// a model that plans twice still has its rounds for the edit — and the cap
+    /// keeps a model that only plans from looping.
+    #[tokio::test]
+    async fn plan_updates_do_not_spend_the_rounds_the_edit_needs() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-plan-rounds-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plan = |text: &str| {
+            serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                {"function": {"name": "update_plan", "arguments": {"items": [{"text": text, "status": "in_progress"}]}}}
+            ]}, "done": true})
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
+                plan("read"),
+                plan("edit"),
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments": {"path": "out.txt", "content": "edited
+"}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "Done."}, "done": true}),
+            ],
+        ));
+        let mut app = App::for_tests();
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "write out.txt".into(),
+            }],
+            "write out.txt",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        run.max_rounds = 1;
+        run.max_repair_iters = 0;
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        // A loop that stopped early leaves answers unasked; do not wait on them.
+        server.abort();
+        let written = std::fs::read_to_string(dir.join("out.txt")).ok();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            written.as_deref(),
+            Some(
+                "edited
+"
+            ),
+            "{lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.contains("Done.")), "{lines:?}");
+        assert_eq!(super::FREE_PLAN_STEPS, 2);
     }
 
     /// SM-2: a model that writes its call into the answer as a `<tool_call>`

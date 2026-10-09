@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `SM-2`: updating the plan does not use up a turn's tool rounds
+
+A turn has a fixed number of tool rounds. A step whose only calls are `update_plan` no
+longer counts against them, at most twice per turn, so a small model that plans before
+it edits still has its rounds for the edit. A model that only ever plans still stops.
+
 ### Added — `AE-1`, `OR-16`: `xencode review --session <id>` shows what a session proved
 
 `xencode review --session <id>` adds the result envelope for that session: each check it
