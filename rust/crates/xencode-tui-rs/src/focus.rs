@@ -202,36 +202,10 @@ impl FocusArea {
 
     /// Short human name for the header's focused-panel badge. Kept under
     /// ~12 columns so the right side survives narrow terminals.
+    /// The one name this destination goes by everywhere — titles, the palette,
+    /// `/goto` replies — read from [`DESTINATIONS`] so it cannot drift (TX-10).
     pub fn display_name(self) -> &'static str {
-        match self {
-            FocusArea::ChatInput => "Chat",
-            FocusArea::FileExplorer => "Explorer",
-            FocusArea::CodeEditor => "Editor",
-            FocusArea::ModelSelector => "Models",
-            FocusArea::Settings => "Settings",
-            FocusArea::CodeReview => "Review",
-            FocusArea::PerformanceDashboard => "Dashboard",
-            FocusArea::ProviderHealth => "Providers",
-            FocusArea::ProjectAnalyzer => "Analyzer",
-            FocusArea::GitCommit => "Git Commit",
-            FocusArea::FeatureNavigator => "Features",
-            FocusArea::ByteBotPanel => "ByteBot",
-            FocusArea::CollaborationHub => "Collab Hub",
-            FocusArea::VoiceInterface => "Voice",
-            FocusArea::TerminalAssistant => "Assistant",
-            FocusArea::SecurityAuditor => "Security",
-            FocusArea::PerformanceProfiler => "Profiler",
-            FocusArea::CustomModels => "Custom Models",
-            FocusArea::LearningMode => "Learning",
-            FocusArea::MultiLanguage => "Languages",
-            FocusArea::ReviewDashboard => "PR Review",
-            FocusArea::TaskManager => "Tasks",
-            FocusArea::WorktreePanel => "Worktrees",
-            FocusArea::AdvisePanel => "Advice",
-            FocusArea::ImpactPanel => "Impact",
-            FocusArea::LayoutPanel => "Layout",
-            FocusArea::WorkerPanel => "Workers",
-        }
+        find_destination(self).map(|d| d.name).unwrap_or("Panel")
     }
 }
 
@@ -631,7 +605,7 @@ pub const DESTINATIONS: &[Destination] = &[
     },
     Destination {
         area: FocusArea::AdvisePanel,
-        name: "Insights & Advice",
+        name: "Insights",
         description: "Live refactor suggestions & warnings",
         level: DisclosureLevel::Level2,
         shortcut: Some("Ctrl+L"),
@@ -672,7 +646,7 @@ pub const DESTINATIONS: &[Destination] = &[
     },
     Destination {
         area: FocusArea::ImpactPanel,
-        name: "Blast Radius",
+        name: "Impact",
         description: "What a change to one file reaches",
         level: DisclosureLevel::Level3,
         shortcut: None,
@@ -705,7 +679,7 @@ pub const DESTINATIONS: &[Destination] = &[
     // ── Level 4: Specialist & deep tooling ────────────────────────────────────
     Destination {
         area: FocusArea::ByteBotPanel,
-        name: "Agent",
+        name: "ByteBot",
         description: "Autonomous task execution loop",
         level: DisclosureLevel::Level4,
         shortcut: Some("/bytebot"),
@@ -792,6 +766,9 @@ pub fn find_destination_by_name(query: &str) -> Option<&'static Destination> {
             || (d.area == FocusArea::LearningMode && (q == "learn" || q == "learning"))
             || (d.area == FocusArea::ByteBotPanel
                 && (q == "bytebot" || q == "agent" || q == "bytebot agent"))
+            // Names these panels went by before they had one (TX-10).
+            || (d.area == FocusArea::AdvisePanel && (q == "advice" || q == "insights & advice"))
+            || (d.area == FocusArea::ImpactPanel && q == "blast radius")
     })
 }
 
@@ -841,7 +818,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("Provider Health", "API connection status"),
     ("Project Analyzer", "Workspace file breakdown"),
     ("Git Commit", "Stage and commit changes"),
-    ("ByteBot Agent", "Autonomous task execution"),
+    ("ByteBot", "Autonomous task execution"),
     ("Collaboration Hub", "Team collaboration tools"),
     ("Voice Interface", "Record a clip, transcribe if able"),
     ("Terminal Assistant", "AI-powered shell helper"),
@@ -854,7 +831,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("Background Tasks", "Running & finished commands"),
     ("Worktrees", "List, create and remove git worktrees"),
     ("Insights", "Live refactor suggestions & warnings"),
-    ("Blast Radius", "What a change to one file reaches"),
+    ("Impact", "What a change to one file reaches"),
     ("Layout History", "Why the screen is arranged this way"),
 ];
 
@@ -887,6 +864,41 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TX-10: a panel goes by one name. The palette list, every title that
+    /// reads `display_name`, and the destination table agree, and no two
+    /// destinations share a name.
+    #[test]
+    fn every_destination_has_one_name_everywhere() {
+        for (i, (name, _)) in super::FEATURE_LIST.iter().enumerate() {
+            let area = super::navigate_feature(i);
+            assert_eq!(
+                *name,
+                area.display_name(),
+                "palette row {i} names {area:?} differently"
+            );
+        }
+        let mut seen = std::collections::HashSet::new();
+        for d in super::DESTINATIONS {
+            assert_eq!(d.area.display_name(), d.name);
+            assert!(
+                seen.insert(d.name),
+                "two destinations are called {}",
+                d.name
+            );
+        }
+        // The old names still find their panel.
+        for (old, area) in [
+            ("agent", super::FocusArea::ByteBotPanel),
+            ("advice", super::FocusArea::AdvisePanel),
+            ("blast radius", super::FocusArea::ImpactPanel),
+        ] {
+            assert_eq!(
+                super::find_destination_by_name(old).map(|d| d.area),
+                Some(area)
+            );
+        }
+    }
 
     /// A settings row that renders its value must never render the secret:
     /// only a fixed-width bullet run plus a four-char tail, enough to tell two
