@@ -18347,7 +18347,7 @@ Content-Length: 0
         assert!(body["result"]
             .as_str()
             .unwrap_or_default()
-            .starts_with("error: the user denied"));
+            .starts_with("error: this call needs approval and nobody is here"));
         assert!(!std::path::Path::new("/tmp/xencode-panel-must-not-run").exists());
     }
 

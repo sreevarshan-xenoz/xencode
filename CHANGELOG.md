@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `SM-2`: a call refused because nobody is there to approve it no longer tells the model to ask
+
+When a call needed approval and no person was present to give it — an evaluation run, or
+any run with no prompt attached — the model was told "the user denied this action … ask
+the user". Small models then asked the absent user for permission and stopped. The model
+is now told that nobody is here to approve it, not to ask or retry, and to carry on by
+reading and editing files. A refusal a person gives at the prompt keeps its old wording.
+
 ### Fixed — `SM-2`: a tool call a model writes into its answer is carried out
 
 Small models sometimes write a tool call into their answer as text —

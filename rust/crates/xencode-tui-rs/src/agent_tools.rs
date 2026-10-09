@@ -1628,6 +1628,12 @@ fn tool_write_note(root: &Path, args: &serde_json::Map<String, serde_json::Value
 /// Wording matters: weak models otherwise retry the identical call forever.
 pub const DENIED_RESULT: &str = "error: the user denied this action. Do not retry it unchanged — explain, adjust, or ask the user.";
 
+/// Result string fed back when a call needs approval and no person is there to
+/// give it (an evaluation run, a headless task). Not "the user denied": told
+/// that, a small model asks the absent user for permission and stops (SM-2,
+/// measured 2026-10-08). This says what to do instead.
+pub const UNATTENDED_RESULT: &str = "error: this call needs approval and nobody is here to give it, so it was not run. Do not ask for permission and do not retry it. Carry on with what needs no approval — read the files and edit them in the workspace — and finish the task.";
+
 /// Result string fed back to the model for a policy-denied call.
 pub const FORBIDDEN_RESULT: &str =
     "error: refused by the permission policy (path outside the allowed workspace).";
@@ -1657,7 +1663,7 @@ impl CallOutcome {
 }
 
 pub fn call_outcome(result: &str) -> CallOutcome {
-    if result == DENIED_RESULT {
+    if result == DENIED_RESULT || result == UNATTENDED_RESULT {
         CallOutcome::Denied
     } else if result == FORBIDDEN_RESULT {
         CallOutcome::Refused
@@ -4458,7 +4464,7 @@ pub async fn execute_tool_call_approved(
                     // possible answer is the only honest one, and it is an answer:
                     // the run went ahead having been refused, so the ledger says so.
                     ctx.record_approval(&call.name, class, ApprovalAnswer::Denied);
-                    return DENIED_RESULT.to_string();
+                    return UNATTENDED_RESULT.to_string();
                 }
                 let decision = match answer.await {
                     Ok(answer) => {
@@ -8814,7 +8820,9 @@ patched = ["{fixed}"]
             None,
         )
         .await;
-        assert_eq!(result, DENIED_RESULT);
+        assert_eq!(result, UNATTENDED_RESULT);
+        assert_eq!(call_outcome(&result), CallOutcome::Denied);
+        assert!(result.contains("nobody is here"), "{result}");
         assert!(
             !root.join("z.txt").exists(),
             "nothing may be written unasked"
