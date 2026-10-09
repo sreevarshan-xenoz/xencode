@@ -5327,10 +5327,13 @@ impl<'a> App<'a> {
         self.bytebot_start_next(tx);
     }
 
+    /// The task of this session waiting for review. A review read from disk
+    /// is never acted on: its snapshot group number belongs to another
+    /// session, and here the same number can be a different turn's changes.
     pub(crate) fn bytebot_reviewing(&self) -> Option<usize> {
         self.bytebot_tasks
             .iter()
-            .position(|t| t.state == crate::bytebot_tasks::TaskState::NeedsReview)
+            .position(|t| t.state == crate::bytebot_tasks::TaskState::NeedsReview && t.this_session)
     }
 
     /// Accept the reviewed task's changes (BT-3): it is completed, and the
@@ -19147,6 +19150,37 @@ Content-Length: 0
         );
         assert_eq!(app.bytebot_tasks[0].state, TaskState::Cancelled);
         assert_eq!(app.bytebot_tasks[0].note.as_deref(), Some("changes undone"));
+    }
+
+    /// BT-3: a review read back from disk (however it got into the list) is
+    /// never acted on: its snapshot group number belongs to another session,
+    /// and in this one the same number can be a different turn's changes.
+    #[tokio::test]
+    async fn a_review_from_disk_cannot_undo_this_sessions_changes() {
+        use crate::bytebot_tasks::{ByteBotTask, TaskState};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let mut app = review_app(dir.path());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // This session's own turn 0 writes a file.
+        let turn = app.checkpoints.begin_turn();
+        write_in_turn(&app, ws.path(), turn, "written this session\n").await;
+        // A record from an earlier session claims that same group number.
+        let mut old = ByteBotTask::new("old review", "m");
+        old.state = TaskState::NeedsReview;
+        old.turn = Some(turn);
+        old.this_session = false;
+        app.bytebot_tasks = vec![old];
+        assert!(app.bytebot_undo(tx.clone()).is_err());
+        assert_eq!(
+            std::fs::read_to_string(ws.path().join("note.txt")).unwrap(),
+            "written this session\n",
+            "this session's change was not touched"
+        );
+        // And it does not hold up the queue.
+        app.bytebot_command = "next job".into();
+        app.run_bytebot(tx);
+        assert!(app.bytebot_running);
     }
 
     /// BT-3: undo refuses once a later turn has changed files, because

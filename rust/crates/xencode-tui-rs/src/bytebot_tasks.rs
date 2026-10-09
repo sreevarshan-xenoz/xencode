@@ -175,8 +175,9 @@ impl TaskStore {
     /// its settled state, decided here in memory so a record that cannot be
     /// rewritten still never comes back pending, and how many were
     /// interrupted mid-run. A task that was running or waiting for help
-    /// cannot resume, so it is failed. A task still pending is cancelled, not
-    /// run: its text was read from disk rather than typed by the person at the
+    /// cannot resume, so it is failed. A task left for review is completed
+    /// with its changes kept, since its undo record did not survive. A task
+    /// still pending is cancelled, not run: its text was read from disk rather than typed by the person at the
     /// keyboard now, and a record can be planted in that folder.
     pub fn recover(&self) -> (Vec<ByteBotTask>, usize) {
         let mut interrupted = 0;
@@ -194,6 +195,17 @@ impl TaskStore {
                     task.state = TaskState::Cancelled;
                     task.note = Some(
                         "not started before xencode exited; type it again to run it".to_string(),
+                    );
+                    let _ = self.save(&task);
+                }
+                TaskState::NeedsReview => {
+                    // Its file snapshots lived in the last session's memory and
+                    // are gone, and the group number would mean a different
+                    // turn now, so it can no longer be undone. Its changes stay.
+                    task.state = TaskState::Completed;
+                    task.turn = None;
+                    task.note = Some(
+                        "left for review when xencode exited; its changes were kept".to_string(),
                     );
                     let _ = self.save(&task);
                 }
@@ -271,6 +283,28 @@ mod tests {
         let c = all.iter().find(|t| t.text == "c").unwrap();
         assert_eq!(c.state, TaskState::Cancelled);
         assert!(c.note.as_deref().is_some_and(|n| n.contains("not started")));
+    }
+
+    #[test]
+    fn a_review_left_from_an_earlier_session_is_completed_with_its_changes_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let mut t = ByteBotTask::new("write a note", "m");
+        t.state = TaskState::NeedsReview;
+        t.turn = Some(0);
+        t.changed_files = vec!["note.txt".into()];
+        store.save(&t).unwrap();
+        let (tasks, interrupted) = store.recover();
+        assert_eq!(interrupted, 0);
+        assert_eq!(tasks[0].state, TaskState::Completed);
+        assert_eq!(
+            tasks[0].turn, None,
+            "a snapshot group from another session means nothing now"
+        );
+        assert!(tasks[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("changes were kept")));
     }
 
     #[test]
