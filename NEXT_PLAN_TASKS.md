@@ -189,14 +189,19 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-08, after `OR-14`: it lists 54 subcommands — the
+  (verified against `xencode --help` on 2026-10-09, after `DK-2`: it lists 55 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
-  `computers`, `compete`, `team`, `orchestrator` — and clap's
-  built-in `help`, 55 entries in the list)
+  `computers`, `compete`, `team`, `orchestrator`, `badge` — and clap's
+  built-in `help`, 56 entries in the list)
 - [ ] Workspace gates green — **not green as of 2026-10-08.** CI has not passed since 2026-09-27: the latest runs stopped at two roster tests that required every agent to be installed on the machine running them (fixed in `74d18f08`, not yet observed on CI, so whether the rest of the suite passes on Linux is unknown). The last full count written here was 16 crates, 2823 passing and 19 ignored on 2026-10-08, after the `AR-3` verdict fix, with one machine-dependent roster test left out of it; that run was not on CI and has not been repeated. On Windows (2026-10-08, after `PL-2`): 2723 passed, 19 ignored, 58 failed, sorted by cause under `PL-2`. The build itself has no compiler warnings on Windows.
+  - **2026-10-09, Windows, after DK-1/DK-2 and BT-1 to BT-5:** `cargo test --workspace` with
+    `XCODE_CONFIG_DIR` set: 17 crates, 2872 passed, 35 failed, 20 ignored. The terminal UI crate has
+    no failures (840 passed); the 35 are the other crates' Windows causes listed under `PL-2` (test
+    servers, Windows paths, Unix-only tools, this machine's installed agents). Two runs gave the
+    same 35. Not run on CI.
 
 ## Model Catalog Honesty
 
@@ -17482,8 +17487,19 @@ or has finished, and ByteBot completed along the lines of the original `bytebot-
 project. Decided in design on 2026-10-09: one engine with many windows (terminal, desktop app,
 badge); ByteBot keeps being xencode's coding agent and borrows the original's task states, task
 list and take-over step, not its desktop control; the status feed is one file per session. The
-design is `docs/superpowers/specs/2026-10-09-desktop-badge-and-bytebot-tasks-design.md` and it
-is **awaiting the owner's review**: nothing below is started.
+design is `docs/superpowers/specs/2026-10-09-desktop-badge-and-bytebot-tasks-design.md`, approved
+by the owner on 2026-10-09, and the plan is `docs/superpowers/plans/2026-10-09-badge-and-bytebot-tasks.md`.
+**Parts 1 and 2 shipped on 2026-10-09** (DK-1, DK-2 on Windows, BT-1 to BT-5); parts 3 to 5
+(DK-3 to DK-5) still need their own designs.
+
+**Live run, 2026-10-09**, with Qwen3-4B (Q4_K_M) on llama.cpp and the real badge watching
+(`xencode-tui-rs/tests/live_bytebot_real_model.rs`, ignored by default because it needs a server):
+the model called `ask_user` ("Please provide the filename you would like to use."), took the answer
+`notes.md`, wrote `hello from bytebot` to it, and the task ended in review listing `notes.md`;
+accepting completed it, in 45 s. The status file went working → needs you → working → needs you
+(review) → finished → removed, and the badge showed each in turn. The keyboard was replaced by the
+calls the panel's keys make, because sending keystrokes to a console window could land in another
+program; the keys themselves are covered by their own tests.
 
 - [x] **DK-1 — status feed.** Each running session writes `<state dir>/live/<session id>.json`:
   state (idle, working, needs you, finished, failed), a redacted one-line headline, a heartbeat.
