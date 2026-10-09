@@ -618,12 +618,20 @@ So:
 - the floating badge keeps showing what the engine is doing while no window is
   open.
 
+Open `xencode` in the same folder twice and both windows show the same
+transcript, tasks and prompts. Answer a prompt in either: the other window
+shows "answered in terminal <pid>: allow" (or the answer you gave), and only
+the first answer counts.
+
 The engine exits by itself ten seconds after the last window closed, once
 nothing is running and nothing is waiting for you. A task that stops to ask for
-an approval, an answer or a review while no window is open waits until you open
-one; the badge shows that it needs you. If the engine stops while a window is
-open, the window says "the engine stopped (…); starting a new one" and carries
-on with a new engine.
+an approval, an answer or a review while no window is open waits for you —
+the badge shows that it needs you — for up to 30 minutes. Then the engine ends
+the wait itself: a question is withdrawn and its task stopped, an approval is
+denied so nothing is written, and a review is completed with its changes kept.
+The transcript says which. If the engine stops while a window is open, the
+window says "the engine stopped (…); starting a new one" and carries on with a
+new engine.
 
 Chat and the commands that change the agent's work run in the engine:
 `/bytebot`, `/spawn`, `/rewind`, `/gate`, `/plan`, `/lesson`, `/ctx`, `/model`,
