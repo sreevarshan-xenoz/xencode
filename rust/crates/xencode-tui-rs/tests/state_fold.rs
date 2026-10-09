@@ -246,7 +246,11 @@ async fn a_fold_queues_a_candidate_and_only_a_promotion_makes_it_durable() {
     app.chat_input.insert_str("/ctx fold");
     app.submit_message(tx);
     let mut failed = false;
-    for _ in 0..400 {
+    // Up to a minute. Linux refuses a closed port at once; Windows takes about
+    // two seconds per connection attempt, and the provider retries with
+    // backoff, so the complaint arrived after about nineteen seconds there.
+    let started = std::time::Instant::now();
+    for _ in 0..2400 {
         while let Ok(line) = rx.try_recv() {
             if line.contains("The fold call failed") {
                 failed = true;
@@ -257,6 +261,7 @@ async fn a_fold_queues_a_candidate_and_only_a_promotion_makes_it_durable() {
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+    println!("the dead-server complaint took {:?}", started.elapsed());
     assert!(failed, "a server that is not there produced no complaint");
     assert!(!candidate.exists(), "a failed fold queued something anyway");
     assert_eq!(
