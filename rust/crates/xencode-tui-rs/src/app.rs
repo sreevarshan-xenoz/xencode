@@ -5223,10 +5223,15 @@ impl<'a> App<'a> {
     /// `/done` tells the model the person did the step themselves.
     pub fn bytebot_answer(&mut self) {
         use crate::bytebot_tasks::TaskState;
+        // A blank line is a slip of the Enter key, not an answer: the question
+        // keeps waiting.
+        let answer = self.bytebot_command.trim().to_string();
+        if answer.is_empty() {
+            return;
+        }
         let Some(reply) = self.bytebot_help.take() else {
             return;
         };
-        let answer = self.bytebot_command.trim().to_string();
         self.bytebot_command.clear();
         self.bytebot_cursor = 0;
         let _ = reply.send(answer.clone());

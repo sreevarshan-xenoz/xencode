@@ -3456,6 +3456,21 @@ mod tests {
     }
 
     #[test]
+    fn enter_on_an_empty_box_does_not_answer_a_question() {
+        let mut app = app_with(FocusArea::ByteBotPanel);
+        app.bytebot_running = true;
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.bytebot_help = Some(reply);
+        type_text(&mut app, "   ");
+        press(&mut app, KeyCode::Enter);
+        assert!(answer.try_recv().is_err(), "a blank line was sent as the answer");
+        assert!(app.bytebot_help.is_some(), "the question is still waiting");
+        type_text(&mut app, "postgres");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(answer.try_recv().unwrap(), "postgres");
+    }
+
+    #[test]
     fn enter_answers_a_bytebot_question_and_esc_withdraws_it() {
         let mut app = app_with(FocusArea::ByteBotPanel);
         app.bytebot_running = true;
