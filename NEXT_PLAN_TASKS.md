@@ -17519,7 +17519,22 @@ program; the keys themselves are covered by their own tests.
   manager.
   - [ ] **macOS:** built and tested by the `badge` CI job only; not watched on a Mac.
 - [ ] **DK-3 — engine process.** The engine moves out of the terminal app into a background
-  process; the terminal app becomes its first client. Needs its own design first.
+  process; the terminal app becomes its first client. Needs its own design first. Designed 2026-10-09 in
+  `docs/superpowers/specs/2026-10-09-engine-process-design.md` (awaiting the owner's review): one
+  engine per project, running while a window is connected or a task works, over a local socket
+  (named pipe on Windows, socket file elsewhere), owning all agent work. Stages:
+  - [ ] **EN-1 — engine crate, in process.** `xencode-engine-rs` takes all agent work out of
+    `app.rs`; the terminal app drives it through channels carrying the socket's messages. No
+    visible change; the existing suite is the proof.
+  - [ ] **EN-2 — the socket and `xencode engine`.** Start on demand, reconnect; closing the
+    terminal no longer stops a task.
+  - [ ] **EN-3 — several windows per engine.** Snapshot on connect, first-answer-wins approvals
+    and questions, the idle and 30-minute rules, the engine writing the badge's status file.
+  - [ ] **EN-4 — a detached launcher that works on Windows,** shared by the badge, the engine and
+    `xencode run --detach`.
+- [ ] **RA-1 — `run_agent` always returns an empty final answer.** It looks for
+  `[SPAWN:0:finish:` while the loop sends `[SPAWN]0:finish:`, and `rounds` is hard-coded to 1.
+  Found while mapping DK-3.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
