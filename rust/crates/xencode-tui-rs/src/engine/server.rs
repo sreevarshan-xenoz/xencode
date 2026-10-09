@@ -28,18 +28,36 @@ pub const IDLE_EXIT: Duration = Duration::from_secs(10);
 /// terminal's own frame interval.
 const TICK: Duration = Duration::from_millis(33);
 
+/// Messages queued for one window before it counts as stalled: about eight
+/// seconds of views at the tick rate, more than a window that is reading
+/// ever falls behind. A stalled window (a suspended terminal) is let go; it
+/// gets a full view again when it reconnects.
+const WINDOW_QUEUE: usize = 256;
+
 /// One connected window.
 struct Window {
     name: String,
-    out: mpsc::UnboundedSender<String>,
+    out: mpsc::Sender<String>,
     watcher: Watcher,
     greeted: bool,
+    tasks: [tokio::task::JoinHandle<()>; 2],
 }
 
 impl Window {
-    /// Queue a message for the window. `false` once its connection is gone.
+    /// Queue a message for the window. `false` once its connection is gone
+    /// or it has stopped reading.
     fn send(&self, msg: &EngineMsg) -> bool {
-        self.out.send(proto::encode(msg)).is_ok()
+        self.out.try_send(proto::encode(msg)).is_ok()
+    }
+}
+
+impl Drop for Window {
+    /// Letting a window go closes its connection, even when its writer is
+    /// stuck on a pipe nobody reads.
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
     }
 }
 
@@ -181,7 +199,7 @@ async fn accept_windows(mut listener: Listener, conns: mpsc::UnboundedSender<Con
 /// slow or vanished window never holds up the engine.
 fn open_window(id: u64, conn: Conn, lines: mpsc::UnboundedSender<(u64, Option<String>)>) -> Window {
     let (mut reader, mut writer) = conn.split();
-    tokio::spawn(async move {
+    let reading = tokio::spawn(async move {
         loop {
             match reader.recv().await {
                 Ok(Some(line)) => {
@@ -196,8 +214,8 @@ fn open_window(id: u64, conn: Conn, lines: mpsc::UnboundedSender<(u64, Option<St
             }
         }
     });
-    let (out, mut queue) = mpsc::unbounded_channel::<String>();
-    tokio::spawn(async move {
+    let (out, mut queue) = mpsc::channel::<String>(WINDOW_QUEUE);
+    let writing = tokio::spawn(async move {
         while let Some(line) = queue.recv().await {
             if writer.send(&line).await.is_err() {
                 return;
@@ -209,6 +227,7 @@ fn open_window(id: u64, conn: Conn, lines: mpsc::UnboundedSender<(u64, Option<St
         out,
         watcher: Watcher::default(),
         greeted: false,
+        tasks: [reading, writing],
     }
 }
 

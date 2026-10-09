@@ -116,7 +116,7 @@ fn stop_running_turn(app: &mut App, tx: &Tx) -> bool {
     };
     // A window onto an engine (EN-2) holds no stop flags of its own: what is
     // running is what the engine's view says.
-    let window = app.engine_link.is_some();
+    let window = app.is_window();
     let chat = app.is_generating && (window || unset(&app.turn_stop));
     // A task waiting on a question sits inside that tool call and would never
     // see the stop; the engine withdraws the question too (BT-2).
@@ -1504,7 +1504,7 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             // otherwise Enter runs or queues what is typed. History is ↑.
             if let Some(id) = app
                 .question_id
-                .filter(|_| app.bytebot_help.is_some() || app.engine_link.is_some())
+                .filter(|_| app.bytebot_help.is_some() || app.is_window())
             {
                 let text = app.bytebot_command.clone();
                 crate::engine::act(

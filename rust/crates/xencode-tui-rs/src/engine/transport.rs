@@ -158,7 +158,8 @@ mod windows {
             }
             let mut needed = 0u32;
             GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
-            let mut buffer = vec![0u8; needed as usize];
+            // Eight-byte words, so the TOKEN_USER at the front is aligned.
+            let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
             let ok = GetTokenInformation(
                 token,
                 TokenUser,
@@ -166,9 +167,11 @@ mod windows {
                 needed,
                 &mut needed,
             );
+            // Read the error before CloseHandle can replace it.
+            let failure = (ok == 0).then(io::Error::last_os_error);
             CloseHandle(token);
-            if ok == 0 {
-                return Err(io::Error::last_os_error());
+            if let Some(e) = failure {
+                return Err(e);
             }
             let user = &*(buffer.as_ptr() as *const TOKEN_USER);
             let mut text: *mut u16 = std::ptr::null_mut();

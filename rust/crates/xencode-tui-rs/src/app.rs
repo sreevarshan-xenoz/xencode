@@ -651,6 +651,8 @@ pub struct App<'a> {
     /// The connection to the engine when this app is a window onto one
     /// (EN-2); `None` when it runs the agent work itself.
     pub engine_link: Option<crate::engine::link::EngineLink>,
+    /// A reconnection to a new engine running in the background (EN-2).
+    pub(crate) engine_reconnect: Option<crate::engine::link::Reconnecting>,
     next_agent_id: u64,
     /// Receive end, taken once by `run_app` and drained each frame.
     pub approval_rx: Option<
@@ -3160,6 +3162,7 @@ impl<'a> App<'a> {
             approval_ids: std::collections::VecDeque::new(),
             remote_approvals: std::collections::VecDeque::new(),
             engine_link: None,
+            engine_reconnect: None,
             question_id: None,
             question_text: None,
             next_agent_id: 1,
@@ -4173,6 +4176,10 @@ impl<'a> App<'a> {
                         .position(|m| m == &self.config.default_model)
                     {
                         self.selected_model = pos;
+                    } else if self.is_window() {
+                        // The model is the engine's to choose (EN-2): a
+                        // window's own list never replaces it.
+                        self.selected_model = 0;
                     } else {
                         // If current default_model is not installed, select first installed model from Ollama
                         if let Some(first) = self.available_models.first().cloned() {
@@ -5797,10 +5804,16 @@ impl<'a> App<'a> {
     }
 
     /// Start the oldest pending task, if any and if nothing is running.
+    /// Whether this app is a window onto an engine, connected or
+    /// reconnecting (EN-2): it then runs no agent work itself.
+    pub fn is_window(&self) -> bool {
+        self.engine_link.is_some() || self.engine_reconnect.is_some()
+    }
+
     pub(crate) fn bytebot_start_next(&mut self, tx: mpsc::UnboundedSender<String>) {
         use crate::bytebot_tasks::TaskState;
         // A window never runs a task itself: the engine carries on the queue.
-        if self.engine_link.is_some() {
+        if self.is_window() {
             crate::engine::act(self, crate::engine::proto::ClientMsg::ResumeTasks, &tx);
             return;
         }
@@ -13708,13 +13721,15 @@ pub async fn run_app<B: Backend + io::Write>(
     } else {
         crate::engine::address::Address::for_project(&project).ok()
     };
-    let start_engine = || -> io::Result<()> {
-        let exe = std::env::current_exe()?;
+    let start_engine: crate::engine::link::Starter = {
         let folder = project.to_string_lossy().to_string();
-        xencode_live_rs::spawn_detached(&exe, &["engine", "--project", &folder]).map(|_| ())
+        std::sync::Arc::new(move || -> io::Result<()> {
+            let exe = std::env::current_exe()?;
+            xencode_live_rs::spawn_detached(&exe, &["engine", "--project", &folder]).map(|_| ())
+        })
     };
     if let Some(addr) = &engine_addr {
-        match crate::engine::link::connect_or_start(addr, &start_engine).await {
+        match crate::engine::link::connect_or_start(addr, &*start_engine).await {
             Ok((link, view)) => crate::engine::link::become_window(&mut app, link, view),
             Err(why) => app.push_toast(
                 crate::toast::ToastKind::Warning,
@@ -13821,7 +13836,7 @@ pub async fn run_app<B: Backend + io::Write>(
         signals.messages += linked.views;
         if let Some(why) = linked.lost {
             if let Some(addr) = &engine_addr {
-                crate::engine::link::recover(&mut app, addr, &start_engine, &why).await;
+                crate::engine::link::recover(&mut app, addr, start_engine.clone(), &why);
             }
             signals.messages += 1;
         }

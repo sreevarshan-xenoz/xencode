@@ -22,7 +22,7 @@ use proto::{ClientMsg, EngineMsg, ReviewDecision, StopTarget, PROTOCOL_VERSION};
 /// goes through `handle` as the window "terminal", and an error the engine
 /// answers with is shown as a warning toast.
 pub fn act(app: &mut App, msg: ClientMsg, tx: &mpsc::UnboundedSender<String>) {
-    if app.engine_link.is_some() {
+    if app.is_window() {
         link::act(app, msg, tx);
         return;
     }
