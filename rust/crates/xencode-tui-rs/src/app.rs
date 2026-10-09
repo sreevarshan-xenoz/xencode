@@ -3780,6 +3780,34 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Queue the approval prompts and ByteBot questions the agent loops have
+    /// raised since the last frame (EN-1), and return how many approvals came
+    /// in. The modal overlay answers the front approval and wakes its task.
+    pub fn drain_agent_channels(&mut self) -> usize {
+        let mut approvals = 0;
+        let mut waiting = None;
+        if let Some(arx) = self.approval_rx.as_mut() {
+            while let Ok((request, responder)) = arx.try_recv() {
+                approvals += 1;
+                waiting = Some(request.summary.clone());
+                self.approval_queue.push_back((request, responder));
+            }
+        }
+        if let Some(summary) = waiting {
+            self.live_approval_waiting(&summary);
+        }
+        let mut asked = Vec::new();
+        if let Some(rx) = self.ask_rx.as_mut() {
+            while let Ok(question) = rx.try_recv() {
+                asked.push(question);
+            }
+        }
+        for (question, reply) in asked {
+            self.bytebot_needs_help(question, reply);
+        }
+        approvals
+    }
+
     /// Apply one message from the agent loop or another background task to
     /// the app (EN-1): the text of a reply, a tool line, a ByteBot step, the
     /// end of a run. `run_app` calls this for every message it drains, and so
@@ -13698,28 +13726,8 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
             app.apply_token(&token, &tx);
         }
 
-        // Approval prompts from the tool loop (I1-03): queue them; the
-        // modal overlay answers the front one and wakes its task.
-        let mut waiting = None;
-        if let Some(arx) = app.approval_rx.as_mut() {
-            while let Ok((request, responder)) = arx.try_recv() {
-                signals.approvals += 1;
-                waiting = Some(request.summary.clone());
-                app.approval_queue.push_back((request, responder));
-            }
-        }
-        if let Some(summary) = waiting {
-            app.live_approval_waiting(&summary);
-        }
-        let mut asked = Vec::new();
-        if let Some(rx) = app.ask_rx.as_mut() {
-            while let Ok(question) = rx.try_recv() {
-                asked.push(question);
-            }
-        }
-        for (question, reply) in asked {
-            app.bytebot_needs_help(question, reply);
-        }
+        // Approval prompts from the tool loop (I1-03) and ByteBot questions.
+        signals.approvals += app.drain_agent_channels();
 
         // Poll events (~30fps)
         if event::poll(Duration::from_millis(33))? {
@@ -19450,6 +19458,29 @@ Content-Length: 0
         app.bytebot_needs_help("Which port?".into(), reply);
         assert!(app.bytebot_withdraw_question());
         assert!(answer.await.is_err(), "the waiting tool call is released");
+    }
+
+    /// EN-1: approvals and ByteBot questions are queued by one App method.
+    #[tokio::test]
+    async fn drain_agent_channels_queues_approvals_and_questions() {
+        let mut app = App::for_tests();
+        let request = crate::agent_tools::ApprovalRequest {
+            tool: "write_file".into(),
+            class: crate::agent_tools::ToolClass::Edit,
+            summary: "write_file a.rs".into(),
+            preview: String::new(),
+            draft: Default::default(),
+        };
+        let (responder, _answer) = tokio::sync::oneshot::channel();
+        app.approval_tx.send((request, responder)).unwrap();
+        let (reply, _q) = tokio::sync::oneshot::channel();
+        app.ask_tx.send(("Which port?".into(), reply)).unwrap();
+        assert_eq!(app.drain_agent_channels(), 1);
+        assert_eq!(
+            app.pending_approval().map(|r| r.summary.as_str()),
+            Some("write_file a.rs")
+        );
+        assert!(app.bytebot_help.is_some());
     }
 
     /// EN-1: the loop's tokens are applied by one App method, the same one
