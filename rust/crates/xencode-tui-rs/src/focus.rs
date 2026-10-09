@@ -526,7 +526,7 @@ pub struct Destination {
     pub command_name: &'static str,
 }
 
-/// Canonical table of all 26 TUI destinations.
+/// Canonical table of all 27 TUI destinations.
 /// Every variant of `FocusArea` is represented with its progressive disclosure tier.
 pub const DESTINATIONS: &[Destination] = &[
     // ── Level 1: Core interaction ─────────────────────────────────────────────
