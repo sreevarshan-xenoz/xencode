@@ -3132,7 +3132,9 @@ report the request it could not answer.
 
 ### `xencode run "the task" [--detach] [--resume ID]`
 Run an agent turn from the command line. Foreground by default; `--detach`
-forks a child that survives the terminal, persisting every completed round
+starts a child that survives the terminal — on Unix by forking, on Windows by
+starting `xencode` again as the run's worker, detached from the console, with
+its output added to the run's log — persisting every completed round
 under `.xencode/cache/detached/<run-id>/` — the spec, one `rounds.jsonl`
 line per round, an `exit.json` the child writes only when it finishes, a pid
 hint, and the log. Status is derived from the exit file and `/proc`, never
@@ -3164,8 +3166,12 @@ started so its first round can end it.
 Nobody is listening on a detached run, so approvals run `edit-allow`: file
 edits are pre-approved and anything else is refused where it stands, exactly
 as the eval harness runs headless. `--allow-shell` opts into `all-allow`.
-`--stop` asks the child to die with SIGTERM and leaves a stop request behind,
-so the run reads as `stopped`, not `crashed`. Resuming a finished, stopped
+`--stop` leaves a stop request behind and then ends the child — with SIGTERM
+on Unix; on Windows, which has no such signal, the worker is ended outright and
+the command waits up to two seconds for it to be gone — so the run reads as
+`stopped`, not `crashed`. The command that starts a detached run returns as
+soon as the run has started, even when its output is being read by another
+program (a shell's `$(…)`). Resuming a finished, stopped
 or still-running run is refused with the reason.
 
 ### `xencode runs [list|show|trailer]`

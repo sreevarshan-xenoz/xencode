@@ -217,6 +217,8 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
   - **2026-10-09, after EN-3:** 2935 passed, 35 failed, 22 ignored (two of the ignored are the
     EN-3 tests that need a running llama.cpp server). No failure is new: all 35 are in crates the
     engine work did not change, from the causes listed under `PL-2`.
+  - **2026-10-09, after EN-4:** 2946 passed, 35 failed, 22 ignored. No failure is new; the 35
+    are the same causes as before, in crates EN-4 did not change.
 
 ## Model Catalog Honesty
 
@@ -17533,7 +17535,7 @@ program; the keys themselves are covered by their own tests.
   file watching, and the Windows 11 frame, corners and shadow switched off through the window
   manager.
   - [ ] **macOS:** built and tested by the `badge` CI job only; not watched on a Mac.
-- [ ] **DK-3 — engine process.** The engine moves out of the terminal app into a background
+- [x] **DK-3 — engine process.** Done 2026-10-09 with EN-1 to EN-4 below. The engine moves out of the terminal app into a background
   process; the terminal app becomes its first client. Needs its own design first. Designed 2026-10-09 in
   `docs/superpowers/specs/2026-10-09-engine-process-design.md` (approved by the owner): one
   engine per project, running while a window is connected or a task works, over a local socket
@@ -17580,8 +17582,20 @@ program; the keys themselves are covered by their own tests.
     two tests are `#[ignore]`d unless `XENCODE_LIVE_LLAMACPP_URL` names a server, so CI does not
     run them. **Not verified:** a question withdrawn by the limit end to end (it needs a model
     that calls `ask_user`; the rule itself is tested on a real app).
-  - [ ] **EN-4 — a detached launcher that works on Windows,** shared by the badge, the engine and
-    `xencode run --detach`.
+  - [x] **EN-4 — a detached launcher that works on Windows,** shared by the badge, the engine and
+    `xencode run --detach`. Done 2026-10-09
+    (`docs/superpowers/plans/2026-10-09-en4-detached-runs-on-windows.md`). `spawn_detached_logged`
+    runs in a given folder and appends to a log; on Windows a detached run starts `xencode run
+    --child <id> --xencode-dir <dir>` that way (Unix keeps forking); `--stop` ends the worker with
+    `TerminateProcess` and waits for it. **Watched on Windows 11** with a real llama.cpp server
+    (Qwen3-4B): a run started from a console that was then closed carried on, wrote and read back
+    `notes.txt`, and finished after two rounds; a forty-file run was stopped after four seconds
+    and read `stopped` with its worker gone. The live check found that a detached process held
+    the starter's output pipe open (`out=$(xencode run --detach …)` waited 166 s); fixed in the
+    launcher, after which the same line returned in under a second.
+- [ ] **RA-2 — a detached run whose model call failed reads as done.** `xencode run --show`
+  says "exit: Done after 0 rounds" when the run's only model call failed with a network error;
+  the error is only in the log. Found 2026-10-09 while testing EN-4.
 - [ ] **RA-1 — `run_agent` always returns an empty final answer.** It looks for
   `[SPAWN:0:finish:` while the loop sends `[SPAWN]0:finish:`, and `rounds` is hard-coded to 1.
   Found while mapping DK-3.
