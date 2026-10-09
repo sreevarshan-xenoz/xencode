@@ -659,7 +659,13 @@ pub async fn run_child(xencode_dir: &Path, run_id: &str) -> DetachedExit {
         );
     }
     agent_rounds(run, tx).await;
+    // The loop reports a turn that ended in an error as `[SPAWN]0:err:`;
+    // such a run did not get done, whatever else it managed (RA-2).
+    let mut failure: Option<String> = None;
     while let Ok(line) = rx.try_recv() {
+        if let Some(why) = line.strip_prefix("[SPAWN]0:err:") {
+            failure = Some(why.trim().to_string());
+        }
         if let Ok(log) = log.as_mut() {
             use std::io::Write;
             let _ = writeln!(log, "{line}");
@@ -673,8 +679,14 @@ pub async fn run_child(xencode_dir: &Path, run_id: &str) -> DetachedExit {
         .unwrap()
         .map(CapStop::reason)
         .or_else(|| check_caps(total_rounds, elapsed, total_cost, &spec.caps).map(CapStop::reason))
+        .or_else(|| failure.as_ref().map(|_| ExitReason::Error))
         .unwrap_or(ExitReason::Done);
-    let exit = finish(reason, total_rounds, elapsed, total_cost, String::new());
+    let note = if reason == ExitReason::Error {
+        failure.unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let exit = finish(reason, total_rounds, elapsed, total_cost, note);
     let _ = write_exit(&dir, &exit);
     exit
 }
