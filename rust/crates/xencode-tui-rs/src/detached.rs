@@ -702,7 +702,27 @@ pub fn read_log_tail(dir: &Path, lines: usize) -> Vec<String> {
 ///
 /// The child is a `fork(2)` of this process, so detached runs exist only on
 /// Unix; elsewhere this returns `Unsupported` and nothing is started.
-#[cfg(not(unix))]
+/// Windows has no fork, so the worker is this same program started again
+/// with the hidden `run --child` options, detached from the console, in the
+/// run's tree, writing to the run's log (EN-4).
+#[cfg(windows)]
+pub fn spawn_child(
+    exe: &Path,
+    run_id: &str,
+    xencode_dir: &Path,
+    cwd: &Path,
+    log: &Path,
+) -> std::io::Result<u32> {
+    let xencode_dir = xencode_dir.to_string_lossy();
+    xencode_live_rs::spawn_detached_logged(
+        exe,
+        &["run", "--child", run_id, "--xencode-dir", &xencode_dir],
+        cwd,
+        log,
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn spawn_child(
     _exe: &Path,
     _run_id: &str,
