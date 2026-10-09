@@ -11512,6 +11512,40 @@ async fn until_stopped(flag: Option<Arc<AtomicBool>>) {
     }
 }
 
+/// What the model is told when it claims an edit on a turn that changed nothing.
+const NO_CHANGE_NOTE: &str = "No file was changed in this turn: no edit_file or write_file call succeeded. Your answer says the code was changed, and it was not. If a change is needed, make it now with edit_file or write_file. If none is needed, say plainly that you changed nothing.";
+
+/// Whether an answer says the code was changed: "I have fixed", "the changes
+/// have been made" and the like. Read only on a turn that changed no file, so
+/// a true report is never second-guessed.
+pub(crate) fn claims_a_change(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    const CLAIMS: &[&str] = &[
+        "i have made",
+        "i've made",
+        "i made the",
+        "i have changed",
+        "i've changed",
+        "i changed",
+        "i have updated",
+        "i've updated",
+        "i updated",
+        "i have fixed",
+        "i've fixed",
+        "i fixed",
+        "i have modified",
+        "i've modified",
+        "i modified",
+        "changes have been made",
+        "has been modified",
+        "has been updated",
+        "has been fixed",
+        "have been applied",
+        "the code now",
+    ];
+    CLAIMS.iter().any(|claim| lower.contains(claim))
+}
+
 /// How many plan-only steps a turn may take without spending a round.
 const FREE_PLAN_STEPS: usize = 2;
 
@@ -11578,6 +11612,8 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     // how many failing checks have already been handed back, and what the
     // project's own commands are (discovered once, from disk, on first use).
     let mut turn_edited = false;
+    // The "you changed no file" note is given once per turn (SM-2).
+    let mut claim_checked = false;
     // The workspace-relative paths a finished Edit-class call wrote, so a
     // non-cargo workspace can hand just those files to a language server (L-12).
     let mut edited_paths: Vec<String> = Vec::new();
@@ -11785,6 +11821,33 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             // another repair round, up to `max_repair_iters` times; past that
             // the turn ends and reports the task unfinished.
             let mut ending_turn = true;
+            // SM-2: an answer that says the code was changed, on a turn that changed
+            // no file, is not the end of the turn. The model is told so once, with a
+            // round left to act on it — measured 2026-10-09, a small model often
+            // reported an edit it never made.
+            if !turn_edited && !claim_checked && round < max_rounds && claims_a_change(&step.text) {
+                claim_checked = true;
+                let call = xencode_providers_rs::ToolCall {
+                    id: format!("no-change-{rounds}"),
+                    name: "changed_files".to_string(),
+                    arguments: serde_json::json!({}),
+                };
+                history.push(xencode_providers_rs::AgentTurn::Assistant {
+                    text: step.text.clone(),
+                    calls: vec![call.clone()],
+                });
+                history.push(xencode_providers_rs::AgentTurn::ToolResult {
+                    id: call.id.clone(),
+                    content: NO_CHANGE_NOTE.to_string(),
+                });
+                if sink == LoopSink::Chat {
+                    let _ = tx.send(
+                        "[TOOL]⚠ the answer says the code was changed, but no file changed this turn — asking once more"
+                            .to_string(),
+                    );
+                }
+                ending_turn = false;
+            }
             if max_repair_iters > 0 && turn_edited {
                 let commands = check_commands
                     .get_or_insert_with(|| crate::agent_tools::discover_check_commands(&tool_root));
@@ -16479,6 +16542,83 @@ edition = \"2021\"
             .evidence_ref
             .as_deref()
             .is_some_and(|r| r.starts_with("tools[")));
+    }
+
+    /// SM-2: an answer that claims an edit on a turn that changed no file is told
+    /// so once, and the model gets a round to make the edit; a second false
+    /// claim ends the turn rather than looping.
+    #[tokio::test]
+    async fn a_claimed_edit_that_never_happened_is_answered_once() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-no-change-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
+                serde_json::json!({"message": {"role": "assistant", "content": "I have fixed the bug."}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments": {"path": "fix.txt", "content": "fixed
+"}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "Now it is fixed."}, "done": true}),
+            ],
+        ));
+        let mut app = App::for_tests();
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "fix it".into(),
+            }],
+            "fix it",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        run.max_repair_iters = 0;
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        server.abort();
+        let written = std::fs::read_to_string(dir.join("fix.txt")).ok();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("no file changed this turn")),
+            "{lines:?}"
+        );
+        assert_eq!(
+            written.as_deref(),
+            Some(
+                "fixed
+"
+            ),
+            "{lines:?}"
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|l| l.contains("asking once more"))
+                .count(),
+            1
+        );
+
+        assert!(super::claims_a_change(
+            "I've updated the function to return early."
+        ));
+        assert!(!super::claims_a_change(
+            "The bug is in the loop bound; it should be `<`."
+        ));
     }
 
     /// SM-2: steps that only update the plan do not spend the round budget, so
