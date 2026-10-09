@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `BT-3`: a ByteBot task that changed files waits for your review
+
+A ByteBot task that ends normally after changing files is now "needs review"
+instead of "completed". The panel lists the changed files, the floating badge
+shows "needs you", and the queue waits. With the command box empty, `a`
+accepts the changes and `u` undoes the task's whole set of changes in one step.
+Undo checks that the task's changes are still the newest ones and refuses
+otherwise, since rewinding would then undo a later turn.
+
 ### Added — `BT-2`: a ByteBot task can stop and ask you a question
 
 ByteBot tasks are offered a new tool, `ask_user`. When the agent cannot carry

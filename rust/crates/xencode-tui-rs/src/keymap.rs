@@ -1486,6 +1486,24 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         {
             advance_agent_stack(app);
         }
+        // BT-3: with nothing typed, `a` accepts and `u` undoes a task that is
+        // waiting for review; with text in the box they type as usual.
+        KeyCode::Char('a')
+            if app.bytebot_command.is_empty() && app.bytebot_reviewing().is_some() =>
+        {
+            app.bytebot_accept(tx.clone());
+        }
+        KeyCode::Char('u')
+            if app.bytebot_command.is_empty() && app.bytebot_reviewing().is_some() =>
+        {
+            match app.bytebot_undo(tx.clone()) {
+                Ok(_) => {}
+                Err(why) => {
+                    app.bytebot_log.push(why.clone());
+                    app.push_toast(crate::toast::ToastKind::Warning, why);
+                }
+            }
+        }
         KeyCode::Char(c) => {
             app.bytebot_command.insert(app.bytebot_cursor, c);
             app.bytebot_cursor += 1;
@@ -3414,6 +3432,27 @@ mod tests {
             app.config.default_model, "kept-model",
             "the second Enter reset it"
         );
+    }
+
+    #[test]
+    fn a_and_u_review_a_task_only_when_the_command_box_is_empty() {
+        use crate::bytebot_tasks::{ByteBotTask, TaskState};
+        let mut app = app_with(FocusArea::ByteBotPanel);
+        let mut task = ByteBotTask::new("write a note", "m");
+        task.state = TaskState::NeedsReview;
+        task.changed_files = vec!["note.txt".into()];
+        app.bytebot_tasks = vec![task];
+
+        // With text in the box, the letters type.
+        type_text(&mut app, "fix ua");
+        assert_eq!(app.bytebot_command, "fix ua");
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsReview);
+
+        app.bytebot_command.clear();
+        app.bytebot_cursor = 0;
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Completed);
+        assert!(app.bytebot_command.is_empty(), "the key was not typed");
     }
 
     #[test]

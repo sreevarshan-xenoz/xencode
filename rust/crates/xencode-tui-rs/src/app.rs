@@ -267,6 +267,16 @@ impl SpawnRecord {
 /// What the ByteBot progress bar means: the share of calls made so far that
 /// came back. It can move backwards when the model makes another call — which
 /// is honest, unlike a bar that hits 100% because a script promised six steps.
+/// A path as the ByteBot panel lists it: relative to the folder xencode runs
+/// in when it is inside it, with forward slashes on every platform.
+fn project_relative(path: &std::path::Path) -> String {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    path.strip_prefix(&cwd)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn bytebot_progress(steps: &[(String, String)]) -> f64 {
     if steps.is_empty() {
         return 0.0;
@@ -5137,7 +5147,7 @@ impl<'a> App<'a> {
     /// Start the oldest pending task, if any and if nothing is running.
     pub(crate) fn bytebot_start_next(&mut self, tx: mpsc::UnboundedSender<String>) {
         use crate::bytebot_tasks::TaskState;
-        if self.bytebot_running {
+        if self.bytebot_running || self.bytebot_reviewing().is_some() {
             return;
         }
         // Only a task typed in this session starts: text read back from disk
@@ -5251,12 +5261,20 @@ impl<'a> App<'a> {
                 .then(|| "a step failed".to_string())
         });
         self.bytebot_help = None;
+        let mut review: Option<usize> = None;
         if let Some(i) = self
             .bytebot_tasks
             .iter()
             .position(|t| matches!(t.state, TaskState::Running | TaskState::NeedsHelp))
         {
             let steps = self.bytebot_steps.clone();
+            let changed: Vec<String> = self.bytebot_tasks[i]
+                .turn
+                .map(|turn| self.checkpoints.group_paths(turn))
+                .unwrap_or_default()
+                .iter()
+                .map(|path| project_relative(path))
+                .collect();
             let task = &mut self.bytebot_tasks[i];
             task.steps = steps;
             task.question = None;
@@ -5267,6 +5285,11 @@ impl<'a> App<'a> {
             } else if let Some(e) = &error {
                 task.state = TaskState::Failed;
                 task.note = Some(e.clone());
+            } else if !changed.is_empty() {
+                // BT-3: changes are not done until the person has seen them.
+                review = Some(changed.len());
+                task.changed_files = changed;
+                task.state = TaskState::NeedsReview;
             } else {
                 task.state = TaskState::Completed;
             }
@@ -5291,7 +5314,75 @@ impl<'a> App<'a> {
             "■ run over: {done}/{} call(s) completed",
             self.bytebot_steps.len()
         ));
+        if let Some(files) = review {
+            self.bytebot_log.push(format!(
+                "review {files} changed file(s): a accepts · u undoes"
+            ));
+            self.live_set(
+                xencode_live_rs::LiveState::NeedsYou,
+                xencode_live_rs::LiveSource::Bytebot,
+                &format!("review {files} changed file(s)"),
+            );
+        }
         self.bytebot_start_next(tx);
+    }
+
+    pub(crate) fn bytebot_reviewing(&self) -> Option<usize> {
+        self.bytebot_tasks
+            .iter()
+            .position(|t| t.state == crate::bytebot_tasks::TaskState::NeedsReview)
+    }
+
+    /// Accept the reviewed task's changes (BT-3): it is completed, and the
+    /// next task in the queue may start.
+    pub fn bytebot_accept(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let Some(i) = self.bytebot_reviewing() else {
+            return;
+        };
+        let task = &mut self.bytebot_tasks[i];
+        task.state = crate::bytebot_tasks::TaskState::Completed;
+        let task = task.clone();
+        self.bytebot_save(&task);
+        self.bytebot_log.push(format!("accepted: {}", task.text));
+        self.live_set(
+            xencode_live_rs::LiveState::Finished,
+            xencode_live_rs::LiveSource::Bytebot,
+            "done",
+        );
+        self.bytebot_start_next(tx);
+    }
+
+    /// Undo the reviewed task's changes (BT-3) by rewinding its checkpoint
+    /// group, then cancel it. Refused unless that group is the newest one
+    /// holding writes: rewinding would otherwise undo a later turn instead.
+    pub fn bytebot_undo(
+        &mut self,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> Result<crate::agent_tools::RewindReport, String> {
+        let Some(i) = self.bytebot_reviewing() else {
+            return Err("no ByteBot task is waiting for review".to_string());
+        };
+        let Some(turn) = self.bytebot_tasks[i].turn else {
+            return Err("this task kept no record of its changes".to_string());
+        };
+        if self.checkpoints.latest_write_turn() != Some(turn) {
+            return Err(
+                "Undo is only possible while this task's changes are the latest; \
+                 use /rewind to step back through later turns first."
+                    .to_string(),
+            );
+        }
+        let report = self.checkpoints.rewind(1);
+        let task = &mut self.bytebot_tasks[i];
+        task.state = crate::bytebot_tasks::TaskState::Cancelled;
+        task.note = Some("changes undone".to_string());
+        let task = task.clone();
+        self.bytebot_save(&task);
+        self.bytebot_log
+            .push(format!("undone: {} file(s) put back", report.files.len()));
+        self.live_stopped();
+        self.bytebot_start_next(tx);
+        Ok(report)
     }
 
     /// Start an autonomous ByteBot run (I2-04). This is the ordinary chat tool
@@ -18965,6 +19056,122 @@ Content-Length: 0
             .filter(|message| message.role == "system")
             .map(|message| message.content.clone())
             .collect()
+    }
+
+    /// BT-3 helper: run a real `write_file` through the gated executor under
+    /// checkpoint group `turn`, as a ByteBot run's own call would.
+    async fn write_in_turn(app: &App<'_>, root: &std::path::Path, turn: usize, content: &str) {
+        let mut ctx = app.approval_ctx();
+        ctx.turn = turn;
+        let call = xencode_providers_rs::ToolCall {
+            id: format!("w{turn}"),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({"path": "note.txt", "content": content}),
+        };
+        let out = crate::agent_tools::execute_tool_call_approved(
+            &app.task_runtime,
+            root,
+            &call,
+            &ctx,
+            None,
+        )
+        .await;
+        assert!(!out.starts_with("error"), "{out}");
+    }
+
+    fn review_app(dir: &std::path::Path) -> App<'static> {
+        let mut app = App::for_tests();
+        app.bytebot_store = Some(crate::bytebot_tasks::TaskStore::new(dir));
+        app.config.default_model = "llamacpp:none".into();
+        app.config.llama_cpp_url = "http://127.0.0.1:9".into();
+        app.config.agent_approval = "edit-allow".to_string();
+        app
+    }
+
+    /// BT-3: a task whose run changed files waits for review, and the queue
+    /// waits with it; accepting completes it and lets the next task start.
+    #[tokio::test]
+    async fn a_task_that_changed_files_waits_for_review() {
+        use crate::bytebot_tasks::TaskState;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let mut app = review_app(dir.path());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "write a note".into();
+        app.run_bytebot(tx.clone());
+        app.bytebot_command = "next job".into();
+        app.run_bytebot(tx.clone());
+        let turn = app.bytebot_tasks[0].turn.unwrap();
+        write_in_turn(&app, ws.path(), turn, "hello\n").await;
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsReview);
+        assert!(
+            app.bytebot_tasks[0]
+                .changed_files
+                .iter()
+                .any(|f| f.ends_with("note.txt")),
+            "{:?}",
+            app.bytebot_tasks[0].changed_files
+        );
+        assert_eq!(
+            app.bytebot_tasks[1].state,
+            TaskState::Pending,
+            "the queue waits for the review"
+        );
+        assert!(!app.bytebot_running);
+        app.bytebot_accept(tx);
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Completed);
+        assert_eq!(app.bytebot_tasks[1].state, TaskState::Running);
+    }
+
+    /// BT-3: undo puts the task's files back and cancels it.
+    #[tokio::test]
+    async fn undo_restores_the_files_and_cancels_the_task() {
+        use crate::bytebot_tasks::TaskState;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        std::fs::write(ws.path().join("note.txt"), "old\n").unwrap();
+        let mut app = review_app(dir.path());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "rewrite the note".into();
+        app.run_bytebot(tx.clone());
+        let turn = app.bytebot_tasks[0].turn.unwrap();
+        write_in_turn(&app, ws.path(), turn, "new\n").await;
+        app.bytebot_run_finished(tx.clone());
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsReview);
+        app.bytebot_undo(tx)
+            .expect("the task's changes are the latest");
+        assert_eq!(
+            std::fs::read_to_string(ws.path().join("note.txt")).unwrap(),
+            "old\n"
+        );
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Cancelled);
+        assert_eq!(app.bytebot_tasks[0].note.as_deref(), Some("changes undone"));
+    }
+
+    /// BT-3: undo refuses once a later turn has changed files, because
+    /// rewinding would undo that turn instead, and nothing on disk moves.
+    #[tokio::test]
+    async fn undo_refuses_when_a_later_turn_changed_files() {
+        use crate::bytebot_tasks::TaskState;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let mut app = review_app(dir.path());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "write a note".into();
+        app.run_bytebot(tx.clone());
+        let turn = app.bytebot_tasks[0].turn.unwrap();
+        write_in_turn(&app, ws.path(), turn, "from the task\n").await;
+        app.bytebot_run_finished(tx.clone());
+        let later = app.checkpoints.begin_turn();
+        write_in_turn(&app, ws.path(), later, "from a later chat turn\n").await;
+        let refused = app.bytebot_undo(tx).expect_err("a later turn wrote files");
+        assert!(refused.contains("latest"), "{refused}");
+        assert_eq!(
+            std::fs::read_to_string(ws.path().join("note.txt")).unwrap(),
+            "from a later chat turn\n"
+        );
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsReview);
     }
 
     /// BT-1: a pending task read from disk is never started on its own, even

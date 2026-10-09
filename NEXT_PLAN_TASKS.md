@@ -17515,7 +17515,11 @@ is **awaiting the owner's review**: nothing below is started.
   person to take over and type `/done`. Done 2026-10-09: offered to ByteBot runs only, handled
   before the approval check (it runs nothing), answered from the panel; Esc withdraws the
   question so a stop cannot hang inside the waiting tool call.
-- [ ] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).
+- [x] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).
+  Done 2026-10-09: the queue waits during a review; undo rewinds the task's own checkpoint group
+  and is refused unless that group is the newest with writes (`CheckpointStore::latest_write_turn`),
+  because two turns can write the same files. Known limit: during a review a new task cannot
+  begin with `a` or `u`.
 - [x] **BT-4 — slash commands in the ByteBot panel** run the same handler as chat. Done
   2026-10-09: `submit_message` is split, and its second half, `dispatch_prompt`, runs a line that
   has already left the composer; the panel calls it for every `/word` line except `/model`.

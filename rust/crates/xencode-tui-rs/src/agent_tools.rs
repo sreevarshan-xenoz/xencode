@@ -4661,6 +4661,13 @@ impl CheckpointStore {
             .unwrap_or_default()
     }
 
+    /// The newest turn that wrote any file: the group `rewind(1)` would undo.
+    /// A ByteBot task's undo (BT-3) checks this is its own turn, because two
+    /// turns can write the same files and a file list cannot tell them apart.
+    pub fn latest_write_turn(&self) -> Option<usize> {
+        self.lock().iter().rposition(|group| !group.is_empty())
+    }
+
     /// The files a `rewind(back)` would touch, without touching anything.
     /// `/rewind` asks git about these before restoring, so that a hand edit
     /// made after the agent's write is not silently overwritten.

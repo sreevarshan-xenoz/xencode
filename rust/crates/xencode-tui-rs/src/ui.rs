@@ -3297,6 +3297,36 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
             )));
             steps_lines.push(Line::from(""));
         }
+        // BT-3: the files a finished task changed, and the two keys.
+        if let Some(task) = app
+            .bytebot_tasks
+            .iter()
+            .find(|t| t.state == crate::bytebot_tasks::TaskState::NeedsReview)
+        {
+            steps_lines.push(Line::from(Span::styled(
+                format!(" Review {} changed file(s)", task.changed_files.len()),
+                Style::default()
+                    .fg(app.theme.warning)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            for file in task.changed_files.iter().take(8) {
+                steps_lines.push(Line::from(Span::styled(
+                    format!("   {file}"),
+                    Style::default().fg(app.theme.fg),
+                )));
+            }
+            if task.changed_files.len() > 8 {
+                steps_lines.push(Line::from(Span::styled(
+                    format!("   … and {} more", task.changed_files.len() - 8),
+                    Style::default().fg(app.theme.message_system),
+                )));
+            }
+            steps_lines.push(Line::from(Span::styled(
+                "   a accepts · u undoes (with the command box empty)",
+                Style::default().fg(app.theme.message_system),
+            )));
+            steps_lines.push(Line::from(""));
+        }
     }
     if !app.bytebot_steps.is_empty() || app.bytebot_running {
         steps_lines.push(Line::from(Span::styled(
