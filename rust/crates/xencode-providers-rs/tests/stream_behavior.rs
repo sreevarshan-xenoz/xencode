@@ -241,3 +241,158 @@ async fn clean_stream_delivers_tokens_in_order() {
     );
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
+
+/// QA-6: a server killed mid-answer can also close the connection cleanly,
+/// with no transport error at all. Before, that half answer came back as a
+/// whole one. Ollama's own end marker is `"done": true`; without it the answer
+/// was cut off and is reported as such, with the text already shown delivered
+/// once and no second attempt.
+#[tokio::test]
+async fn an_ollama_answer_that_ends_without_done_is_reported_cut_off() {
+    let (base_url, counter) = spawn_server(vec![PlanStep::ChunkedOk(vec![
+        ("Half".to_string(), false),
+        (" an answer".to_string(), false),
+    ])])
+    .await;
+    let manager = ProviderManager::new(OllamaClient::new(&base_url, 5), None, None, None, None);
+    let manager = manager.with_retry_config(fast_config());
+
+    let mut tokens: Vec<String> = Vec::new();
+    let result = manager
+        .generate_stream("test-model", &messages(), |t| tokens.push(t.to_string()))
+        .await;
+
+    let err = result.expect_err("a cut-off answer must not pass as complete");
+    assert!(
+        err.to_string()
+            .contains("closed the connection before finishing"),
+        "{err}"
+    );
+    assert_eq!(tokens, vec!["Half".to_string(), " an answer".to_string()]);
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+}
+
+/// One OpenAI-style SSE answer per connection, the body sent whole and the
+/// connection then closed cleanly — the shape of a server that stops early.
+async fn spawn_sse_server(body: String) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 16384];
+            let mut read = 0usize;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let n = sock.read(&mut buf[read..]).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    read += n;
+                    let text = String::from_utf8_lossy(&buf[..read]).to_string();
+                    if let Some(head_end) = text.find("\r\n\r\n") {
+                        let length = text[..head_end]
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if read >= head_end + 4 + length {
+                            break;
+                        }
+                    }
+                    if read == buf.len() {
+                        break;
+                    }
+                }
+            })
+            .await;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = sock.write_all(response.as_bytes()).await;
+            let _ = sock.shutdown().await;
+        }
+    });
+    format!("http://{addr}/v1")
+}
+
+fn sse_delta(text: &str) -> String {
+    format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{text}\"}}}}]}}\n\n")
+}
+
+#[tokio::test]
+async fn an_openai_style_answer_without_an_end_marker_is_reported_cut_off() {
+    let base = spawn_sse_server(format!("{}{}", sse_delta("Half"), sse_delta(" an answer"))).await;
+    let manager = ProviderManager::new(
+        OllamaClient::new("http://127.0.0.1:9", 5),
+        None,
+        None,
+        None,
+        None,
+    )
+    .with_remote(&base, None)
+    .with_retry_config(fast_config());
+    let mut tokens: Vec<String> = Vec::new();
+    let result = manager
+        .generate_stream_with_tools("remote:m", &messages(), &[], &[], None, |t| {
+            tokens.push(t.to_string())
+        })
+        .await;
+    let err = result.expect_err("a cut-off answer must not pass as complete");
+    assert!(
+        err.to_string()
+            .contains("closed the connection before finishing"),
+        "{err}"
+    );
+    assert_eq!(tokens.concat(), "Half an answer");
+}
+
+#[tokio::test]
+async fn an_openai_style_answer_with_its_end_marker_is_whole() {
+    let body = format!(
+        "{}{}data: [DONE]\n\n",
+        sse_delta("Whole"),
+        sse_delta(" answer")
+    );
+    let base = spawn_sse_server(body).await;
+    let manager = ProviderManager::new(
+        OllamaClient::new("http://127.0.0.1:9", 5),
+        None,
+        None,
+        None,
+        None,
+    )
+    .with_remote(&base, None)
+    .with_retry_config(fast_config());
+    let step = manager
+        .generate_stream_with_tools("remote:m", &messages(), &[], &[], None, |_| {})
+        .await
+        .expect("an answer that says it is done is complete");
+    assert_eq!(step.text, "Whole answer");
+
+    // `finish_reason` on the last chunk ends an answer just as well.
+    let body = format!(
+        "{}data: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\n",
+        sse_delta("Done")
+    );
+    let base = spawn_sse_server(body).await;
+    let manager = ProviderManager::new(
+        OllamaClient::new("http://127.0.0.1:9", 5),
+        None,
+        None,
+        None,
+        None,
+    )
+    .with_remote(&base, None)
+    .with_retry_config(fast_config());
+    let step = manager
+        .generate_stream_with_tools("remote:m", &messages(), &[], &[], None, |_| {})
+        .await
+        .expect("finish_reason ends the answer");
+    assert_eq!(step.text, "Done");
+}

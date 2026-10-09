@@ -1259,6 +1259,9 @@ impl ProviderManager {
             });
         }
         if !done {
+            return Err(compatible::cut_off("Ollama"));
+        }
+        if !done {
             lines.finish(&mut |line| {
                 if done {
                     return;
@@ -1333,6 +1336,9 @@ impl ProviderManager {
                 }
                 done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
             });
+        }
+        if !done {
+            return Err(compatible::cut_off("Ollama"));
         }
         if !done {
             lines.finish(&mut |line| {
@@ -1610,13 +1616,14 @@ impl ProviderManager {
         let mut full_response = String::new();
         let mut usage = compatible::UsageCounts::default();
         let mut acc = tools::ToolCallAccumulator::default();
+        let mut ended = false;
         let mut lines = frames::FrameLines::default();
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result
                 .map_err(|e| ProviderError::Network(format!("llama.cpp stream error: {e}")))?;
             lines.feed(&chunk, &mut |line| {
-                compatible::ingest_line(
+                ended |= compatible::ingest_line(
                     line,
                     &mut full_response,
                     &mut usage,
@@ -1626,7 +1633,7 @@ impl ProviderManager {
             });
         }
         lines.finish(&mut |line| {
-            compatible::ingest_line(
+            ended |= compatible::ingest_line(
                 line,
                 &mut full_response,
                 &mut usage,
@@ -1634,6 +1641,9 @@ impl ProviderManager {
                 &mut callback,
             )
         });
+        if !ended {
+            return Err(compatible::cut_off("llama.cpp"));
+        }
 
         self.maybe_record_llamacpp_timings(usage, start.elapsed().as_secs_f64());
 

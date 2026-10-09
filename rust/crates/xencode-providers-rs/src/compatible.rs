@@ -245,6 +245,7 @@ where
     let mut text = String::new();
     let mut usage = UsageCounts::default();
     let mut acc = ToolCallAccumulator::default();
+    let mut ended = false;
     let mut lines = crate::frames::FrameLines::default();
     // Kept only for a recording: the bytes as they arrived, before the frame
     // reader had anything to say about where a line begins.
@@ -258,10 +259,15 @@ where
             raw.extend_from_slice(&chunk);
         }
         lines.feed(&chunk, &mut |line| {
-            ingest_line(line, &mut text, &mut usage, &mut acc, &mut callback)
+            ended |= ingest_line(line, &mut text, &mut usage, &mut acc, &mut callback)
         });
     }
-    lines.finish(&mut |line| ingest_line(line, &mut text, &mut usage, &mut acc, &mut callback));
+    lines.finish(&mut |line| {
+        ended |= ingest_line(line, &mut text, &mut usage, &mut acc, &mut callback)
+    });
+    if !ended {
+        return Err(cut_off(label));
+    }
 
     // A body that is not text is not recorded at all: half of it written down
     // would come back later as an answer the model never gave.
@@ -289,24 +295,46 @@ where
     })
 }
 
-/// One complete line of an OpenAI-style SSE body.
+/// The error for an answer whose stream closed before the server said it was
+/// done. Without it, a server killed mid-answer handed back half an answer as
+/// if it were the whole one.
+pub(crate) fn cut_off(label: &str) -> ProviderError {
+    ProviderError::Network(format!(
+        "{label} closed the connection before finishing its answer"
+    ))
+}
+
+/// One complete line of an OpenAI-style SSE body. Returns true when the line
+/// says the answer is over: the `data: [DONE]` marker, or a choice carrying a
+/// `finish_reason`. A stream that closes without either was cut off (QA-6).
 pub(crate) fn ingest_line<F: FnMut(&str)>(
     line: &str,
     text: &mut String,
     usage: &mut UsageCounts,
     acc: &mut ToolCallAccumulator,
     callback: &mut F,
-) {
+) -> bool {
     let line = line.trim();
-    if line.is_empty() || line == "data: [DONE]" {
-        return;
+    if line == "data: [DONE]" {
+        return true;
+    }
+    if line.is_empty() {
+        return false;
     }
     let Some(data) = line.strip_prefix("data: ") else {
-        return;
+        return false;
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
-        return;
+        return false;
     };
+    let finished = json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .is_some_and(|choices| {
+            choices
+                .iter()
+                .any(|c| c.get("finish_reason").is_some_and(|r| !r.is_null()))
+        });
     // The final chunk carries usage (with an empty choices array). A server only
     // sends that chunk when asked — see `ask_for_usage`.
     if let Some(counts) = json.get("usage").and_then(|u| u.as_object()) {
@@ -325,6 +353,7 @@ pub(crate) fn ingest_line<F: FnMut(&str)>(
         }
     }
     tools::ingest_oai_chunk(&json, text, acc, callback);
+    finished
 }
 
 /// Ask an OpenAI-style server to say what the request cost.

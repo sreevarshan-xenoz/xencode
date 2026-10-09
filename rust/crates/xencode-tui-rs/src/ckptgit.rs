@@ -514,6 +514,37 @@ mod tests {
         assert_eq!(author.trim(), "xencode|xencode@localhost");
     }
 
+    /// QA-6: a repository whose `.git/index` is gone (deleted, or lost to a
+    /// crash) still checkpoints, because the checkpoint builds its tree in an
+    /// index of its own, and the user's missing index is not recreated by it.
+    #[test]
+    fn a_missing_git_index_does_not_stop_a_checkpoint() {
+        let repo = Repo::new(true);
+        std::fs::remove_file(repo.root.join(".git").join("index")).unwrap();
+        std::fs::write(
+            repo.at("a.txt"),
+            b"written after the index went
+",
+        )
+        .unwrap();
+
+        let sha = write_turn(&repo.root, 0, &[repo.at("a.txt")])
+            .expect("no error")
+            .expect("a turn that changed a file makes a commit");
+        assert!(!sha.is_empty());
+        assert_eq!(
+            repo.ckpt_file("a.txt").as_deref(),
+            Some(
+                "written after the index went
+"
+            )
+        );
+        assert!(
+            !repo.root.join(".git").join("index").exists(),
+            "the checkpoint wrote into the user's index"
+        );
+    }
+
     #[test]
     fn turns_chain_so_the_branch_is_a_history_of_writes() {
         let repo = Repo::new(true);

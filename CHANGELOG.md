@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `QA-6`: a half answer from a server that stopped is no longer passed off as whole, and a dying MCP server's last words are kept
+
+- When a model server closed the connection in the middle of an answer without an
+  error, the half answer was returned as if it were complete. An Ollama answer now has
+  to end with `"done": true`, and an OpenAI-style or llama.cpp answer with `[DONE]` or a
+  `finish_reason`; otherwise it fails as "closed the connection before finishing its
+  answer", and the chat says so.
+- When an MCP server died in the middle of a tool call, the call failed at once but the
+  error left out what the server wrote to stderr on its way out. It is now included, as
+  it already was for a server that failed during the handshake.
+- A recorded session whose last line was cut off mid-write is still refused for
+  replay, and now says it is incomplete instead of calling the file unreadable.
+
 ### Fixed — `SM-2`: a call refused because nobody is there to approve it no longer tells the model to ask
 
 When a call needed approval and no person was present to give it — an evaluation run, or

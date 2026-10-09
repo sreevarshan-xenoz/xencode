@@ -6424,6 +6424,26 @@ context.
   in `Cargo.lock` today) plus six real kills: SIGKILL llama.cpp mid-turn, `rm
   .git/index`, read-only dir, MCP child dying mid-call, torn JSONL line, cache
   write failure.
+  *(Done 2026-10-09, with real faults instead of failpoints: the `fail` crate injects an
+  error into code that did not fail, which is the kind of stand-in the repository's
+  no-mocks rule forbids, so each of the six is caused for real. Two of them found
+  defects, now fixed. **A server that closes the connection cleanly mid-answer** — what a
+  killed `llama-server` behind a proxy, or a crashed Ollama runner, looks like — used to
+  hand back the half answer as a whole one, because no reader required the end marker;
+  now Ollama's `"done": true` and the OpenAI-style `[DONE]` or `finish_reason` are
+  required, and a stream without one fails as "closed the connection before finishing
+  its answer" (`stream_behavior.rs`, against a real local server, Ollama and OpenAI-style).
+  **An MCP server that dies mid-call** failed the call at once but without the words it
+  wrote to stderr on the way out — they were only ever attached during the handshake;
+  now every closed connection carries them (`server_dies_mid_call.rs`, a real `sh`
+  child, five runs out of five). The other four already behaved and are now proven: a
+  deleted `.git/index` does not stop a checkpoint and is not recreated by it
+  (`ckptgit.rs`); a read-only file is refused by `edit_file` and `write_file` with the
+  reason and left whole (`agent_tools.rs`); a cache directory that cannot be written to
+  still answers from memory (`xencode-cache-rs`); a recording cut off mid-line is
+  refused and now says it was cut off rather than "not a readable recording"
+  (`session.rs`). Torn tails in `turns.jsonl`, `runs.jsonl` and `task_eval.jsonl` were
+  already read tolerantly by `read_jsonl_tolerant`, with its own tests.)*
 
 ### Q-8 Knowledge lifecycle, memory and learning (QK + QM)
 
