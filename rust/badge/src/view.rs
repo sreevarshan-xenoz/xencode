@@ -230,7 +230,15 @@ impl Render for Badge {
             // there); elsewhere start_window_move does it.
             .window_control_area(WindowControlArea::Drag)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.quit());
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _, window, cx| {
+                    // Save a position the person just dragged to: the regular
+                    // save waits for the next one-second refresh.
+                    this.remember_position(window);
+                    cx.quit();
+                }),
+            );
         if shown == Shown::Working {
             // Eight dots around the edge, one lit, stepping round: a turning ring.
             let lit = self.step % 8;
