@@ -105,6 +105,12 @@ Two fixes have direct evidence and are next: read a `<tool_call>{…}` block wri
 answer as the call it is, and word a refused command so the model is told to make the edit
 rather than to ask for permission.
 
+**Fifth change, 2026-10-09, not yet measured:** a `<tool_call>{…}</tool_call>` block written
+into an answer is now read as the call it is, when the server returned no structured call
+and the block names a tool that was offered (`xencode-providers-rs` `tools.rs`
+`recover_text_tool_calls`, with a TUI test that runs the written call end to end). The
+effect on the pass rate needs the GPU run above and is not claimed here.
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,

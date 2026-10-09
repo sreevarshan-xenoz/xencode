@@ -1212,9 +1212,133 @@ pub fn skill_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// Read tool calls a model wrote into its answer text, as
+/// `<tool_call>{"name": …, "arguments": {…}}</tool_call>` (the Hermes/Qwen
+/// form), when the server returned no structured call. Only a block naming a
+/// tool that was actually offered is taken, so prose that merely mentions the
+/// syntax runs nothing. Taken blocks are removed from the text; any other
+/// block is left as written, and a step that already has structured calls is
+/// not touched.
+pub fn recover_text_tool_calls(step: &mut AgentStep, offered: &[ToolDefinition]) {
+    const OPEN: &str = "<tool_call>";
+    const CLOSE: &str = "</tool_call>";
+    if !step.tool_calls.is_empty() || !step.text.contains(OPEN) {
+        return;
+    }
+    let mut kept = String::new();
+    let mut found = Vec::new();
+    let mut rest = step.text.as_str();
+    while let Some(start) = rest.find(OPEN) {
+        let after = &rest[start + OPEN.len()..];
+        let (body, block_len) = match after.find(CLOSE) {
+            Some(end) => (&after[..end], OPEN.len() + end + CLOSE.len()),
+            None => (after, OPEN.len() + after.len()),
+        };
+        kept.push_str(&rest[..start]);
+        match parse_text_call(body, offered) {
+            Some((name, arguments)) => found.push(ToolCall {
+                id: format!("call_text_{}", found.len()),
+                name,
+                arguments,
+            }),
+            None => kept.push_str(&rest[start..start + block_len]),
+        }
+        rest = &rest[start + block_len..];
+    }
+    kept.push_str(rest);
+    if !found.is_empty() {
+        step.text = kept.trim().to_string();
+        step.tool_calls = found;
+    }
+}
+
+/// One `<tool_call>` body: a JSON object with an offered tool's `name` and
+/// its `arguments` (or `parameters`, which some templates use).
+fn parse_text_call(body: &str, offered: &[ToolDefinition]) -> Option<(String, serde_json::Value)> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let name = value.get("name")?.as_str()?.to_string();
+    if !offered.iter().any(|t| t.name == name) {
+        return None;
+    }
+    let arguments = value
+        .get("arguments")
+        .or_else(|| value.get("parameters"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    Some((name, arguments))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn offered(names: &[&str]) -> Vec<ToolDefinition> {
+        names
+            .iter()
+            .map(|n| ToolDefinition {
+                name: n.to_string(),
+                description: String::new(),
+                parameters: serde_json::json!({"type": "object"}),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tool_call_written_as_text_becomes_the_call() {
+        // The shape recorded in the 2026-10-08 evaluation run.
+        let mut step = AgentStep {
+            text: "I'll fix it.\n<tool_call>\n{\"name\": \"edit_file\", \"arguments\": \
+                   {\"path\": \"src/lib.rs\", \"old\": \"a\", \"new\": \"b\"}}\n</tool_call>"
+                .to_string(),
+            tool_calls: Vec::new(),
+        };
+        recover_text_tool_calls(&mut step, &offered(&["edit_file", "read_file"]));
+        assert_eq!(step.tool_calls.len(), 1);
+        assert_eq!(step.tool_calls[0].name, "edit_file");
+        assert_eq!(step.tool_calls[0].arguments["path"], "src/lib.rs");
+        assert_eq!(step.text, "I'll fix it.");
+    }
+
+    #[test]
+    fn only_offered_tools_and_well_formed_blocks_are_taken() {
+        let text = "<tool_call>{\"name\": \"rm_rf\", \"arguments\": {}}</tool_call> and \
+                    <tool_call>not json</tool_call>";
+        let mut step = AgentStep {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+        };
+        recover_text_tool_calls(&mut step, &offered(&["edit_file"]));
+        assert!(step.tool_calls.is_empty());
+        assert_eq!(step.text, text, "nothing taken, nothing changed");
+
+        // Two calls, one unclosed at the end of the answer.
+        let mut step = AgentStep {
+            text:
+                "<tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"a\"}}</tool_call>\
+                   <tool_call>{\"name\": \"read_file\", \"parameters\": {\"path\": \"b\"}}"
+                    .to_string(),
+            tool_calls: Vec::new(),
+        };
+        recover_text_tool_calls(&mut step, &offered(&["read_file"]));
+        assert_eq!(step.tool_calls.len(), 2);
+        assert_eq!(step.tool_calls[1].arguments["path"], "b");
+        assert_ne!(step.tool_calls[0].id, step.tool_calls[1].id);
+    }
+
+    #[test]
+    fn structured_calls_are_never_second_guessed() {
+        let mut step = AgentStep {
+            text: "<tool_call>{\"name\": \"edit_file\", \"arguments\": {}}</tool_call>".to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call_0".into(),
+                name: "read_file".into(),
+                arguments: serde_json::json!({}),
+            }],
+        };
+        recover_text_tool_calls(&mut step, &offered(&["edit_file", "read_file"]));
+        assert_eq!(step.tool_calls.len(), 1);
+        assert_eq!(step.tool_calls[0].name, "read_file");
+    }
 
     #[test]
     fn run_command_takes_a_required_command_and_optional_net_grant() {

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `SM-2`: a tool call a model writes into its answer is carried out
+
+Small models sometimes write a tool call into their answer as text —
+`<tool_call>{"name": "edit_file", "arguments": {…}}</tool_call>` — instead of returning
+it as a tool call, and the edit they meant was dropped with the turn. When the server
+returns no structured call, such a block is now read as the call it is, as long as it
+names a tool that was offered. Blocks naming anything else, or that are not valid JSON,
+are left in the answer and run nothing.
+
 ### Changed — `TX-10`: each TUI panel goes by one name
 
 Three panels were called different things in different places: the agent panel was
