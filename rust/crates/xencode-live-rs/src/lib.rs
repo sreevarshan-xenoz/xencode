@@ -222,6 +222,34 @@ pub fn spawn_detached(exe: &Path, args: &[&str]) -> std::io::Result<u32> {
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    start_detached(cmd)
+}
+
+/// As [`spawn_detached`], but running in `cwd` with its standard output and
+/// standard error appended to `log`, which is created if missing and never
+/// cut short: a resumed run adds to the log of the run it continues. A
+/// detached `xencode run` on Windows starts its worker this way (EN-4).
+pub fn spawn_detached_logged(
+    exe: &Path,
+    args: &[&str],
+    cwd: &Path,
+    log: &Path,
+) -> std::io::Result<u32> {
+    let out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)?;
+    let err = out.try_clone()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(out)
+        .stderr(err);
+    start_detached(cmd)
+}
+
+fn start_detached(mut cmd: std::process::Command) -> std::io::Result<u32> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -341,6 +369,48 @@ mod tests {
         assert!(
             dir.path().join("broken.json").exists(),
             "a file that cannot be read is not judged dead"
+        );
+    }
+
+    #[test]
+    fn a_detached_process_runs_in_its_folder_and_adds_to_its_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("with space");
+        std::fs::create_dir(&folder).unwrap();
+        let log = dir.path().join("run.log");
+        std::fs::write(
+            &log, "first
+",
+        )
+        .unwrap();
+        // Each prints the folder it runs in.
+        let (exe, args) = if cfg!(windows) {
+            ("cmd", vec!["/c", "cd"])
+        } else {
+            ("sh", vec!["-c", "pwd"])
+        };
+        let exe = xencode_core_rs::sys::which(exe).expect("a shell on PATH");
+        let pid = spawn_detached_logged(&exe, &args, &folder, &log).unwrap();
+        assert!(pid > 0);
+        let start = std::time::Instant::now();
+        let lines = loop {
+            let text = std::fs::read_to_string(&log).unwrap();
+            let lines: Vec<String> = text.lines().map(str::to_string).collect();
+            if lines.len() >= 2 || start.elapsed() > std::time::Duration::from_secs(10) {
+                break lines;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("first"),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .get(1)
+                .is_some_and(|l| l.trim_end().ends_with("with space")),
+            "{lines:?}"
         );
     }
 
