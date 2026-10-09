@@ -56,6 +56,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         }
         return done();
     }
+    // Esc stops a running turn before it does anything else (UX-14). The
+    // screen has promised this for a while ("Esc to stop it first"); the
+    // text already streamed stays, and the loop ends at its next boundary.
+    // The second Esc, with the stop already asked for, is the ordinary key.
+    if key.code == KeyCode::Esc && key.modifiers.is_empty() && stop_running_turn(app) {
+        return done();
+    }
     // Only a second bare `q` confirms a quit; any other key withdraws it.
     if !(key.code == KeyCode::Char('q') && key.modifiers.is_empty()) {
         app.quit_armed = false;
@@ -89,6 +96,32 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
 
 fn quit() -> KeyFlow {
     KeyFlow::Quit
+}
+
+/// Ask every running agent loop to stop: the chat turn and the ByteBot task
+/// each carry a flag the round loop races against. Returns `true` when at
+/// least one flag was newly set, so the caller can swallow the key; a flag
+/// already set means the stop was asked for and the key means what it
+/// usually does.
+fn stop_running_turn(app: &mut App) -> bool {
+    let mut stopped = false;
+    if app.is_generating {
+        if let Some(stop) = app.turn_stop.as_ref() {
+            stopped |= !stop.swap(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    if app.bytebot_running {
+        if let Some(stop) = app.bytebot_stop.as_ref() {
+            stopped |= !stop.swap(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    if stopped {
+        app.push_toast(
+            crate::toast::ToastKind::Info,
+            "Stopping the turn — what it already said stays".to_string(),
+        );
+    }
+    stopped
 }
 
 fn done() -> KeyFlow {
@@ -358,16 +391,12 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         }
         KeyCode::Char('c') => {
             // A running turn is cancelled first; only an idle session quits.
-            if app.is_generating {
-                if let Some(stop) = app.turn_stop.as_ref() {
-                    if !stop.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                        app.push_toast(
-                            crate::toast::ToastKind::Info,
-                            "Stopping the turn — Ctrl+C again quits".to_string(),
-                        );
-                        return Some(done());
-                    }
-                }
+            if stop_running_turn(app) {
+                app.push_toast(
+                    crate::toast::ToastKind::Info,
+                    "Ctrl+C again quits".to_string(),
+                );
+                return Some(done());
             }
             return Some(quit());
         }
@@ -2677,6 +2706,47 @@ mod tests {
 
         let mut idle = app_with(FocusArea::ChatInput);
         assert_eq!(ctrl_c(&mut idle), KeyFlow::Quit);
+    }
+
+    #[test]
+    fn esc_stops_a_running_turn_before_it_does_anything_else() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.input_mode = InputMode::Editing;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        app.turn_stop = Some(stop.clone());
+        app.is_generating = true;
+        assert_eq!(press(&mut app, KeyCode::Esc), KeyFlow::Continue);
+        assert!(
+            stop.load(std::sync::atomic::Ordering::Relaxed),
+            "Esc did not set the stop flag"
+        );
+        assert_eq!(
+            app.input_mode,
+            InputMode::Editing,
+            "the first Esc only stops the turn"
+        );
+        // A second Esc, with the stop already asked for, does what it always did.
+        assert_eq!(press(&mut app, KeyCode::Esc), KeyFlow::Continue);
+        assert_eq!(app.input_mode, InputMode::Normal);
+
+        // A ByteBot run is stopped the same way.
+        let mut app = app_with(FocusArea::ByteBotPanel);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        app.bytebot_stop = Some(stop.clone());
+        app.bytebot_running = true;
+        assert_eq!(press(&mut app, KeyCode::Esc), KeyFlow::Continue);
+        assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(
+            app.focus,
+            FocusArea::ByteBotPanel,
+            "the panel stays open while it stops"
+        );
+
+        // Idle, Esc is the ordinary key.
+        let mut idle = app_with(FocusArea::ChatInput);
+        idle.input_mode = InputMode::Editing;
+        press(&mut idle, KeyCode::Esc);
+        assert_eq!(idle.input_mode, InputMode::Normal);
     }
 
     #[test]

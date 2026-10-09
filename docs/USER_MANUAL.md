@@ -195,7 +195,7 @@ Panel-independent (Normal mode):
 |-----|--------|
 | `?` / `F1` | Keybinding help overlay (lists the focused panel's keys); `F1` and `/help` also work while typing |
 | `Tab` | Cycle explorer → editor → chat |
-| `Esc` | Close popup / leave edit mode |
+| `Esc` | Stop the running turn (what it already said stays) · close popup / leave edit mode |
 | `i` or `/` | Edit the chat input (`/` types the slash, so `/init` works straight away). A session with nothing said yet starts here already |
 | `m` | Model selector (`r` refresh, `l`/`u` llama.cpp load/unload) |
 | `s` | Settings (except in panels that bind `s` themselves: Security Auditor sort, Custom Models save) |
