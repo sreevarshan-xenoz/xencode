@@ -1310,6 +1310,7 @@ fn setting_display(app: &App, idx: usize) -> String {
                 "Cloud Models" => app.config.allow_cloud_models,
                 "External Workers" => app.config.allow_external_workers,
                 "Mouse Capture" => app.config.mouse_capture,
+                "Floating Badge" => app.config.badge_autostart,
                 _ => false,
             };
             if row.label == "Cloud Models" {

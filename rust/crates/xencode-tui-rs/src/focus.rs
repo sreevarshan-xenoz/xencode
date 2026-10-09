@@ -344,6 +344,11 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Toggle,
     },
     SettingRow {
+        label: "Floating Badge",
+        section: "Display",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
         label: "Disclosure Level",
         section: "Display",
         kind: SettingKind::Stepped {

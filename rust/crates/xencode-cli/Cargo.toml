@@ -13,6 +13,7 @@ path = "src/main.rs"
 xencode-agents-rs = { path = "../xencode-agents-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
+xencode-live-rs = { path = "../xencode-live-rs" }
 xencode-cache-rs = { path = "../xencode-cache-rs" }
 xencode-models-rs = { path = "../xencode-models-rs" }
 xencode-memory-rs = { path = "../xencode-memory-rs" }

@@ -166,6 +166,44 @@ pub fn clip_headline(text: &str) -> String {
     out
 }
 
+/// The badge program's file name on this platform.
+pub fn badge_exe_name() -> String {
+    format!("xencode-badge{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// Where the badge program is: next to `beside` (the folder `xencode`
+/// itself runs from) first, then on `PATH`.
+pub fn find_badge(beside: Option<&Path>) -> Option<PathBuf> {
+    if let Some(dir) = beside {
+        let candidate = dir.join(badge_exe_name());
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    xencode_core_rs::sys::which("xencode-badge")
+}
+
+/// Start the badge so it outlives this process and owns no console window.
+pub fn spawn_badge(exe: &Path) -> std::io::Result<()> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn().map(|_| ())
+}
+
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -271,6 +309,23 @@ mod tests {
             dir.path().join("broken.json").exists(),
             "a file that cannot be read is not judged dead"
         );
+    }
+
+    #[test]
+    fn the_badge_next_to_xencode_is_found_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join(badge_exe_name());
+        std::fs::write(&exe, b"").unwrap();
+        assert_eq!(find_badge(Some(dir.path())), Some(exe));
+    }
+
+    #[test]
+    fn an_empty_folder_does_not_produce_a_badge_from_it() {
+        let dir = tempfile::tempdir().unwrap();
+        // PATH may hold a real badge on a developer machine; only the folder
+        // is asserted.
+        let found = find_badge(Some(dir.path()));
+        assert!(found.is_none_or(|p| !p.starts_with(dir.path())));
     }
 
     #[test]

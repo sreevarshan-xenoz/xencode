@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `DK-1`, `DK-2`: live session status and the `xencode badge` command
+
+Every running terminal session now keeps a small status file for the floating
+badge: idle, working, needs you, finished or failed, with a one-line headline
+that passes through secret redaction first. `xencode badge` starts the badge
+program, detached from the terminal, and Settings → `Floating Badge` starts it
+with the terminal app. The badge program itself is built separately.
+
 ### Fixed — `PL-2`: Windows bugs found while fixing the Windows test failures
 
 - **Reading a dependency's docs picked a readme name the crate does not

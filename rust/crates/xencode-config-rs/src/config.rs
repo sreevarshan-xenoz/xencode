@@ -694,6 +694,11 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub allow_external_workers: bool,
 
+    /// Start the floating badge when the terminal app starts (DK-2). Off by
+    /// default: the badge is a separate program that may not be installed.
+    #[serde(default)]
+    pub badge_autostart: bool,
+
     /// Which search engine the agent's `web_search` tool is allowed to ask, by its
     /// exact name — `none`, `wikipedia`, `searxng`, `brave` or `tavily`.
     ///
@@ -1092,6 +1097,7 @@ impl Default for XencodeConfig {
             price_lookup: false,
             allow_web_fetch: false,
             allow_external_workers: false,
+            badge_autostart: false,
             search_provider: default_search_provider(),
             search_searxng_url: String::new(),
             api_keys: ApiKeys::default(),

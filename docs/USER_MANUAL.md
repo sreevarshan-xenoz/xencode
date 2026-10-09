@@ -345,6 +345,7 @@ Display settings (Settings panel rows, same keys as `xencode config set`):
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
 | `Mouse Capture` / `mouse_capture` | on | xencode reads the wheel, pane clicks and divider drags; off hands the mouse back to the terminal, which is how a terminal's own drag-select comes back (see the note above the chat table) |
+| `Floating Badge` / `badge_autostart` | off | on starts the floating badge with the terminal app; if the `xencode-badge` program is not found next to `xencode` or on `PATH`, a warning says so and the session carries on |
 | `Agent Approval` / `agent_approval` | `ask` | how the chat agent may use its tools: `ask` prompts before mutating tools, `edit-allow` auto-approves file edits but still prompts for shell, `all-allow` auto-approves everything inside the workspace (paths outside it, `.git/` and the config dir are always refused) |
 | `Command Timeout` / `agent_command_timeout` | 30 s | how long the agent's `run_command` may run before it is killed; the panel steps 5–300 s, `config set` accepts 1–600 |
 

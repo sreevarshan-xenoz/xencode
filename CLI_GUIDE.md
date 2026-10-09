@@ -2417,6 +2417,20 @@ reports every kind as pinned to it.
 A project's own files do not move: `.xencode/` inside the workspace holds the
 retrieval index, the recorded sessions and `cache/metrics.jsonl`.
 
+### `xencode badge`
+Start the floating badge: a small separate program, `xencode-badge`, that shows
+what every running xencode session is doing and when one needs you. It is
+started detached, so closing this terminal leaves it running. `xencode` looks
+for it next to its own executable first, then on `PATH`; when it is in neither,
+the command fails with:
+
+```
+xencode-badge was not found next to xencode or on PATH. Build it with: cargo build --release --manifest-path rust/badge/Cargo.toml
+```
+
+Settings → `Floating Badge` (`badge_autostart`) starts it with the terminal app
+instead.
+
 ### `xencode paths [--format text|json]`
 Print where each kind of file is read from, and name the ones that are still in
 `~/.xencode`.
@@ -2682,6 +2696,7 @@ in it was unchanged by the session that opened on it.
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
 | `mouse_capture` | bool | whether xencode asks the terminal for the mouse at all: on (default) reads the wheel, pane clicks and divider drags; off hands them back, which is how a terminal's own drag-select of text comes to work again. Takes effect mid-session from the TUI's `Mouse Capture` row, and next start from here |
+| `badge_autostart` | bool | start the floating badge (`xencode badge`) whenever the terminal app starts; off by default. Settings → `Floating Badge` flips it |
 | `agent_approval` | string | agent tool-approval mode: `ask` (edits and shell prompt, reads free), `edit-allow` (edits free, shell prompts), `all-allow` (all local tools free, but a stranger's MCP server and the network still prompt), `plan` (read-only **and enforced**: an edit, shell call or external tool is denied, not merely prompted, so a plan turn cannot write even on a stale "always allow" grant — a grant only replaces a prompt, never a denial; and in this mode the write and shell tools are not offered to the model at all, only the read-only ones), or `autonomous` (reads, edits and shell run free with no human, but anything reaching an external MCP server or the network is denied rather than asked, because there is nobody to answer a prompt; this is what separates it from `all-allow`, which still lets those two prompt). Unknown → `ask`. Once the session has touched secrets (a key file read, an env dump, secret-shaped output), every later shell call asks in every mode — including past an `all-allow` setting or a session grant given before the secrets were read. A one-shot approval at the prompt still runs the call; headless, the prompt's absence denies it as before. All five are cycled live in the TUI's `Agent Approval` row. |
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
 | `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |

@@ -1295,6 +1295,7 @@ fn settings_toggle(app: &mut App, label: &str) -> bool {
         "Cloud Models" => &mut app.config.allow_cloud_models,
         "External Workers" => &mut app.config.allow_external_workers,
         "Mouse Capture" => &mut app.config.mouse_capture,
+        "Floating Badge" => &mut app.config.badge_autostart,
         _ => return false,
     };
     *flag = !*flag;
@@ -3382,6 +3383,16 @@ mod tests {
     }
 
     #[test]
+    fn the_floating_badge_row_turns_autostart_on_and_off() {
+        let mut app = app_with(FocusArea::Settings);
+        assert!(!app.config.badge_autostart, "off by default");
+        assert!(super::settings_toggle(&mut app, "Floating Badge"));
+        assert!(app.config.badge_autostart);
+        assert!(super::settings_toggle(&mut app, "Floating Badge"));
+        assert!(!app.config.badge_autostart);
+    }
+
+    #[test]
     fn settings_table_shape_is_stable() {
         use crate::focus::{SettingKind, SETTINGS_ITEMS};
         assert_eq!(SETTINGS_ITEMS.first().unwrap().label, "Theme");
@@ -3402,6 +3413,7 @@ mod tests {
                 "Show Scrollbars",
                 "Line Numbers",
                 "Mouse Capture",
+                "Floating Badge",
                 "Disclosure Level",
             ]
         );
