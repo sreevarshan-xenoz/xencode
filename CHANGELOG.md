@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `SM-2`: a claimed edit that never happened is answered once
+
+When a turn changed no file but the model's answer says it did ("I have fixed the bug"),
+the turn no longer ends there. The model is told, once per turn, that no file was
+changed, and is asked either to make the edit or to say plainly that it changed
+nothing. The chat shows a line when this happens.
+
 ### Changed — `SM-2`: updating the plan does not use up a turn's tool rounds
 
 A turn has a fixed number of tool rounds. A step whose only calls are `update_plan` no
