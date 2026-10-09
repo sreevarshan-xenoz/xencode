@@ -65,14 +65,5 @@ fn main() {
 /// Hold `<live dir>/badge.lock` for the life of the process. `None` when
 /// another badge holds it.
 fn take_lock() -> Option<std::fs::File> {
-    let dir = xencode_live_rs::live_dir().ok()?;
-    std::fs::create_dir_all(&dir).ok()?;
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(dir.join("badge.lock"))
-        .ok()?;
-    file.try_lock().ok()?;
-    Some(file)
+    xencode_live_rs::take_badge_lock(&xencode_live_rs::live_dir().ok()?)
 }
