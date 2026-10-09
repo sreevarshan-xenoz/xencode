@@ -168,7 +168,7 @@ one of them is a reason a new user leaves in the first five minutes. Quick wins 
 | **TX-7** ✅ | At 80 columns the footer's `?:help` is cut off behind the status block; the welcome text never mentions `?`, `/` or `Ctrl+F` (`ui.rs:482`, `ui.rs:785`) | `?:help` first; the empty screen shows provider status and "? keys · / commands · Ctrl+F all panels" |
 | **TX-8** ✅ | No `NO_COLOR` handling anywhere (verified); focus shown by border colour only | honour `NO_COLOR`; mark the focused pane in text |
 | **TX-9** ✅ | Global Ctrl chords fire while typing (Ctrl+A/E/K/U/W open panels or cycle layout; Ctrl+C quits with no way to cancel a running turn) | pass readline keys to the composer while editing; Esc/Ctrl+C cancel the turn first, quit only when idle |
-| **TX-10** ✅ (the names; the lower default level waits on `AG-3`/`AG-4`) | 27 destinations at the default disclosure level 4, and one panel under several names ("ByteBot"/"Agent", "Advice"/"Insights & Advice", "Impact"/"Blast Radius") | one name per destination from `DESTINATIONS`; with `AG-3`/`AG-4`, a lower default level and a palette |
+| **TX-10** ✅ (the names; the lower default level and the palette shipped 2026-10-09 as `AG-4` and `AG-3`) | 27 destinations at the default disclosure level 4, and one panel under several names ("ByteBot"/"Agent", "Advice"/"Insights & Advice", "Impact"/"Blast Radius") | one name per destination from `DESTINATIONS`; with `AG-3`/`AG-4`, a lower default level and a palette |
 
 **Parked until step 3's gate is met:** new items in W9, W12 and W14 (the ecology waves).
 They add surface; the measured problem is that the core loop does not land an edit.
@@ -17006,6 +17006,17 @@ are not re-numbered here.
   fresh config directory lands on a Home that a first-time user can describe, `/level` still
   raises every destination back into view, and the count of what is on screen at first start is
   printed before and after the change from a real run — not asserted from the enum.
+  - [x] **Shipped 2026-10-09, after `AG-3`, except the "describe it" half.** The default is
+    now 2 (Workflow), not 1: level 1 leaves out git commit and code review, which a first coding
+    session reaches for, and 2 is still one level, inside the two-level ceiling quoted above. The
+    counts were read off the screen of `App::new()` started against an empty settings directory
+    (`tests/fresh_start_level.rs`, the same start path `xencode tui` takes), printed before and
+    after: level 4 → 2; Ctrl+F navigator 26 panels with 22 visible at 120x40 → 10, all visible;
+    first-screen shortcuts 5 → 4 (ByteBot left). `/level 4` brings all 26 back and is saved to the
+    settings file, checked in the same test. The welcome line said "Ctrl+F all panels", which a
+    lower level made false; it now says "Ctrl+X find anything". The depth trap is not closed:
+    workspaces (`AG-1`/`AG-2`) do not exist yet, so there is only this one axis today. **Not
+    done:** whether a first-time user can describe the screen needs a person, so it stays open.
 
 - **AG-5 — change what a slot shows, not how many slots there are.** *Effort: L.* The directive
   wants Work to show diagnostics while debugging and review while reviewing. The evidence says do

@@ -390,7 +390,9 @@ pub struct XencodeConfig {
     pub mouse_capture: bool,
 
     /// Progressive disclosure level for UI destinations: 1 = Core, 2 = Standard/Workflow, 3 = Advanced, 4 = All/Specialist (AE-5).
-    /// Defaults to 4 (unrestricted plain xencode).
+    /// Defaults to 2 (AG-4): a first start shows the everyday panels, and the
+    /// command palette (Ctrl+X) and `/level 4` reach the rest. A settings file
+    /// that already holds a level keeps it.
     #[serde(default = "default_disclosure_level")]
     pub disclosure_level: u8,
 
@@ -1033,7 +1035,7 @@ fn default_colab_weights() -> String {
 }
 
 fn default_disclosure_level() -> u8 {
-    4
+    2
 }
 
 impl Default for XencodeConfig {

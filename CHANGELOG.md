@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `AG-4`: a first start opens at disclosure level 2, not 4
+
+With no settings file, xencode used to start at level 4, which shows every
+panel. It now starts at level 2, Workflow: chat, explorer, editor, models,
+settings, code review, git commit, background tasks, worktrees and insights.
+Measured on a real first start against an empty settings directory, the Ctrl+F
+navigator went from 26 panels, of which 22 fit a 120x40 terminal, to 10 that
+all fit. The first screen's shortcut line went from 5 entries to 4; ByteBot is
+the one that left it.
+
+Nothing became unreachable. The Ctrl+X command palette lists every panel at any
+level, `/goto` still opens any panel by name, and `/level 4` or the Disclosure
+Level setting shows everything again. The welcome text's last line now reads
+"Ctrl+X find anything" instead of "Ctrl+F all panels", which stopped being
+true. A settings file that already holds a level keeps it.
+
 ### Added — `AG-3` / `UX-6`: a command palette on Ctrl+X
 
 Ctrl+X opens a palette that lists every panel, every slash command and every

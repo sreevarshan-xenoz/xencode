@@ -43,7 +43,7 @@ fn an_empty_session_says_how_to_start_and_where_everything_is() {
     );
     assert!(lines.contains("type a prompt and press Enter"), "{lines}");
     assert!(
-        lines.contains("F1 or ? keys · / commands · Ctrl+F all panels"),
+        lines.contains("F1 or ? keys · / commands · Ctrl+X find anything"),
         "{lines}"
     );
     // The provider named is the model's own, not Ollama.

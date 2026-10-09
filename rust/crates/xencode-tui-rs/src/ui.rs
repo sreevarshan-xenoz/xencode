@@ -886,7 +886,7 @@ pub fn welcome_lines(app: &App) -> Vec<String> {
     vec![
         "  Welcome to Xencode — type a prompt and press Enter.".to_string(),
         model,
-        "  F1 or ? keys · / commands · Ctrl+F all panels".to_string(),
+        "  F1 or ? keys · / commands · Ctrl+X find anything".to_string(),
     ]
 }
 
