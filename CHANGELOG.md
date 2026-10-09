@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `TX-9`: Ctrl+C stops a running turn, and the composer keeps the shell editing keys
+
+`Ctrl+C` used to quit the TUI even while a turn was running, with no way to cancel the
+turn itself. It now stops the running turn first, dropping a request still in flight,
+and the chat shows "Turn stopped". A second `Ctrl+C`, or one with nothing running, quits.
+
+While typing a prompt, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` used to open
+panels or cycle the layout. In the composer they now move to the start or end of the
+line and delete to its end, to its start, or the word before the cursor. Outside the
+composer they keep their panel meanings.
+
 ### Changed — `TX-2`: a new session opens in the composer, and a stray `q` no longer quits
 
 The TUI used to start in Normal mode, where a sentence typed before pressing `i`
