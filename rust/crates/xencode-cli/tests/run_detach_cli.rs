@@ -54,7 +54,10 @@ fn a_detached_run_returns_at_once_and_finishes_on_its_own() {
     );
     let said = text(&out);
     assert!(out.status.success(), "{said}");
-    assert!(started.elapsed() < Duration::from_secs(30), "it waited for the run");
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "it waited for the run"
+    );
     let line = said
         .lines()
         .find(|l| l.starts_with("detached run "))
@@ -64,7 +67,11 @@ fn a_detached_run_returns_at_once_and_finishes_on_its_own() {
 
     let start = Instant::now();
     let shown = loop {
-        let shown = text(&xencode(project.path(), config.path(), &["run", "--show", &id]));
+        let shown = text(&xencode(
+            project.path(),
+            config.path(),
+            &["run", "--show", &id],
+        ));
         if shown.contains("status: finished") {
             break shown;
         }
@@ -75,9 +82,68 @@ fn a_detached_run_returns_at_once_and_finishes_on_its_own() {
         std::thread::sleep(Duration::from_millis(250));
     };
     assert!(shown.contains("prompt: write a note"), "{shown}");
-    let log = text(&xencode(project.path(), config.path(), &["run", "--log", &id]));
+    let log = text(&xencode(
+        project.path(),
+        config.path(),
+        &["run", "--log", &id],
+    ));
     assert!(
         log.contains("127.0.0.1:9"),
         "the log says the model server could not be reached: {log}"
     );
+}
+
+/// Started from another folder, for a project whose path has a space: the
+/// worker works in the project and keeps the run's state where the starting
+/// command looks for it.
+#[test]
+fn a_detached_run_started_elsewhere_works_in_a_project_with_a_space() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("proj dir");
+    let elsewhere = root.path().join("start here");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&elsewhere).unwrap();
+    let config = settings();
+    let project_arg = project.to_string_lossy().to_string();
+    let out = xencode(
+        &elsewhere,
+        config.path(),
+        &[
+            "run",
+            "write a note",
+            "--detach",
+            "--tool-root",
+            &project_arg,
+            "--model",
+            "llamacpp:none",
+            "--llamacpp-url",
+            "http://127.0.0.1:9",
+        ],
+    );
+    let said = text(&out);
+    assert!(out.status.success(), "{said}");
+    let id = said
+        .lines()
+        .find(|l| l.starts_with("detached run "))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap_or_else(|| panic!("no run id in: {said}"))
+        .to_string();
+    let start = Instant::now();
+    let shown = loop {
+        let shown = text(&xencode(&elsewhere, config.path(), &["run", "--show", &id]));
+        if shown.contains("status: finished") {
+            break shown;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "never finished: {shown}"
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    assert!(
+        shown.contains("proj dir"),
+        "the run worked in the project: {shown}"
+    );
+    let log = text(&xencode(&elsewhere, config.path(), &["run", "--log", &id]));
+    assert!(log.contains("127.0.0.1:9"), "{log}");
 }
