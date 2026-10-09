@@ -12,6 +12,60 @@ use tokio::sync::mpsc;
 use crate::app::App;
 use proto::{ClientMsg, EngineMsg, ReviewDecision, StopTarget, PROTOCOL_VERSION};
 
+/// What one `pump` did: how many loop messages and approval prompts arrived,
+/// and the messages to send to every window.
+pub struct Pump {
+    pub messages: usize,
+    pub approvals: usize,
+    pub out: Vec<EngineMsg>,
+}
+
+/// Take in everything the agent loops reported since the last call, in the
+/// order the main loop always used: messages first (each applied to the app,
+/// then sent on as an `Event`), then new approval prompts, then a new
+/// question. Approvals and the question come with their ids.
+pub fn pump(
+    app: &mut App,
+    rx: &mut mpsc::UnboundedReceiver<String>,
+    tx: &mpsc::UnboundedSender<String>,
+) -> Pump {
+    let mut out = Vec::new();
+    let mut messages = 0;
+    while let Ok(token) = rx.try_recv() {
+        messages += 1;
+        app.apply_token(&token, tx);
+        out.push(EngineMsg::Event { token });
+    }
+    let question_before = app.question_id;
+    let approvals = app.drain_agent_channels();
+    let first_new = app.approval_queue.len() - approvals;
+    for (i, (request, _)) in app.approval_queue.iter().enumerate().skip(first_new) {
+        out.push(EngineMsg::ApprovalRequested {
+            approval: approval_view(app.approval_ids[i], request),
+        });
+    }
+    if app.question_id != question_before {
+        if let (Some(id), Some(text)) = (app.question_id, app.question_text.clone()) {
+            out.push(EngineMsg::QuestionAsked { id, text });
+        }
+    }
+    Pump {
+        messages,
+        approvals,
+        out,
+    }
+}
+
+fn approval_view(id: u64, request: &crate::agent_tools::ApprovalRequest) -> proto::ApprovalView {
+    proto::ApprovalView {
+        id,
+        tool: request.tool.clone(),
+        class: request.class_label().to_string(),
+        summary: request.summary.clone(),
+        preview: request.preview.clone(),
+    }
+}
+
 /// Carry out one action a window asked for. `by` names the window, so the
 /// others can be told who answered. Returns what the engine says back.
 pub fn handle(
@@ -143,6 +197,71 @@ mod tests {
             preview: String::new(),
             draft: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn pump_turns_tokens_into_events_and_reports_counts() {
+        let mut app = engine_app();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        app.is_generating = true;
+        tx.send("hello ".to_string()).unwrap();
+        tx.send("[DONE]".to_string()).unwrap();
+        let pumped = pump(&mut app, &mut rx, &tx);
+        assert_eq!(pumped.messages, 2);
+        assert_eq!(pumped.approvals, 0);
+        assert_eq!(
+            pumped.out,
+            vec![
+                EngineMsg::Event {
+                    token: "hello ".into()
+                },
+                EngineMsg::Event {
+                    token: "[DONE]".into()
+                },
+            ]
+        );
+        assert!(
+            !app.is_generating,
+            "the tokens were applied, not only forwarded"
+        );
+    }
+
+    #[tokio::test]
+    async fn pump_keeps_the_frame_order() {
+        let mut app = engine_app();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (asker, _a) = oneshot::channel();
+        app.ask_tx.send(("Which port?".into(), asker)).unwrap();
+        let (responder, _b) = oneshot::channel();
+        app.approval_tx
+            .send((request("write_file a.rs"), responder))
+            .unwrap();
+        tx.send("[TOOL]→ write_file a.rs".to_string()).unwrap();
+        let pumped = pump(&mut app, &mut rx, &tx);
+        assert_eq!(pumped.approvals, 1);
+        let id = app.approval_ids[0];
+        let question = app.question_id.unwrap();
+        assert_eq!(
+            pumped.out,
+            vec![
+                EngineMsg::Event {
+                    token: "[TOOL]→ write_file a.rs".into()
+                },
+                EngineMsg::ApprovalRequested {
+                    approval: ApprovalView {
+                        id,
+                        tool: "write_file".into(),
+                        class: crate::agent_tools::ToolClass::Edit.overlay_label().into(),
+                        summary: "write_file a.rs".into(),
+                        preview: String::new(),
+                    }
+                },
+                EngineMsg::QuestionAsked {
+                    id: question,
+                    text: "Which port?".into()
+                },
+            ]
+        );
     }
 
     #[tokio::test]
