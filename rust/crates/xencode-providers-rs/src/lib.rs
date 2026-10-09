@@ -955,7 +955,30 @@ impl ProviderManager {
     ///
     /// Unlike [`generate_stream_with_options`], this path never retries:
     /// re-running a step could double-execute tools.
+    /// One model turn with tools offered. A call the model wrote into its answer
+    /// as a `<tool_call>{…}</tool_call>` block, instead of returning it as a
+    /// tool call, is read as the call it is (SM-2): small models do this, and
+    /// the edit they meant used to be dropped with the turn.
     pub async fn generate_stream_with_tools<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        history: &[AgentTurn],
+        tools: &[ToolDefinition],
+        options: Option<&LlamaCppOptions>,
+        callback: F,
+    ) -> Result<AgentStep, ProviderError>
+    where
+        F: FnMut(&str),
+    {
+        let mut step = self
+            .generate_stream_with_tools_raw(model, messages, history, tools, options, callback)
+            .await?;
+        tools::recover_text_tool_calls(&mut step, tools);
+        Ok(step)
+    }
+
+    async fn generate_stream_with_tools_raw<F>(
         &self,
         model: &str,
         messages: &[ChatMessage],

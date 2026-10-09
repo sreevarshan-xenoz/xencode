@@ -16161,6 +16161,65 @@ mod tests {
     /// both answered to the model instead of run — even in the most permissive
     /// approval mode. The second one only fails because the loop hands the
     /// executor the same descriptions it handed the model.
+    /// SM-2: a model that writes its call into the answer as a `<tool_call>`
+    /// block still gets the tool run, instead of the turn ending on prose.
+    #[tokio::test]
+    async fn a_tool_call_written_as_text_is_carried_out() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-text-call-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("notes.txt"),
+            "the answer is 42
+",
+        )
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
+                serde_json::json!({"message": {"role": "assistant", "content":
+                    "<tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"notes.txt\"}}</tool_call>"},
+                    "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "It says 42."}, "done": true}),
+            ],
+        ));
+
+        let mut app = App::for_tests();
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "what do the notes say".into(),
+            }],
+            "what do the notes say",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        let _ = server.await;
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("[TOOL]") && l.contains("read_file")),
+            "the written call was not run: {lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.contains("It says 42.")), "{lines:?}");
+    }
+
     /// Setting the stop flag mid-request ends the turn at once: the server here
     /// accepts the connection and never answers.
     #[tokio::test]
