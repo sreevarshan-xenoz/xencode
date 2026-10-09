@@ -4237,6 +4237,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xencode-live-rs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "xencode-config-rs",
+]
+
+[[package]]
 name = "xencode-mcp-rs"
 version = "0.1.0"
 dependencies = [
