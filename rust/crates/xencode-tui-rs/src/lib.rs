@@ -9,6 +9,7 @@ pub mod crate_docs;
 pub mod crate_sources;
 pub mod decompose;
 pub mod detached;
+pub mod engine;
 pub mod eval_judge;
 pub mod event_bus;
 pub mod focus;
