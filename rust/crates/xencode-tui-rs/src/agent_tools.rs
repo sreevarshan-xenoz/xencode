@@ -7478,6 +7478,50 @@ patched = ["{fixed}"]
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    /// QA-6: a file the agent may not write — read-only on disk — is refused
+    /// with the reason, as an answer the model can read, and left exactly as it
+    /// was. Nothing panics and nothing is half written.
+    #[test]
+    fn a_read_only_file_is_refused_with_the_reason_and_left_whole() {
+        let root = temp_root("readonly");
+        let path = root.join("locked.rs");
+        std::fs::write(
+            &path,
+            "fn locked() {}
+",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let edit = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({"path": "locked.rs", "old": "locked", "new": "open"})),
+        );
+        let write = tool_write_file(
+            &root,
+            &args_of(serde_json::json!({"path": "locked.rs", "content": "replaced
+"})),
+        );
+        let left = std::fs::read_to_string(&path).unwrap();
+
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&path, perms).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+
+        assert!(edit.starts_with("error: cannot write"), "{edit}");
+        assert!(write.starts_with("error: cannot write"), "{write}");
+        assert_eq!(
+            left,
+            "fn locked() {}
+",
+            "the file was changed"
+        );
+    }
+
     #[test]
     fn edit_file_requires_unique_matches_or_all() {
         let root = temp_root("edit");

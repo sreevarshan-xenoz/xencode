@@ -527,7 +527,9 @@ impl McpClient {
             }
         }
         let tail = self.stderr_tail();
-        if tail.trim().is_empty() {
+        // Already said once (a request inside the handshake adds it, and the
+        // handshake asks again): the words are not repeated.
+        if tail.trim().is_empty() || error.to_string().contains(tail.trim()) {
             return error;
         }
         McpError::Protocol {
@@ -547,7 +549,7 @@ impl McpClient {
             .await
         {
             self.forget(id);
-            return Err(e);
+            return Err(self.with_stderr(e).await);
         }
         match tokio::time::timeout(self.request_timeout, answer).await {
             Err(_elapsed) => {
@@ -560,10 +562,15 @@ impl McpClient {
             }
             Ok(Err(_dropped)) => {
                 self.forget(id);
-                Err(McpError::Closed {
+                // The server went away mid-call (QA-6): what it said on stderr
+                // on the way out is the only explanation there is.
+                let closed = McpError::Closed {
                     server: self.name.clone(),
-                })
+                };
+                Err(self.with_stderr(closed).await)
             }
+            // The reader saw the server's output end while this call waited.
+            Ok(Ok(Err(closed @ McpError::Closed { .. }))) => Err(self.with_stderr(closed).await),
             Ok(Ok(result)) => result,
         }
     }

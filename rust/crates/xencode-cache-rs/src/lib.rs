@@ -566,6 +566,35 @@ mod tests {
         assert_eq!(cache.stats().entries, 0);
     }
 
+    /// QA-6: a cache whose directory cannot be written to — here the path is
+    /// an ordinary file, which no platform lets anything be created inside —
+    /// still answers from memory for the rest of the session, writes nothing,
+    /// and does not take the caller down with it.
+    #[test]
+    fn a_cache_that_cannot_be_written_still_answers_from_memory() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let not_a_dir = dir.join("cache");
+        fs::write(&not_a_dir, b"a file where the cache directory should be").unwrap();
+
+        let mut cache = ResponseCache {
+            entries: HashMap::new(),
+            max_size: 10,
+            ttl_seconds: 3600.0,
+            cache_dir: Some(not_a_dir.clone()),
+            stats: CacheStats::default(),
+            next_seq: 1,
+        };
+        cache.set("prompt", "model", "response");
+        assert_eq!(cache.get("prompt", "model"), Some("response".to_string()));
+        assert_eq!(
+            fs::read(&not_a_dir).unwrap(),
+            b"a file where the cache directory should be",
+            "the file in the way was not touched"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn disk_persistence_roundtrip() {
         let dir = temp_dir();

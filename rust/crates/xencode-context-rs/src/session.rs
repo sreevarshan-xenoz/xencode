@@ -251,16 +251,28 @@ pub fn read_session(xencode_dir: &Path, run_id: &str) -> Result<Session, String>
 fn read_session_text(text: &str, origin: &str) -> Result<Session, String> {
     let mut calls: Vec<RecordedCall> = Vec::new();
     let mut seen_run = None;
+    let last = text.lines().count();
     for (number, raw) in text.lines().enumerate() {
         let raw = raw.trim();
         if raw.is_empty() {
             continue;
         }
         let line: SessionLine = serde_json::from_str(raw).map_err(|e| {
-            format!(
-                "{origin} line {}: not a readable recording ({e})",
-                number + 1
-            )
+            // A last line with no newline after it was being written when the
+            // run stopped (QA-6). It is still refused — replaying part of a run
+            // as the whole of it would mislead — but it is named for what it is.
+            if number + 1 == last && !text.ends_with('\n') {
+                format!(
+                    "{origin} ends in a half-written line {}: the run stopped while it \
+                     was being recorded, so the recording is incomplete and is not replayed",
+                    number + 1
+                )
+            } else {
+                format!(
+                    "{origin} line {}: not a readable recording ({e})",
+                    number + 1
+                )
+            }
         })?;
         match line {
             SessionLine::Run(run) => {
@@ -586,6 +598,41 @@ mod tests {
         for c in calls {
             writer.record(c.clone()).unwrap();
         }
+    }
+
+    /// QA-6: a run killed while its last call was being written leaves a
+    /// half line at the end of the recording. It is refused, and the refusal
+    /// says the run was cut off rather than calling the file unreadable.
+    #[test]
+    fn a_recording_cut_off_mid_line_is_refused_as_incomplete() {
+        let dir = temp_dir("torn");
+        write(&dir, &[call(0, "first"), call(1, "second")]);
+        let path = session_path(&dir, "r1");
+        let whole = std::fs::read_to_string(&path).unwrap();
+        let cut = &whole[..whole.len() - 12];
+        std::fs::write(&path, cut).unwrap();
+
+        let err = read_session(&dir, "r1").expect_err("a torn recording is not replayed");
+        assert!(err.contains("half-written line"), "{err}");
+        assert!(err.contains("incomplete"), "{err}");
+
+        // A bad line that is not the last one keeps the old wording.
+        let lines: Vec<&str> = whole.lines().collect();
+        let broken = format!(
+            "{}
+{{not json
+{}
+",
+            lines[0],
+            lines[1..].join(
+                "
+"
+            )
+        );
+        std::fs::write(&path, broken).unwrap();
+        let err = read_session(&dir, "r1").unwrap_err();
+        assert!(err.contains("not a readable recording"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
