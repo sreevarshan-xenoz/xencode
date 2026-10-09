@@ -16,8 +16,8 @@
 | W2 | 15 | 15 | 0 | 0 | 10 |
 | W3 | 15 | 10 | 0 | 0 | 15 |
 | W4 | 12 | 8 | 0 | 0 | 10 |
-| W5 | 15 | 3 | 0 | 0 | 14 |
-| W6 | 10 | 0 | 0 | 0 | 5 |
+| W5 | 15 | 3 | 0 | 0 | 15 |
+| W6 | 10 | 0 | 0 | 0 | 8 |
 | W7 | 19 | 16 | 0 | 0 | 19 |
 | W8 | 6 | 5 | 1 | 0 | 6 |
 | W9 | 21 | 0 | 0 | 0 | 2 |
@@ -30,7 +30,7 @@
 | W16 | 14 | 10 | 2 | 1 | 14 |
 | W17 | 15 | 12 | 2 | 0 | 14 |
 | unscheduled | 10 | 0 | 0 | 0 | 2 |
-| **all** | **324** | **135** | **9** | **2** | **195** |
+| **all** | **324** | **135** | **9** | **2** | **199** |
 
 ## W0
 
@@ -137,7 +137,7 @@
 | CU-1 | A verifier seam: evidence-shaped pass/fail plus an artifact, feeding | capability | — | 1 | b4699697 (2026-10-08) |
 | L-7 | test/lint auto-repair loop with an exit-code "done" gate | capability | done | 2 | 59bb18b1 (2026-10-08) |
 | L-8 | `edit_file` failure fallback | capability | done | 1 | 1f0baeaf (2026-09-30) |
-| QA-6 | Fault seams + kill tests | capability | — | 0 | — |
+| QA-6 | Fault seams + kill tests | capability | — | 1 | d4e4fbff (2026-10-09) |
 | VF-1 | Diff coverage — `cargo llvm-cov --lcov`, intersected with the added | capability | — | 1 | 30ff19ff (2026-09-28) |
 | VF-2 | `--show-missing-lines` / `--json` as a read-only tool | capability | — | 1 | 30ff19ff (2026-09-28) |
 | VF-3 | `cargo mutants --in-diff <git diff>` | capability | — | 1 | 28470ec2 (2026-09-28) |
@@ -156,11 +156,11 @@
 |---|---|---|---|---|---|
 | EVd-1 | Session run-ledger | core | — | 2 | 59bb18b1 (2026-10-08) |
 | EVd-2 | A session key on `RequestMetrics` (`metrics.rs:22-42` has none) | core | — | 2 | 59bb18b1 (2026-10-08) |
-| EVd-3 | A checks-ran verdict: `{ran, skipped, failed, evidence-ref}` | capability | — | 0 | — |
+| EVd-3 | A checks-ran verdict: `{ran, skipped, failed, evidence-ref}` | capability | — | 1 | 28723fc0 (2026-10-09) |
 | EVd-4 | `.xencode/artifacts/<session>/` | capability | — | 1 | 9b478a6c (2026-09-29) |
-| EVd-5 | Ledger-fed compaction | capability | — | 0 | — |
+| EVd-5 | Ledger-fed compaction | capability | — | 1 | cd176958 (2026-10-09) |
 | EVd-6 | False-verified calibration | capability | — | 0 | — |
-| EVd-7 | Hash-chain the ledger, reusing EV-11's prev-hash+seq primitive | capability | — | 0 | — |
+| EVd-7 | Hash-chain the ledger, reusing EV-11's prev-hash+seq primitive | capability | — | 1 | de2e3e31 (2026-10-09) |
 | EVd-8 | The task evidence graph: requirement → decision → action → verification, keyed on the task | capability | — | 1 | 59bf8252 (2026-10-02) |
 | QA-4 | Sequential A/B/C variants recorded on EVd-1's ledger | capability | — | 0 | — |
 | QI-3 | Machine-checkable slots only | capability | — | 1 | 9326ce91 (2026-09-29) |
