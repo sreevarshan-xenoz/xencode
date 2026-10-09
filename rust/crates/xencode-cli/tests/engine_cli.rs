@@ -288,3 +288,142 @@ async fn an_engine_killed_mid_way_is_replaced_by_a_new_one() {
     assert_eq!(second.address(), addr);
     let _ = join(&addr, "after").await;
 }
+
+// The terminal app as a window onto the engine: a real `App`, linked to a
+// real engine process, driven frame by frame the way the frame loop does.
+
+use xencode_tui_rs::app::App;
+use xencode_tui_rs::engine::link;
+
+/// Run window frames until `done` holds or `wait` passes.
+async fn frames_until(app: &mut App<'_>, wait: Duration, done: impl Fn(&App<'_>) -> bool) {
+    // A frame always runs first: lines the window just added only reach the
+    // engine on a frame.
+    let start = Instant::now();
+    loop {
+        let frame = link::frame(app);
+        assert!(
+            frame.lost.is_none(),
+            "the engine went away: {:?}",
+            frame.lost
+        );
+        if done(app) {
+            return;
+        }
+        assert!(start.elapsed() < wait, "gave up waiting on the window");
+        tokio::time::sleep(Duration::from_millis(33)).await;
+    }
+}
+
+async fn window_onto(addr: &Address) -> App<'static> {
+    let (linked, view) = link::open(addr, "terminal").await.unwrap();
+    let mut app = App::for_tests();
+    link::become_window(&mut app, linked, view);
+    app
+}
+
+#[tokio::test]
+async fn a_window_sends_bytebot_work_to_the_engine_and_sees_it_end() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let mut app = window_onto(&addr).await;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    xencode_tui_rs::engine::act(
+        &mut app,
+        ClientMsg::SubmitChat {
+            prompt: "/bytebot write a note".into(),
+        },
+        &tx,
+    );
+    frames_until(&mut app, Duration::from_secs(60), |app| {
+        app.bytebot_tasks
+            .iter()
+            .any(|t| t.text == "write a note" && t.state.words() == "failed")
+    })
+    .await;
+    assert!(app.bytebot_tasks[0].this_session);
+    assert!(!app.bytebot_running, "the window runs nothing itself");
+    assert!(
+        app.messages
+            .iter()
+            .any(|m| m.content == "/bytebot write a note"),
+        "the engine's transcript, shown in the window, has the command"
+    );
+}
+
+#[tokio::test]
+async fn a_command_run_in_the_window_reaches_every_window() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let mut app = window_onto(&addr).await;
+    let (mut other, seen) = join(&addr, "other").await;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    xencode_tui_rs::engine::act(
+        &mut app,
+        ClientMsg::SubmitChat {
+            prompt: "/help".into(),
+        },
+        &tx,
+    );
+    let lines = app.messages.len();
+    assert!(lines > 0, "/help wrote its answer in the window");
+    frames_until(&mut app, Duration::from_secs(10), |app| {
+        app.messages.len() == lines && app.messages.iter().any(|m| m.content == "/help")
+    })
+    .await;
+    let seen = watch_until(&mut other, seen, Duration::from_secs(10), |view| {
+        view.messages.len() == lines
+    })
+    .await;
+    let mine: Vec<_> = app.messages.iter().map(|m| m.content.clone()).collect();
+    let theirs: Vec<_> = seen.messages.iter().map(|m| m.content.clone()).collect();
+    assert_eq!(mine, theirs);
+}
+
+#[tokio::test]
+async fn a_lost_engine_is_said_in_words() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let mut engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let mut app = window_onto(&addr).await;
+    engine.child.kill().unwrap();
+    engine.child.wait().unwrap();
+
+    let start = Instant::now();
+    let why = loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the loss was never noticed"
+        );
+        if let Some(why) = link::frame(&mut app).lost {
+            break why;
+        }
+        tokio::time::sleep(Duration::from_millis(33)).await;
+    };
+    assert!(app.engine_link.is_none());
+
+    let started = std::sync::Mutex::new(Vec::<Engine>::new());
+    let begin = || {
+        started
+            .lock()
+            .unwrap()
+            .push(Engine::start(project.path(), config.path()));
+        Ok(())
+    };
+    link::recover(&mut app, &addr, &begin, &why).await;
+    let said: Vec<_> = app.toasts.iter().map(|t| t.message.clone()).collect();
+    assert!(
+        said.iter()
+            .any(|m| m.starts_with("the engine stopped (") && m.ends_with("starting a new one")),
+        "{said:?}"
+    );
+    assert!(
+        app.engine_link.is_some(),
+        "a new engine was reached: {said:?}"
+    );
+}

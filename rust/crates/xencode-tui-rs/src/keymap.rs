@@ -114,10 +114,14 @@ fn stop_running_turn(app: &mut App, tx: &Tx) -> bool {
         flag.as_ref()
             .is_some_and(|f| !f.load(std::sync::atomic::Ordering::Relaxed))
     };
-    let chat = app.is_generating && unset(&app.turn_stop);
+    // A window onto an engine (EN-2) holds no stop flags of its own: what is
+    // running is what the engine's view says.
+    let window = app.engine_link.is_some();
+    let chat = app.is_generating && (window || unset(&app.turn_stop));
     // A task waiting on a question sits inside that tool call and would never
     // see the stop; the engine withdraws the question too (BT-2).
-    let bytebot = app.bytebot_running && (unset(&app.bytebot_stop) || app.bytebot_help.is_some());
+    let bytebot =
+        app.bytebot_running && (window || unset(&app.bytebot_stop) || app.bytebot_help.is_some());
     if chat {
         crate::engine::act(
             app,
@@ -1498,7 +1502,10 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         KeyCode::Enter => {
             // A waiting question (BT-2) takes the line as its answer;
             // otherwise Enter runs or queues what is typed. History is ↑.
-            if let Some(id) = app.question_id.filter(|_| app.bytebot_help.is_some()) {
+            if let Some(id) = app
+                .question_id
+                .filter(|_| app.bytebot_help.is_some() || app.engine_link.is_some())
+            {
                 let text = app.bytebot_command.clone();
                 crate::engine::act(
                     app,

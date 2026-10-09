@@ -648,6 +648,9 @@ pub struct App<'a> {
     /// view so the overlay draws them; answers go back by id.
     pub(crate) remote_approvals:
         std::collections::VecDeque<(u64, crate::agent_tools::ApprovalRequest)>,
+    /// The connection to the engine when this app is a window onto one
+    /// (EN-2); `None` when it runs the agent work itself.
+    pub engine_link: Option<crate::engine::link::EngineLink>,
     next_agent_id: u64,
     /// Receive end, taken once by `run_app` and drained each frame.
     pub approval_rx: Option<
@@ -3156,6 +3159,7 @@ impl<'a> App<'a> {
             bytebot_help: None,
             approval_ids: std::collections::VecDeque::new(),
             remote_approvals: std::collections::VecDeque::new(),
+            engine_link: None,
             question_id: None,
             question_text: None,
             next_agent_id: 1,
@@ -5795,6 +5799,11 @@ impl<'a> App<'a> {
     /// Start the oldest pending task, if any and if nothing is running.
     pub(crate) fn bytebot_start_next(&mut self, tx: mpsc::UnboundedSender<String>) {
         use crate::bytebot_tasks::TaskState;
+        // A window never runs a task itself: the engine carries on the queue.
+        if self.engine_link.is_some() {
+            crate::engine::act(self, crate::engine::proto::ClientMsg::ResumeTasks, &tx);
+            return;
+        }
         if self.bytebot_running || self.bytebot_reviewing().is_some() {
             return;
         }
@@ -13682,16 +13691,46 @@ fn hand_over_terminal<B: Backend>(terminal: &mut Terminal<B>, argv: &[String], a
 /// The TUI frame loop. `B` has to be writable because the mouse-capture
 /// setting (`V-7`) takes effect by asking the terminal for, or against, mouse
 /// events — which is a write to the same place the frames go.
-pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::Result<()> {
+/// Run the terminal app. Unless `in_process` is set it is a window onto the
+/// project's engine (EN-2), starting the engine when none is running; if no
+/// engine can be reached it says so and runs the agent work itself.
+pub async fn run_app<B: Backend + io::Write>(
+    terminal: &mut Terminal<B>,
+    in_process: bool,
+) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     app.start_in_composer_when_empty();
 
+    let project = xencode_context_rs::default_root();
+    let engine_addr = if in_process {
+        None
+    } else {
+        crate::engine::address::Address::for_project(&project).ok()
+    };
+    let start_engine = || -> io::Result<()> {
+        let exe = std::env::current_exe()?;
+        let folder = project.to_string_lossy().to_string();
+        xencode_live_rs::spawn_detached(&exe, &["engine", "--project", &folder]).map(|_| ())
+    };
+    if let Some(addr) = &engine_addr {
+        match crate::engine::link::connect_or_start(addr, &start_engine).await {
+            Ok((link, view)) => crate::engine::link::become_window(&mut app, link, view),
+            Err(why) => app.push_toast(
+                crate::toast::ToastKind::Warning,
+                format!("the engine could not be started ({why}); this window runs the agent work itself"),
+            ),
+        }
+    }
+
     // Query installed Ollama models and check provider health immediately on startup
     app.refresh_models(tx.clone());
     app.run_health_check(tx.clone());
-    // If llama.cpp is configured but not running, spawn it (attaches if it is).
-    app.maybe_auto_start_llama(tx.clone());
+    // If llama.cpp is configured but not running, spawn it (attaches if it
+    // is). A window leaves that to its engine.
+    if app.engine_link.is_none() {
+        app.maybe_auto_start_llama(tx.clone());
+    }
 
     // Real-time file watcher: every non-ignored change is reported as a
     // `[WATCH]<kind>|<path>` token. The drain loop only surfaces warnings for
@@ -13776,6 +13815,16 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
         let pumped = crate::engine::pump(&mut app, &mut rx, &tx);
         signals.messages += pumped.messages;
         signals.approvals += pumped.approvals;
+        // In a window, what the engine sent since the last frame (EN-2). An
+        // engine that went away is said in words and replaced once.
+        let linked = crate::engine::link::frame(&mut app);
+        signals.messages += linked.views;
+        if let Some(why) = linked.lost {
+            if let Some(addr) = &engine_addr {
+                crate::engine::link::recover(&mut app, addr, &start_engine, &why).await;
+            }
+            signals.messages += 1;
+        }
 
         // Poll events (~30fps)
         if event::poll(Duration::from_millis(33))? {
