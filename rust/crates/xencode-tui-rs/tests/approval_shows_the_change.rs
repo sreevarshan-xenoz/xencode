@@ -65,6 +65,7 @@ fn asking() -> (
             taint: Arc::new(AtomicBool::new(false)),
             sandbox: xencode_tui_rs::sandbox::Sandbox::disabled(),
             redaction: Arc::new(xencode_context_rs::Vault::default()),
+            ask: None,
             repro: Arc::new(xencode_tui_rs::reprogate::ReproGate::new()),
         },
         rx,

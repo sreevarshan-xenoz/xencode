@@ -17511,8 +17511,10 @@ is **awaiting the owner's review**: nothing below is started.
   Done 2026-10-09 (`xencode-tui-rs/src/bytebot_tasks.rs`): records in
   `.xencode/bytebot/tasks/`, a queue that runs one task at a time, cancelled on Esc, failed on a
   provider error with the error kept, and interrupted tasks failed on the next start.
-- [ ] **BT-2 — needs help:** an `ask_user` tool that pauses a task for an answer, or for the
-  person to take over and type `/done`.
+- [x] **BT-2 — needs help:** an `ask_user` tool that pauses a task for an answer, or for the
+  person to take over and type `/done`. Done 2026-10-09: offered to ByteBot runs only, handled
+  before the approval check (it runs nothing), answered from the panel; Esc withdraws the
+  question so a stop cannot hang inside the waiting tool call.
 - [ ] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).
 - [x] **BT-4 — slash commands in the ByteBot panel** run the same handler as chat. Done
   2026-10-09: `submit_message` is split, and its second half, `dispatch_prompt`, runs a line that

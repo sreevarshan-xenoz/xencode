@@ -603,6 +603,12 @@ pub struct App<'a> {
         crate::agent_tools::ApprovalRequest,
         tokio::sync::oneshot::Sender<crate::agent_tools::ApprovalAnswer>,
     )>,
+    /// Where ByteBot's `ask_user` questions arrive (BT-2), each with the
+    /// channel the person's answer goes back on.
+    pub ask_tx: mpsc::UnboundedSender<(String, tokio::sync::oneshot::Sender<String>)>,
+    pub ask_rx: Option<mpsc::UnboundedReceiver<(String, tokio::sync::oneshot::Sender<String>)>>,
+    /// The answer channel of the question the current task is waiting on.
+    pub(crate) bytebot_help: Option<tokio::sync::oneshot::Sender<String>>,
     /// Receive end, taken once by `run_app` and drained each frame.
     pub approval_rx: Option<
         mpsc::UnboundedReceiver<(
@@ -2982,6 +2988,7 @@ impl<'a> App<'a> {
         let theme = ThemeColors::get(&config.active_theme);
 
         let (approval_tx, approval_rx) = mpsc::unbounded_channel();
+        let (ask_tx, ask_rx) = mpsc::unbounded_channel();
         let event_bus = crate::event_bus::EventBus::default();
         let event_rx = event_bus.subscribe();
         let git_status = git_status_map();
@@ -3104,6 +3111,9 @@ impl<'a> App<'a> {
             approval_scroll: 0,
             approval_tx,
             approval_rx: Some(approval_rx),
+            ask_tx,
+            ask_rx: Some(ask_rx),
+            bytebot_help: None,
             memory,
             event_bus,
             event_rx,
@@ -4319,6 +4329,7 @@ impl<'a> App<'a> {
             // The chat path replaces this with the vault its assembled turn took
             // out (PR-3); every other caller runs without a redaction to undo.
             redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            ask: None,
             // The session's gate, shared across runs like the taint bit (U-6): a
             // fix whose failure was witnessed in one turn keeps its unlocked
             // edits in the next, and one that has not stays locked either way.
@@ -5146,6 +5157,8 @@ impl<'a> App<'a> {
             self.bytebot_save(&task);
             return;
         };
+        let mut run = run;
+        run.approval.ask = Some(self.ask_tx.clone());
         let model = self.config.default_model.clone();
         let task = &mut self.bytebot_tasks[i];
         task.state = TaskState::Running;
@@ -5155,6 +5168,72 @@ impl<'a> App<'a> {
         let task = task.clone();
         self.bytebot_save(&task);
         tokio::spawn(agent_rounds(run, tx));
+    }
+
+    /// The running task asked the person a question (BT-2): it waits in
+    /// "needs help" until `bytebot_answer` or `bytebot_withdraw_question`.
+    pub fn bytebot_needs_help(
+        &mut self,
+        question: String,
+        reply: tokio::sync::oneshot::Sender<String>,
+    ) {
+        use crate::bytebot_tasks::TaskState;
+        if let Some(i) = self
+            .bytebot_tasks
+            .iter()
+            .position(|t| t.state == TaskState::Running)
+        {
+            let task = &mut self.bytebot_tasks[i];
+            task.state = TaskState::NeedsHelp;
+            task.question = Some(question.clone());
+            let task = task.clone();
+            self.bytebot_save(&task);
+        }
+        self.bytebot_help = Some(reply);
+        self.bytebot_log.push(format!("? {question}"));
+        self.live_set(
+            xencode_live_rs::LiveState::NeedsYou,
+            xencode_live_rs::LiveSource::Bytebot,
+            &question,
+        );
+        self.focus = FocusArea::ByteBotPanel;
+    }
+
+    /// Send what is typed in the panel as the answer and resume the task.
+    /// `/done` tells the model the person did the step themselves.
+    pub fn bytebot_answer(&mut self) {
+        use crate::bytebot_tasks::TaskState;
+        let Some(reply) = self.bytebot_help.take() else {
+            return;
+        };
+        let answer = self.bytebot_command.trim().to_string();
+        self.bytebot_command.clear();
+        self.bytebot_cursor = 0;
+        let _ = reply.send(answer.clone());
+        if let Some(i) = self
+            .bytebot_tasks
+            .iter()
+            .position(|t| t.state == TaskState::NeedsHelp)
+        {
+            let task = &mut self.bytebot_tasks[i];
+            task.state = TaskState::Running;
+            task.question = None;
+            let task = task.clone();
+            self.bytebot_save(&task);
+        }
+        self.bytebot_log.push(if answer == "/done" {
+            "you did that step yourself".to_string()
+        } else {
+            format!("answered: {answer}")
+        });
+        self.live_tool_started("answer received");
+    }
+
+    /// Withdraw the question the task is waiting on: the tool call returns
+    /// that nobody answered, so a stop can reach the loop. Returns whether
+    /// there was one.
+    pub fn bytebot_withdraw_question(&mut self) -> bool {
+        self.bytebot_help.take().is_some()
     }
 
     /// A ByteBot run ended (`[BYTEBOT_DONE]`): record how, then start the next
@@ -5169,14 +5248,16 @@ impl<'a> App<'a> {
                 .any(|(_, status)| status == "failed")
                 .then(|| "a step failed".to_string())
         });
+        self.bytebot_help = None;
         if let Some(i) = self
             .bytebot_tasks
             .iter()
-            .position(|t| t.state == TaskState::Running)
+            .position(|t| matches!(t.state, TaskState::Running | TaskState::NeedsHelp))
         {
             let steps = self.bytebot_steps.clone();
             let task = &mut self.bytebot_tasks[i];
             task.steps = steps;
+            task.question = None;
             task.ended_at = Some(xencode_live_rs::now_secs());
             if stopped {
                 task.state = TaskState::Cancelled;
@@ -12102,7 +12183,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             let _ = tx.send(format!("[OLLAMA]{note}"));
         }
     }
-    let tools = offered_tools_with(
+    let mut tools = offered_tools_with(
         &approval.mcp,
         &approval.skills,
         approval.mode,
@@ -12111,6 +12192,10 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         approval.search_offered(),
         AvailableIndexes::of(&tool_root),
     );
+    // BT-2: only a ByteBot task can stop and ask; a chat turn answers in text.
+    if sink == LoopSink::ByteBot && approval.ask.is_some() {
+        tools.push(xencode_providers_rs::ask_user_tool());
+    }
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
     // with whatever the reader would have guessed (MI-1).
@@ -13451,6 +13536,15 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
         if let Some(summary) = waiting {
             app.live_approval_waiting(&summary);
         }
+        let mut asked = Vec::new();
+        if let Some(rx) = app.ask_rx.as_mut() {
+            while let Ok(question) = rx.try_recv() {
+                asked.push(question);
+            }
+        }
+        for (question, reply) in asked {
+            app.bytebot_needs_help(question, reply);
+        }
 
         // Poll events (~30fps)
         if event::poll(Duration::from_millis(33))? {
@@ -14023,6 +14117,7 @@ mod tests {
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sandbox: crate::sandbox::Sandbox::disabled(),
             redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            ask: None,
             repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
         };
         let call = xencode_providers_rs::ToolCall {
@@ -14207,6 +14302,7 @@ mod tests {
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
                 redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+                ask: None,
                 repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
             }
         };
@@ -15318,6 +15414,7 @@ mod tests {
             taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sandbox: crate::sandbox::Sandbox::disabled(),
             redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+            ask: None,
             repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
         };
         let call = xencode_providers_rs::ToolCall {
@@ -18866,6 +18963,52 @@ Content-Length: 0
             .filter(|message| message.role == "system")
             .map(|message| message.content.clone())
             .collect()
+    }
+
+    /// BT-2: a ByteBot question puts the task in "needs help" and the badge in
+    /// "needs you"; an answer from the panel resumes it, "/done" says the
+    /// person did the step, and nothing else can be started meanwhile.
+    #[tokio::test]
+    async fn a_task_that_asks_for_help_waits_for_the_answer() {
+        use crate::bytebot_tasks::{TaskState, TaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        let mut app = App::for_tests();
+        app.bytebot_store = Some(TaskStore::new(dir.path()));
+        app.live = Some(crate::live_status::LiveFeed::new(
+            live.path().to_path_buf(),
+            "s1".into(),
+            std::path::Path::new("."),
+        ));
+        app.config.default_model = "llamacpp:none".into();
+        app.config.llama_cpp_url = "http://127.0.0.1:9".into();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_command = "pick a database".into();
+        app.run_bytebot(tx.clone());
+
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        app.bytebot_needs_help("Which database?".into(), reply);
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::NeedsHelp);
+        assert_eq!(
+            app.bytebot_tasks[0].question.as_deref(),
+            Some("Which database?")
+        );
+        let status = std::fs::read_to_string(live.path().join("s1.json")).unwrap();
+        assert!(status.contains("\"needs_you\""), "{status}");
+        assert!(status.contains("Which database?"), "{status}");
+
+        app.bytebot_command = "postgres".into();
+        app.bytebot_answer();
+        assert_eq!(answer.await.unwrap(), "postgres");
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Running);
+        assert_eq!(app.bytebot_tasks[0].question, None);
+        assert!(app.bytebot_command.is_empty());
+
+        // Withdrawn: the person cancels instead of answering.
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        app.bytebot_needs_help("Which port?".into(), reply);
+        assert!(app.bytebot_withdraw_question());
+        assert!(answer.await.is_err(), "the waiting tool call is released");
     }
 
     /// BT-1: ByteBot tasks queue and run one at a time, oldest first. Each

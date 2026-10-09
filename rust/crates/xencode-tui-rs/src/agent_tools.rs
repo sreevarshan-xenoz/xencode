@@ -232,7 +232,7 @@ pub fn tool_class(tool: &str) -> ToolClass {
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "find_refs" | "callers"
         | "read_file" | "list_dir" | "search_files" | "read_docs" | "lookup_advisory"
-        | "load_skill" | "update_plan" => ToolClass::ReadOnly,
+        | "load_skill" | "update_plan" | "ask_user" => ToolClass::ReadOnly,
         "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
             ToolClass::Edit
         }
@@ -4154,6 +4154,10 @@ pub struct ApprovalCtx {
     /// classified and run, so the plaintext never crossed to the provider but
     /// the command still works. Empty/default when nothing was redacted.
     pub redaction: Arc<xencode_context_rs::Vault>,
+    /// Where a ByteBot task's `ask_user` question goes (BT-2): the TUI shows
+    /// it and sends the person's answer back. `None` everywhere else, and then
+    /// the tool answers that it is only for ByteBot tasks.
+    pub ask: Option<mpsc::UnboundedSender<(String, oneshot::Sender<String>)>>,
     /// The red-to-green reproduction gate (U-6). Shared across the session's
     /// runs like the taint bit, because its state is about the bug being fixed
     /// rather than the turn that noticed it: a gate that reset each turn would
@@ -4364,6 +4368,36 @@ pub async fn execute_tool_call_approved(
     ctx: &ApprovalCtx,
     mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
+    // BT-2: a ByteBot task asks the person a question. Nothing runs and
+    // nothing is written, so there is no approval to ask for; the question
+    // itself is the stop. The loop waits here until the person answers, types
+    // "/done" after doing the step themselves, or cancels the task.
+    if call.name == "ask_user" {
+        let question = call
+            .arguments_object()
+            .get("question")
+            .and_then(|q| q.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let Some(ask) = ctx.ask.as_ref() else {
+            return "error: ask_user is only available to ByteBot tasks".to_string();
+        };
+        if question.is_empty() {
+            return "error: ask_user needs a question".to_string();
+        }
+        let (reply, answer) = oneshot::channel();
+        if ask.send((question, reply)).is_err() {
+            return UNATTENDED_RESULT.to_string();
+        }
+        return match answer.await {
+            Ok(text) if text.trim() == "/done" => {
+                "The person did this step themselves. Continue from there.".to_string()
+            }
+            Ok(text) => format!("The person answered: {}", text.trim()),
+            Err(_) => "The person did not answer; the task was cancelled.".to_string(),
+        };
+    }
     // A secret the context engine held back from this turn's dynamic tiers
     // reached the model only as a placeholder (PR-3). Here, at the point of
     // execution — after the provider saw the token, before the tool runs — the
@@ -8019,6 +8053,64 @@ patched = ["{fixed}"]
         prompts: mpsc::UnboundedReceiver<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
     }
 
+    /// BT-2: `ask_user` sends its question to the person and returns what they
+    /// answer; "/done" means they did the step themselves; with nobody to ask
+    /// it says so instead of waiting forever.
+    #[tokio::test]
+    async fn ask_user_waits_for_the_person_and_returns_the_answer() {
+        let root = temp_root("ask-user");
+        let rt = new_task_runtime();
+        let mut h = harness(ApprovalMode::Ask);
+        let (ask_tx, mut ask_rx) = mpsc::unbounded_channel();
+        h.ctx.ask = Some(ask_tx);
+        let ask = call(
+            "ask_user",
+            serde_json::json!({ "question": "Which database?" }),
+        );
+
+        for (reply, expected) in [
+            ("postgres", "The person answered: postgres"),
+            (
+                "/done",
+                "The person did this step themselves. Continue from there.",
+            ),
+        ] {
+            let running = {
+                let (rt, root, ctx, ask) = (rt.clone(), root.clone(), h.ctx.clone(), ask.clone());
+                tokio::spawn(async move {
+                    execute_tool_call_approved(&rt, &root, &ask, &ctx, None).await
+                })
+            };
+            let (question, responder) = ask_rx
+                .recv()
+                .await
+                .expect("the question reaches the person");
+            assert_eq!(question, "Which database?");
+            assert!(
+                h.prompts.try_recv().is_err(),
+                "asking is not an approval prompt"
+            );
+            responder.send(reply.to_string()).unwrap();
+            assert_eq!(running.await.unwrap(), expected);
+        }
+
+        // The person cancels: the question is withdrawn and the tool says so.
+        let running = {
+            let (rt, root, ctx, ask) = (rt.clone(), root.clone(), h.ctx.clone(), ask.clone());
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &ask, &ctx, None).await },
+            )
+        };
+        let (_question, responder) = ask_rx.recv().await.unwrap();
+        drop(responder);
+        assert!(running.await.unwrap().contains("did not answer"));
+
+        h.ctx.ask = None;
+        let out = execute_tool_call_approved(&rt, &root, &ask, &h.ctx, None).await;
+        assert!(out.contains("only available to ByteBot tasks"), "{out}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn harness(mode: ApprovalMode) -> Harness {
         let (tx, rx) = mpsc::unbounded_channel();
         let checkpoints = Arc::new(CheckpointStore::new());
@@ -8048,6 +8140,7 @@ patched = ["{fixed}"]
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
                 redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+                ask: None,
                 repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
             },
             prompts: rx,
@@ -8968,6 +9061,7 @@ patched = ["{fixed}"]
                 taint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 sandbox: crate::sandbox::Sandbox::disabled(),
                 redaction: std::sync::Arc::new(xencode_context_rs::Vault::default()),
+                ask: None,
                 repro: std::sync::Arc::new(crate::reprogate::ReproGate::new()),
             };
             let content = format!("written in turn {turn}\n");

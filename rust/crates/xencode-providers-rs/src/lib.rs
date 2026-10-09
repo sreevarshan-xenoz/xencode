@@ -31,8 +31,8 @@ pub use capabilities::{
 pub use compatible::OpenAICompatibleProvider;
 pub use egress::{chain_for, classify, provider_for, url_host, Egress, EgressPolicy, RoutingFacts};
 pub use tools::{
-    advise_tools, background_tools, command_tools, debug_tools, file_tools, plan_tools,
-    repro_tools, search_tools, skill_tools, web_tools, AgentStep, AgentTurn, ToolCall,
+    advise_tools, ask_user_tool, background_tools, command_tools, debug_tools, file_tools,
+    plan_tools, repro_tools, search_tools, skill_tools, web_tools, AgentStep, AgentTurn, ToolCall,
     ToolDefinition,
 };
 

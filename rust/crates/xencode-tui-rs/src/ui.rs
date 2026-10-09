@@ -3279,6 +3279,24 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
             ]));
         }
         steps_lines.push(Line::from(""));
+        // BT-2: the question the current task is waiting on, and how to answer.
+        if let Some(question) = current
+            .and_then(|i| app.bytebot_tasks.get(i))
+            .filter(|t| t.state == crate::bytebot_tasks::TaskState::NeedsHelp)
+            .and_then(|t| t.question.as_deref())
+        {
+            steps_lines.push(Line::from(Span::styled(
+                format!(" ? Needs help: {question}"),
+                Style::default()
+                    .fg(app.theme.warning)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            steps_lines.push(Line::from(Span::styled(
+                "   type an answer and Enter · /done if you did it yourself · Esc cancels the task",
+                Style::default().fg(app.theme.message_system),
+            )));
+            steps_lines.push(Line::from(""));
+        }
     }
     if !app.bytebot_steps.is_empty() || app.bytebot_running {
         steps_lines.push(Line::from(Span::styled(

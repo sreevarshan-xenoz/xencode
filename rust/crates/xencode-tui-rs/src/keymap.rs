@@ -119,6 +119,9 @@ fn stop_running_turn(app: &mut App) -> bool {
         if let Some(stop) = app.bytebot_stop.as_ref() {
             stopped |= !stop.swap(true, std::sync::atomic::Ordering::Relaxed);
         }
+        // A task waiting on a question sits inside that tool call and would
+        // never see the stop; withdrawing the question lets it return (BT-2).
+        stopped |= app.bytebot_withdraw_question();
     }
     if stopped {
         app.push_toast(
@@ -1470,8 +1473,13 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             app.bytebot_cursor = app.bytebot_command.len();
         }
         KeyCode::Enter => {
-            // Executes what's typed; history recall is ↑.
-            app.run_bytebot(tx.clone());
+            // A waiting question (BT-2) takes the line as its answer;
+            // otherwise Enter runs or queues what is typed. History is ↑.
+            if app.bytebot_help.is_some() {
+                app.bytebot_answer();
+            } else {
+                app.run_bytebot(tx.clone());
+            }
         }
         KeyCode::Char('n') | KeyCode::Char('N')
             if app.last_layout.agents.is_some() && app.bytebot_command.is_empty() =>
@@ -3406,6 +3414,31 @@ mod tests {
             app.config.default_model, "kept-model",
             "the second Enter reset it"
         );
+    }
+
+    #[test]
+    fn enter_answers_a_bytebot_question_and_esc_withdraws_it() {
+        let mut app = app_with(FocusArea::ByteBotPanel);
+        app.bytebot_running = true;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        app.bytebot_stop = Some(stop.clone());
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.bytebot_help = Some(reply);
+        type_text(&mut app, "postgres");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(answer.try_recv().unwrap(), "postgres");
+        assert!(
+            app.bytebot_tasks.is_empty(),
+            "the answer is not queued as a task"
+        );
+
+        // Esc stops the task, and the waiting question must let go too, or the
+        // loop would sit inside the tool call and never see the stop.
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.bytebot_help = Some(reply);
+        press(&mut app, KeyCode::Esc);
+        assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(answer.try_recv().is_err(), "the question was withdrawn");
     }
 
     #[test]
