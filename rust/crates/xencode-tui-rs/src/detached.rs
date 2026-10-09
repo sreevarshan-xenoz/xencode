@@ -779,7 +779,8 @@ pub fn spawn_child(
     Ok(pid as u32)
 }
 
-/// Send the run's child a `SIGTERM` and wait briefly for it to die. The
+/// Send the run's child a `SIGTERM` (on Windows, end it) and wait briefly
+/// for it to die. The
 /// `stop` file is written first, so whatever the signal achieves already,
 /// the run reads as stopped rather than crashed.
 pub fn stop_child(dir: &Path, pid: u32) -> String {
@@ -788,6 +789,27 @@ pub fn stop_child(dir: &Path, pid: u32) -> String {
     #[cfg(unix)]
     unsafe {
         libc::kill(pid as i32, libc::SIGTERM);
+    }
+    // Windows has no SIGTERM; the worker is ended outright (EN-4). The
+    // stop file already says it was asked to stop, and a worker that has
+    // already gone cannot be opened, which is the same answer.
+    #[cfg(windows)]
+    // SAFETY: the handle is opened for termination only, used once and
+    // closed.
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+            PROCESS_TERMINATE,
+        };
+        let process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
+        if !process.is_null() {
+            // Ending a process finishes after the call returns; wait for it.
+            if TerminateProcess(process, 1) != 0 {
+                WaitForSingleObject(process, 2000);
+            }
+            CloseHandle(process);
+        }
     }
     for _ in 0..20 {
         if !xencode_core_rs::tasks_file::pid_alive(pid) {
@@ -808,6 +830,38 @@ mod tests {
             max_wall_ms: 60_000,
             max_cost_micros: Some(1_000_000),
         }
+    }
+
+    /// `xencode run --stop` on Windows ends the worker itself (EN-4).
+    #[cfg(windows)]
+    #[test]
+    fn stopping_a_run_ends_its_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut worker = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let said = stop_child(dir.path(), worker.id());
+        assert!(said.starts_with("stopped"), "{said}");
+        assert!(dir.path().join("stop").exists());
+        // Ended, not merely asked: it is long gone before its 30 seconds.
+        let ended = worker.try_wait().unwrap();
+        assert!(ended.is_some(), "the worker is still running");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stopping_a_run_whose_worker_already_ended_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut worker = std::process::Command::new("cmd")
+            .args(["/c", "exit", "0"])
+            .spawn()
+            .unwrap();
+        let pid = worker.id();
+        worker.wait().unwrap();
+        let said = stop_child(dir.path(), pid);
+        assert!(said.starts_with("stopped"), "{said}");
     }
 
     #[test]
