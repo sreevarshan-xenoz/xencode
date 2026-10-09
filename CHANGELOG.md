@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EN-4`: detached runs work on Windows
+
+- `xencode run --detach` and `xencode run --resume <id> --detach` work on
+  Windows. They used to refuse with "detached runs need fork(2)"; the run now
+  starts `xencode` again as its worker, detached from the console, in the run's
+  folder, writing to the run's log. Unix keeps forking.
+- `xencode run --stop` ends a detached run on Windows; it used to leave the
+  worker running and say it might be ignoring SIGTERM.
+
+### Fixed — a detached process held open the output of the command that started it
+
+On Windows, reading the output of a command that started something detached
+(`out=$(xencode run --detach …)` in a shell) waited until the detached process
+ended, because it was handed the reader's pipe. The badge and the engine are
+started the same way. The command now returns its output at once.
+
+### Known — a detached run whose model could not be reached reads as done
+
+`xencode run --show` reports "exit: Done after 0 rounds" for a run whose only
+model call failed; the error is in `xencode run --log`. Recorded as `RA-2`.
+
 ### Added — `EN-3`: several windows on one engine, and no wait without an end
 
 - Two terminals open on the same project share one engine and show the same
