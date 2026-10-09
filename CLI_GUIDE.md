@@ -2452,7 +2452,7 @@ running." and starts nothing.
 Settings → `Floating Badge` (`badge_autostart`) starts it with the terminal app
 instead.
 
-### `xencode engine [--project <folder>]`
+### `xencode engine [--project <folder>] [--wait-limit <seconds>]`
 Run the agent work for one project folder (default: the current folder) in a
 process of its own, for the terminal app and other windows to connect to. The
 terminal app starts it by itself when needed, so running it by hand is only
@@ -2483,9 +2483,22 @@ xencode engine for E:\work\demo listening on \\.\pipe\xencode-engine-<user>-<16 
   the engine; the other commands run in the window, and the lines they add to
   the transcript are sent to the engine so every window shows the same
   transcript.
-- **Not yet.** A task waiting for an approval, an answer or a review while no
-  window is open waits until a window connects; the floating badge shows that
-  it needs you.
+- **Several windows.** Every window connected to one engine shows the same
+  transcript, tasks and prompts. The first answer to an approval or a question
+  counts; the other windows show "answered in <window>: <answer>", and a
+  later answer to the same prompt gets "that approval is no longer waiting". A
+  terminal names itself `terminal <process id>`. A window speaking another
+  protocol version is told which versions each side speaks and disconnected.
+- **Waits with no window: `--wait-limit <seconds>`** (default 1800). While no
+  window is connected and something waits for you, a clock runs; it stops as
+  soon as a window connects. When it reaches the limit the engine ends each
+  wait itself: a ByteBot question is withdrawn and its task stopped, an
+  approval prompt is denied (nothing is written), and a task waiting for
+  review is completed with its changes kept. Each is written in the
+  transcript. The floating badge shows "needs you" for as long as the wait
+  lasts.
+- **One writer.** The engine is the only process that writes the project's
+  conversation memory, ByteBot task records and badge status file.
 
 ### `xencode paths [--format text|json]`
 Print where each kind of file is read from, and name the ones that are still in

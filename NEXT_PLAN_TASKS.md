@@ -214,6 +214,9 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
     pass. The 37 are in crates EN-2 did not change; this time the two intermittent
     `xencode-models-rs` download failures were `a_partial_file_larger_than_the_file_is_not_trusted_with_a_range`
     and `a_partial_file_only_needs_the_rest_of_the_disk_to_be_let_through`.
+  - **2026-10-09, after EN-3:** 2935 passed, 35 failed, 22 ignored (two of the ignored are the
+    EN-3 tests that need a running llama.cpp server). No failure is new: all 35 are in crates the
+    engine work did not change, from the causes listed under `PL-2`.
 
 ## Model Catalog Honesty
 
@@ -17561,8 +17564,22 @@ program; the keys themselves are covered by their own tests.
     Unix machine here; covered by code reading and the CI build), and a connection attempt from a
     second Windows account. Left for EN-3: a task waiting on an approval, answer or review while
     no window is open waits with no time limit.
-  - [ ] **EN-3 — several windows per engine.** Snapshot on connect, first-answer-wins approvals
-    and questions, the idle and 30-minute rules, the engine writing the badge's status file.
+  - [x] **EN-3 — several windows per engine.** Done 2026-10-09
+    (`docs/superpowers/plans/2026-10-09-en3-several-windows.md`). Windows name themselves
+    (`terminal <pid>`) and are told when another window answered a prompt they showed; a
+    protocol mismatch is said and the window disconnected; with no window connected, a wait for a
+    person ends after `--wait-limit` (default 30 minutes): question withdrawn and its task
+    stopped, approval denied, review completed with changes kept; a task waiting for review keeps
+    the engine alive until then; a window is built with in-memory conversation memory, no status
+    file and no task store, so the engine is the only writer. **Watched on Windows 11:** two
+    terminal windows on one project shared one engine process, which held the only status file;
+    with both closed the engine exited after 10.3 s and removed it. Against a real llama.cpp
+    server (Qwen3-4B), two windows answering one approval at once: one answer counted, both were
+    told the same winner, the other was refused in words; and an approval left with no window was
+    denied after a five-second `--wait-limit`, nothing was written, and the engine exited. Those
+    two tests are `#[ignore]`d unless `XENCODE_LIVE_LLAMACPP_URL` names a server, so CI does not
+    run them. **Not verified:** a question withdrawn by the limit end to end (it needs a model
+    that calls `ask_user`; the rule itself is tested on a real app).
   - [ ] **EN-4 — a detached launcher that works on Windows,** shared by the badge, the engine and
     `xencode run --detach`.
 - [ ] **RA-1 — `run_agent` always returns an empty final answer.** It looks for

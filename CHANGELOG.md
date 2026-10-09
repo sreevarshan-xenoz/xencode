@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EN-3`: several windows on one engine, and no wait without an end
+
+- Two terminals open on the same project share one engine and show the same
+  transcript, tasks and prompts. When one window answers an approval or a
+  ByteBot question, the others show "answered in terminal <pid>: allow" (or
+  the answer given) and the prompt closes there too. Only the first answer
+  counts; a second one is told the prompt is no longer waiting.
+- With no window open, a question, approval or review no longer waits
+  forever. After 30 minutes — `xencode engine --wait-limit <seconds>` changes
+  that — a question is withdrawn and its task stopped, an approval is denied
+  so nothing is written, and a task waiting for review is completed with its
+  changes kept. Each is said in the transcript. A task waiting for review now
+  keeps the engine running until then.
+- Only the engine writes the project's conversation memory, ByteBot task
+  records and badge status file; a window opens none of them.
+- A window speaking another protocol version is told so and disconnected.
+
 ### Added — `EN-2`: agent work runs in its own process, so closing the terminal no longer stops it
 
 Opening `xencode` now connects to the project's *engine*, a background
@@ -36,12 +53,9 @@ transcript and tasks.
 - If the engine stops while a window is open, the window says "the engine
   stopped (…); starting a new one" and connects to a new one.
 
-Not yet: a task that waits for an approval, an answer or a review while no
-window is open waits until a window connects (the badge shows that it needs
-you). Several windows on one engine work but are not yet finished: the rule
-that ends a wait after 30 minutes and the badge file written by the engine
-alone are the next stage (`EN-3`). `/init`, `/advise`, `/verify` and
-`/orchestrator` run in the window, so their work stops with it.
+`/init`, `/advise`, `/verify` and `/orchestrator` run in the window, so their
+work stops with it. (What happens to a wait with no window open is described
+under `EN-3` above.)
 
 ### Changed (internal) — `EN-1`: an engine boundary inside the terminal app
 
