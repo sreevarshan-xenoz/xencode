@@ -2336,6 +2336,19 @@ impl<'a> App<'a> {
     }
 
     pub fn new() -> Self {
+        Self::build(false)
+    }
+
+    /// The app for a window onto an engine (EN-3). The same settings,
+    /// plugins, skills and layout as `new`, but nothing the engine owns is
+    /// opened for writing: conversation memory is kept in memory only, and
+    /// there is no badge status file and no ByteBot task store — the engine
+    /// writes all three.
+    pub fn for_window() -> Self {
+        Self::build(true)
+    }
+
+    fn build(window: bool) -> Self {
         // A config this build cannot read is not a reason to refuse the session —
         // defaults are a usable session — but it is a reason to say so before the
         // person changes a setting that would then sit only in memory. `DF-1`
@@ -2344,14 +2357,18 @@ impl<'a> App<'a> {
             Ok(config) => (config, None),
             Err(problem) => (XencodeConfig::default(), Some(problem)),
         };
-        let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
-            .unwrap_or_else(|_| ConversationMemory::new(50));
+        let mut memory = if window {
+            ConversationMemory::new(config.max_memory_items)
+        } else {
+            ConversationMemory::with_persistence(config.max_memory_items)
+                .unwrap_or_else(|_| ConversationMemory::new(50))
+        };
         let session_id = memory.start_session(None);
         let dir = xencode_plugin_rs::default_plugin_dir();
         let mut app = Self::with_config_and_memory(config, memory, dir);
         // DK-1: this session's status file for the floating badge. A state
         // folder that cannot be found costs the badge, not the session.
-        if let Ok(live) = xencode_live_rs::live_dir() {
+        if let Some(live) = xencode_live_rs::live_dir().ok().filter(|_| !window) {
             let root = std::env::current_dir().unwrap_or_default();
             app.live = Some(crate::live_status::LiveFeed::new(live, session_id, &root));
             // Written once at start so the file names the model from the first frame.
@@ -2361,20 +2378,24 @@ impl<'a> App<'a> {
                 "",
             );
         }
-        if app.config.badge_autostart {
+        // The engine starts the badge and owns the task records; a window
+        // gets the task list from the engine's view.
+        if app.config.badge_autostart && !window {
             app.start_badge();
         }
         // BT-1: ByteBot's task list comes back with the project. A task that
         // was running or waiting for help when xencode exited cannot resume.
-        let store = crate::bytebot_tasks::TaskStore::new(&app.project_xencode_dir());
-        let (tasks, interrupted) = store.recover();
-        app.bytebot_tasks = tasks;
-        app.bytebot_store = Some(store);
-        if interrupted > 0 {
-            app.push_toast(
-                crate::toast::ToastKind::Warning,
-                interrupted_tasks_warning(interrupted),
-            );
+        if !window {
+            let store = crate::bytebot_tasks::TaskStore::new(&app.project_xencode_dir());
+            let (tasks, interrupted) = store.recover();
+            app.bytebot_tasks = tasks;
+            app.bytebot_store = Some(store);
+            if interrupted > 0 {
+                app.push_toast(
+                    crate::toast::ToastKind::Warning,
+                    interrupted_tasks_warning(interrupted),
+                );
+            }
         }
         app.load_plugins();
         app.load_skills();
@@ -13711,10 +13732,6 @@ pub async fn run_app<B: Backend + io::Write>(
     terminal: &mut Terminal<B>,
     in_process: bool,
 ) -> io::Result<()> {
-    let mut app = App::new();
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-    app.start_in_composer_when_empty();
-
     let project = xencode_context_rs::default_root();
     let engine_addr = if in_process {
         None
@@ -13728,14 +13745,33 @@ pub async fn run_app<B: Backend + io::Write>(
             xencode_live_rs::spawn_detached(&exe, &["engine", "--project", &folder]).map(|_| ())
         })
     };
+    // The engine is reached before the app is built: a window opens nothing
+    // the engine writes (EN-3).
+    let mut linked = None;
+    let mut unreachable = None;
     if let Some(addr) = &engine_addr {
         match crate::engine::link::connect_or_start(addr, &*start_engine).await {
-            Ok((link, view)) => crate::engine::link::become_window(&mut app, link, view),
-            Err(why) => app.push_toast(
-                crate::toast::ToastKind::Warning,
-                format!("the engine could not be started ({why}); this window runs the agent work itself"),
-            ),
+            Ok(link) => linked = Some(link),
+            Err(why) => unreachable = Some(why),
         }
+    }
+    let mut app = if linked.is_some() {
+        App::for_window()
+    } else {
+        App::new()
+    };
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    app.start_in_composer_when_empty();
+    if let Some((link, view)) = linked {
+        crate::engine::link::become_window(&mut app, link, view);
+    }
+    if let Some(why) = unreachable {
+        app.push_toast(
+            crate::toast::ToastKind::Warning,
+            format!(
+                "the engine could not be started ({why}); this window runs the agent work itself"
+            ),
+        );
     }
 
     // Query installed Ollama models and check provider health immediately on startup
