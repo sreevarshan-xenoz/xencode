@@ -4108,6 +4108,27 @@ impl<'a> App<'a> {
         classify(model, self.routing_facts())
     }
 
+    /// The provider behind the configured model and its last health result,
+    /// in words — `llamacpp ready`, `ollama not running` — for the status bar
+    /// and the welcome screen. It names whichever provider is in use, where the
+    /// old icon only ever reflected Ollama (TX-6).
+    pub fn provider_status(&self) -> String {
+        let provider =
+            xencode_providers_rs::provider_for(&self.config.default_model, self.routing_facts());
+        let key = match provider {
+            "google_gemini" => "gemini",
+            other => other,
+        };
+        let state = match self.ollama_health_entries.get(key) {
+            Some((s, _, _)) if s == "healthy" => "ready".to_string(),
+            Some((s, _, _)) if s == "unavailable" => "not running".to_string(),
+            Some((s, _, _)) if s == "error" => "error".to_string(),
+            Some((s, _, _)) => s.clone(),
+            None => "not checked".to_string(),
+        };
+        format!("{key} {state}")
+    }
+
     fn routing_facts(&self) -> RoutingFacts<'_> {
         RoutingFacts {
             openrouter_key: self.config.api_keys.has_secret(SecretProvider::OpenRouter),
