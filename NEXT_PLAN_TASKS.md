@@ -135,6 +135,21 @@ Next, one change at a time: stop `update_plan` from costing a round of the budge
 completion claim on a turn that edited nothing with one "you changed no file" continuation (the
 second half of SM-1's plan, not yet built).
 
+**Sixth run, 2026-10-09 — plan updates no longer spend rounds (`22b15191`).** Same settings and
+cool-downs as the fifth run. **5 of 24**, the same total: `off-by-one` 2/3, `missing-value` 1/3 and
+`early-return` 1/3 (both 0 in every earlier run), `ignored-result` 1/3, the rest 0/3. The passes
+moved and the total did not, so on its own this change is not shown to help; it stays in because
+it costs nothing when a model does not plan.
+
+**Seventh run, 2026-10-09 — a claimed edit that never happened is answered once (`f7c803b5`).**
+Same server, one 24-case batch with no cool-downs (the owner allowed full GPU use). **3 of 24**
+(`off-by-one` 3/3, every other shape 0/3) — within the run-to-run spread of the 5 of 24 before. The
+note fired **zero** times: the answers that claimed a change came from turns that had edited
+something (the wrong thing), so the check correctly stayed silent, and the false-claim pattern
+the fifth run suggested is really a wrong-edit pattern. Across three changes the total sits at
+3–5 of 24, so prompt-side nudges are not the binding limit for this model. What has not been
+measured is the budget itself: several cases ran out at 11 rounds still searching.
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,
