@@ -61,6 +61,11 @@ pub struct ByteBotTask {
     pub started_at: Option<u64>,
     #[serde(default)]
     pub ended_at: Option<u64>,
+    /// The xencode process that made the task. A second xencode starting in
+    /// the same project leaves the records of a process that is still running
+    /// alone; `None` in records written before this field existed.
+    #[serde(default)]
+    pub pid: Option<u32>,
     /// Made by the person in this session. Never written or read: a record
     /// loaded from disk is always `false`, and only `true` tasks may start.
     #[serde(skip)]
@@ -91,6 +96,7 @@ impl ByteBotTask {
             created_at: now.as_secs(),
             started_at: None,
             ended_at: None,
+            pid: Some(std::process::id()),
             this_session: true,
         }
     }
@@ -183,6 +189,15 @@ impl TaskStore {
         let mut interrupted = 0;
         let mut settled = Vec::new();
         for mut task in self.load_all() {
+            // Another xencode still running in this project owns its tasks;
+            // they are shown but neither settled nor rewritten.
+            let owner_alive = task.pid.is_some_and(|pid| {
+                pid != std::process::id() && xencode_core_rs::sys::pid_alive(pid)
+            });
+            if owner_alive {
+                settled.push(task);
+                continue;
+            }
             match task.state {
                 TaskState::Running | TaskState::NeedsHelp => {
                     task.state = TaskState::Failed;
@@ -283,6 +298,69 @@ mod tests {
         let c = all.iter().find(|t| t.text == "c").unwrap();
         assert_eq!(c.state, TaskState::Cancelled);
         assert!(c.note.as_deref().is_some_and(|n| n.contains("not started")));
+    }
+
+    /// Final review, finding 2: a second xencode in the same project leaves
+    /// a running session's records alone; only a dead session's are settled.
+    #[test]
+    fn records_of_a_session_still_running_are_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let mut alive = ByteBotTask::new("owned by a live session", "m");
+        alive.state = TaskState::Running;
+        assert_eq!(
+            alive.pid,
+            Some(std::process::id()),
+            "a task records who made it"
+        );
+        // Another xencode still running: a separate process that stays alive
+        // for the length of the test.
+        let mut other = std::process::Command::new(if cfg!(windows) { "ping" } else { "sleep" })
+            .args(if cfg!(windows) {
+                vec!["-n", "30", "127.0.0.1"]
+            } else {
+                vec!["30"]
+            })
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        alive.pid = Some(other.id());
+        let gone = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .args(if cfg!(windows) {
+                vec!["/c", "exit"]
+            } else {
+                vec![]
+            })
+            .spawn()
+            .unwrap();
+        let gone_pid = gone.id();
+        let mut gone = gone;
+        gone.wait().unwrap();
+        let mut dead = ByteBotTask::new("owned by a dead session", "m");
+        dead.state = TaskState::Running;
+        dead.pid = Some(gone_pid);
+        store.save(&alive).unwrap();
+        store.save(&dead).unwrap();
+        let (tasks, interrupted) = store.recover();
+        assert_eq!(
+            interrupted, 1,
+            "only the dead session's task was interrupted"
+        );
+        let state_of = |text: &str| tasks.iter().find(|t| t.text == text).unwrap().state;
+        assert_eq!(state_of("owned by a live session"), TaskState::Running);
+        assert_eq!(state_of("owned by a dead session"), TaskState::Failed);
+        let on_disk = store.load_all();
+        assert_eq!(
+            on_disk
+                .iter()
+                .find(|t| t.text == "owned by a live session")
+                .unwrap()
+                .state,
+            TaskState::Running,
+            "the live session's record on disk was not rewritten"
+        );
+        let _ = other.kill();
+        let _ = other.wait();
     }
 
     #[test]

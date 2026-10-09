@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — ByteBot tasks: four problems found by a review of the work above
+
+- **Undo no longer overwrites a hand edit.** Like `/rewind`, ByteBot's undo
+  now refuses when a file was changed by hand after the task wrote it, and
+  names the file; `/rewind 1 --force` restores it anyway. A successful undo
+  also refreshes the editor pane.
+- **Two xencode sessions in one project no longer rewrite each other's
+  tasks.** Each record names the process that made it, and a session starting
+  up leaves the records of one that is still running alone, instead of marking
+  its running task failed and showing a false warning.
+- **Esc pauses the queue.** Stopping a task no longer starts the next queued
+  one straight away; Enter on an empty command box carries on.
+- **Three messages had long runs of spaces in the middle**: the description
+  of the `ask_user` tool given to the model, the "xencode-badge was not found"
+  message, and the startup warning about interrupted tasks.
+
 ### Added — `BT-3`: a ByteBot task that changed files waits for your review
 
 A ByteBot task that ends normally after changing files is now "needs review"

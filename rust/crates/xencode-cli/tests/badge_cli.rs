@@ -20,4 +20,9 @@ fn a_missing_badge_is_named_with_how_to_build_it() {
         "{stderr}"
     );
     assert!(stderr.contains("rust/badge/Cargo.toml"), "{stderr}");
+    // The manual quotes this sentence; it must read the same.
+    assert!(
+        stderr.contains("or on PATH. Build it with: cargo build --release"),
+        "{stderr}"
+    );
 }

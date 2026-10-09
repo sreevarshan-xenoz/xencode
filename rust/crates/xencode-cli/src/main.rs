@@ -2604,7 +2604,7 @@ fn run_badge() -> Result<(), String> {
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
     let exe = xencode_live_rs::find_badge(beside.as_deref()).ok_or_else(|| {
-        "xencode-badge was not found next to xencode or on PATH. Build it with:          cargo build --release --manifest-path rust/badge/Cargo.toml"
+        "xencode-badge was not found next to xencode or on PATH. Build it with: cargo build --release --manifest-path rust/badge/Cargo.toml"
             .to_string()
     })?;
     xencode_live_rs::spawn_badge(&exe)

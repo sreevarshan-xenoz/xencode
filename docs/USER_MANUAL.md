@@ -461,17 +461,21 @@ is not a separate engine and it is not a demo —
   `needs help`, `needs review`, `completed`, `cancelled` and `failed`. The
   panel lists the newest five, the current one marked `›`. Typing a new task
   while one runs queues it; tasks run one at a time, oldest first. Esc on a
-  running task cancels it, a provider error fails it with the error kept in
+  running task cancels it and pauses the queue; Enter on an empty command box
+  carries on with the next task. A provider error fails it with the error kept in
   the record, and a task that was running when xencode exited is marked
   failed the next time xencode starts, with a warning saying so. A task that
   was still waiting its turn is cancelled rather than started: xencode only
   runs task text typed in this session, never text read back from disk.
-  Secrets are removed from a record before it is written.
+  Secrets are removed from a record before it is written. A second xencode started in the
+  same project leaves the tasks of one that is still running alone.
 - a task that changed files ends as `needs review` rather than `completed`.
   The panel lists the files it changed, the floating badge shows "needs you",
   and the queue waits. With the command box empty, `a` accepts the changes and
   the task is completed; `u` undoes them, putting every file the task wrote
-  back as it was, and the task is cancelled. Undo is refused once a later turn
+  back as it was, and the task is cancelled. Like `/rewind`, undo refuses to
+  overwrite a file you changed by hand since the task wrote it, and says
+  which; `/rewind 1 --force` restores it anyway. Undo is also refused once a later turn
   has changed files too, because it would then undo that turn instead; use
   `/rewind` to step back through the later turns first. While a review waits,
   a new task cannot start with the letter `a` or `u`, because those keys
