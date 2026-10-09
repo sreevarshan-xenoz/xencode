@@ -4147,10 +4147,10 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let scanned = if app.sec_scan_path.is_empty() {
-        String::from(" 🛡️ Security Auditor (Enter:scan, Esc:close) ")
+        String::from(" 🛡️ Security Auditor — pattern scan, not a review (Enter:scan, Esc:close) ")
     } else {
         format!(
-            " 🛡️ Security Auditor · {} (Enter:scan, Esc:close) ",
+            " 🛡️ Security Auditor — pattern scan · {} (Enter:scan, Esc:close) ",
             app.sec_scan_path
         )
     };

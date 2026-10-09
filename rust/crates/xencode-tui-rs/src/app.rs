@@ -10838,6 +10838,9 @@ fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<St
         if row.failed {
             out.push("   stopped on a provider error before answering".to_string());
         }
+        if let Some(checks) = &row.checks {
+            out.push(format!("   {}", checks.summary()));
+        }
         if !row.retrieved_files.is_empty() {
             // Paths only, and only the ones the budget kept: this is the answer
             // to "what was it looking at", not a copy of the repository.
@@ -11379,6 +11382,8 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     // last one that failed; the token total adds up only what a server
     // reported, so a run against Ollama, which reports none, has no total.
     let mut turn_tools: Vec<xencode_context_rs::ToolTrace> = Vec::new();
+    // What the last round of post-edit checks found (EVd-3), for the trace.
+    let mut turn_checks: Option<xencode_context_rs::ChecksVerdict> = None;
     // What this round's tool calls returned, for the recording of the call
     // that asked for them.
     let mut recorded: Vec<xencode_context_rs::RecordedToolCall> = Vec::new();
@@ -11591,6 +11596,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                     let mut failure: Option<(String, xencode_providers_rs::ToolCall, String)> =
                         None;
                     let mut verifiable = true;
+                    let mut verdict = xencode_context_rs::ChecksVerdict::default();
                     for (index_of, command) in commands.iter().enumerate() {
                         let call = xencode_providers_rs::ToolCall {
                             id: format!("verify-{rounds}-{index_of}"),
@@ -11628,9 +11634,16 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                             arguments: xencode_context_rs::arguments_preview(&call.arguments),
                             tail: (!tail.is_empty()).then_some(tail),
                         });
+                        verdict.evidence_ref = Some(format!("tools[{}]", turn_tools.len() - 1));
+                        let rest = || commands[index_of + 1..].iter().cloned();
                         match crate::agent_tools::check_verdict(&result) {
-                            crate::agent_tools::CheckVerdict::Passed => continue,
+                            crate::agent_tools::CheckVerdict::Passed => {
+                                verdict.ran.push(command.clone());
+                                continue;
+                            }
                             crate::agent_tools::CheckVerdict::Unverifiable => {
+                                verdict.skipped.push(command.clone());
+                                verdict.skipped.extend(rest());
                                 // No exit code is a fact about the check (a
                                 // denial, a timeout, a missing toolchain), not
                                 // a verdict on the edit. Say it ended
@@ -11645,14 +11658,20 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                                 break;
                             }
                             crate::agent_tools::CheckVerdict::Failed => {
+                                verdict.ran.push(command.clone());
+                                verdict.failed.push(command.clone());
+                                verdict.skipped.extend(rest());
                                 failure = Some((command.clone(), call, result));
                                 break;
                             }
                         }
                     }
+                    turn_checks = Some(verdict);
                     if verifiable && failure.is_none() && sink == LoopSink::Chat {
+                        // "Passed", not "verified": an exit code says the checks
+                        // passed, not that the change is right (EVd-3).
                         let _ = tx.send(format!(
-                            "[TOOL]✓ verified: {} exited 0",
+                            "[TOOL]✓ checks passed: {} exited 0",
                             commands.join(", ")
                         ));
                     }
@@ -11692,14 +11711,23 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                         crate::lsp::run(&tool_root, &edited_paths, approval.command_timeout).await;
                     match report.verdict {
                         crate::lsp::LspVerdict::Clean => {
+                            turn_checks = Some(xencode_context_rs::ChecksVerdict {
+                                ran: vec![server.to_string()],
+                                ..Default::default()
+                            });
                             if sink == LoopSink::Chat {
                                 let _ = tx.send(format!(
-                                    "[TOOL]✓ verified: {server} found no errors in {} edited file(s)",
+                                    "[TOOL]✓ checks passed: {server} found no errors in {} edited file(s)",
                                     edited_paths.len()
                                 ));
                             }
                         }
                         crate::lsp::LspVerdict::Errors => {
+                            turn_checks = Some(xencode_context_rs::ChecksVerdict {
+                                ran: vec![server.to_string()],
+                                failed: vec![server.to_string()],
+                                ..Default::default()
+                            });
                             if repair_iters < max_repair_iters && round < max_rounds {
                                 repair_iters += 1;
                                 let call = xencode_providers_rs::ToolCall {
@@ -11731,6 +11759,10 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                             }
                         }
                         crate::lsp::LspVerdict::Unverifiable => {
+                            turn_checks = Some(xencode_context_rs::ChecksVerdict {
+                                skipped: vec![server.to_string()],
+                                ..Default::default()
+                            });
                             if sink == LoopSink::Chat {
                                 let _ = tx.send(format!(
                                     "[TOOL]✗ {server} produced no diagnostics, so this turn's edits end unverified"
@@ -11891,6 +11923,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     trace.error = stop_error.map(|e| xencode_context_rs::redact_error_for_trace(&e));
     trace.prompt_sha256 = prompt_digest;
     trace.tools = turn_tools;
+    trace.checks = turn_checks;
     trace.completion_tokens = reported_tokens;
     trace.retrieved_files = retrieved_files;
     trace.is_decision = is_decision;
@@ -16161,6 +16194,94 @@ mod tests {
     /// both answered to the model instead of run — even in the most permissive
     /// approval mode. The second one only fails because the loop hands the
     /// executor the same descriptions it handed the model.
+    /// EVd-3: the post-edit checks run for real on a small cargo project, the
+    /// chat says the checks passed (not that the change is verified), and the
+    /// turn's trace carries the verdict: what ran, what failed, what was skipped.
+    #[tokio::test]
+    async fn a_turn_that_edits_records_which_checks_ran_and_what_they_found() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-checks-verdict-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]
+name = \"demo\"
+version = \"0.1.0\"
+edition = \"2021\"
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn one() -> u32 { 1 }
+",
+        )
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments":
+                        {"path": "src/lib.rs", "content": "pub fn one() -> u32 {
+    1
+}
+"}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "Done."}, "done": true}),
+            ],
+        ));
+
+        let mut app = App::for_tests();
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "format one()".into(),
+            }],
+            "format one()",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        run.trace_dir = dir.join(".xencode");
+        run.max_repair_iters = 1;
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        let _ = server.await;
+        let traces = xencode_context_rs::read_recent_traces(&dir.join(".xencode"), 10);
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("✓ checks passed: cargo test, cargo clippy exited 0")),
+            "{lines:?}"
+        );
+        assert!(!lines.iter().any(|l| l.contains("verified:")), "{lines:?}");
+        let checks = traces
+            .last()
+            .and_then(|t| t.checks.clone())
+            .expect("the turn's trace carries its checks");
+        assert_eq!(checks.ran, vec!["cargo test", "cargo clippy"]);
+        assert!(checks.failed.is_empty() && checks.skipped.is_empty());
+        assert!(checks.all_passed());
+        assert!(checks
+            .evidence_ref
+            .as_deref()
+            .is_some_and(|r| r.starts_with("tools[")));
+    }
+
     /// SM-2: a model that writes its call into the answer as a `<tool_call>`
     /// block still gets the tool run, instead of the turn ending on prose.
     #[tokio::test]

@@ -4983,6 +4983,16 @@ even though the design is not.
   labelled `pattern-scan` wherever it is surfaced (fact 11) rather than
   "security". *Effort: S.* JUnit's `skipped ≠ passed` semantics are the model.
   *Trap:* every consumer will want to upgrade the word.
+  *(Done 2026-10-09. The result envelope (`OR-16`) already carried this shape for task
+  hand-offs; what was missing was the chat's own post-edit checks, which printed
+  "✓ verified" on an exit code. Every turn whose edits were checked now records a
+  `ChecksVerdict` on its trace row — `ran`, `failed` (a subset of `ran`), `skipped`
+  (due but never run: a denial, a timeout, no toolchain, or an earlier failure) and
+  `evidence_ref` (`tools[N]`, the trace's own tool row holding the output) — and
+  `/trace` prints it as one line. The chat now says "✓ checks passed: … exited 0".
+  The pattern scanner is labelled "pattern scan" in `xencode analyze`'s output and in
+  the Security Auditor's title. Proved by a TUI test that runs the real `cargo test`
+  and `cargo clippy` on a scratch crate after a scripted edit.)*
 - **EVd-4 — `.xencode/artifacts/<session>/`.** Per-session dirs, log tails
   reusing `agent_tools.rs:778-830`'s caps, keep last N plus every failing
   session, git-ignored by default. *Effort: S.* *Trap:* a `cargo test` loop
