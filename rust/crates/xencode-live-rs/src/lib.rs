@@ -185,6 +185,28 @@ pub fn find_badge(beside: Option<&Path>) -> Option<PathBuf> {
     xencode_core_rs::sys::which("xencode-badge")
 }
 
+/// Take the lock that keeps the badge to one copy per user, in `dir` (the
+/// live folder). `None` when another badge holds it. The lock lasts as long
+/// as the returned file is kept open.
+pub fn take_badge_lock(dir: &Path) -> Option<std::fs::File> {
+    std::fs::create_dir_all(dir).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("badge.lock"))
+        .ok()?;
+    file.try_lock().ok()?;
+    Some(file)
+}
+
+/// Whether a badge is running for this user: its lock is held.
+pub fn badge_running(dir: &Path) -> bool {
+    // Taking the lock and letting it go at once answers the question without
+    // keeping anything.
+    take_badge_lock(dir).is_none() && dir.join("badge.lock").exists()
+}
+
 /// Start the badge so it outlives this process and owns no console window.
 pub fn spawn_badge(exe: &Path) -> std::io::Result<()> {
     let mut cmd = std::process::Command::new(exe);
@@ -311,6 +333,17 @@ mod tests {
             dir.path().join("broken.json").exists(),
             "a file that cannot be read is not judged dead"
         );
+    }
+
+    #[test]
+    fn a_held_badge_lock_means_a_badge_is_running() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!badge_running(dir.path()), "no badge yet");
+        let lock = take_badge_lock(dir.path()).expect("the first badge takes the lock");
+        assert!(badge_running(dir.path()));
+        assert!(take_badge_lock(dir.path()).is_none(), "a second badge cannot take it");
+        drop(lock);
+        assert!(!badge_running(dir.path()), "the lock goes with the badge");
     }
 
     #[test]

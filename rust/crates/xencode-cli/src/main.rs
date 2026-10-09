@@ -2600,6 +2600,10 @@ const UNSET_WHEN_EMPTY: [&str; 6] = [
 /// `xencode badge` (DK-2): start the floating badge, detached from this
 /// terminal. A badge that is already running makes the new copy exit at once.
 fn run_badge() -> Result<(), String> {
+    if xencode_live_rs::live_dir().is_ok_and(|dir| xencode_live_rs::badge_running(&dir)) {
+        println!("The badge is already running.");
+        return Ok(());
+    }
     let beside = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));

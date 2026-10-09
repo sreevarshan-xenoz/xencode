@@ -26,3 +26,21 @@ fn a_missing_badge_is_named_with_how_to_build_it() {
         "{stderr}"
     );
 }
+
+#[test]
+fn a_badge_already_running_is_reported_instead_of_started_again() {
+    let empty = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    // A running badge holds this lock; the test holds it in its place.
+    let _lock = xencode_live_rs::take_badge_lock(&config.path().join("live")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_xencode"))
+        .arg("badge")
+        .env("PATH", empty.path())
+        .env("XCODE_CONFIG_DIR", config.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout.contains("The badge is already running."), "{stdout}");
+    assert!(!stdout.contains("Started"), "{stdout}");
+}
