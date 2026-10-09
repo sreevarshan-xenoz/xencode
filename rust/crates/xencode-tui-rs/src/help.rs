@@ -182,6 +182,7 @@ pub(crate) const COMMANDS: &[Binding] = &[
         "show where the next turn would send your prompt, and what redaction holds back, without sending it",
     ),
     ("/goto <destination>", "switch focus to destination by name"),
+    ("/model [name]", "switch model, or list the ones found"),
     ("/level [1-4]", "progressive disclosure tier: 1 Core, 2 Workflow, 3 Advanced, 4 All"),
 ];
 

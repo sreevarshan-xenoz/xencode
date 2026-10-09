@@ -371,6 +371,7 @@ These twenty-four are the only strings the chat input intercepts (`SLASH_COMMAND
 /egress [text]              Show where the next turn would send your prompt, and what redaction holds back — without sending it
 /goto <destination>         Switch focus directly to any panel destination by name
 /level [1-4]                Progressive disclosure tier: 1 Core, 2 Workflow (the default), 3 Advanced, 4 All
+/model [name]               Switch model, or list the ones found; in the ByteBot panel, a pick list
 /help                       Open the help overlay (same as ?); an unknown /word is answered here, not sent to the model
 ```
 

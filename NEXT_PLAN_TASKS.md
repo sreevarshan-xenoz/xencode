@@ -17512,5 +17512,7 @@ is **awaiting the owner's review**: nothing below is started.
   person to take over and type `/done`.
 - [ ] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).
 - [ ] **BT-4 — slash commands in the ByteBot panel** run the same handler as chat.
-- [ ] **BT-5 — `/model` and an in-panel model list**, with every model change going through one
-  function that also clears the old model's measured context window.
+- [x] **BT-5 — `/model` and an in-panel model list**, with every model change going through one
+  function that also clears the old model's measured context window. Done 2026-10-09:
+  `App::set_model` is used by the Models screen, `/model` and the ByteBot panel's list; tests
+  cover the forgotten window, `/model` in chat, and switching from the panel without leaving it.

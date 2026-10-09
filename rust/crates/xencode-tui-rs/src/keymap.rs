@@ -799,6 +799,10 @@ fn on_esc(app: &mut App) {
         app.init_visible = false;
         return;
     }
+    if app.focus == FocusArea::ByteBotPanel && app.bytebot_model_picker {
+        app.bytebot_model_picker = false;
+        return;
+    }
     match app.focus {
         FocusArea::Settings => {
             if app.settings_url_editing {
@@ -977,13 +981,7 @@ fn key_model_selector(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         }
         KeyCode::Enter => {
             if let Some(model) = app.available_models.get(app.selected_model).cloned() {
-                app.config.default_model = model.clone();
-                app.save_config();
-                // llama.cpp servers only serve their loaded model, so kick
-                // off a server-side swap so the next generation uses it.
-                if let Some(inner) = llama_model_target(&model) {
-                    app.llamacpp_control("switch", Some(inner.to_string()), tx.clone());
-                }
+                app.set_model(&model, tx.clone());
                 app.focus = FocusArea::ChatInput;
             }
         }
@@ -1438,6 +1436,34 @@ fn key_git_commit(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
 }
 
 fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
+    if app.bytebot_model_picker {
+        // The panel's model list (BT-5) takes the arrows and Enter; Esc is
+        // handled by `on_esc`, which closes the list before the panel.
+        let count = app.available_models.len();
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.bytebot_model_selected = app.bytebot_model_selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.bytebot_model_selected + 1 < count {
+                    app.bytebot_model_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(model) = app
+                    .available_models
+                    .get(app.bytebot_model_selected)
+                    .cloned()
+                {
+                    app.set_model(&model, tx.clone());
+                    app.bytebot_log.push(format!("model: {model}"));
+                }
+                app.bytebot_model_picker = false;
+            }
+            _ => {}
+        }
+        return true;
+    }
     match key.code {
         KeyCode::Up if !app.bytebot_running && !app.bytebot_history.is_empty() => {
             app.bytebot_command = app.bytebot_history.last().unwrap().clone();
@@ -3380,6 +3406,38 @@ mod tests {
             app.config.default_model, "kept-model",
             "the second Enter reset it"
         );
+    }
+
+    #[test]
+    fn the_bytebot_panel_switches_model_without_leaving() {
+        let mut app = app_with(FocusArea::ByteBotPanel);
+        app.available_models = vec!["a:1".into(), "b:2".into()];
+        app.config.default_model = "a:1".into();
+        type_text(&mut app, "/model");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.bytebot_model_picker, "/model alone opens the list");
+        assert!(!app.bytebot_running, "no task started");
+        assert_eq!(
+            app.bytebot_model_selected, 0,
+            "the list starts on the current model"
+        );
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.config.default_model, "b:2");
+        assert!(!app.bytebot_model_picker);
+        assert_eq!(app.focus, FocusArea::ByteBotPanel);
+
+        // Esc closes the list and changes nothing; `/model <name>` switches directly.
+        type_text(&mut app, "/model");
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.bytebot_model_picker);
+        assert_eq!(app.config.default_model, "b:2");
+        assert_eq!(app.focus, FocusArea::ByteBotPanel);
+        type_text(&mut app, "/model a:1");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.config.default_model, "a:1");
+        assert!(app.bytebot_command.is_empty());
     }
 
     #[test]
