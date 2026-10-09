@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `BT-1`: ByteBot keeps a task list with the original Bytebot states
+
+Each task given to ByteBot, from its panel or with `/bytebot`, is now a record
+in the project's `.xencode/bytebot/tasks/` folder, with the states the
+original Bytebot project uses: pending, running, needs help, needs review,
+completed, cancelled and failed. A task typed while another runs waits its
+turn instead of being refused; tasks run one at a time, oldest first. The
+panel lists the newest five with their states in words. The list survives a
+restart, and a task that was running when xencode exited is marked failed on
+the next start, with a warning.
+
 ### Fixed — `BT-4`: slash commands typed in the ByteBot panel run as commands
 
 A line starting with `/` in the ByteBot panel's command box used to be handed

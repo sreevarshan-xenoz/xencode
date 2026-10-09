@@ -3247,6 +3247,39 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
 
     // Steps panel
     let mut steps_lines: Vec<Line> = Vec::new();
+    // BT-1: the task list, newest five, the current task marked `›` and every
+    // state in words.
+    if !app.bytebot_tasks.is_empty() {
+        steps_lines.push(Line::from(Span::styled(
+            " Tasks",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )));
+        let current = app.bytebot_current_index();
+        let first = app.bytebot_tasks.len().saturating_sub(5);
+        for (i, task) in app.bytebot_tasks.iter().enumerate().skip(first) {
+            let colour = match task.state {
+                crate::bytebot_tasks::TaskState::Completed => app.theme.success,
+                crate::bytebot_tasks::TaskState::Failed => app.theme.danger,
+                crate::bytebot_tasks::TaskState::NeedsHelp
+                | crate::bytebot_tasks::TaskState::NeedsReview => app.theme.warning,
+                _ => app.theme.fg,
+            };
+            steps_lines.push(Line::from(vec![
+                Span::styled(
+                    format!(" {} ", if Some(i) == current { "›" } else { " " }),
+                    Style::default().fg(app.theme.accent),
+                ),
+                Span::styled(
+                    format!("{}  ", task.state.words()),
+                    Style::default().fg(colour),
+                ),
+                Span::styled(task.text.clone(), Style::default().fg(app.theme.fg)),
+            ]));
+        }
+        steps_lines.push(Line::from(""));
+    }
     if !app.bytebot_steps.is_empty() || app.bytebot_running {
         steps_lines.push(Line::from(Span::styled(
             " Execution Steps",
