@@ -475,7 +475,9 @@ is not a separate engine and it is not a demo —
   has changed files too, because it would then undo that turn instead; use
   `/rewind` to step back through the later turns first. While a review waits,
   a new task cannot start with the letter `a` or `u`, because those keys
-  answer the review; settle it first.
+  answer the review; settle it first. A task still waiting for review when
+  xencode exits is marked completed with its changes kept: its undo record
+  lived in that session's memory and cannot be used by the next one.
 - a ByteBot task can stop and ask you a question. The task shows as `needs
   help`, the floating badge turns amber, and the panel shows the question.
   Type an answer and press Enter to carry on; type `/done` instead if you did
