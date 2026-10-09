@@ -5332,7 +5332,10 @@ mod tests {
     }
 
     async fn wait_exit(rt: &TaskRuntime, id: u64) -> TaskRecord {
-        for _ in 0..100 {
+        // Up to ten seconds, returning as soon as the task ends. Starting `sh`
+        // on Windows can take over a second when the whole suite runs at once,
+        // and one second was this helper's whole budget.
+        for _ in 0..1000 {
             let rec = rt.lock().await.poll(id).await.unwrap();
             if rec.status != xencode_core_rs::TaskStatus::Running {
                 return rec;
