@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `PL-2`: Windows bugs found while fixing the Windows test failures
+
+- **Reading a dependency's docs picked a readme name the crate does not
+  have.** On a case-insensitive disk, as on Windows and macOS, a crate with
+  `readme.md` and `README.rst` was reported as having `README.md`, and the
+  real `README.rst` was skipped. The lookup now compares against the names
+  actually in the folder.
+
 ### Changed — `AG-4`: a first start opens at disclosure level 2, not 4
 
 With no settings file, xencode used to start at level 4, which shows every

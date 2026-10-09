@@ -298,9 +298,15 @@ pub fn pick_doc_file(dir: &Path) -> Option<DocFile> {
     if let Some(from_manifest) = manifest_readme(dir) {
         return Some(from_manifest);
     }
+    // Compare against the names actually in the directory. Asking the disk
+    // whether `README.md` exists is answered "yes" for `readme.md` on Windows
+    // and macOS, which would report a name the crate does not have.
+    let present: std::collections::HashSet<std::ffi::OsString> = std::fs::read_dir(dir)
+        .map(|entries| entries.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
     for name in README_NAMES {
         let full = dir.join(name);
-        if full.is_file() {
+        if present.contains(std::ffi::OsStr::new(name)) && full.is_file() {
             return Some(DocFile {
                 rel: name.to_string(),
                 full,
