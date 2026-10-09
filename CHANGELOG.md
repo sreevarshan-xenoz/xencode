@@ -16,7 +16,11 @@ completed, cancelled and failed. A task typed while another runs waits its
 turn instead of being refused; tasks run one at a time, oldest first. The
 panel lists the newest five with their states in words. The list survives a
 restart, and a task that was running when xencode exited is marked failed on
-the next start, with a warning.
+the next start, with a warning. A task still waiting its turn is cancelled on
+the next start rather than run, because its text then comes from disk and
+not from the person at the keyboard. Records are written with secrets
+redacted, and a record whose id is not one xencode makes is neither read nor
+written, so a tampered file cannot point outside the tasks folder.
 
 ### Fixed — `BT-4`: slash commands typed in the ByteBot panel run as commands
 

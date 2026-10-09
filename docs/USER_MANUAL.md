@@ -463,7 +463,10 @@ is not a separate engine and it is not a demo —
   while one runs queues it; tasks run one at a time, oldest first. Esc on a
   running task cancels it, a provider error fails it with the error kept in
   the record, and a task that was running when xencode exited is marked
-  failed the next time xencode starts, with a warning saying so.
+  failed the next time xencode starts, with a warning saying so. A task that
+  was still waiting its turn is cancelled rather than started: xencode only
+  runs task text typed in this session, never text read back from disk.
+  Secrets are removed from a record before it is written.
 - a line starting with `/` typed in the panel runs that command exactly as
   it would in chat — `/init`, `/help`, `/rewind` and the rest — instead of
   being handed to the agent as a task. Its output appears where that command

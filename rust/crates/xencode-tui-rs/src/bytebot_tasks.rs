@@ -68,16 +68,12 @@ impl ByteBotTask {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        // Seconds for order, then the low bits of the clock's nanoseconds and
-        // a per-process counter, so two tasks made in one second differ.
+        // Seconds, the full nanoseconds and a per-process counter, all
+        // zero-padded, so ids sort in the order the tasks were made: the
+        // queue reloads in that order after a restart.
         static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let id = format!(
-            "{}-{:05x}{:03x}",
-            now.as_secs(),
-            now.subsec_nanos() & 0xfffff,
-            n & 0xfff
-        );
+        let id = task_id(now.as_secs(), now.subsec_nanos(), n);
         ByteBotTask {
             id,
             text: text.to_string(),
@@ -95,6 +91,17 @@ impl ByteBotTask {
     }
 }
 
+/// Whether `id` has the shape `task_id` makes: digits and dashes only.
+fn is_task_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit() || c == '-')
+}
+
+/// A task id that sorts in creation order: seconds, nanoseconds
+/// and a per-process counter, each zero-padded to a fixed width.
+fn task_id(secs: u64, nanos: u32, counter: u32) -> String {
+    format!("{secs:012}-{nanos:09}-{:04}", counter % 10_000)
+}
+
 /// The folder of task records for one project.
 pub struct TaskStore {
     dir: PathBuf,
@@ -109,7 +116,27 @@ impl TaskStore {
     }
 
     /// Write one record atomically: a temporary file renamed over the old one.
+    /// Secrets are redacted from the text, steps and note before writing, and
+    /// an id that is not one this module makes is refused, so a record can
+    /// never name a file outside the tasks folder.
     pub fn save(&self, task: &ByteBotTask) -> std::io::Result<()> {
+        if !is_task_id(&task.id) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("not a task id: {:?}", task.id),
+            ));
+        }
+        let mut task = task.clone();
+        task.text = xencode_context_rs::redact_secrets(&task.text);
+        for (call, outcome) in &mut task.steps {
+            *call = xencode_context_rs::redact_secrets(call);
+            *outcome = xencode_context_rs::redact_secrets(outcome);
+        }
+        task.note = task.note.map(|n| xencode_context_rs::redact_secrets(&n));
+        task.question = task
+            .question
+            .map(|q| xencode_context_rs::redact_secrets(&q));
+        let task = &task;
         std::fs::create_dir_all(&self.dir)?;
         let target = self.dir.join(format!("{}.json", task.id));
         let temp = self.dir.join(format!(".{}.tmp", task.id));
@@ -130,27 +157,43 @@ impl TaskStore {
             .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-            .filter_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok())
+            .filter_map(|p| {
+                serde_json::from_str::<ByteBotTask>(&std::fs::read_to_string(p).ok()?).ok()
+            })
+            .filter(|t| is_task_id(&t.id))
             .collect();
         tasks.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
         tasks
     }
 
-    /// Mark tasks that were running or waiting for help when xencode last
-    /// exited as failed; nothing can resume them. Returns how many.
+    /// Settle tasks left open when xencode last exited, and return how many
+    /// were interrupted mid-run. A task that was running or waiting for help
+    /// cannot resume, so it is failed. A task still pending is cancelled, not
+    /// run: its text was read from disk rather than typed by the person at the
+    /// keyboard now, and a record can be planted in that folder.
     pub fn recover(&self) -> usize {
-        let mut recovered = 0;
+        let mut interrupted = 0;
         for mut task in self.load_all() {
-            if matches!(task.state, TaskState::Running | TaskState::NeedsHelp) {
-                task.state = TaskState::Failed;
-                task.question = None;
-                task.note = Some("xencode exited during this task".to_string());
-                if self.save(&task).is_ok() {
-                    recovered += 1;
+            match task.state {
+                TaskState::Running | TaskState::NeedsHelp => {
+                    task.state = TaskState::Failed;
+                    task.question = None;
+                    task.note = Some("xencode exited during this task".to_string());
+                    if self.save(&task).is_ok() {
+                        interrupted += 1;
+                    }
                 }
+                TaskState::Pending => {
+                    task.state = TaskState::Cancelled;
+                    task.note = Some(
+                        "not started before xencode exited; type it again to run it".to_string(),
+                    );
+                    let _ = self.save(&task);
+                }
+                _ => {}
             }
         }
-        recovered
+        interrupted
     }
 }
 
@@ -207,17 +250,85 @@ mod tests {
             assert_eq!(t.state, TaskState::Failed);
             assert_eq!(t.note.as_deref(), Some("xencode exited during this task"));
         }
-        assert_eq!(
-            all.iter().find(|t| t.text == "c").unwrap().state,
-            TaskState::Pending
+        // A task still pending from an earlier session is never started on
+        // its own: its text came from disk, not from the person now at the
+        // keyboard, and a record can be planted there.
+        let c = all.iter().find(|t| t.text == "c").unwrap();
+        assert_eq!(c.state, TaskState::Cancelled);
+        assert!(c.note.as_deref().is_some_and(|n| n.contains("not started")));
+    }
+
+    #[test]
+    fn a_record_whose_id_is_a_path_is_never_loaded_or_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let mut evil = ByteBotTask::new("x", "m");
+        evil.id = "../../escaped".to_string();
+        assert!(
+            store.save(&evil).is_err(),
+            "an id that is a path is refused"
+        );
+        assert!(!dir.path().join("escaped.json").exists());
+        let planted = serde_json::to_string(&evil).unwrap();
+        std::fs::create_dir_all(dir.path().join("bytebot/tasks")).unwrap();
+        std::fs::write(dir.path().join("bytebot/tasks/planted.json"), planted).unwrap();
+        assert!(
+            store.load_all().is_empty(),
+            "a planted record with a path id is skipped"
         );
     }
 
     #[test]
-    fn two_tasks_made_at_once_get_different_ids() {
-        let a = ByteBotTask::new("a", "m");
-        let b = ByteBotTask::new("b", "m");
-        assert_ne!(a.id, b.id);
+    fn secrets_never_reach_a_task_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let mut t = ByteBotTask::new("deploy with key sk-FAKE-NOT-A-REAL-TEST-KEY", "m");
+        t.steps.push((
+            "run_command curl -H \"Authorization: Bearer sk-FAKE-NOT-A-REAL-TEST-KEY\"".into(),
+            "done".into(),
+        ));
+        t.note = Some("failed: sk-FAKE-NOT-A-REAL-TEST-KEY rejected".into());
+        store.save(&t).unwrap();
+        let text = std::fs::read_to_string(
+            dir.path()
+                .join("bytebot/tasks")
+                .join(format!("{}.json", t.id)),
+        )
+        .unwrap();
+        assert!(!text.contains("sk-FAKE-NOT-A-REAL-TEST-KEY"), "{text}");
+    }
+
+    #[test]
+    fn ids_sort_in_creation_order_across_every_digit_boundary() {
+        // Pairs made one after the other; each later id must sort after.
+        let pairs = [
+            ((5, 1_048_575, 0), (5, 1_048_576, 1)),
+            ((5, 999_999_999, 7), (6, 0, 8)),
+            ((5, 10, 9_999), (5, 11, 0)),
+            ((9, 0, 0), (10, 0, 1)),
+        ];
+        for ((s1, n1, c1), (s2, n2, c2)) in pairs {
+            let (a, b) = (task_id(s1, n1, c1), task_id(s2, n2, c2));
+            assert!(a < b, "{a} does not sort before {b}");
+        }
+    }
+
+    #[test]
+    fn tasks_made_in_one_second_reload_in_the_order_they_were_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let made: Vec<ByteBotTask> = (0..20)
+            .map(|i| ByteBotTask::new(&format!("task {i}"), "m"))
+            .collect();
+        for t in made.iter().rev() {
+            store.save(t).unwrap();
+        }
+        let ids: Vec<_> = made.iter().map(|t| t.id.clone()).collect();
+        let reloaded: Vec<_> = store.load_all().into_iter().map(|t| t.id).collect();
+        assert_eq!(reloaded, ids);
+        let mut unique = ids.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "two tasks share an id");
     }
 
     #[test]
