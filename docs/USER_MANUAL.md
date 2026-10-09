@@ -456,6 +456,11 @@ is not a separate engine and it is not a demo —
   whole run's file changes back, and a plan it posts shows in the same strip.
 - if the provider fails, the panel prints the error it got and the open step
   goes `failed`. Nothing is reported as done that xencode did not observe.
+- `/model` typed in the panel opens a list of the models found (↑↓, Enter,
+  Esc keeps the current one) without leaving the panel; `/model <name>`
+  switches straight away. Every way of changing model — this list, `/model`
+  in chat and the Models screen — also forgets the context size measured for
+  the old model, so the next turn is sized for the new one.
 
 ### Slash Commands (the only ones)
 

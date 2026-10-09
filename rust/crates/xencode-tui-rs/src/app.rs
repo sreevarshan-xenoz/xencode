@@ -118,6 +118,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/egress",
     "/goto",
     "/level",
+    "/model",
     "/help",
 ];
 
@@ -845,6 +846,9 @@ pub struct App<'a> {
     /// The running ByteBot task's stop flag, set by `Esc` (UX-14). The run
     /// ends at its next round boundary and the panel reports what it got.
     pub(crate) bytebot_stop: Option<Arc<AtomicBool>>,
+    /// The ByteBot panel's model list is open (BT-5), and which row is lit.
+    pub bytebot_model_picker: bool,
+    pub bytebot_model_selected: usize,
     /// This session's live status file (DK-1), read by the floating badge.
     /// `None` in tests that do not ask for one.
     pub live: Option<crate::live_status::LiveFeed>,
@@ -2216,6 +2220,39 @@ impl<'a> App<'a> {
     }
 
     /// Append a system message to the chat transcript.
+    /// Every model change goes through here (BT-5): the Models screen,
+    /// `/model` and the ByteBot panel's list. The context window measured for
+    /// the old model is forgotten, so the next turn is not budgeted for it, and
+    /// a llama.cpp server is told to load the new model.
+    pub fn set_model(&mut self, model: &str, tx: mpsc::UnboundedSender<String>) {
+        self.config.default_model = model.to_string();
+        self.save_config();
+        self.server_context_window = None;
+        self.ollama_window = None;
+        if let Some(inner) = llama_model_target(model) {
+            self.llamacpp_control("switch", Some(inner.to_string()), tx);
+        }
+    }
+
+    /// `/model [name]`: switch with a name, list what was found without one.
+    fn handle_model_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let name = prompt.trim().strip_prefix("/model").unwrap_or("").trim();
+        if name.is_empty() {
+            let found = if self.available_models.is_empty() {
+                "none found yet (m opens Models, r refreshes)".to_string()
+            } else {
+                self.available_models.join(", ")
+            };
+            let current = self.config.default_model.clone();
+            self.push_system_message(format!(
+                "Models: {found} · current: {current}. Type /model <name> to switch."
+            ));
+        } else {
+            self.set_model(name, tx);
+            self.push_system_message(format!("Model: {name}"));
+        }
+    }
+
     pub fn push_system_message(&mut self, text: impl Into<String>) {
         self.messages.push(UiMessage {
             role: "system".to_string(),
@@ -3187,6 +3224,8 @@ impl<'a> App<'a> {
             no_color: std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
             turn_stop: None,
             bytebot_stop: None,
+            bytebot_model_picker: false,
+            bytebot_model_selected: 0,
             live: None,
             live_turn_error: None,
             live_turn_stopped: false,
@@ -4015,6 +4054,11 @@ impl<'a> App<'a> {
             } else {
                 self.push_system_message("Usage: /level [1-4]");
             }
+            return;
+        }
+
+        if prompt.trim() == "/model" || prompt.starts_with("/model ") {
+            self.handle_model_command(&prompt, tx);
             return;
         }
 
@@ -4974,6 +5018,26 @@ impl<'a> App<'a> {
     pub fn run_bytebot(&mut self, tx: mpsc::UnboundedSender<String>) {
         let task = self.bytebot_command.trim().to_string();
         if task.is_empty() {
+            return;
+        }
+        // BT-5: the model is chosen without leaving the panel.
+        if task == "/model" {
+            self.bytebot_command.clear();
+            self.bytebot_cursor = 0;
+            self.bytebot_model_selected = self
+                .available_models
+                .iter()
+                .position(|m| *m == self.config.default_model)
+                .unwrap_or(0);
+            self.bytebot_model_picker = true;
+            return;
+        }
+        if let Some(name) = task.strip_prefix("/model ") {
+            let name = name.trim().to_string();
+            self.bytebot_command.clear();
+            self.bytebot_cursor = 0;
+            self.set_model(&name, tx);
+            self.bytebot_log.push(format!("model: {name}"));
             return;
         }
         if let Some(run) = self.arm_bytebot(&task) {
@@ -15054,12 +15118,13 @@ mod tests {
     async fn an_unknown_slash_command_is_answered_here_not_sent_to_the_model() {
         let mut app = App::for_tests();
         let (tx, _rx) = mpsc::unbounded_channel::<String>();
-        app.set_chat_text("/model");
+        // `/model` was this test's example until BT-5 made it a command.
+        app.set_chat_text("/frobnicate");
         app.submit_message(tx.clone());
         assert!(!app.is_generating, "no model turn starts");
         let last = app.messages.last().unwrap();
         assert!(
-            last.content.contains("Unknown command /model"),
+            last.content.contains("Unknown command /frobnicate"),
             "{}",
             last.content
         );
@@ -18656,6 +18721,40 @@ Content-Length: 0
             .filter(|message| message.role == "system")
             .map(|message| message.content.clone())
             .collect()
+    }
+
+    /// BT-5: a model change forgets the context window measured for the old
+    /// model, so the next turn is budgeted for the new one.
+    #[tokio::test]
+    async fn changing_model_forgets_the_old_models_window() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.config.default_model = "qwen2.5:7b".into();
+        app.ollama_window = Some(32_768);
+        app.server_context_window = Some(8192);
+        app.set_model("qwen3:4b", tx);
+        assert_eq!(app.config.default_model, "qwen3:4b");
+        assert_eq!(app.ollama_window, None);
+        assert_eq!(app.server_context_window, None);
+    }
+
+    /// BT-5: `/model <name>` switches; `/model` alone lists what was found.
+    #[tokio::test]
+    async fn slash_model_switches_and_lists() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.available_models = vec!["a:1".into(), "b:2".into()];
+        app.chat_input.insert_str("/model b:2");
+        app.submit_message(tx.clone());
+        assert_eq!(app.config.default_model, "b:2");
+        assert!(!app.is_generating, "the command is not sent to the model");
+        app.chat_input.insert_str("/model");
+        app.submit_message(tx);
+        let last = system_lines(&app).last().cloned().unwrap_or_default();
+        assert!(
+            last.contains("a:1") && last.contains("b:2") && last.contains("current: b:2"),
+            "{last}"
+        );
     }
 
     /// The done-when for the cost work, checked end to end: records written to

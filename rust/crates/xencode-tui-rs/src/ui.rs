@@ -3428,6 +3428,58 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         let hist_para = Paragraph::new(history_lines).style(Style::default().fg(app.theme.fg));
         f.render_widget(hist_para, inner_hist);
     }
+
+    // BT-5: the model list opened by `/model`, drawn over the step rows so the
+    // panel stays where it is. The lit row carries `›` and the current model
+    // says so in words, so neither depends on colour.
+    if app.bytebot_model_picker && bottom[0].height > 2 && bottom[0].width > 4 {
+        let area = bottom[0];
+        f.render_widget(Clear, area);
+        let block = Block::default()
+            .border_set(panel_border_set(app.config.rounded_borders))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(app.theme.accent))
+            .title(" Model — ↑↓ Enter · Esc keeps the current one ");
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let lines: Vec<Line> = if app.available_models.is_empty() {
+            vec![Line::from(Span::styled(
+                " No models found yet — m opens Models, where r refreshes the list",
+                Style::default().fg(app.theme.message_system),
+            ))]
+        } else {
+            app.available_models
+                .iter()
+                .enumerate()
+                .map(|(i, model)| {
+                    let lit = i == app.bytebot_model_selected;
+                    let current = *model == app.config.default_model;
+                    let text = format!(
+                        "{} {}{}",
+                        if lit { "›" } else { " " },
+                        model,
+                        if current { " (current)" } else { "" }
+                    );
+                    let style = if lit {
+                        Style::default()
+                            .fg(app.theme.highlight_fg)
+                            .bg(app.theme.highlight)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(app.theme.fg)
+                    };
+                    Line::from(Span::styled(text, style))
+                })
+                .collect()
+        };
+        let skip = app
+            .bytebot_model_selected
+            .saturating_sub(inner.height.saturating_sub(1) as usize);
+        f.render_widget(
+            Paragraph::new(lines.into_iter().skip(skip).collect::<Vec<_>>()),
+            inner,
+        );
+    }
 }
 
 // ── Project Context (/init) Overlay ────────────────────────────────────────

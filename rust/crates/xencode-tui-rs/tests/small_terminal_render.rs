@@ -300,6 +300,34 @@ fn renders_at_any_terminal_size() {
     );
 }
 
+/// The ByteBot panel's model list (BT-5) is drawn over its step rows and must
+/// survive the same sweep, with models and without.
+#[test]
+fn renders_the_bytebot_model_list_at_any_terminal_size() {
+    let mut failures = Vec::new();
+    for models in [
+        vec![],
+        vec!["a:1".to_string(), "b:2".to_string(), "c:3".to_string()],
+    ] {
+        let mut app = populated(FocusArea::ByteBotPanel);
+        app.available_models = models.clone();
+        app.bytebot_model_picker = true;
+        app.bytebot_model_selected = models.len().saturating_sub(1);
+        for &width in WIDTHS {
+            for &height in HEIGHTS {
+                let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap();
+                }));
+                if rendered.is_err() {
+                    failures.push(format!("{} models at {width}x{height}", models.len()));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// The command palette is modal too, with a query line above its list; both
 /// an empty query and one that matches nothing must survive the size sweep.
 #[test]

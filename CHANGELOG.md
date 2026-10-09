@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `BT-5`: `/model`, and switching model inside the ByteBot panel
+
+`/model <name>` switches model from the chat; `/model` alone lists the models
+found and names the current one. In the ByteBot panel, `/model` opens a list
+to pick from without leaving the panel. Every model change, including the
+Models screen, now goes through one place that also forgets the context size
+measured for the previous model; before, the first turn after a switch could
+be sized for the old model.
+
 ### Added — `DK-1`, `DK-2`: live session status and the `xencode badge` command
 
 Every running terminal session now keeps a small status file for the floating
