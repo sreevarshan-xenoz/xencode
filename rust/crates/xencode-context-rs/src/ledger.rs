@@ -99,14 +99,31 @@ pub fn append_ledger(xencode_dir: &Path, entry: &LedgerEntry) -> std::io::Result
         note,
         ..entry.clone()
     };
-    let mut text = serde_json::to_string(&stored).unwrap_or_default();
+    // Chained onto the row before it (EVd-7), so an edit made to the file
+    // afterwards shows up when it is checked: `verify_ledger`, or
+    // `xencode audit verify .xencode/ledger.jsonl`, which reads every chained
+    // log the same way.
+    let path = ledger_path(xencode_dir);
+    let prev = xencode_core_rs::chain::continue_from(&path);
+    let value = serde_json::to_value(&stored).map_err(std::io::Error::other)?;
+    let (mut text, _digest) =
+        xencode_core_rs::chain::chained_line(value, &prev).map_err(std::io::Error::other)?;
     text.push('\n');
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(ledger_path(xencode_dir))?;
+        .open(path)?;
     file.write_all(text.as_bytes())
+}
+
+/// Check the ledger's chain: every row hashes to its own digest and names the
+/// row before it. Rows written before the ledger was chained are counted, not
+/// failed. This proves the file is self-consistent, nothing more: there is no
+/// key, so whoever rewrites the whole file can rewrite the chain with it.
+pub fn verify_ledger(xencode_dir: &Path) -> xencode_core_rs::chain::ChainReport {
+    let text = std::fs::read_to_string(ledger_path(xencode_dir)).unwrap_or_default();
+    xencode_core_rs::chain::verify_chain(&text)
 }
 
 /// Every row, oldest first. A corrupt line is skipped with its number kept, so
@@ -161,6 +178,68 @@ mod tests {
             log_ref: "artifacts/s1/test.log".to_string(),
             note: "green".to_string(),
         }
+    }
+
+    /// EVd-7: each row is chained to the one before it, so an edit to a row in
+    /// the middle of the file is caught on that line, and the rows still read
+    /// back as rows.
+    #[test]
+    fn the_ledger_is_chained_and_an_edit_to_one_row_is_caught() {
+        let xencode = temp_xencode("chain");
+        for code in [0, 1, 0] {
+            let mut row = entry(Some("s1"));
+            row.exit_code = code;
+            append_ledger(&xencode, &row).unwrap();
+        }
+        let report = verify_ledger(&xencode);
+        assert_eq!(report.records, 3);
+        assert!(report.fully_chained(), "{report:?}");
+        assert_eq!(
+            read_ledger(&xencode).len(),
+            3,
+            "chain fields do not hide rows"
+        );
+
+        // Turn the failing run in the middle into a passing one.
+        let path = ledger_path(&xencode);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<String> = text
+            .lines()
+            .enumerate()
+            .map(|(i, l)| {
+                if i == 1 {
+                    l.replace("\"exit_code\":1", "\"exit_code\":0")
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        assert_ne!(
+            lines.join(
+                "
+"
+            ) + "
+",
+            text,
+            "the edit happened"
+        );
+        std::fs::write(
+            &path,
+            lines.join(
+                "
+",
+            ) + "
+",
+        )
+        .unwrap();
+        let report = verify_ledger(&xencode);
+        assert!(!report.intact());
+        assert_eq!(report.problems[0].line, 2, "{report:?}");
+        assert_eq!(
+            report.problems[0].problem,
+            xencode_core_rs::chain::ChainProblem::ContentChanged
+        );
+        let _ = std::fs::remove_dir_all(xencode.parent().unwrap());
     }
 
     #[test]

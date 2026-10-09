@@ -5008,6 +5008,12 @@ even though the design is not.
   verbatim. *Effort: S.* *Trap:* do not add signing. For a local user a chain
   proves only self-consistency, which is still worth having for rewind
   forensics.
+  *(Done 2026-10-09. The chain code moved out of `xencode-server-rs`'s audit module into
+  `xencode-core-rs` (`chain.rs`) unchanged, and both the audit log and the ledger now
+  use it, from the same starting value, so `xencode audit verify .xencode/ledger.jsonl`
+  checks the ledger with no new command. No signing. Proved live: two real `xencode
+  test` runs in a scratch crate verified intact (exit 0); changing the first row's
+  `exit_code` was reported on line 1 (exit 1).)*
 
 Build **EVd-1 + EVd-2** first: they are the substrate, cheap, and unblock CX-1.
 Defer the verdict (EVd-3) until **L-7** exists, because an exit code is the only

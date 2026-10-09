@@ -3103,7 +3103,8 @@ Every line `trailer` prints is a `Token: value` trailer, so `git
 interpret-trailers` reads it as trailers when it sits at the end of a commit
 message.
 
-### `xencode audit verify [PATH]`Check the session server's audit log for records that were changed after they
+### `xencode audit verify [PATH]`
+Check the session server's audit log for records that were changed after they
 were written. Each record carries a digest of its own contents and the digest of
 the record before it, so editing, removing or moving a line is reported on a
 specific line. Defaults to `audit.jsonl` in the state directory. Exits non-zero when
@@ -3112,7 +3113,12 @@ something does not add up.
 ```bash
 xencode audit verify
 xencode audit verify /path/to/audit.jsonl
+xencode audit verify .xencode/ledger.jsonl   # the run ledger `xencode test` writes
 ```
+
+The project's run ledger (`.xencode/ledger.jsonl`, one row per `xencode test` run) is
+chained the same way, so the same command checks it. Rows written before the ledger was
+chained are counted as unchained rather than reported as broken.
 
 What it cannot tell you: a log that someone truncated at the end still verifies,
 because nothing outside the file says how long it should be, and anyone willing

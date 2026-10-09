@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `EVd-7`: the run ledger is hash-chained, and `xencode audit verify` checks it
+
+Each row of `.xencode/ledger.jsonl` (written by `xencode test`) now carries the digest
+of the row before it and of itself, the same chain the server's audit log uses.
+`xencode audit verify .xencode/ledger.jsonl` reports an edited, moved or removed row by
+line. As with the audit log, this catches an edit, not a rewrite of the whole file.
+
 ### Fixed — `QA-6`: a half answer from a server that stopped is no longer passed off as whole, and a dying MCP server's last words are kept
 
 - When a model server closed the connection in the middle of an answer without an
