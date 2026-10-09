@@ -76,6 +76,23 @@ pub fn remove_status(dir: &Path, session_id: &str) {
     let _ = std::fs::remove_file(status_path(dir, session_id));
 }
 
+/// Delete status files whose heartbeat stopped more than `older_than` seconds
+/// before `now`: their sessions were killed or crashed and cannot remove
+/// their own file. Returns how many were deleted. Files that cannot be read
+/// are left alone, because nothing proves their session is dead.
+pub fn prune_dead(dir: &Path, now: u64, older_than: u64) -> usize {
+    let mut removed = 0;
+    for read in read_all(dir) {
+        if let Read::Ok(status) = read {
+            if now.saturating_sub(status.heartbeat_at) > older_than {
+                remove_status(dir, &status.session_id);
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 /// One file's outcome. A file that cannot be used is reported, not hidden.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Read {
@@ -235,6 +252,25 @@ mod tests {
         assert_eq!(clipped.chars().count(), HEADLINE_MAX);
         assert!(clipped.ends_with('…'));
         assert_eq!(clip_headline("short"), "short");
+    }
+
+    #[test]
+    fn only_files_silent_for_longer_than_the_limit_are_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut dead = sample("dead");
+        dead.heartbeat_at = 1_000;
+        let mut alive = sample("alive");
+        alive.heartbeat_at = 1_000 + 590;
+        write_status(dir.path(), &dead).unwrap();
+        write_status(dir.path(), &alive).unwrap();
+        std::fs::write(dir.path().join("broken.json"), "{").unwrap();
+        assert_eq!(prune_dead(dir.path(), 1_000 + 601, 600), 1);
+        assert!(!status_path(dir.path(), "dead").exists());
+        assert!(status_path(dir.path(), "alive").exists());
+        assert!(
+            dir.path().join("broken.json").exists(),
+            "a file that cannot be read is not judged dead"
+        );
     }
 
     #[test]

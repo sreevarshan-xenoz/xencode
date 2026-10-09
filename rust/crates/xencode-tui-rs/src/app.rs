@@ -845,6 +845,14 @@ pub struct App<'a> {
     /// The running ByteBot task's stop flag, set by `Esc` (UX-14). The run
     /// ends at its next round boundary and the panel reports what it got.
     pub(crate) bytebot_stop: Option<Arc<AtomicBool>>,
+    /// This session's live status file (DK-1), read by the floating badge.
+    /// `None` in tests that do not ask for one.
+    pub live: Option<crate::live_status::LiveFeed>,
+    /// The error that ended the running chat turn, held until its `[DONE]`
+    /// arrives so the status file can say "failed" rather than "finished".
+    pub live_turn_error: Option<String>,
+    /// The person stopped the running turn; its end keeps the status "idle".
+    pub(crate) live_turn_stopped: bool,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -2241,9 +2249,21 @@ impl<'a> App<'a> {
         };
         let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
             .unwrap_or_else(|_| ConversationMemory::new(50));
-        memory.start_session(None);
+        let session_id = memory.start_session(None);
         let dir = xencode_plugin_rs::default_plugin_dir();
         let mut app = Self::with_config_and_memory(config, memory, dir);
+        // DK-1: this session's status file for the floating badge. A state
+        // folder that cannot be found costs the badge, not the session.
+        if let Ok(live) = xencode_live_rs::live_dir() {
+            let root = std::env::current_dir().unwrap_or_default();
+            app.live = Some(crate::live_status::LiveFeed::new(live, session_id, &root));
+            // Written once at start so the file names the model from the first frame.
+            app.live_set(
+                xencode_live_rs::LiveState::Idle,
+                xencode_live_rs::LiveSource::Chat,
+                "",
+            );
+        }
         app.load_plugins();
         app.load_skills();
         // V-6: the window arrangement comes back with the app. A file this
@@ -3164,6 +3184,9 @@ impl<'a> App<'a> {
             no_color: std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
             turn_stop: None,
             bytebot_stop: None,
+            live: None,
+            live_turn_error: None,
+            live_turn_stopped: false,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -3498,6 +3521,10 @@ impl<'a> App<'a> {
         }
         let _ = responder.send(answer);
         self.approval_scroll = 0;
+        if self.approval_queue.is_empty() && (self.is_generating || self.bytebot_running) {
+            let source = self.live_source();
+            self.live_set(xencode_live_rs::LiveState::Working, source, "continuing");
+        }
         if answer == crate::agent_tools::ApprovalAnswer::Denied {
             let event = xencode_agents_rs::protocol::AgentEvent::PermissionDenied {
                 tool: request.tool.clone(),
@@ -3624,6 +3651,76 @@ impl<'a> App<'a> {
                 self.input_mode = InputMode::Editing;
             }
         }
+    }
+
+    /// Record this session's state in its live status file (DK-1). The feed
+    /// redacts and clips the headline itself.
+    pub(crate) fn live_set(
+        &mut self,
+        state: xencode_live_rs::LiveState,
+        source: xencode_live_rs::LiveSource,
+        headline: &str,
+    ) {
+        let model = self.config.default_model.clone();
+        if let Some(feed) = self.live.as_mut() {
+            feed.set(state, source, headline, &model);
+        }
+    }
+
+    fn live_source(&self) -> xencode_live_rs::LiveSource {
+        if self.bytebot_running {
+            xencode_live_rs::LiveSource::Bytebot
+        } else {
+            xencode_live_rs::LiveSource::Chat
+        }
+    }
+
+    /// A chat turn or ByteBot task has started.
+    pub fn live_turn_started(&mut self) {
+        let source = self.live_source();
+        self.live_set(xencode_live_rs::LiveState::Working, source, "thinking");
+    }
+
+    /// A tool call has started; `summary` is the call as the approval prompt names it.
+    pub fn live_tool_started(&mut self, summary: &str) {
+        let source = self.live_source();
+        self.live_set(xencode_live_rs::LiveState::Working, source, summary);
+    }
+
+    /// An approval prompt is waiting for the person.
+    pub fn live_approval_waiting(&mut self, summary: &str) {
+        let source = self.live_source();
+        self.live_set(
+            xencode_live_rs::LiveState::NeedsYou,
+            source,
+            &format!("waiting for you to allow: {summary}"),
+        );
+    }
+
+    /// A turn or task ended; `error` is `None` for a normal end.
+    pub fn live_turn_ended(&mut self, error: Option<&str>) {
+        let source = self.live_source();
+        match error {
+            None => self.live_set(xencode_live_rs::LiveState::Finished, source, "done"),
+            Some(e) => self.live_set(xencode_live_rs::LiveState::Failed, source, e),
+        }
+    }
+
+    /// The end of a turn or task, as `[DONE]` or `[BYTEBOT_DONE]` reports it:
+    /// stopped stays idle, an error recorded during the turn is "failed",
+    /// anything else is "finished".
+    pub(crate) fn live_turn_finished(&mut self) {
+        let error = self.live_turn_error.take();
+        if std::mem::take(&mut self.live_turn_stopped) {
+            return;
+        }
+        self.live_turn_ended(error.as_deref());
+    }
+
+    /// The person stopped the turn.
+    pub fn live_stopped(&mut self) {
+        let source = self.live_source();
+        self.live_set(xencode_live_rs::LiveState::Idle, source, "stopped");
     }
 
     pub(crate) fn push_toast(&mut self, kind: crate::toast::ToastKind, message: String) {
@@ -3921,6 +4018,7 @@ impl<'a> App<'a> {
         }
 
         self.is_generating = true;
+        self.live_turn_started();
         // The turn boundary: what today has spent is weighed before this turn's
         // context is sized, so a passed cap buys the turn down and the check
         // never lands between a tool call and the verification after it (CX-7).
@@ -4490,6 +4588,7 @@ impl<'a> App<'a> {
         if text == "[DONE]" {
             self.is_generating = false;
             self.total_llm_calls += 1;
+            self.live_turn_finished();
             // The turn is over and its record is on disk: this is the moment the
             // session's spend and the budget warning can be right (L-9).
             self.refresh_spend();
@@ -4891,6 +4990,7 @@ impl<'a> App<'a> {
         self.bytebot_command = task.clone();
         self.bytebot_cursor = task.len();
         self.bytebot_running = true;
+        self.live_turn_started();
         self.bytebot_progress = 0.0;
         self.bytebot_steps.clear();
         self.bytebot_log.clear();
@@ -5340,6 +5440,7 @@ impl<'a> App<'a> {
     /// testable without a model.
     pub fn bytebot_event(&mut self, body: &str) {
         if let Some(summary) = body.strip_prefix("call:") {
+            self.live_tool_started(summary);
             self.bytebot_steps
                 .push((summary.to_string(), "running".to_string()));
         } else if let Some(outcome) = body.strip_prefix("done:") {
@@ -12541,6 +12642,16 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
             } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
                 app.bytebot_event(body);
             } else if token == "[BYTEBOT_DONE]" {
+                // Read the steps while the source is still "bytebot".
+                if !app.live_turn_stopped
+                    && app
+                        .bytebot_steps
+                        .iter()
+                        .any(|(_, status)| status == "failed")
+                {
+                    app.live_turn_error = Some("a step failed".to_string());
+                }
+                app.live_turn_finished();
                 app.bytebot_running = false;
                 // Whatever came back is what there is: the bar and the closing
                 // line read the step rows, so an aborted run cannot claim 100%.
@@ -13042,6 +13153,9 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
             } else if let Some(body) = token.strip_prefix("[TASKS]") {
                 app.handle_tasks_command(body);
             } else if let Some(body) = token.strip_prefix("[TOOL]") {
+                if let Some(call) = body.strip_prefix("→ ") {
+                    app.live_tool_started(call.trim());
+                }
                 // Tool-loop lines arrive mid-stream (D1-02); the next token
                 // opens a fresh assistant bubble, so each round stays visible.
                 app.messages.push(UiMessage {
@@ -13055,11 +13169,14 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                     content: format!("◈ {body}"),
                 });
             } else if token == "[STOPPED]" {
+                app.live_stopped();
+                app.live_turn_stopped = true;
                 app.messages.push(UiMessage {
                     role: "system".to_string(),
                     content: "■ Turn stopped.".to_string(),
                 });
             } else if let Some(body) = token.strip_prefix(TURN_ERROR_PREFIX) {
+                app.live_turn_error = Some(body.to_string());
                 app.messages.push(UiMessage {
                     role: "system".to_string(),
                     content: body.to_string(),
@@ -13088,11 +13205,16 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
 
         // Approval prompts from the tool loop (I1-03): queue them; the
         // modal overlay answers the front one and wakes its task.
+        let mut waiting = None;
         if let Some(arx) = app.approval_rx.as_mut() {
             while let Ok((request, responder)) = arx.try_recv() {
                 signals.approvals += 1;
+                waiting = Some(request.summary.clone());
                 app.approval_queue.push_back((request, responder));
             }
+        }
+        if let Some(summary) = waiting {
+            app.live_approval_waiting(&summary);
         }
 
         // Poll events (~30fps)
@@ -13307,6 +13429,9 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
         // after it was tried, so a broken helper is named in the turn that hit
         // it rather than the next one the person has to send.
         app.say_secret_problems();
+        if let Some(feed) = app.live.as_mut() {
+            feed.heartbeat();
+        }
 
         signals.toasts_after = app.toasts.len();
         signals.activity = app.activity_animating();
