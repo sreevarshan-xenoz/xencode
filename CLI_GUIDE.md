@@ -2428,6 +2428,9 @@ the command fails with:
 xencode-badge was not found next to xencode or on PATH. Build it with: cargo build --release --manifest-path rust/badge/Cargo.toml
 ```
 
+When a badge is already running, the command says "The badge is already
+running." and starts nothing.
+
 Settings → `Floating Badge` (`badge_autostart`) starts it with the terminal app
 instead.
 
