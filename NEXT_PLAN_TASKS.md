@@ -17473,3 +17473,32 @@ and feeds `AF-5`, `AI-3` is a naming decision that `AG-1` has to make and is wri
 and `AI-4` depends on `MEM-2`'s durable tier. The differentiators are stated as four, in the open, so
 that a later pass can be judged against them instead of against the size of this list.
 
+
+## Milestone AJ — desktop app, floating badge and ByteBot tasks (owner directive, 2026-10-09)
+
+The owner wants a Windows and Mac desktop app with everything the terminal has, a small xencode
+logo floating at the screen edge that shows what the agent is doing and when it needs the person
+or has finished, and ByteBot completed along the lines of the original `bytebot-ai/bytebot`
+project. Decided in design on 2026-10-09: one engine with many windows (terminal, desktop app,
+badge); ByteBot keeps being xencode's coding agent and borrows the original's task states, task
+list and take-over step, not its desktop control; the status feed is one file per session. The
+design is `docs/superpowers/specs/2026-10-09-desktop-badge-and-bytebot-tasks-design.md` and it
+is **awaiting the owner's review**: nothing below is started.
+
+- [ ] **DK-1 — status feed.** Each running session writes `<state dir>/live/<session id>.json`:
+  state (idle, working, needs you, finished, failed), a redacted one-line headline, a heartbeat.
+- [ ] **DK-2 — the floating badge.** `xencode badge` starts a small always-on-top GPUI window at
+  the screen edge that shows the most urgent session state and a card on hover. Windows verified
+  here; macOS built in CI and not checked off until watched on a Mac.
+- [ ] **DK-3 — engine process.** The engine moves out of the terminal app into a background
+  process; the terminal app becomes its first client. Needs its own design first.
+- [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
+  own design first.
+- [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
+- [ ] **BT-1 — ByteBot task records and a queue**, with the original project's seven states.
+- [ ] **BT-2 — needs help:** an `ask_user` tool that pauses a task for an answer, or for the
+  person to take over and type `/done`.
+- [ ] **BT-3 — needs review:** a task that changed files waits for accept (`a`) or undo (`u`).
+- [ ] **BT-4 — slash commands in the ByteBot panel** run the same handler as chat.
+- [ ] **BT-5 — `/model` and an in-panel model list**, with every model change going through one
+  function that also clears the old model's measured context window.
