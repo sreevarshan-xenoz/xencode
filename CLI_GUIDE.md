@@ -56,7 +56,7 @@ Programs can also drive the agent loop directly as a library call through `xenco
 TUI keys — press `?` (or `F1`) in the TUI for the live, panel-aware
 keybinding overlay; the authoritative list lives there. Essentials:
 `Tab` cycles explorer/editor/chat · `i` edits chat (`Enter` sends,
-`Alt+Enter`/`Ctrl+J` newline, `Alt+↑/↓` history, `Tab` completes `/`
+`Alt+Enter`/`Ctrl+J` newline, `Ctrl+A`/`Ctrl+E`/`Ctrl+K`/`Ctrl+U`/`Ctrl+W` edit the line as in a shell, `Alt+↑/↓` history, `Tab` completes `/`
 commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+A` the worker panel (fleet · recipe roles · tasks · graph · costs · logs · approvals, each figure traced) · `Ctrl+B` ByteBot ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
@@ -64,7 +64,7 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 (session layout history; `Enter` shows the pane widths a change moved between) ·
 `Ctrl+Space` switch mode (`CODING` ⇄ `ORCHESTRATOR`; both read the same tasks,
 agents and git state, so nothing is lost in the switch) ·
-`Ctrl+C`, or `q` pressed twice, quits (a single `q` asks first, and any other key keeps the session). A session with nothing said yet opens in the composer, so the first thing typed is a prompt. If the terminal has the mouse, a divider between two
+`Ctrl+C` stops a running turn (even mid-answer) and quits when nothing is running; `q` pressed twice also quits (a single `q` asks first, and any other key keeps the session). A session with nothing said yet opens in the composer, so the first thing typed is a prompt. If the terminal has the mouse, a divider between two
 side-by-side panes drags to resize them; if you want the terminal's own
 drag-select of text back, `xencode config set mouse_capture off` hands the
 mouse over (the same row lives on the Settings panel, and it takes effect on

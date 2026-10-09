@@ -828,6 +828,9 @@ pub struct App<'a> {
     /// A bare `q` was pressed once; the next `q` quits, any other key keeps
     /// the session (TX-2).
     pub quit_armed: bool,
+    /// The running chat turn's stop flag: `Ctrl+C` sets it to cancel the turn
+    /// before it is ever read as quit (TX-9).
+    pub(crate) turn_stop: Option<Arc<AtomicBool>>,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -3140,6 +3143,7 @@ impl<'a> App<'a> {
             settings_reset_active: false,
             settings_reset_armed: false,
             quit_armed: false,
+            turn_stop: None,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -3985,6 +3989,9 @@ impl<'a> App<'a> {
         // point of running rather than on the way to the model.
         run.approval.redaction = std::sync::Arc::new(assembly.vault);
 
+        let stop = Arc::new(AtomicBool::new(false));
+        run.stop_flag = Some(stop.clone());
+        self.turn_stop = Some(stop);
         tokio::spawn(agent_rounds(run, tx));
     }
 
@@ -11289,6 +11296,16 @@ pub async fn run_agent(options: AgentRunOptions) -> Result<AgentRunOutput, Agent
     })
 }
 
+/// Resolves once `flag` is set; never, when there is no flag.
+async fn until_stopped(flag: Option<Arc<AtomicBool>>) {
+    let Some(flag) = flag else {
+        return std::future::pending().await;
+    };
+    while !flag.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -11389,7 +11406,13 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             let _ = tx.send(format!("[OLLAMA]{problem}"));
         }
     }
-    let ollama_notes = manager.prepare_ollama_request(&model, ollama_asks).await;
+    // Raced against the stop flag too: this asks the server about the model,
+    // and a server that is slow to answer must not make Ctrl+C wait. A stop
+    // here skips the notes; the first round then sees the flag and ends.
+    let ollama_notes = tokio::select! {
+        notes = manager.prepare_ollama_request(&model, ollama_asks) => notes,
+        () = until_stopped(stop_flag.clone()) => Vec::new(),
+    };
     if sink == LoopSink::Chat {
         for note in ollama_notes {
             let _ = tx.send(format!("[OLLAMA]{note}"));
@@ -11441,20 +11464,28 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         // Chat streams deltas straight to the transcript; ByteBot wants one
         // row per assistant turn, so its text is collected instead.
         let mut spoken = String::new();
-        let step = match agent_step_with_fallback(
-            &manager,
-            &model,
-            &fallback_models,
-            &context_messages,
-            &history,
-            offer,
-            &llama_opts,
-            sink,
-            &tx,
-            &mut spoken,
-        )
-        .await
-        {
+        // The call races the stop flag, so a stop asked for mid-answer drops
+        // the request at once instead of waiting for the stream to finish.
+        let raced = tokio::select! {
+            step = agent_step_with_fallback(
+                &manager,
+                &model,
+                &fallback_models,
+                &context_messages,
+                &history,
+                offer,
+                &llama_opts,
+                sink,
+                &tx,
+                &mut spoken,
+            ) => Some(step),
+            () = until_stopped(stop_flag.clone()) => None,
+        };
+        let Some(raced) = raced else {
+            let _ = tx.send("[STOPPED]".to_string());
+            break;
+        };
+        let step = match raced {
             Ok(step) => step,
             // Errors leave no partial tool state. The chat finalizes the turn
             // on [DONE] like before; ByteBot has no transcript to bury it in,
@@ -12624,6 +12655,11 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                 app.messages.push(UiMessage {
                     role: "system".to_string(),
                     content: format!("◈ {body}"),
+                });
+            } else if token == "[STOPPED]" {
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: "■ Turn stopped.".to_string(),
                 });
             } else if let Some(body) = token.strip_prefix(TURN_ERROR_PREFIX) {
                 app.messages.push(UiMessage {
@@ -16101,6 +16137,78 @@ mod tests {
     /// both answered to the model instead of run — even in the most permissive
     /// approval mode. The second one only fails because the loop hands the
     /// executor the same descriptions it handed the model.
+    /// Setting the stop flag mid-request ends the turn at once: the server here
+    /// accepts the connection and never answers.
+    #[tokio::test]
+    async fn a_stop_mid_request_ends_the_turn_without_waiting_for_the_answer() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Every request but the chat one is refused at once; the chat request
+        // is read and then never answered.
+        let (chat_seen_tx, chat_seen) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut chat_seen_tx = Some(chat_seen_tx);
+            let mut held = Vec::new();
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 8192];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                if head.contains("/api/chat") {
+                    if let Some(seen) = chat_seen_tx.take() {
+                        let _ = seen.send(());
+                    }
+                    held.push(socket);
+                } else {
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 404 Not Found
+Content-Length: 0
+
+",
+                        )
+                        .await;
+                }
+            }
+        });
+
+        let mut app = App::for_tests();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "hello".into(),
+            }],
+            "hello",
+        );
+        run.ollama_url = format!("http://{addr}");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        run.stop_flag = Some(stop.clone());
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        let started = std::time::Instant::now();
+        let turn = tokio::spawn(super::agent_rounds(run, tx));
+        // Stop only once the chat request is in flight.
+        tokio::time::timeout(std::time::Duration::from_secs(10), chat_seen)
+            .await
+            .expect("the chat request reached the server")
+            .unwrap();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        tokio::time::timeout(std::time::Duration::from_secs(10), turn)
+            .await
+            .expect("the turn ended soon after the stop")
+            .unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        assert!(lines.iter().any(|l| l == "[STOPPED]"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "[DONE]"), "{lines:?}");
+        server.abort();
+    }
+
     /// A model whose server is not there ends the chat turn with a line saying
     /// so, naming the model and what to try, before the turn is closed.
     #[tokio::test]

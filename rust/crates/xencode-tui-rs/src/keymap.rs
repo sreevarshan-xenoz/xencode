@@ -288,6 +288,14 @@ fn store_view(app: &mut App, slot: usize) {
 }
 
 fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
+    // While a prompt is being typed, the readline keys belong to the
+    // composer: Ctrl+A/E/K/U/W used to open panels or cycle the layout.
+    if app.input_mode == InputMode::Editing
+        && app.focus == FocusArea::ChatInput
+        && matches!(key.code, KeyCode::Char('a' | 'e' | 'k' | 'u' | 'w'))
+    {
+        return None;
+    }
     match key.code {
         KeyCode::Char(' ') => {
             // The product-mode toggle (`X-2`). Claimed here, on the pre-focus
@@ -348,7 +356,21 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
             return Some(done());
         }
-        KeyCode::Char('c') => return Some(quit()),
+        KeyCode::Char('c') => {
+            // A running turn is cancelled first; only an idle session quits.
+            if app.is_generating {
+                if let Some(stop) = app.turn_stop.as_ref() {
+                    if !stop.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        app.push_toast(
+                            crate::toast::ToastKind::Info,
+                            "Stopping the turn — Ctrl+C again quits".to_string(),
+                        );
+                        return Some(done());
+                    }
+                }
+            }
+            return Some(quit());
+        }
         KeyCode::Char('g') => {
             app.refresh_git();
         }
@@ -2017,6 +2039,22 @@ fn editing_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         KeyCode::Char('j') if key.modifiers == KeyModifiers::CONTROL => {
             app.chat_input.insert_newline();
         }
+        // Readline editing in the composer (TX-9).
+        KeyCode::Char('a') if key.modifiers == KeyModifiers::CONTROL => {
+            app.chat_input.move_cursor(tui_textarea::CursorMove::Head);
+        }
+        KeyCode::Char('e') if key.modifiers == KeyModifiers::CONTROL => {
+            app.chat_input.move_cursor(tui_textarea::CursorMove::End);
+        }
+        KeyCode::Char('k') if key.modifiers == KeyModifiers::CONTROL => {
+            app.chat_input.delete_line_by_end();
+        }
+        KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
+            app.chat_input.delete_line_by_head();
+        }
+        KeyCode::Char('w') if key.modifiers == KeyModifiers::CONTROL => {
+            app.chat_input.delete_word();
+        }
         KeyCode::Enter => {
             if !app.is_generating {
                 app.submit_message(tx.clone());
@@ -2586,6 +2624,54 @@ mod tests {
         app.input_mode = InputMode::Normal;
         app.start_in_composer_when_empty();
         assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn readline_keys_edit_the_prompt_instead_of_opening_panels() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.input_mode = InputMode::Editing;
+        let layout = app.config.layout.clone();
+        for c in "hello world".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        let ctrl = |app: &mut App, c| {
+            press_with_mods(app, KeyCode::Char(c), KeyModifiers::CONTROL);
+        };
+        ctrl(&mut app, 'w');
+        assert_eq!(app.chat_input.lines().join(""), "hello ");
+        ctrl(&mut app, 'a');
+        press(&mut app, KeyCode::Char('>'));
+        assert_eq!(app.chat_input.lines().join(""), ">hello ");
+        ctrl(&mut app, 'e');
+        press(&mut app, KeyCode::Char('!'));
+        assert_eq!(app.chat_input.lines().join(""), ">hello !");
+        ctrl(&mut app, 'u');
+        assert_eq!(app.chat_input.lines().join(""), "");
+        for c in "abc".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        ctrl(&mut app, 'a');
+        ctrl(&mut app, 'k');
+        assert_eq!(app.chat_input.lines().join(""), "");
+        assert_eq!(app.config.layout, layout, "Ctrl+U did not cycle the layout");
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        assert_eq!(app.input_mode, InputMode::Editing);
+    }
+
+    #[test]
+    fn ctrl_c_stops_a_running_turn_before_it_quits() {
+        let mut app = app_with(FocusArea::ChatInput);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        app.turn_stop = Some(stop.clone());
+        app.is_generating = true;
+        let ctrl_c =
+            |app: &mut App| press_with_mods(app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(ctrl_c(&mut app), KeyFlow::Continue);
+        assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(ctrl_c(&mut app), KeyFlow::Quit, "the second one quits");
+
+        let mut idle = app_with(FocusArea::ChatInput);
+        assert_eq!(ctrl_c(&mut idle), KeyFlow::Quit);
     }
 
     #[test]
