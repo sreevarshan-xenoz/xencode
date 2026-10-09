@@ -31,7 +31,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     // scrolls the diff, and swallows everything else — quit chords
     // included — exactly like the help overlay.
     if app.pending_approval().is_some() {
-        return approval_modal_key(app, key);
+        return approval_modal_key(app, key, tx);
     }
     // The help overlay is modal: Esc/?/F1 close it, every other key is
     // swallowed while it is open.
@@ -65,7 +65,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     // screen has promised this for a while ("Esc to stop it first"); the
     // text already streamed stays, and the loop ends at its next boundary.
     // The second Esc, with the stop already asked for, is the ordinary key.
-    if key.code == KeyCode::Esc && key.modifiers.is_empty() && stop_running_turn(app) {
+    if key.code == KeyCode::Esc && key.modifiers.is_empty() && stop_running_turn(app, tx) {
         return done();
     }
     // Only a second bare `q` confirms a quit; any other key withdraws it.
@@ -108,21 +108,35 @@ fn quit() -> KeyFlow {
 /// least one flag was newly set, so the caller can swallow the key; a flag
 /// already set means the stop was asked for and the key means what it
 /// usually does.
-fn stop_running_turn(app: &mut App) -> bool {
-    let mut stopped = false;
-    if app.is_generating {
-        if let Some(stop) = app.turn_stop.as_ref() {
-            stopped |= !stop.swap(true, std::sync::atomic::Ordering::Relaxed);
-        }
+fn stop_running_turn(app: &mut App, tx: &Tx) -> bool {
+    use crate::engine::proto::{ClientMsg, StopTarget};
+    let unset = |flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>| {
+        flag.as_ref()
+            .is_some_and(|f| !f.load(std::sync::atomic::Ordering::Relaxed))
+    };
+    let chat = app.is_generating && unset(&app.turn_stop);
+    // A task waiting on a question sits inside that tool call and would never
+    // see the stop; the engine withdraws the question too (BT-2).
+    let bytebot = app.bytebot_running && (unset(&app.bytebot_stop) || app.bytebot_help.is_some());
+    if chat {
+        crate::engine::act(
+            app,
+            ClientMsg::Stop {
+                target: StopTarget::Chat,
+            },
+            tx,
+        );
     }
-    if app.bytebot_running {
-        if let Some(stop) = app.bytebot_stop.as_ref() {
-            stopped |= !stop.swap(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        // A task waiting on a question sits inside that tool call and would
-        // never see the stop; withdrawing the question lets it return (BT-2).
-        stopped |= app.bytebot_withdraw_question();
+    if bytebot {
+        crate::engine::act(
+            app,
+            ClientMsg::Stop {
+                target: StopTarget::Bytebot,
+            },
+            tx,
+        );
     }
+    let stopped = chat || bytebot;
     if stopped {
         app.push_toast(
             crate::toast::ToastKind::Info,
@@ -175,18 +189,17 @@ fn done() -> KeyFlow {
 /// The approval prompt answers with four keys and nothing else. Enter is
 /// deliberately swallowed rather than treated as a deny: a stray Return in
 /// the terminal should never be read as an answer.
-fn approval_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
-    use crate::agent_tools::ApprovalAnswer;
+fn approval_modal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
+    use crate::engine::proto::{ClientMsg, WireAnswer};
+    let answer = |app: &mut App, answer: WireAnswer| {
+        if let Some(&id) = app.approval_ids.front() {
+            crate::engine::act(app, ClientMsg::AnswerApproval { id, answer }, tx);
+        }
+    };
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => {
-            app.resolve_approval(ApprovalAnswer::Approved);
-        }
-        KeyCode::Char('a') | KeyCode::Char('A') => {
-            app.resolve_approval(ApprovalAnswer::ApprovedForSession);
-        }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            app.resolve_approval(ApprovalAnswer::Denied);
-        }
+        KeyCode::Char('y') | KeyCode::Char('Y') => answer(app, WireAnswer::Allow),
+        KeyCode::Char('a') | KeyCode::Char('A') => answer(app, WireAnswer::AllowForSession),
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => answer(app, WireAnswer::Deny),
         KeyCode::Up | KeyCode::Char('k') => {
             app.approval_scroll = app.approval_scroll.saturating_sub(1);
         }
@@ -435,7 +448,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         }
         KeyCode::Char('c') => {
             // A running turn is cancelled first; only an idle session quits.
-            if stop_running_turn(app) {
+            if stop_running_turn(app, tx) {
                 app.push_toast(
                     crate::toast::ToastKind::Info,
                     "Ctrl+C again quits".to_string(),
@@ -984,7 +997,11 @@ fn key_model_selector(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         }
         KeyCode::Enter => {
             if let Some(model) = app.available_models.get(app.selected_model).cloned() {
-                app.set_model(&model, tx.clone());
+                crate::engine::act(
+                    app,
+                    crate::engine::proto::ClientMsg::SetModel { name: model },
+                    tx,
+                );
                 app.focus = FocusArea::ChatInput;
             }
         }
@@ -1458,7 +1475,13 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
                     .get(app.bytebot_model_selected)
                     .cloned()
                 {
-                    app.set_model(&model, tx.clone());
+                    crate::engine::act(
+                        app,
+                        crate::engine::proto::ClientMsg::SetModel {
+                            name: model.clone(),
+                        },
+                        tx,
+                    );
                     app.bytebot_log.push(format!("model: {model}"));
                 }
                 app.bytebot_model_picker = false;
@@ -1475,8 +1498,13 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         KeyCode::Enter => {
             // A waiting question (BT-2) takes the line as its answer;
             // otherwise Enter runs or queues what is typed. History is ↑.
-            if app.bytebot_help.is_some() {
-                app.bytebot_answer();
+            if let Some(id) = app.question_id.filter(|_| app.bytebot_help.is_some()) {
+                let text = app.bytebot_command.clone();
+                crate::engine::act(
+                    app,
+                    crate::engine::proto::ClientMsg::AnswerQuestion { id, text },
+                    tx,
+                );
             } else {
                 app.run_bytebot(tx.clone());
             }
@@ -1491,16 +1519,29 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         KeyCode::Char('a')
             if app.bytebot_command.is_empty() && app.bytebot_reviewing().is_some() =>
         {
-            app.bytebot_accept(tx.clone());
+            crate::engine::act(
+                app,
+                crate::engine::proto::ClientMsg::Review {
+                    decision: crate::engine::proto::ReviewDecision::Accept,
+                },
+                tx,
+            );
         }
         KeyCode::Char('u')
             if app.bytebot_command.is_empty() && app.bytebot_reviewing().is_some() =>
         {
-            match app.bytebot_undo(tx.clone()) {
-                Ok(_) => {}
-                Err(why) => {
-                    app.bytebot_log.push(why.clone());
-                    app.push_toast(crate::toast::ToastKind::Warning, why);
+            let replies = crate::engine::handle(
+                app,
+                crate::engine::proto::ClientMsg::Review {
+                    decision: crate::engine::proto::ReviewDecision::Undo,
+                },
+                tx,
+                "terminal",
+            );
+            for reply in replies {
+                if let crate::engine::proto::EngineMsg::Error { message } = reply {
+                    app.bytebot_log.push(message.clone());
+                    app.push_toast(crate::toast::ToastKind::Warning, message);
                 }
             }
         }
@@ -2988,16 +3029,21 @@ mod tests {
     ) -> tokio::sync::oneshot::Receiver<crate::agent_tools::ApprovalAnswer> {
         use crate::agent_tools::{ApprovalDraft, ApprovalRequest};
         let (responder, answer) = tokio::sync::oneshot::channel();
-        app.approval_queue.push_back((
-            ApprovalRequest {
-                tool: tool.into(),
-                class,
-                draft: ApprovalDraft::default(),
-                summary: format!("{tool} src/lib.rs"),
-                preview: "+fn hello() {}\n".into(),
-            },
-            responder,
-        ));
+        // Through the channel the agent loop uses, so the prompt gets its id
+        // the way a real one does (EN-1).
+        app.approval_tx
+            .send((
+                ApprovalRequest {
+                    tool: tool.into(),
+                    class,
+                    draft: ApprovalDraft::default(),
+                    summary: format!("{tool} src/lib.rs"),
+                    preview: "+fn hello() {}\n".into(),
+                },
+                responder,
+            ))
+            .unwrap();
+        app.drain_agent_channels();
         answer
     }
 
@@ -3461,6 +3507,7 @@ mod tests {
         app.bytebot_running = true;
         let (reply, mut answer) = tokio::sync::oneshot::channel();
         app.bytebot_help = Some(reply);
+        app.question_id = Some(1);
         type_text(&mut app, "   ");
         press(&mut app, KeyCode::Enter);
         assert!(
@@ -3481,6 +3528,7 @@ mod tests {
         app.bytebot_stop = Some(stop.clone());
         let (reply, mut answer) = tokio::sync::oneshot::channel();
         app.bytebot_help = Some(reply);
+        app.question_id = Some(1);
         type_text(&mut app, "postgres");
         press(&mut app, KeyCode::Enter);
         assert_eq!(answer.try_recv().unwrap(), "postgres");
@@ -3493,6 +3541,7 @@ mod tests {
         // loop would sit inside the tool call and never see the stop.
         let (reply, mut answer) = tokio::sync::oneshot::channel();
         app.bytebot_help = Some(reply);
+        app.question_id = Some(1);
         press(&mut app, KeyCode::Esc);
         assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
         assert!(answer.try_recv().is_err(), "the question was withdrawn");

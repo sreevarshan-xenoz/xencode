@@ -12,6 +12,17 @@ use tokio::sync::mpsc;
 use crate::app::App;
 use proto::{ClientMsg, EngineMsg, ReviewDecision, StopTarget, PROTOCOL_VERSION};
 
+/// The terminal app's way of asking the engine for an agent action: the
+/// message goes through `handle` as the window "terminal", and an error the
+/// engine answers with is shown as a warning toast.
+pub fn act(app: &mut App, msg: ClientMsg, tx: &mpsc::UnboundedSender<String>) {
+    for reply in handle(app, msg, tx, "terminal") {
+        if let EngineMsg::Error { message } = reply {
+            app.push_toast(crate::toast::ToastKind::Warning, message);
+        }
+    }
+}
+
 /// What one `pump` did: how many loop messages and approval prompts arrived,
 /// and the messages to send to every window.
 pub struct Pump {
