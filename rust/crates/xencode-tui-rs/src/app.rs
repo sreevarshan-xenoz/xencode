@@ -33,6 +33,7 @@ use crate::ui;
 const CTX_SYSTEM: &str = xencode_context_rs::prompts::AGENT_SYSTEM;
 
 /// Represents a message in the UI chat list
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UiMessage {
     pub role: String,
     pub content: String,
@@ -643,6 +644,10 @@ pub struct App<'a> {
     pub(crate) question_id: Option<u64>,
     /// The waiting question's text, kept with its id for the engine.
     pub(crate) question_text: Option<String>,
+    /// The engine's approval prompts on a window (EN-2), rebuilt from the
+    /// view so the overlay draws them; answers go back by id.
+    pub(crate) remote_approvals:
+        std::collections::VecDeque<(u64, crate::agent_tools::ApprovalRequest)>,
     next_agent_id: u64,
     /// Receive end, taken once by `run_app` and drained each frame.
     pub approval_rx: Option<
@@ -3150,6 +3155,7 @@ impl<'a> App<'a> {
             ask_rx: Some(ask_rx),
             bytebot_help: None,
             approval_ids: std::collections::VecDeque::new(),
+            remote_approvals: std::collections::VecDeque::new(),
             question_id: None,
             question_text: None,
             next_agent_id: 1,
@@ -3622,7 +3628,10 @@ impl<'a> App<'a> {
 
     /// The approval prompt the overlay shows right now, if any.
     pub fn pending_approval(&self) -> Option<&crate::agent_tools::ApprovalRequest> {
-        self.approval_queue.front().map(|(request, _)| request)
+        self.approval_queue
+            .front()
+            .map(|(request, _)| request)
+            .or_else(|| self.remote_approvals.front().map(|(_, request)| request))
     }
 
     /// Answer the frontmost prompt: wake the waiting tool task, apply the

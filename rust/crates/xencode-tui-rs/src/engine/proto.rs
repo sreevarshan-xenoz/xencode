@@ -13,14 +13,39 @@ pub const PROTOCOL_VERSION: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
-    Hello { version: u32, client: String },
-    SubmitChat { prompt: String },
-    EnqueueTask { text: String },
-    AnswerQuestion { id: u64, text: String },
-    AnswerApproval { id: u64, answer: WireAnswer },
-    Stop { target: StopTarget },
-    Review { decision: ReviewDecision },
-    SetModel { name: String },
+    Hello {
+        version: u32,
+        client: String,
+    },
+    SubmitChat {
+        prompt: String,
+    },
+    EnqueueTask {
+        text: String,
+    },
+    AnswerQuestion {
+        id: u64,
+        text: String,
+    },
+    AnswerApproval {
+        id: u64,
+        answer: WireAnswer,
+    },
+    Stop {
+        target: StopTarget,
+    },
+    Review {
+        decision: ReviewDecision,
+    },
+    SetModel {
+        name: String,
+    },
+    /// A line a window-side command added to the transcript, so every
+    /// window's transcript stays the same.
+    Note {
+        role: String,
+        content: String,
+    },
     Goodbye,
 }
 
@@ -81,20 +106,17 @@ pub struct ApprovalView {
 }
 
 /// What the engine tells a window.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EngineMsg {
     Hello {
         version: u32,
         session_id: String,
     },
-    /// Where things stand, sent when a window connects.
-    Snapshot {
-        model: String,
-        generating: bool,
-        bytebot_running: bool,
-        approvals: Vec<ApprovalView>,
-        question: Option<(u64, String)>,
+    /// The agent state a window draws: all of it when the window connects,
+    /// then only what changed.
+    View {
+        view: Box<super::view::View>,
     },
     /// One message from the agent loop, as `App::apply_token` takes it.
     Event {
@@ -177,6 +199,10 @@ mod tests {
             ClientMsg::SetModel {
                 name: "llamacpp:qwen3-4b".into(),
             },
+            ClientMsg::Note {
+                role: "system".into(),
+                content: "Theme: dark".into(),
+            },
             ClientMsg::Goodbye,
         ]
     }
@@ -194,12 +220,14 @@ mod tests {
                 version: PROTOCOL_VERSION,
                 session_id: "session_1".into(),
             },
-            EngineMsg::Snapshot {
-                model: "m".into(),
-                generating: true,
-                bytebot_running: false,
-                approvals: vec![approval.clone()],
-                question: Some((3, "Which port?".into())),
+            EngineMsg::View {
+                view: Box::new(super::super::view::View {
+                    messages_from: 2,
+                    generating: Some(true),
+                    approvals: Some(vec![approval.clone()]),
+                    question: Some(Some((3, "Which port?".into()))),
+                    ..Default::default()
+                }),
             },
             EngineMsg::Event {
                 token: "[TOOL]→ read_file a.rs".into(),
