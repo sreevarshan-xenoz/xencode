@@ -1724,6 +1724,12 @@ esac
     ;;
 esac
 ;;
+(badge)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (paths)
 _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
@@ -3204,6 +3210,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(badge)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (paths)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3567,6 +3577,7 @@ _xencode_commands() {
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
+'badge:Start the floating badge that shows what running xencode sessions are doing and when one needs you' \
 'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
@@ -3715,6 +3726,11 @@ _xencode__subcmd__audit__subcmd__help__subcmd__verify_commands() {
 _xencode__subcmd__audit__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'xencode audit verify commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__badge_commands] )) ||
+_xencode__subcmd__badge_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode badge commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__bootstrap_commands] )) ||
 _xencode__subcmd__bootstrap_commands() {
@@ -4147,6 +4163,7 @@ _xencode__subcmd__help_commands() {
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
+'badge:Start the floating badge that shows what running xencode sessions are doing and when one needs you' \
 'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
@@ -4239,6 +4256,11 @@ _xencode__subcmd__help__subcmd__audit_commands() {
 _xencode__subcmd__help__subcmd__audit__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help audit verify commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__badge_commands] )) ||
+_xencode__subcmd__help__subcmd__badge_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help badge commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__bootstrap_commands] )) ||
 _xencode__subcmd__help__subcmd__bootstrap_commands() {

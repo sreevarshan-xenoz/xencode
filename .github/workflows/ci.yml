@@ -81,3 +81,38 @@ jobs:
       working-directory: rust
       env:
         RUSTFLAGS: -D warnings
+
+  badge:
+    # The floating badge (DK-2) is its own Cargo workspace under rust/badge, so
+    # the jobs above never build its GPU interface library. This job proves it
+    # builds, and runs its tests, on the two desktop platforms it ships for.
+    # macOS has only ever been built here, never watched running on a Mac.
+    name: badge (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo registry and build
+      uses: actions/cache@v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust/badge/target
+        key: ${{ runner.os }}-badge-${{ hashFiles('rust/badge/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-badge-
+
+    - name: Build and test the badge
+      run: |
+        cargo build
+        cargo test
+      working-directory: rust/badge

@@ -563,6 +563,22 @@ starter model; inside the TUI nothing is installed for you.
 
 ## Advanced Features
 
+### Floating badge
+
+A small round xencode logo that stays above other windows and shows what every
+running terminal session is doing, so you can see from another program when
+the agent needs you or has finished. Start it with `xencode badge`, or turn on
+Settings → `Floating Badge` to start it with each session. It is a separate
+program, `xencode-badge`, built from `rust/badge`; see `rust/badge/README.md`
+for building it and for what each colour means. Hover for one row per session,
+drag to move it, right-click to close it.
+
+Each session keeps a small status file in the `live/` folder of xencode's state
+directory while it runs: its project, model, state and a one-line description
+of what it is doing, with secrets removed. The file is deleted when the session
+exits normally, and files left by a session that was killed are deleted by the
+next session to start once they are ten minutes old.
+
 ### Code Analysis
 
 Analyze source code for style issues, bugs, and security vulnerabilities:

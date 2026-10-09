@@ -17485,11 +17485,23 @@ list and take-over step, not its desktop control; the status feed is one file pe
 design is `docs/superpowers/specs/2026-10-09-desktop-badge-and-bytebot-tasks-design.md` and it
 is **awaiting the owner's review**: nothing below is started.
 
-- [ ] **DK-1 — status feed.** Each running session writes `<state dir>/live/<session id>.json`:
+- [x] **DK-1 — status feed.** Each running session writes `<state dir>/live/<session id>.json`:
   state (idle, working, needs you, finished, failed), a redacted one-line headline, a heartbeat.
-- [ ] **DK-2 — the floating badge.** `xencode badge` starts a small always-on-top GPUI window at
-  the screen edge that shows the most urgent session state and a card on hover. Windows verified
-  here; macOS built in CI and not checked off until watched on a Mac.
+  Done 2026-10-09 (`xencode-live-rs`, `xencode-tui-rs/src/live_status.rs`). Watched with the real
+  app on Windows: the file appeared with project, process and model, and the heartbeat advanced
+  every 5 s. A force-closed session cannot delete its file, so a starting session deletes files
+  silent for over 10 minutes.
+- [x] **DK-2 — the floating badge, on Windows.** `xencode badge` starts a small always-on-top GPUI
+  window at the screen edge that shows the most urgent session state and a card on hover. Done
+  2026-10-09 (`rust/badge`, its own workspace; display rules in `xencode-live-rs/src/badge.rs`).
+  Watched on Windows 11: all five states and the not-responding dot, the hover card with two
+  sessions, the card closing when the mouse jumps to another monitor, a failure clearing after a
+  hover, dragging and the saved position on restart, right-click to close, a second badge exiting
+  at once, `xencode badge` starting it, and a real terminal session appearing in the card.
+  Deviations: no snapping to an edge (GPUI cannot move a window), polling every second instead of
+  file watching, and the Windows 11 frame, corners and shadow switched off through the window
+  manager.
+  - [ ] **macOS:** built and tested by the `badge` CI job only; not watched on a Mac.
 - [ ] **DK-3 — engine process.** The engine moves out of the terminal app into a background
   process; the terminal app becomes its first client. Needs its own design first.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
