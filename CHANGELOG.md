@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (internal) — `EN-1`: an engine boundary inside the terminal app
+
+No visible change. Every agent action the terminal app takes — sending a chat
+prompt, adding a ByteBot task, answering a question or an approval, stopping,
+reviewing, changing model — now goes through one engine function as a typed
+message, and everything the agent loop reports comes back as typed messages.
+Approval prompts and ByteBot questions carry ids, so an answer that arrives
+after the prompt was already answered is refused instead of landing on the
+next one. This is the first step towards running the engine as its own
+process, so that closing the terminal no longer stops a task. One small visible
+difference: pressing Enter on an empty box while a ByteBot question waits now
+shows a warning that nothing was sent, where before nothing happened.
+
 ### Fixed — five small points left from the review of the badge and ByteBot work
 
 - Enter on an empty command box no longer sends an empty answer to a waiting

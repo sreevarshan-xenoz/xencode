@@ -202,6 +202,12 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
     no failures (840 passed); the 35 are the other crates' Windows causes listed under `PL-2` (test
     servers, Windows paths, Unix-only tools, this machine's installed agents). Two runs gave the
     same 35. Not run on CI.
+  - **2026-10-09, later, after EN-1:** 2897 passed, 37 failed, 20 ignored. The TUI crate has no
+    failures (865 passed). The two new failures are in `xencode-models-rs`, which nothing today
+    changed: `download::tests::a_file_the_disk_cannot_hold_is_refused_before_anything_is_written`
+    and `a_file_that_does_not_hash_to_the_expected_checksum_is_thrown_away`. Run alone, the first
+    failed once and passed once and the second passed twice: both are intermittent and not yet
+    explained.
 
 ## Model Catalog Honesty
 
@@ -17523,9 +17529,15 @@ program; the keys themselves are covered by their own tests.
   `docs/superpowers/specs/2026-10-09-engine-process-design.md` (awaiting the owner's review): one
   engine per project, running while a window is connected or a task works, over a local socket
   (named pipe on Windows, socket file elsewhere), owning all agent work. Stages:
-  - [ ] **EN-1 — engine crate, in process.** `xencode-engine-rs` takes all agent work out of
-    `app.rs`; the terminal app drives it through channels carrying the socket's messages. No
-    visible change; the existing suite is the proof.
+  - [x] **EN-1 — engine boundary, in process.** Done 2026-10-09
+    (`docs/superpowers/plans/2026-10-09-en1-engine-boundary.md`). The engine is the module
+    `xencode-tui-rs/src/engine/` rather than a new crate, because the agent loop depends on about a
+    dozen modules of that crate; only `proto.rs` needs to move when the desktop app wants the types.
+    `proto.rs` defines the JSON-line messages; `engine::handle` carries out every agent action and
+    `engine::pump` turns the loop's output into messages, with approvals and questions answered
+    by id. The terminal app's main loop calls `pump`, and every agent action from its keys goes
+    through `handle`. No visible change: the TUI suite passed with nothing but four test setups
+    adjusted to give their prompt or question an id.
   - [ ] **EN-2 — the socket and `xencode engine`.** Start on demand, reconnect; closing the
     terminal no longer stops a task.
   - [ ] **EN-3 — several windows per engine.** Snapshot on connect, first-answer-wins approvals
