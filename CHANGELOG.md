@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — five small points left from the review of the badge and ByteBot work
+
+- Enter on an empty command box no longer sends an empty answer to a waiting
+  ByteBot question.
+- A stopped chat turn and a stopped ByteBot task no longer share one stop, so
+  stopping one cannot mark the other cancelled.
+- `xencode badge` says "The badge is already running." instead of "Started"
+  when one is already running.
+- Right-clicking the badge right after dragging it keeps the new position.
+- The badge's hover card grows and shrinks as sessions start and end while it
+  is open.
+
 ### Fixed — ByteBot tasks: four problems found by a review of the work above
 
 - **Undo no longer overwrites a hand edit.** Like `/rewind`, ByteBot's undo
