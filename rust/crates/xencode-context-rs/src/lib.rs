@@ -164,7 +164,8 @@ pub use index::{
 };
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use ledger::{
-    append_ledger, digest_hex, ledger_for_session, ledger_path, read_ledger, LedgerEntry, RunClass,
+    append_ledger, digest_hex, envelope_for_session, ledger_for_session, ledger_path, read_ledger,
+    verify_ledger, LedgerEntry, RunClass,
 };
 pub use lesson::{
     approve_lesson, asks_for_words, check_streak, denied_call, draft_lesson, drop_lesson,

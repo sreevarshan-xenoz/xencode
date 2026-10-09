@@ -1997,6 +1997,7 @@ _arguments "${_arguments_options[@]}" : \
 (review)
 _arguments "${_arguments_options[@]}" : \
 '--base=[Base branch, tag, commit — or HEAD for uncommitted changes. Defaults to origin/HEAD, init.defaultBranch, or '\''main'\'']:BASE:_default' \
+'--session=[Also print the result envelope for this session\: the checks it ran, read from the run ledger, and the status they support]:SESSION:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
 '-h[Print help]' \
 '--help[Print help]' \

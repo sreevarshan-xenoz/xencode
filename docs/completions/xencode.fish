@@ -655,6 +655,7 @@ json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand release-notes" -l force -d 'Replace the file named by --out even if it is already there'
 complete -c xencode -n "__fish_xencode_using_subcommand release-notes" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand review" -l base -d 'Base branch, tag, commit — or HEAD for uncommitted changes. Defaults to origin/HEAD, init.defaultBranch, or \'main\'' -r
+complete -c xencode -n "__fish_xencode_using_subcommand review" -l session -d 'Also print the result envelope for this session: the checks it ran, read from the run ledger, and the status they support' -r
 complete -c xencode -n "__fish_xencode_using_subcommand review" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand review" -s h -l help -d 'Print help'

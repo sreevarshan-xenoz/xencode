@@ -5216,7 +5216,7 @@ Without nextest installed, it falls back to the repository's own test command
 including that a fallback run cannot check for retries, so its result cannot be
 compared to a nextest run.
 
-### `xencode review [--base <ref>] [--format text|json]`
+### `xencode review [--base <ref>] [--session <id>] [--format text|json]`
 PR-level diff triage: files changed between the base and HEAD with line
 counts, plus working-tree analysis per file (code issues, image
 inventory). When `--base` is omitted, the base branch is resolved from
@@ -5225,10 +5225,18 @@ falling back to `'main'` as a last resort, and the header explicitly states whic
 was used. `--base HEAD` reviews uncommitted changes. Unanalyzable files
 (deleted, binary) get visible notes, never silence.
 
+`--session <id>` adds the result envelope for that session: every check the session ran,
+read from `.xencode/ledger.jsonl` (the rows `xencode test --session` and `/verify` write),
+each with its exit code and the line and digest of the ledger row it came from, and the
+status those exit codes support. A session that ran no check is `blocked`, never
+`completed`; any non-zero exit is `failed`. With `--format json` the envelope is the
+`envelope` key.
+
 ```bash
 xencode review
 xencode review --base main
 xencode review --base HEAD --format json | jq '.files[] | {path, issues: (.issues|length)}'
+xencode review --base HEAD --session green   # and what session `green` proved
 ```
 
 ### `xencode advisories <action>`

@@ -837,6 +837,11 @@ enum Commands {
         #[arg(long)]
         base: Option<String>,
 
+        /// Also print the result envelope for this session: the checks it ran,
+        /// read from the run ledger, and the status they support
+        #[arg(long)]
+        session: Option<String>,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -2392,7 +2397,11 @@ async fn async_main() {
             force,
             format,
         } => run_release_notes(from, to, release, out, force, format),
-        Commands::Review { base, format } => run_review(base, format),
+        Commands::Review {
+            base,
+            session,
+            format,
+        } => run_review(base, session, format),
         Commands::Replay {
             run_id,
             list,
@@ -13690,12 +13699,25 @@ fn run_interop(
     Ok(())
 }
 
-fn run_review(explicit_base: Option<String>, format: OutputFormat) -> Result<(), String> {
+fn run_review(
+    explicit_base: Option<String>,
+    session: Option<String>,
+    format: OutputFormat,
+) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = resolve_review_root(&cwd);
     let (base, source) = resolve_review_base(&root, explicit_base.as_deref());
     let diffs = xencode_context_rs::git_diff_numstat(&root, &base)?;
     let files: Vec<ReviewedFile> = diffs.iter().map(|d| review_file(&root, d)).collect();
+    // AE-1: the evidence half, from the ledger rows this session wrote.
+    let envelope = session.as_deref().map(|session| {
+        xencode_context_rs::envelope_for_session(
+            &root.join(xencode_context_rs::XENCODE_DIR),
+            session,
+            &format!("changes against {base}"),
+            files.iter().map(|f| f.path.clone()).collect(),
+        )
+    });
     match format {
         OutputFormat::Json => {
             let arr: Vec<serde_json::Value> = files
@@ -13720,6 +13742,12 @@ fn run_review(explicit_base: Option<String>, format: OutputFormat) -> Result<(),
                     "base_source".to_string(),
                     serde_json::Value::String(source.label().to_string()),
                 );
+                if let Some(envelope) = &envelope {
+                    obj.insert(
+                        "envelope".to_string(),
+                        serde_json::to_value(envelope).map_err(|e| e.to_string())?,
+                    );
+                }
             }
             println!(
                 "{}",
@@ -13750,6 +13778,13 @@ fn run_review(explicit_base: Option<String>, format: OutputFormat) -> Result<(),
                 }
             }
         }
+    }
+    if let (OutputFormat::Text, Some(envelope)) = (&format, &envelope) {
+        println!(
+            "
+Result envelope, from .xencode/ledger.jsonl:"
+        );
+        print!("{}", envelope.for_reviewer().render());
     }
     Ok(())
 }

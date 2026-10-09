@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `AE-1`, `OR-16`: `xencode review --session <id>` shows what a session proved
+
+`xencode review --session <id>` adds the result envelope for that session: each check it
+ran, read from the run ledger, with its exit code and the line and digest of the ledger
+row it came from, and the status those exit codes support. A session that ran no check
+is reported `blocked`, never `completed`; a non-zero exit is `failed`.
+
 ### Added — `OR-18`, `OR-4`, `OR-15`: `/spawn` file leases, checked before launch, at finish and at merge
 
 - Name the files a subagent may change with `@path` in the `/spawn` task. That set is

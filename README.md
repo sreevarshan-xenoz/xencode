@@ -407,7 +407,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Server** | `xencode server` | Start collaboration server (local-first: `127.0.0.1:8765`; TLS opt-in) |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
-| **Review** | `xencode review [--base main]` | PR-level diff triage with per-file analysis |
+| **Review** | `xencode review [--base main] [--session <id>]` | PR-level diff triage with per-file analysis, and the checks a session ran |
 | **Advisories** | `xencode advisories check --path rust` | Judge every package in `Cargo.lock` against the RustSec and OSV corpora downloaded once by `xencode advisories sync`; `show`/`status` read the same files offline |
 | **Replay** | `xencode replay <run-id> [--run-tools]` | Run a recorded agent turn again from the bytes it was made of, with no model answering |
 | **Eval** | `xencode eval run [-c off-by-one] [-m MODEL] [--judge]` | Score the agent on defects seeded on purpose, graded by the diff and an exit code, with an optional ranking of the attempts that came closest |

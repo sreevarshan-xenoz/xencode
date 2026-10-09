@@ -138,6 +138,90 @@ pub fn read_ledger(xencode_dir: &Path) -> Vec<LedgerEntry> {
         .collect()
 }
 
+/// The result envelope for one session (AE-1, the producer `OR-16` never had):
+/// one command per ledger row the session wrote, each pointing at the row it
+/// came from — its line in `ledger.jsonl` and, for a chained row, its digest —
+/// so every exit code a reviewer reads resolves to a run that happened. A
+/// session with no rows proved nothing and is `Blocked`, never `Completed`; any
+/// non-zero exit is `Failed`. `changed_files` comes from the caller's diff.
+pub fn envelope_for_session(
+    xencode_dir: &Path,
+    session: &str,
+    task: &str,
+    changed_files: Vec<String>,
+) -> xencode_core_rs::ResultEnvelope {
+    use xencode_core_rs::{Evidence, FinishStatus, Handoff, RanCommand, ResultEnvelope};
+    let text = std::fs::read_to_string(ledger_path(xencode_dir)).unwrap_or_default();
+    let mut commands = Vec::new();
+    let mut artifact_refs = Vec::new();
+    for (index, raw) in text.lines().enumerate() {
+        let Ok(row) = serde_json::from_str::<LedgerEntry>(raw) else {
+            continue;
+        };
+        if row.session.as_deref() != Some(session) {
+            continue;
+        }
+        let digest = serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|v| v.get("digest").and_then(|d| d.as_str()).map(str::to_string));
+        let evidence_ref = match digest {
+            Some(d) => format!(
+                "{LEDGER_FILE} line {}, digest {}",
+                index + 1,
+                &d[..d.len().min(16)]
+            ),
+            None => format!("{LEDGER_FILE} line {}", index + 1),
+        };
+        let command = if row.note.trim().is_empty() {
+            format!("{} run", row.run_class.as_str())
+        } else {
+            format!("{} run ({})", row.run_class.as_str(), row.note.trim())
+        };
+        if !row.log_ref.is_empty() {
+            artifact_refs.push(row.log_ref.clone());
+        }
+        commands.push(RanCommand {
+            command,
+            exit_code: row.exit_code,
+            evidence_ref,
+        });
+    }
+    let (status, handoff) = if commands.is_empty() {
+        (
+            FinishStatus::Blocked,
+            Handoff::Blocked {
+                reason: "no check ran in this session, so nothing was proven".to_string(),
+            },
+        )
+    } else if commands.iter().any(|c| !c.passed()) {
+        (
+            FinishStatus::Failed,
+            Handoff::Blocked {
+                reason: "a check this session ran exited non-zero".to_string(),
+            },
+        )
+    } else {
+        (
+            FinishStatus::Completed,
+            Handoff::NeedsReview {
+                reason: "every check passed; a person decides whether it lands".to_string(),
+            },
+        )
+    };
+    ResultEnvelope {
+        status,
+        agent: format!("session {session}"),
+        task: task.to_string(),
+        evidence: Evidence {
+            changed_files,
+            commands,
+            artifact_refs,
+        },
+        claims: Vec::new(),
+        handoff,
+    }
+}
+
 /// Rows for one session, oldest first.
 pub fn ledger_for_session(xencode_dir: &Path, session: &str) -> Vec<LedgerEntry> {
     read_ledger(xencode_dir)
@@ -178,6 +262,40 @@ mod tests {
             log_ref: "artifacts/s1/test.log".to_string(),
             note: "green".to_string(),
         }
+    }
+
+    /// AE-1: the envelope for a session lists exactly that session's rows, each
+    /// pointing at the line and digest it came from; no rows is Blocked.
+    #[test]
+    fn a_sessions_envelope_points_every_exit_code_at_its_ledger_row() {
+        let xencode = temp_xencode("envelope");
+        let mut other = entry(Some("s2"));
+        other.exit_code = 3;
+        append_ledger(&xencode, &other).unwrap();
+        append_ledger(&xencode, &entry(Some("s1"))).unwrap();
+        let envelope = envelope_for_session(&xencode, "s1", "the task", vec!["a.rs".into()]);
+        assert_eq!(envelope.status, xencode_core_rs::FinishStatus::Completed);
+        assert_eq!(envelope.evidence.commands.len(), 1, "only s1's rows");
+        let reference = &envelope.evidence.commands[0].evidence_ref;
+        assert!(
+            reference.starts_with("ledger.jsonl line 2, digest "),
+            "{reference}"
+        );
+        let line2 = std::fs::read_to_string(ledger_path(&xencode))
+            .unwrap()
+            .lines()
+            .nth(1)
+            .unwrap()
+            .to_string();
+        let digest = reference.rsplit(' ').next().unwrap();
+        assert!(line2.contains(digest), "the reference resolves to the row");
+
+        let failed = envelope_for_session(&xencode, "s2", "t", Vec::new());
+        assert_eq!(failed.status, xencode_core_rs::FinishStatus::Failed);
+        let nothing = envelope_for_session(&xencode, "never-ran", "t", Vec::new());
+        assert_eq!(nothing.status, xencode_core_rs::FinishStatus::Blocked);
+        assert!(nothing.for_reviewer().render().contains("status: blocked"));
+        let _ = std::fs::remove_dir_all(xencode.parent().unwrap());
     }
 
     /// EVd-7: each row is chained to the one before it, so an edit to a row in
