@@ -111,6 +111,12 @@ and the block names a tool that was offered (`xencode-providers-rs` `tools.rs`
 `recover_text_tool_calls`, with a TUI test that runs the written call end to end). The
 effect on the pass rate needs the GPU run above and is not claimed here.
 
+**Sixth change, 2026-10-09, not yet measured:** a call refused because nobody is present to
+approve it (the evaluation drops its prompt receiver) is now answered with `UNATTENDED_RESULT`,
+which tells the model not to ask for permission and to carry on with reading and editing,
+instead of `DENIED_RESULT`'s "the user denied this action … or ask the user". A person's
+own "no" at the prompt keeps the old wording.
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,
