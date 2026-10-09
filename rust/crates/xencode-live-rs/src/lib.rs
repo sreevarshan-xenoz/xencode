@@ -6,6 +6,8 @@
 //! written to a temporary name and renamed into place, so a reader never sees
 //! half a file from a writer that is still running.
 
+pub mod badge;
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
