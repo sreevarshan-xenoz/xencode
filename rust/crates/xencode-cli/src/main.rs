@@ -545,6 +545,15 @@ enum Commands {
     /// doing and when one needs you
     Badge,
 
+    /// Run the agent work for one project in its own process, for the
+    /// terminal app and other windows to connect to. It exits on its own once
+    /// no window is connected and nothing is running.
+    Engine {
+        /// The project folder (default: the current folder)
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+
     /// Where xencode keeps its own files: settings, session records, cache and
     /// downloaded models, and whether they are still in `~/.xencode`
     Paths {
@@ -2299,6 +2308,7 @@ async fn async_main() {
         } => run_doctor(env, deps, selfcheck, format).await,
         Commands::Session { action } => run_session(action),
         Commands::Badge => run_badge(),
+        Commands::Engine { project } => run_engine(project).await,
         Commands::Paths { format } => run_paths(format),
         Commands::Migrate { dry_run } => run_migrate(dry_run),
         Commands::Verify {
@@ -14983,6 +14993,20 @@ const NO_TERMINAL: &str = concat!(
     "`xencode query <prompt>` for one answer, `xencode run <task>` for an agent turn, ",
     "`xencode scan`, `xencode analyze`, `xencode doctor`. `xencode --help` lists the rest."
 );
+
+async fn run_engine(project: Option<PathBuf>) -> Result<(), String> {
+    let project = match project {
+        Some(project) => project,
+        None => {
+            std::env::current_dir().map_err(|e| format!("cannot read the current folder: {e}"))?
+        }
+    };
+    xencode_tui_rs::engine::server::serve(project).await?;
+    // The model list and health checks may still have work in flight that
+    // nobody will read; the engine is finished, so the process ends now
+    // rather than waiting for them.
+    std::process::exit(0);
+}
 
 async fn run_tui() -> Result<(), String> {
     use std::io::IsTerminal;

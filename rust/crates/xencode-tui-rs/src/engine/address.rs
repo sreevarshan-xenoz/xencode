@@ -69,6 +69,15 @@ impl Address {
     }
 }
 
+impl std::fmt::Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Address::Pipe(name) => f.write_str(name),
+            Address::Socket(path) => write!(f, "{}", path.display()),
+        }
+    }
+}
+
 /// The lock file only the running engine for `project` holds.
 pub fn lock_path(project: &Path) -> Result<PathBuf, String> {
     Ok(engine_dir()?.join(format!("{}.lock", fingerprint(project))))

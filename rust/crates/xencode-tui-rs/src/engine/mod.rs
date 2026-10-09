@@ -5,6 +5,7 @@
 
 pub mod address;
 pub mod proto;
+pub mod server;
 pub mod transport;
 pub mod view;
 
