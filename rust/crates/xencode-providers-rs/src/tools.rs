@@ -1120,6 +1120,23 @@ pub fn search_tools() -> Vec<ToolDefinition> {
 /// whole plan, so the model never has to track indices, and the tool touches
 /// no files — it is presentation only. A model that ignores it loses the
 /// checklist and nothing else.
+/// The tool a ByteBot task uses to stop and ask the person a question (BT-2).
+/// Offered to ByteBot runs only; a chat turn can simply answer in text.
+pub fn ask_user_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "ask_user".to_string(),
+        description: "Stop and ask the person one question when you cannot continue                       without their answer. The task pauses until they reply. They may                       instead do the step themselves, and you will be told so."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "question": { "type": "string", "description": "One clear question" }
+            },
+            "required": ["question"]
+        }),
+    }
+}
+
 pub fn plan_tools() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -1270,6 +1287,14 @@ fn parse_text_call(body: &str, offered: &[ToolDefinition]) -> Option<(String, se
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ask_user_takes_exactly_one_required_question() {
+        let tool = super::ask_user_tool();
+        assert_eq!(tool.name, "ask_user");
+        assert_eq!(tool.parameters["required"], serde_json::json!(["question"]));
+        assert_eq!(tool.parameters["properties"]["question"]["type"], "string");
+    }
+
     use super::*;
 
     fn offered(names: &[&str]) -> Vec<ToolDefinition> {

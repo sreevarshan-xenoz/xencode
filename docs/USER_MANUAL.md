@@ -467,6 +467,12 @@ is not a separate engine and it is not a demo —
   was still waiting its turn is cancelled rather than started: xencode only
   runs task text typed in this session, never text read back from disk.
   Secrets are removed from a record before it is written.
+- a ByteBot task can stop and ask you a question. The task shows as `needs
+  help`, the floating badge turns amber, and the panel shows the question.
+  Type an answer and press Enter to carry on; type `/done` instead if you did
+  that step yourself, and the agent is told so and continues from there. Esc
+  cancels the task. Chat turns are not offered this; they can simply ask in
+  their reply.
 - a line starting with `/` typed in the panel runs that command exactly as
   it would in chat — `/init`, `/help`, `/rewind` and the rest — instead of
   being handed to the agent as a task. Its output appears where that command

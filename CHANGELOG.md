@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `BT-2`: a ByteBot task can stop and ask you a question
+
+ByteBot tasks are offered a new tool, `ask_user`. When the agent cannot carry
+on without you, it asks one question: the task waits as "needs help", the
+floating badge shows "needs you" with the question, and the panel shows the
+question with how to answer. An answer typed in the panel goes back to the
+agent; `/done` tells it you did that step yourself. Esc cancels the task and
+releases the waiting question, so the stop always gets through. Chat turns are
+not offered the tool.
+
 ### Added — `BT-1`: ByteBot keeps a task list with the original Bytebot states
 
 Each task given to ByteBot, from its panel or with `/bytebot`, is now a record

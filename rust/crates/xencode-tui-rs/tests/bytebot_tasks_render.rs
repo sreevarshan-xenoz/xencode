@@ -39,3 +39,16 @@ fn the_panel_lists_tasks_with_their_states() {
     assert!(screen.contains("› running  second job"), "{screen}");
     assert!(screen.contains("pending  third job"), "{screen}");
 }
+
+#[test]
+fn a_waiting_question_is_shown_with_how_to_answer_it() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::ByteBotPanel;
+    let mut waiting = task("pick a database", TaskState::NeedsHelp);
+    waiting.question = Some("Which database?".into());
+    app.bytebot_tasks = vec![waiting];
+    let screen = rendered(&mut app, 140, 45);
+    assert!(screen.contains("Needs help: Which database?"), "{screen}");
+    assert!(screen.contains("/done"), "{screen}");
+    assert!(screen.contains("needs help  pick a database"), "{screen}");
+}
