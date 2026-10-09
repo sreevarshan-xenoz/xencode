@@ -4155,6 +4155,7 @@ dependencies = [
  "xencode-config-rs",
  "xencode-context-rs",
  "xencode-core-rs",
+ "xencode-live-rs",
  "xencode-mcp-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
@@ -4244,6 +4245,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "xencode-config-rs",
+ "xencode-core-rs",
 ]
 
 [[package]]

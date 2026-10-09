@@ -2264,6 +2264,9 @@ impl<'a> App<'a> {
                 "",
             );
         }
+        if app.config.badge_autostart {
+            app.start_badge();
+        }
         app.load_plugins();
         app.load_skills();
         // V-6: the window arrangement comes back with the app. A file this
@@ -3650,6 +3653,29 @@ impl<'a> App<'a> {
                 self.focus = FocusArea::ChatInput;
                 self.input_mode = InputMode::Editing;
             }
+        }
+    }
+
+    /// Start the floating badge (DK-2). A second copy is harmless: the badge
+    /// refuses to run twice for one user.
+    pub(crate) fn start_badge(&mut self) {
+        let beside = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+        match xencode_live_rs::find_badge(beside.as_deref()) {
+            Some(exe) => {
+                if let Err(e) = xencode_live_rs::spawn_badge(&exe) {
+                    self.push_toast(
+                        crate::toast::ToastKind::Warning,
+                        format!("Could not start the badge: {e}"),
+                    );
+                }
+            }
+            None => self.push_toast(
+                crate::toast::ToastKind::Warning,
+                "Floating Badge is on, but xencode-badge was not found next to xencode or on PATH"
+                    .to_string(),
+            ),
         }
     }
 

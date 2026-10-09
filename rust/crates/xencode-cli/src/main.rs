@@ -541,6 +541,10 @@ enum Commands {
         action: SessionAction,
     },
 
+    /// Start the floating badge that shows what running xencode sessions are
+    /// doing and when one needs you
+    Badge,
+
     /// Where xencode keeps its own files: settings, session records, cache and
     /// downloaded models, and whether they are still in `~/.xencode`
     Paths {
@@ -2294,6 +2298,7 @@ async fn async_main() {
             format,
         } => run_doctor(env, deps, selfcheck, format).await,
         Commands::Session { action } => run_session(action),
+        Commands::Badge => run_badge(),
         Commands::Paths { format } => run_paths(format),
         Commands::Migrate { dry_run } => run_migrate(dry_run),
         Commands::Verify {
@@ -2592,6 +2597,22 @@ const UNSET_WHEN_EMPTY: [&str; 6] = [
 
 /// Print where each kind of xencode's own files is kept, and say in as many
 /// words when they are still in the single directory this layout replaced.
+/// `xencode badge` (DK-2): start the floating badge, detached from this
+/// terminal. A badge that is already running makes the new copy exit at once.
+fn run_badge() -> Result<(), String> {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let exe = xencode_live_rs::find_badge(beside.as_deref()).ok_or_else(|| {
+        "xencode-badge was not found next to xencode or on PATH. Build it with:          cargo build --release --manifest-path rust/badge/Cargo.toml"
+            .to_string()
+    })?;
+    xencode_live_rs::spawn_badge(&exe)
+        .map_err(|e| format!("could not start {}: {e}", exe.display()))?;
+    println!("Started {}", exe.display());
+    Ok(())
+}
+
 fn run_paths(format: OutputFormat) -> Result<(), String> {
     use xencode_config_rs::paths;
 
