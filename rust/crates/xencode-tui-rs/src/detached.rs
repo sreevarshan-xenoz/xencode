@@ -700,8 +700,8 @@ pub fn read_log_tail(dir: &Path, lines: usize) -> Vec<String> {
 /// runs with its working directory in the run's tree — re-deriving it there
 /// would point at the tree's own `.xencode`, not the project's.
 ///
-/// The child is a `fork(2)` of this process, so detached runs exist only on
-/// Unix; elsewhere this returns `Unsupported` and nothing is started.
+/// On Unix the child is a `fork(2)` of this process. On platforms that are
+/// neither Unix nor Windows this returns `Unsupported` and nothing starts.
 /// Windows has no fork, so the worker is this same program started again
 /// with the hidden `run --child` options, detached from the console, in the
 /// run's tree, writing to the run's log (EN-4).
@@ -790,26 +790,18 @@ pub fn stop_child(dir: &Path, pid: u32) -> String {
     unsafe {
         libc::kill(pid as i32, libc::SIGTERM);
     }
-    // Windows has no SIGTERM; the worker is ended outright (EN-4). The
-    // stop file already says it was asked to stop, and a worker that has
-    // already gone cannot be opened, which is the same answer.
+    // Windows has no SIGTERM; the worker is ended outright (EN-4) — but
+    // only when the process behind the pid is xencode. Ending cannot be
+    // refused the way a signal can, and a pid left behind by a worker that
+    // died may have been given to another program since.
     #[cfg(windows)]
-    // SAFETY: the handle is opened for termination only, used once and
-    // closed.
-    unsafe {
-        use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
-            PROCESS_TERMINATE,
-        };
-        let process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
-        if !process.is_null() {
-            // Ending a process finishes after the call returns; wait for it.
-            if TerminateProcess(process, 1) != 0 {
-                WaitForSingleObject(process, 2000);
-            }
-            CloseHandle(process);
+    {
+        if let Some(image) = windows_stop::other_program(pid) {
+            return format!(
+                "pid {pid} now belongs to another program ({image}); the run's worker is gone, so nothing was ended"
+            );
         }
+        windows_stop::end(pid);
     }
     for _ in 0..20 {
         if !xencode_core_rs::tasks_file::pid_alive(pid) {
@@ -817,7 +809,73 @@ pub fn stop_child(dir: &Path, pid: u32) -> String {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    format!("asked pid {pid} to stop and it is still alive; it may be ignoring SIGTERM")
+    if cfg!(windows) {
+        format!("pid {pid} could not be ended (it may belong to another account)")
+    } else {
+        format!("asked pid {pid} to stop and it is still alive; it may be ignoring SIGTERM")
+    }
+}
+
+#[cfg(windows)]
+mod windows_stop {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
+        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        PROCESS_TERMINATE,
+    };
+
+    /// The program running as `pid`, when it is not this one; `None` when it
+    /// is this program or cannot be looked at (gone, or not ours to see).
+    pub(super) fn other_program(pid: u32) -> Option<String> {
+        // SAFETY: the handle is opened to read the image name only, and
+        // closed; the buffer outlives the call and its length is passed.
+        let image = unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let mut buffer = [0u16; 1024];
+            let mut len = buffer.len() as u32;
+            let ok = QueryFullProcessImageNameW(
+                process,
+                PROCESS_NAME_WIN32,
+                buffer.as_mut_ptr(),
+                &mut len,
+            );
+            CloseHandle(process);
+            if ok == 0 {
+                return None;
+            }
+            String::from_utf16_lossy(&buffer[..len as usize])
+        };
+        let mine = std::env::current_exe().ok()?;
+        let plain = |p: &str| p.trim_start_matches(r"\\?\").to_string();
+        let same = |a: &str, b: &str| plain(a).eq_ignore_ascii_case(&plain(b));
+        let canonical = |p: &std::path::Path| {
+            std::fs::canonicalize(p)
+                .map(|c| c.to_string_lossy().to_string())
+                .unwrap_or_else(|_| p.to_string_lossy().to_string())
+        };
+        let theirs = canonical(std::path::Path::new(&image));
+        (!same(&theirs, &canonical(&mine))).then_some(image)
+    }
+
+    /// End `pid` and wait up to two seconds for it to be gone.
+    pub(super) fn end(pid: u32) {
+        // SAFETY: the handle is opened to end and wait on this one process,
+        // used, and closed.
+        unsafe {
+            let process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
+            if !process.is_null() {
+                // Ending a process finishes after the call returns.
+                if TerminateProcess(process, 1) != 0 {
+                    WaitForSingleObject(process, 2000);
+                }
+                CloseHandle(process);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -832,22 +890,58 @@ mod tests {
         }
     }
 
-    /// `xencode run --stop` on Windows ends the worker itself (EN-4).
+    /// Set for the copy of this test binary that plays a run's worker.
+    #[cfg(windows)]
+    const WORKER: &str = "XENCODE_TEST_DETACHED_WORKER";
+
+    /// Does nothing in a normal run; as the worker, it waits half a minute.
+    #[cfg(windows)]
+    #[test]
+    fn worker_waits_to_be_stopped() {
+        if std::env::var_os(WORKER).is_some() {
+            std::thread::sleep(Duration::from_secs(30));
+        }
+    }
+
+    /// `xencode run --stop` on Windows ends the worker itself (EN-4). The
+    /// worker is this same program, as a run's worker is.
     #[cfg(windows)]
     #[test]
     fn stopping_a_run_ends_its_worker() {
         let dir = tempfile::tempdir().unwrap();
-        let mut worker = std::process::Command::new("ping")
-            .args(["-n", "30", "127.0.0.1"])
+        let mut worker = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "detached::tests::worker_waits_to_be_stopped"])
+            .env(WORKER, "1")
             .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap();
         let said = stop_child(dir.path(), worker.id());
+        let ended = worker.try_wait().unwrap();
+        if ended.is_none() {
+            let _ = worker.kill();
+        }
         assert!(said.starts_with("stopped"), "{said}");
         assert!(dir.path().join("stop").exists());
-        // Ended, not merely asked: it is long gone before its 30 seconds.
-        let ended = worker.try_wait().unwrap();
         assert!(ended.is_some(), "the worker is still running");
+    }
+
+    /// A pid left behind by a worker that died may belong to another program
+    /// by now; that program is not ended.
+    #[cfg(windows)]
+    #[test]
+    fn a_pid_now_used_by_another_program_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut other = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let said = stop_child(dir.path(), other.id());
+        let still_running = other.try_wait().unwrap().is_none();
+        let _ = other.kill();
+        let _ = other.wait();
+        assert!(still_running, "another program was ended: {said}");
+        assert!(said.contains("another program"), "{said}");
     }
 
     #[cfg(windows)]
