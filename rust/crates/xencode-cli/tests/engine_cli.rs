@@ -537,3 +537,124 @@ async fn a_window_whose_engine_cannot_come_back_stays_responsive() {
         tokio::time::sleep(Duration::from_millis(33)).await;
     }
 }
+
+// Prompts that only a real model raises. These run against a llama.cpp
+// server named by XENCODE_LIVE_LLAMACPP_URL (and XENCODE_LIVE_MODEL, default
+// `llamacpp:qwen3-4b`), so they are ignored unless asked for:
+//   XENCODE_LIVE_LLAMACPP_URL=http://127.0.0.1:18080 cargo test -p xencode-cli --test engine_cli -- --ignored
+
+fn live_settings() -> tempfile::TempDir {
+    let url = std::env::var("XENCODE_LIVE_LLAMACPP_URL")
+        .expect("set XENCODE_LIVE_LLAMACPP_URL to a running llama.cpp server");
+    let model =
+        std::env::var("XENCODE_LIVE_MODEL").unwrap_or_else(|_| "llamacpp:qwen3-4b".to_string());
+    let dir = tempfile::tempdir().unwrap();
+    let config = serde_json::json!({ "default_model": model, "llama_cpp_url": url });
+    std::fs::write(dir.path().join("config.json"), config.to_string()).unwrap();
+    dir
+}
+
+/// Read until an approval prompt arrives; returns its id.
+async fn approval_shown(conn: &mut Conn, wait: Duration) -> u64 {
+    let start = Instant::now();
+    loop {
+        assert!(start.elapsed() < wait, "no approval was asked for");
+        let Ok(Ok(Some(line))) =
+            tokio::time::timeout(Duration::from_millis(500), conn.recv()).await
+        else {
+            continue;
+        };
+        if let Ok(EngineMsg::ApprovalRequested { approval }) = proto::decode_engine(&line) {
+            return approval.id;
+        }
+    }
+}
+
+/// Everything a window receives over `wait`.
+async fn received(conn: &mut Conn, wait: Duration) -> Vec<EngineMsg> {
+    let mut got = Vec::new();
+    let start = Instant::now();
+    while start.elapsed() < wait {
+        if let Ok(Ok(Some(line))) =
+            tokio::time::timeout(Duration::from_millis(200), conn.recv()).await
+        {
+            if let Ok(msg) = proto::decode_engine(&line) {
+                got.push(msg);
+            }
+        }
+    }
+    got
+}
+
+#[tokio::test]
+#[ignore = "needs a running llama.cpp server: XENCODE_LIVE_LLAMACPP_URL"]
+async fn two_windows_racing_for_one_approval() {
+    let project = tempfile::tempdir().unwrap();
+    let config = live_settings();
+    let engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let (mut a, _) = join(&addr, "window a").await;
+    let (mut b, _) = join(&addr, "window b").await;
+    send(
+        &mut a,
+        ClientMsg::EnqueueTask {
+            text: "Create a file named race.txt containing exactly the word: race".into(),
+        },
+    )
+    .await;
+    let wait = Duration::from_secs(180);
+    let (id_a, id_b) = tokio::join!(approval_shown(&mut a, wait), approval_shown(&mut b, wait));
+    assert_eq!(id_a, id_b, "both windows show the same prompt");
+    let answer = |id| ClientMsg::AnswerApproval {
+        id,
+        answer: proto::WireAnswer::Allow,
+    };
+    tokio::join!(send(&mut a, answer(id_a)), send(&mut b, answer(id_b)));
+    let (got_a, got_b) = tokio::join!(
+        received(&mut a, Duration::from_secs(5)),
+        received(&mut b, Duration::from_secs(5))
+    );
+    let winners = |got: &[EngineMsg]| {
+        got.iter()
+            .filter_map(|m| match m {
+                EngineMsg::ApprovalResolved { id, by, .. } if *id == id_a => Some(by.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let (won_a, won_b) = (winners(&got_a), winners(&got_b));
+    assert_eq!(won_a.len(), 1, "window a was told once: {got_a:?}");
+    assert_eq!(won_a, won_b, "both windows name the same winner");
+    let refused = |got: &[EngineMsg]| {
+        got.iter().any(|m| {
+            matches!(m, EngineMsg::Error { message } if message == "that approval is no longer waiting")
+        })
+    };
+    let loser = if won_a[0] == "window a" {
+        &got_b
+    } else {
+        &got_a
+    };
+    let winner = if won_a[0] == "window a" {
+        &got_a
+    } else {
+        &got_b
+    };
+    assert!(refused(loser), "the slower answer is refused: {loser:?}");
+    assert!(!refused(winner), "{winner:?}");
+    assert_eq!(
+        link::answered_elsewhere(
+            &EngineMsg::ApprovalResolved {
+                id: id_a,
+                answer: proto::WireAnswer::Allow,
+                by: won_a[0].clone(),
+            },
+            if won_a[0] == "window a" {
+                "window b"
+            } else {
+                "window a"
+            }
+        ),
+        Some(format!("answered in {}: allow", won_a[0]))
+    );
+}
