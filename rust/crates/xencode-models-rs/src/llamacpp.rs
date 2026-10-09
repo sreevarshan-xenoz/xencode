@@ -51,7 +51,7 @@ struct OpenAIModelEntry {
 /// `cached_tokens` is a reading of the server's own memory rather than arithmetic,
 /// which is why it is kept: it is the only number here that says whether the
 /// byte-stable prefix did its job.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LlamaCppTimings {
     /// Number of tokens generated.
     pub tokens_generated: u64,

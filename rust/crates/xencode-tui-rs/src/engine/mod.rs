@@ -6,6 +6,7 @@
 pub mod address;
 pub mod proto;
 pub mod transport;
+pub mod view;
 
 use std::sync::atomic::Ordering;
 
@@ -180,6 +181,10 @@ pub fn handle(
         }
         ClientMsg::SetModel { name } => {
             app.set_model(&name, tx.clone());
+            Vec::new()
+        }
+        ClientMsg::Note { role, content } => {
+            app.messages.push(crate::app::UiMessage { role, content });
             Vec::new()
         }
         ClientMsg::Goodbye => Vec::new(),

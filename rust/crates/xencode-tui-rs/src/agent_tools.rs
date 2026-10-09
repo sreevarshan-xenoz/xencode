@@ -87,6 +87,22 @@ impl ToolClass {
             Self::Network => "network request",
         }
     }
+
+    /// The class an approval prompt names in words, read back on a window
+    /// that only received the words. Unknown words are treated as the most
+    /// guarded class, so a window never shows a prompt as safer than it is.
+    pub fn from_overlay_label(label: &str) -> Self {
+        [
+            Self::ReadOnly,
+            Self::Edit,
+            Self::Shell,
+            Self::External,
+            Self::Network,
+        ]
+        .into_iter()
+        .find(|class| class.overlay_label() == label)
+        .unwrap_or(Self::Network)
+    }
 }
 
 /// The outcome of the policy for one call.
@@ -5163,7 +5179,8 @@ pub const PLAN_COMPACT_ITEMS: usize = 6;
 /// Longest plan line worth rendering (the rest is an essay, not a step).
 const PLAN_TEXT_WIDTH: usize = 100;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlanStatus {
     Pending,
     InProgress,
@@ -5181,7 +5198,7 @@ impl PlanStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PlanItem {
     pub text: String,
     pub status: PlanStatus,
