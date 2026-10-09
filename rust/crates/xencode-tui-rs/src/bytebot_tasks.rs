@@ -61,6 +61,10 @@ pub struct ByteBotTask {
     pub started_at: Option<u64>,
     #[serde(default)]
     pub ended_at: Option<u64>,
+    /// Made by the person in this session. Never written or read: a record
+    /// loaded from disk is always `false`, and only `true` tasks may start.
+    #[serde(skip)]
+    pub this_session: bool,
 }
 
 impl ByteBotTask {
@@ -87,6 +91,7 @@ impl ByteBotTask {
             created_at: now.as_secs(),
             started_at: None,
             ended_at: None,
+            this_session: true,
         }
     }
 }
@@ -166,22 +171,24 @@ impl TaskStore {
         tasks
     }
 
-    /// Settle tasks left open when xencode last exited, and return how many
-    /// were interrupted mid-run. A task that was running or waiting for help
+    /// Settle tasks left open when xencode last exited. Returns every task with
+    /// its settled state, decided here in memory so a record that cannot be
+    /// rewritten still never comes back pending, and how many were
+    /// interrupted mid-run. A task that was running or waiting for help
     /// cannot resume, so it is failed. A task still pending is cancelled, not
     /// run: its text was read from disk rather than typed by the person at the
     /// keyboard now, and a record can be planted in that folder.
-    pub fn recover(&self) -> usize {
+    pub fn recover(&self) -> (Vec<ByteBotTask>, usize) {
         let mut interrupted = 0;
+        let mut settled = Vec::new();
         for mut task in self.load_all() {
             match task.state {
                 TaskState::Running | TaskState::NeedsHelp => {
                     task.state = TaskState::Failed;
                     task.question = None;
                     task.note = Some("xencode exited during this task".to_string());
-                    if self.save(&task).is_ok() {
-                        interrupted += 1;
-                    }
+                    let _ = self.save(&task);
+                    interrupted += 1;
                 }
                 TaskState::Pending => {
                     task.state = TaskState::Cancelled;
@@ -192,8 +199,9 @@ impl TaskStore {
                 }
                 _ => {}
             }
+            settled.push(task);
         }
-        interrupted
+        (settled, interrupted)
     }
 }
 
@@ -215,7 +223,14 @@ mod tests {
         )
         .unwrap();
         assert!(text.contains("\"state\": \"pending\""), "{text}");
-        assert_eq!(store.load_all(), vec![t]);
+        assert!(
+            !text.contains("this_session"),
+            "the session flag is never written"
+        );
+        // Everything comes back except the session flag, which is never read.
+        let mut expected = t.clone();
+        expected.this_session = false;
+        assert_eq!(store.load_all(), vec![expected]);
     }
 
     #[test]
@@ -244,8 +259,8 @@ mod tests {
         for t in [&a, &b, &c] {
             store.save(t).unwrap();
         }
-        assert_eq!(store.recover(), 2);
-        let all = store.load_all();
+        let (all, interrupted) = store.recover();
+        assert_eq!(interrupted, 2);
         for t in all.iter().filter(|t| t.text != "c") {
             assert_eq!(t.state, TaskState::Failed);
             assert_eq!(t.note.as_deref(), Some("xencode exited during this task"));
@@ -256,6 +271,44 @@ mod tests {
         let c = all.iter().find(|t| t.text == "c").unwrap();
         assert_eq!(c.state, TaskState::Cancelled);
         assert!(c.note.as_deref().is_some_and(|n| n.contains("not started")));
+    }
+
+    #[test]
+    fn a_pending_task_is_settled_even_when_its_record_cannot_be_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let t = ByteBotTask::new("planted", "m");
+        store.save(&t).unwrap();
+        let file = dir
+            .path()
+            .join("bytebot/tasks")
+            .join(format!("{}.json", t.id));
+        let original = std::fs::metadata(&file).unwrap().permissions();
+        let mut readonly = original.clone();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(&file, readonly).unwrap();
+        let (tasks, _) = store.recover();
+        std::fs::set_permissions(&file, original).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            tasks[0].state,
+            TaskState::Cancelled,
+            "the in-memory list does not trust the failed write"
+        );
+    }
+
+    #[test]
+    fn only_tasks_made_in_this_session_can_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        let typed = ByteBotTask::new("typed now", "m");
+        assert!(typed.this_session);
+        store.save(&typed).unwrap();
+        let loaded = store.load_all();
+        assert!(
+            !loaded[0].this_session,
+            "a record read from disk is never this session's"
+        );
     }
 
     #[test]

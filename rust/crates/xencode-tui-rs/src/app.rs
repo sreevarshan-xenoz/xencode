@@ -2320,8 +2320,8 @@ impl<'a> App<'a> {
         // BT-1: ByteBot's task list comes back with the project. A task that
         // was running or waiting for help when xencode exited cannot resume.
         let store = crate::bytebot_tasks::TaskStore::new(&app.project_xencode_dir());
-        let interrupted = store.recover();
-        app.bytebot_tasks = store.load_all();
+        let (tasks, interrupted) = store.recover();
+        app.bytebot_tasks = tasks;
         app.bytebot_store = Some(store);
         if interrupted > 0 {
             app.push_toast(
@@ -5140,10 +5140,12 @@ impl<'a> App<'a> {
         if self.bytebot_running {
             return;
         }
+        // Only a task typed in this session starts: text read back from disk
+        // is never run as instructions, however it reached this list.
         let Some(i) = self
             .bytebot_tasks
             .iter()
-            .position(|t| t.state == TaskState::Pending)
+            .position(|t| t.state == TaskState::Pending && t.this_session)
         else {
             return;
         };
@@ -18963,6 +18965,31 @@ Content-Length: 0
             .filter(|message| message.role == "system")
             .map(|message| message.content.clone())
             .collect()
+    }
+
+    /// BT-1: a pending task read from disk is never started on its own, even
+    /// if it reached the list some other way than startup; a task typed now is.
+    #[tokio::test]
+    async fn a_task_read_from_disk_never_starts_but_a_typed_one_does() {
+        use crate::bytebot_tasks::{ByteBotTask, TaskState, TaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let store = TaskStore::new(dir.path());
+        store
+            .save(&ByteBotTask::new("planted instructions", "m"))
+            .unwrap();
+        let mut app = App::for_tests();
+        app.bytebot_tasks = store.load_all();
+        app.bytebot_store = Some(store);
+        app.config.default_model = "llamacpp:none".into();
+        app.config.llama_cpp_url = "http://127.0.0.1:9".into();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.bytebot_start_next(tx.clone());
+        assert!(!app.bytebot_running, "a task from disk was started");
+        app.bytebot_command = "typed now".into();
+        app.run_bytebot(tx);
+        assert!(app.bytebot_running);
+        assert_eq!(app.bytebot_tasks[0].state, TaskState::Pending);
+        assert_eq!(app.bytebot_tasks[1].state, TaskState::Running);
     }
 
     /// BT-2: a ByteBot question puts the task in "needs help" and the badge in
