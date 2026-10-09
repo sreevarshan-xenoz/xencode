@@ -3,6 +3,7 @@
 //! runs inside the terminal app; `EN-2` carries the same messages over a
 //! local socket to an engine in its own process.
 
+pub mod address;
 pub mod proto;
 
 use std::sync::atomic::Ordering;

@@ -209,7 +209,16 @@ pub fn badge_running(dir: &Path) -> bool {
 
 /// Start the badge so it outlives this process and owns no console window.
 pub fn spawn_badge(exe: &Path) -> std::io::Result<()> {
+    spawn_detached(exe, &[]).map(|_| ())
+}
+
+/// Start `exe` with `args` so it outlives this process: no console window on
+/// Windows, its own process group on Unix, and no standard streams. Returns
+/// its process id. The badge, the engine (EN-2) and `xencode run --detach`
+/// (EN-4) start this way.
+pub fn spawn_detached(exe: &Path, args: &[&str]) -> std::io::Result<u32> {
     let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -225,7 +234,7 @@ pub fn spawn_badge(exe: &Path) -> std::io::Result<()> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().map(|_| ())
+    cmd.spawn().map(|child| child.id())
 }
 
 pub fn now_secs() -> u64 {
@@ -336,12 +345,43 @@ mod tests {
     }
 
     #[test]
+    fn a_detached_process_starts_and_its_pid_is_returned() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran");
+        let (exe, args): (&str, Vec<String>) = if cfg!(windows) {
+            (
+                "cmd",
+                // The temporary path has no spaces; cmd does not understand
+                // the escaped quotes Rust would put around inner quotes.
+                vec!["/c".into(), format!("type nul > {}", marker.display())],
+            )
+        } else {
+            (
+                "sh",
+                vec!["-c".into(), format!("touch '{}'", marker.display())],
+            )
+        };
+        let exe = xencode_core_rs::sys::which(exe).expect("a shell on PATH");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let pid = spawn_detached(&exe, &args).unwrap();
+        assert!(pid > 0);
+        let start = std::time::Instant::now();
+        while !marker.exists() && start.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(marker.exists(), "the detached process did not run");
+    }
+
+    #[test]
     fn a_held_badge_lock_means_a_badge_is_running() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!badge_running(dir.path()), "no badge yet");
         let lock = take_badge_lock(dir.path()).expect("the first badge takes the lock");
         assert!(badge_running(dir.path()));
-        assert!(take_badge_lock(dir.path()).is_none(), "a second badge cannot take it");
+        assert!(
+            take_badge_lock(dir.path()).is_none(),
+            "a second badge cannot take it"
+        );
         drop(lock);
         assert!(!badge_running(dir.path()), "the lock goes with the badge");
     }

@@ -16,6 +16,7 @@ xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
 xencode-live-rs = { path = "../xencode-live-rs" }
+sha2 = "0.10"
 xencode-mcp-rs = { path = "../xencode-mcp-rs" }
 xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
