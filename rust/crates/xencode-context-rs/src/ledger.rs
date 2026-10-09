@@ -121,9 +121,17 @@ pub fn append_ledger(xencode_dir: &Path, entry: &LedgerEntry) -> std::io::Result
 /// row before it. Rows written before the ledger was chained are counted, not
 /// failed. This proves the file is self-consistent, nothing more: there is no
 /// key, so whoever rewrites the whole file can rewrite the chain with it.
-pub fn verify_ledger(xencode_dir: &Path) -> xencode_core_rs::chain::ChainReport {
-    let text = std::fs::read_to_string(ledger_path(xencode_dir)).unwrap_or_default();
-    xencode_core_rs::chain::verify_chain(&text)
+pub fn verify_ledger(xencode_dir: &Path) -> Result<xencode_core_rs::chain::ChainReport, String> {
+    // A ledger that exists but cannot be read is an error, not an empty and
+    // therefore "intact" one.
+    let path = ledger_path(xencode_dir);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(xencode_core_rs::chain::verify_chain(&text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(xencode_core_rs::chain::ChainReport::default())
+        }
+        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+    }
 }
 
 /// Every row, oldest first. A corrupt line is skipped with its number kept, so
@@ -151,7 +159,34 @@ pub fn envelope_for_session(
     changed_files: Vec<String>,
 ) -> xencode_core_rs::ResultEnvelope {
     use xencode_core_rs::{Evidence, FinishStatus, Handoff, RanCommand, ResultEnvelope};
-    let text = std::fs::read_to_string(ledger_path(xencode_dir)).unwrap_or_default();
+    let path = ledger_path(xencode_dir);
+    // Evidence is only as good as the ledger it comes from: a ledger that
+    // cannot be read, or whose chain shows an edit, proves nothing, and the
+    // envelope says so instead of reporting the rows as runs.
+    let unusable = |reason: String| ResultEnvelope {
+        status: FinishStatus::Blocked,
+        agent: format!("session {session}"),
+        task: task.to_string(),
+        evidence: Evidence {
+            changed_files: changed_files.clone(),
+            commands: Vec::new(),
+            artifact_refs: Vec::new(),
+        },
+        claims: Vec::new(),
+        handoff: Handoff::Blocked { reason },
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return unusable(format!("cannot read {}: {e}", path.display())),
+    };
+    let chain = xencode_core_rs::chain::verify_chain(&text);
+    if let Some(problem) = chain.problems.first() {
+        return unusable(format!(
+            "{LEDGER_FILE} was changed after it was written — {}",
+            xencode_core_rs::chain::describe(problem, "xencode")
+        ));
+    }
     let mut commands = Vec::new();
     let mut artifact_refs = Vec::new();
     for (index, raw) in text.lines().enumerate() {
@@ -168,9 +203,14 @@ pub fn envelope_for_session(
             Some(d) => format!(
                 "{LEDGER_FILE} line {}, digest {}",
                 index + 1,
-                &d[..d.len().min(16)]
+                d.chars().take(16).collect::<String>()
             ),
-            None => format!("{LEDGER_FILE} line {}", index + 1),
+            // A row from before the ledger was chained proves nothing about
+            // itself, and the reference says so.
+            None => format!(
+                "{LEDGER_FILE} line {}, written before the ledger was chained, not tamper-evident",
+                index + 1
+            ),
         };
         let command = if row.note.trim().is_empty() {
             format!("{} run", row.run_class.as_str())
@@ -295,6 +335,35 @@ mod tests {
         let nothing = envelope_for_session(&xencode, "never-ran", "t", Vec::new());
         assert_eq!(nothing.status, xencode_core_rs::FinishStatus::Blocked);
         assert!(nothing.for_reviewer().render().contains("status: blocked"));
+
+        // An edited ledger proves nothing: turning s2's failure into a pass
+        // breaks the chain, and the envelope reports blocked, not completed.
+        let path = ledger_path(&xencode);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            text.replacen("\"exit_code\":3", "\"exit_code\":0", 1),
+        )
+        .unwrap();
+        let forged = envelope_for_session(&xencode, "s2", "t", Vec::new());
+        assert_eq!(forged.status, xencode_core_rs::FinishStatus::Blocked);
+        assert!(forged.evidence.commands.is_empty());
+        match &forged.handoff {
+            xencode_core_rs::Handoff::Blocked { reason } => {
+                assert!(reason.contains("changed after it was written"), "{reason}")
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // A row whose digest is not the hash it claims (here not even hex) is
+        // refused by the chain check before it is cited, and nothing panics.
+        std::fs::write(
+            &path,
+            "{\"ts_unix_ms\":1,\"session\":\"s3\",\"run_class\":\"test\",\"exit_code\":0,\"subjects\":[],\"log_ref\":\"\",\"note\":\"\",\"digest\":\"ééééééééééééééééé\"}
+",
+        )
+        .unwrap();
+        let _ = envelope_for_session(&xencode, "s3", "t", Vec::new());
         let _ = std::fs::remove_dir_all(xencode.parent().unwrap());
     }
 
@@ -309,7 +378,7 @@ mod tests {
             row.exit_code = code;
             append_ledger(&xencode, &row).unwrap();
         }
-        let report = verify_ledger(&xencode);
+        let report = verify_ledger(&xencode).unwrap();
         assert_eq!(report.records, 3);
         assert!(report.fully_chained(), "{report:?}");
         assert_eq!(
@@ -350,7 +419,7 @@ mod tests {
 ",
         )
         .unwrap();
-        let report = verify_ledger(&xencode);
+        let report = verify_ledger(&xencode).unwrap();
         assert!(!report.intact());
         assert_eq!(report.problems[0].line, 2, "{report:?}");
         assert_eq!(
