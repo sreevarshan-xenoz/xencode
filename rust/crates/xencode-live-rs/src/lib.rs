@@ -250,6 +250,28 @@ pub fn spawn_detached_logged(
 }
 
 fn start_detached(mut cmd: std::process::Command) -> std::io::Result<u32> {
+    // Windows hands every inheritable handle to a new process, including
+    // this process's own output when that is a pipe someone reads to its
+    // end (a shell's `$(…)`); a detached process would hold it open for its
+    // whole life. This process's standard handles stop being inheritable;
+    // a child given them on purpose gets its own inheritable copy from std.
+    #[cfg(windows)]
+    // SAFETY: GetStdHandle returns this process's handles or null/invalid,
+    // and SetHandleInformation only changes a flag on a valid one.
+    unsafe {
+        use windows_sys::Win32::Foundation::{
+            SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+        };
+        use windows_sys::Win32::System::Console::{
+            GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+        };
+        for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -369,6 +391,65 @@ mod tests {
         assert!(
             dir.path().join("broken.json").exists(),
             "a file that cannot be read is not judged dead"
+        );
+    }
+
+    /// Set by `a_detached_process_does_not_hold_its_starters_output_open`
+    /// for the copy of this test binary it runs as the starter.
+    const STARTER: &str = "XENCODE_TEST_DETACHED_STARTER";
+
+    /// Does nothing in a normal run. Run as the starter, it starts a
+    /// process that lives for half a minute and exits at once.
+    #[test]
+    fn starter_starts_a_long_detached_process() {
+        let Some(dir) = std::env::var_os(STARTER) else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        let (exe, args) = if cfg!(windows) {
+            ("ping", vec!["-n", "30", "127.0.0.1"])
+        } else {
+            ("sleep", vec!["30"])
+        };
+        let exe = xencode_core_rs::sys::which(exe).expect("a long-running program on PATH");
+        let pid = spawn_detached_logged(&exe, &args, &dir, &dir.join("log")).unwrap();
+        std::fs::write(dir.join("pid"), pid.to_string()).unwrap();
+    }
+
+    /// A program reading what `xencode run --detach` prints (a shell's
+    /// `$(…)`, a test's captured output) waits until every process holding
+    /// that output has closed it. The detached process must not be one of
+    /// them, or the reader waits for the whole run.
+    #[test]
+    fn a_detached_process_does_not_hold_its_starters_output_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::starter_starts_a_long_detached_process"])
+            .env(STARTER, dir.path())
+            .output()
+            .unwrap();
+        let waited = started.elapsed();
+        let pid = std::fs::read_to_string(dir.path().join("pid")).unwrap_or_default();
+        // The long process is ended either way, so nothing is left running.
+        if !pid.is_empty() {
+            let _ = if cfg!(windows) {
+                std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", pid.trim()])
+                    .output()
+            } else {
+                std::process::Command::new("kill").arg(pid.trim()).output()
+            };
+        }
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(!pid.is_empty(), "the starter started nothing");
+        assert!(
+            waited < std::time::Duration::from_secs(15),
+            "reading the starter's output waited {waited:?}, for the detached process"
         );
     }
 
