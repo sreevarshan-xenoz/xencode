@@ -21,16 +21,16 @@
 | W7 | 19 | 16 | 0 | 0 | 19 |
 | W8 | 6 | 5 | 1 | 0 | 6 |
 | W9 | 21 | 0 | 0 | 0 | 2 |
-| W10 | 23 | 18 | 0 | 0 | 20 |
+| W10 | 23 | 18 | 0 | 0 | 21 |
 | W11 | 20 | 2 | 0 | 0 | 17 |
 | W12 | 15 | 1 | 3 | 1 | 3 |
 | W13 | 3 | 0 | 0 | 0 | 0 |
 | W14 | 77 | 3 | 1 | 0 | 19 |
 | W15 | 3 | 3 | 0 | 0 | 3 |
-| W16 | 14 | 10 | 2 | 1 | 14 |
-| W17 | 15 | 12 | 2 | 0 | 14 |
+| W16 | 14 | 12 | 0 | 1 | 14 |
+| W17 | 15 | 13 | 1 | 0 | 15 |
 | unscheduled | 10 | 0 | 0 | 0 | 2 |
-| **all** | **324** | **135** | **9** | **2** | **199** |
+| **all** | **324** | **138** | **6** | **2** | **201** |
 
 ## W0
 
@@ -180,7 +180,7 @@
 | QTR-1 | Make `manifest.permissions` real | core | — | 1 | 2561b42e (2026-10-03) |
 | QTR-3 | `bwrap` wrapper for `run_command`, hooks and background | capability | done | 1 | 99f6a67f (2026-10-04) |
 | QTR-4 | Git-backed checkpoints | capability | done | 1 | 5aa8420e (2026-10-04) |
-| QTR-5 | Accountability as trailers + a run ledger | capability | — | 1 | da8869cc (2026-10-03) |
+| QTR-5 | Accountability as trailers + a run ledger | capability | — | 2 | d199a1f7 (2026-10-09) |
 | SE-2 | untrusted-content marking | core | done | 1 | f692b288 (2026-10-04) |
 | SE-3 | the `AGENTS.md` trust split (fact 3) | core | done | 1 | aa2d22b4 (2026-10-04) |
 | SE-4 | lethal-trifecta gate in `classify` | core | done | 1 | 3b594036 (2026-10-03) |
@@ -242,7 +242,7 @@
 | QK-2 | budgeted, human-authored preference block inside AC-4’s ceiling | capability | done | 1 | 856a5f43 (2026-10-06) |
 | QK-3 | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | done | 1 | 47e065b7 (2026-10-05) |
 | QK-4 | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | done | 1 | 5dbd87e2 (2026-10-06) |
-| QK-5 | knowledge value/cost proxy from `retrieved_files` + token counts | capability | — | 0 | — |
+| QK-5 | knowledge value/cost proxy from `retrieved_files` + token counts | capability | — | 1 | d199a1f7 (2026-10-09) |
 | QK-6 | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | done | 1 | e62b2beb (2026-10-06) |
 | QK-7 | versioned checkpoints as `anchor.md`-style co-commits | capability | — | 1 | 16af5d49 (2026-10-06) |
 | QK-8 | `/trust` a directory's own `AGENTS.md` | capability | done | 1 | a9864297 (2026-10-05) |
@@ -411,8 +411,8 @@
 | OR-1 | Task decomposition, measured before it is trusted | core | done | 1 | 18bdd241 (2026-10-08) |
 | OR-2 | The task graph and scheduler | core | done | 2 | 088c3630 (2026-10-07) |
 | OR-3 | The permission broker | core | done | 1 | f1cc0eec (2026-10-02) |
-| OR-15 | The task contract: done means what xencode said it means | core | open | 2 | a9144266 (2026-10-08) |
-| OR-16 | The result envelope, claims separated from evidence | core | open | 2 | a9144266 (2026-10-08) |
+| OR-15 | The task contract: done means what xencode said it means | core | done | 3 | 1e43d5b6 (2026-10-09) |
+| OR-16 | The result envelope, claims separated from evidence | core | done | 3 | b149c939 (2026-10-09) |
 | M-5 | `xencode mcp serve` | ecology | done | 1 | d5f27ec7 (2026-09-30) |
 | V-10 | Worker-event to window bridge | capability | — | 2 | 4561fdbd (2026-10-02) |
 
@@ -420,7 +420,7 @@
 
 | ID | Item | Bucket | Marked | Commits | Latest |
 |---|---|---|---|---|---|
-| OR-4 | Leases, not shared checkouts | capability | open | 2 | a9144266 (2026-10-08) |
+| OR-4 | Leases, not shared checkouts | capability | done | 3 | 1e43d5b6 (2026-10-09) |
 | OR-5 | The merge decision, with a human gate | capability | done | 1 | deb273df (2026-10-07) |
 | OR-6 | Capability-gated routing | capability | done | 1 | 894e17c6 (2026-10-07) |
 | OR-7 | Re-dispatch a dead worker onto another agent | capability | done | 1 | 78071c19 (2026-10-07) |
@@ -429,7 +429,7 @@
 | OR-10 | Plan, simulate, and dry-run first by default | capability | done | 2 | 9e5870a7 (2026-10-08) |
 | OR-11 | Explain every routing choice | capability | done | 2 | 9e5870a7 (2026-10-08) |
 | OR-17 | The veto, liftable only by reviewer, human or stated policy | capability | done | 1 | c1aab270 (2026-10-08) |
-| OR-18 | Put the lease and the task contract in the launch path | capability | — | 0 | — |
+| OR-18 | Put the lease and the task contract in the launch path | capability | — | 1 | 1e43d5b6 (2026-10-09) |
 | OR-13 | The Local-Only profile | capability | open | 1 | eb69ec9a (2026-10-07) |
 | OR-12 | The worker panel | ecology | done | 1 | ca6921b5 (2026-10-07) |
 | OR-14 | `/orchestrator` as a mode, plus its command surface | ecology | done | 2 | d62843e4 (2026-10-08) |
