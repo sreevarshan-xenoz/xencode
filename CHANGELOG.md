@@ -23,10 +23,17 @@ On Windows, reading the output of a command that started something detached
 ended, because it was handed the reader's pipe. The badge and the engine are
 started the same way. The command now returns its output at once.
 
-### Known — a detached run whose model could not be reached reads as done
+### Fixed — two ways the headless agent and detached runs misreported themselves
 
-`xencode run --show` reports "exit: Done after 0 rounds" for a run whose only
-model call failed; the error is in `xencode run --log`. Recorded as `RA-2`.
+- `RA-1`: `xencode_tui_rs::run_agent`, the library call that runs the agent
+  loop without a screen, always returned an empty final answer and a round
+  count of 1. It now returns the model's answer and the rounds the loop took.
+- `RA-2`: a detached run whose model call failed read "exit: Done". It now
+  reads "exit: Error", and `xencode run --show` gives the reason on a `why:`
+  line.
+- `xencode run --stop` on Windows checks that the process behind a run's
+  recorded process id is xencode before ending it, so a dead run's id that
+  Windows has since given to another program never ends that program.
 
 ### Added — `EN-3`: several windows on one engine, and no wait without an end
 
