@@ -4158,6 +4158,19 @@ tests.
       contract test and two CLI tests correctly report.
     Whether to fix these depends on the open decision that Windows is a
     release target while the table below calls native Windows "rejected".
+  - [x] **The terminal UI crate's Windows failures fixed 2026-10-09, at the owner's request.**
+    `cargo test -p xencode-tui-rs` on Windows went from 23 failing to none: 804 passed,
+    0 failed, 5 ignored. Three were real product bugs, now fixed for every platform: the readme
+    lookup reported a name the crate does not have on a case-insensitive disk; the reproduction
+    gate refused every Windows reproduction because `testsepro.rs` never matched
+    `tests/repro.rs`; and compiler errors reached the model as `src\lib.rs`. The rest were the
+    tests' own assumptions: the fetch/search server answering before reading (5 tests), a
+    10-second wait for a refused connection that takes 18.8 s on Windows, deleting the current
+    directory, a backslash path inside JSON and `sh -c`, the profiler requiring `/proc`, and Git
+    for Windows' gpg needing a `/c/...` home. Found alongside, not Windows-specific: two
+    permission broker tests never deleted their temp folders, and the signing tests left a
+    gpg agent running; both now clean up. The other crates' Windows failures listed above are
+    not part of this and are still open.
 - **PL-3 A terminal capability probe in the TUI** — `NO_COLOR`,
   `FORCE_COLOR`, `CLICOLOR`, `COLORTERM=truecolor`, `TERM_PROGRAM`, tmux
   detection, with a documented 16-colour and plain fallback (fact 18). **M**.
