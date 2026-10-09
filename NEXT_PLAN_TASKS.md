@@ -117,6 +117,24 @@ which tells the model not to ask for permission and to carry on with reading and
 instead of `DENIED_RESULT`'s "the user denied this action … or ask the user". A person's
 own "no" at the prompt keeps the old wording.
 
+**Fifth run, 2026-10-09 — the two changes above measured.** Same server as the fourth run
+(`-c 8192 -ngl 99 --jinja --reasoning off`, alias `qwen3-4b`), temperature 0, seed 42, prompts
+`449d6f4fd09a`, 3 repeats per shape. Run one shape at a time with the GPU cooled below 70 °C
+before each, because a single 24-case run held the RTX 3060 laptop GPU at 89 °C under thermal
+slowdown and was stopped. **5 of 24 passed (21%)**, against 2 of 24 for the fourth run: `off-by-one`
+3/3 (0 in every earlier run), `ignored-result` 2/3, every other shape 0/3. The gate (12 of 24) is
+not met. What the final answers show:
+- **The round budget runs out first.** Most failures used all nine rounds — eight tool calls,
+  then the closing round with no tools — still reading files or calling `update_plan`, and never
+  edited. Planning calls spend the budget the edit needed.
+- **A claimed edit that was never made.** Several answers say "I have made the necessary changes"
+  while the grader shows `src/lib.rs` untouched.
+- **A `<tool_call>` written into the closing round's answer.** That round offers no tools, so the
+  text-call reading correctly runs nothing; it is the budget, again.
+Next, one change at a time: stop `update_plan` from costing a round of the budget, and answer a
+completion claim on a turn that edited nothing with one "you changed no file" continuation (the
+second half of SM-1's plan, not yet built).
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,
