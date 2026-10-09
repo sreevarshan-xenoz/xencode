@@ -167,7 +167,7 @@ Global (work in every panel, any mode):
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+C` | Quit |
+| `Ctrl+C` | Stop the running turn (even mid-answer); quit when nothing is running |
 | `Ctrl+G` | Refresh git status |
 | `Ctrl+E` | File explorer |
 | `Ctrl+S` | Save editor / Git commit panel |
@@ -185,19 +185,21 @@ Global (work in every panel, any mode):
 | `Ctrl+U` | Cycle the body layout: classic → chat-first → zen → any template you declared in config |
 | `Ctrl+0` | Layout history: every change this screen has been through, oldest first, each named by the ask behind it (`Enter` on a row shows the pane widths before and after) |
 | `Ctrl+W` | Close panel → chat |
+
+While you are typing a prompt, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` edit the line as in a shell (start, end, delete to end, delete to start, delete the word before the cursor) instead of the panel actions above.
 | `Ctrl+,` | Settings |
 
 Panel-independent (Normal mode):
 
 | Key | Action |
 |-----|--------|
-| `?` / `F1` | Keybinding help overlay (lists the focused panel's keys) |
+| `?` / `F1` | Keybinding help overlay (lists the focused panel's keys); `F1` and `/help` also work while typing |
 | `Tab` | Cycle explorer → editor → chat |
 | `Esc` | Close popup / leave edit mode |
-| `i` or `/` | Edit the chat input |
+| `i` or `/` | Edit the chat input (`/` types the slash, so `/init` works straight away). A session with nothing said yet starts here already |
 | `m` | Model selector (`r` refresh, `l`/`u` llama.cpp load/unload) |
 | `s` | Settings (except in panels that bind `s` themselves: Security Auditor sort, Custom Models save) |
-| `q` | Quit |
+| `q` `q` | Quit — a single `q` asks first, and any other key keeps the session |
 | `e` | Code editor: start typing edits |
 | `↑ ↓` / `j k` | Scroll or move selection (all scrollable panels) |
 | Mouse wheel | Scroll the panel under the cursor |
@@ -240,7 +242,7 @@ do anything):
 | Provider Health | Health checks with status icons (real requests): Ollama, llama.cpp and each keyed API get a row, and so does the Remote/Colab forward — it probes `remote_base_url`'s `/models` (the same endpoint `xencode colab status` waits on) and shows the forward URI under the row, while Connection Details lists the configured Remote URI or says it is not configured. With no remote URL set the row reads "Remote URL not configured (Settings → Remote URL)" instead of hiding |
 | Project Analyzer | Workspace file type analysis (real scan) |
 | Git Commit | Type a message, Enter runs `git commit -am` (tracked modifications only — untracked files are never added); result returns as a chat line |
-| ByteBot Agent | Step-through autonomous task execution (real tool loop) |
+| ByteBot | Step-through autonomous task execution (real tool loop) |
 | Collaboration Hub | Real WebSocket client: create/join sessions, live members with roles, server errors verbatim |
 | Voice Interface | Real capture: `Enter` spawns the first recorder on `PATH` — `arecord`, `pw-record` or `parec` — streaming raw 16-bit mono 16 kHz, and the level bar, the peak and the clip length are RMS over the bytes it actually sent (one reading per 100 ms chunk). `Enter` again, or `Esc` while it is recording, ends the capture early and keeps the clip; `m`/`Space` mutes, which discards audio instead of saving a silent file. The clip is written to `.xencode/voice/clip-<unix>.wav`. The transcript stays empty unless a whisper CLI (`whisper`, `whisper-cpp`, `whisper-cli`) is installed — then its stdout is the text, and its failure is shown as its failure. With no engine the panel says so and names the clip it kept |
 | Terminal Assistant | Real delegation: type what you want to do and `Enter` makes one call to the configured model, which answers with up to 8 `command · risk · why` rows built from the workspace it was told about. `f` filters by risk, `j`/`k` select, `y`/`Enter` runs the selection — through the agent's approval gate, so the same modal and policy as a model-issued `run_command`, and the outcome (a denial included) is listed in the panel's history. A provider error is printed rather than papered over |
