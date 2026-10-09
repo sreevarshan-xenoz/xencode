@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `TX-7`, `TX-6`: the first screen says how to start, help is never cut off, and the status bar names the provider in use
+
+- The status bar starts with `?:help`, so it is still on screen in an 80-column
+  terminal. While typing, the hint line starts with `F1:help`, and `F1` now opens help
+  from the composer as well.
+- An empty session says "type a prompt and press Enter", names the configured model
+  with its provider's state, and points to `F1 or ? keys · / commands · Ctrl+F all
+  panels`. With no model configured, it says how to pick one.
+- The status bar and the Settings summary used to show ✅ or ❓ for Ollama only, so a
+  llama.cpp user always saw ❓. They now name the provider behind the configured model
+  and its last health result in words: `llamacpp ready`, `ollama not running`,
+  `remote error`.
+- While a turn runs, the composer title says `Ctrl+C stops`.
+
 ### Changed — `TX-9`: Ctrl+C stops a running turn, and the composer keeps the shell editing keys
 
 `Ctrl+C` used to quit the TUI even while a turn was running, with no way to cancel the

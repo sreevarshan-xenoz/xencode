@@ -2061,6 +2061,11 @@ fn editing_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
                 app.chat_scroll = 0;
             }
         }
+        // F1 types nothing, so it opens help even while typing a prompt.
+        KeyCode::F(1) => {
+            app.help_visible = true;
+            app.help_scroll = 0;
+        }
         KeyCode::Esc => {
             app.input_mode = InputMode::Normal;
         }

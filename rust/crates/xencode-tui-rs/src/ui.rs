@@ -354,13 +354,8 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     // Git branch
     let branch_str = format!(" \u{1F9F0} {}", app.git_branch);
 
-    // Provider health indicator
-    let ollama_ok = app
-        .ollama_health_entries
-        .get("ollama")
-        .map(|(s, _, _)| s == "healthy")
-        .unwrap_or(false);
-    let health_icon = if ollama_ok { "\u{2705}" } else { "\u{2753}" };
+    // The provider in use and its state, in words (TX-6).
+    let health_icon = app.provider_status();
 
     // Uptime
     let uptime_secs = (xencode_models_rs::current_timestamp() - app.session_start_time).max(0.0);
@@ -386,7 +381,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     // Build status text chunks
     let left_parts = match app.input_mode {
         InputMode::Normal => format!(
-            " {}  [{}]  {} | {}  {}  {}  {}  \u{394} {}  | ",
+            " ?:help  {}  [{}]  {} | {}  {}  {}  {}  \u{394} {}  | ",
             mode_str,
             app.mode.label(),
             branch_str,
@@ -403,7 +398,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = if app.pending_approval().is_some() {
         "y:allow  a:allow like this  n/Esc:deny  k/j:scroll diff"
     } else if app.input_mode == InputMode::Editing {
-        "Enter:send  Esc:normal  \u{2190}\u{2192}:cursor"
+        "F1:help  Enter:send  Esc:normal  \u{2190}\u{2192}:cursor"
     } else {
         match app.focus {
             FocusArea::Settings => "\u{2191}\u{2193}:nav  \u{2190}\u{2192}:change  Enter:save  Esc:close",
@@ -469,7 +464,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::MultiLanguage => {
                 "Enter:detect  Tab:pick a field  type:edit  Enter:translate  Esc:close"
             }
-            _ => "i:edit  m:models  s:settings  ?:help  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
+            _ => "i:edit  m:models  s:settings  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
         }
     };
 
@@ -775,16 +770,37 @@ fn scrollbar_bar(app: &App) -> Scrollbar<'static> {
 
 // ── Chat Messages ───────────────────────────────────────────────────────────
 
+/// What an empty session shows: how to start, which model answers and
+/// whether its provider is up, and the three ways to find everything else.
+pub fn welcome_lines(app: &App) -> Vec<String> {
+    let model = if app.config.default_model.is_empty() {
+        "  No model chosen yet — press Esc, then m, to pick one.".to_string()
+    } else {
+        format!(
+            "  Model: {} ({})",
+            app.config.default_model,
+            app.provider_status()
+        )
+    };
+    vec![
+        "  Welcome to Xencode — type a prompt and press Enter.".to_string(),
+        model,
+        "  F1 or ? keys · / commands · Ctrl+F all panels".to_string(),
+    ]
+}
+
 /// The chat transcript as rendered lines. Shared by `draw_messages` and the
 /// resize clamp so both agree on the content length.
 fn chat_lines(app: &App) -> Vec<Line<'static>> {
     let mut text = Vec::new();
 
     if app.messages.is_empty() {
-        text.push(Line::from(Span::styled(
-            "  Welcome to Xencode! Press 'i' to start typing.",
-            Style::default().fg(app.theme.message_system),
-        )));
+        for line in welcome_lines(app) {
+            text.push(Line::from(Span::styled(
+                line,
+                Style::default().fg(app.theme.message_system),
+            )));
+        }
         text.push(Line::from(""));
         let shortcuts = crate::focus::first_run_shortcuts_line(app.active_disclosure_level());
         text.push(Line::from(Span::styled(
@@ -985,7 +1001,7 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 
     let title = if app.is_generating {
         let frame = spinner::frame(app.spinner_tick);
-        format!(" {} Thinking... ", frame)
+        format!(" {} Thinking... Ctrl+C stops ", frame)
     } else if is_editing {
         if area.width < 30 {
             " Enter:send · Alt+Enter: newline ".to_string()
@@ -2441,15 +2457,8 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
         0.0
     };
 
-    // Determine health status emoji for current model
-    let model_health_icon = if let Some((status, _, _)) = app.ollama_health_entries.get("ollama") {
-        match status.as_str() {
-            "healthy" => "\u{2705}",
-            _ => "\u{2753}",
-        }
-    } else {
-        "\u{2753}"
-    };
+    // The model's own provider and its state, in words (TX-6).
+    let model_health_icon = format!("({})", app.provider_status());
 
     let lines = vec![
         Line::from(Span::styled(
@@ -2506,7 +2515,7 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
         )),
         Line::from(format!(
             "   Model:      {}  {}",
-            model_health_icon, app.config.default_model
+            app.config.default_model, model_health_icon
         )),
         Line::from(format!("   Theme:      {}", app.config.active_theme)),
         Line::from(format!(
