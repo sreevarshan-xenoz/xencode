@@ -216,7 +216,10 @@ fn span_location(span: &Value) -> String {
     let file = span
         .get("file_name")
         .and_then(Value::as_str)
-        .unwrap_or("<unknown>");
+        .unwrap_or("<unknown>")
+        // rustc on Windows names `src\lib.rs`. Every other path the model is
+        // shown uses forward slashes, and its file tools accept them there.
+        .replace('\\', "/");
     let line = span.get("line_start").and_then(Value::as_u64).unwrap_or(0);
     let column = span
         .get("column_start")
@@ -410,6 +413,26 @@ mod tests {
                     .to_string()
             )]
         );
+    }
+
+    #[test]
+    fn a_windows_file_name_is_shown_with_forward_slashes() {
+        // rustc's JSON escapes the backslash, so `src\lib.rs` arrives as `src\\lib.rs`.
+        let windows = E0308.replace(
+            r#""file_name":"src/lib.rs""#,
+            r#""file_name":"src\\lib.rs""#,
+        );
+        assert_ne!(
+            windows, E0308,
+            "the sample changed shape; this test no longer tests anything"
+        );
+        let report = parse(&windows).expect("parsed");
+        let rendered = report.render();
+        assert!(
+            rendered.contains("error E0308: mismatched types — src/lib.rs:1:32"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains('\\'), "{rendered}");
     }
 
     #[test]

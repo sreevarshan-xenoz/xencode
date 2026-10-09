@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matched the reproduction file `tests/repro.rs` or the reported area of the
   bug, so a correct reproduction was marked "suspect". Paths are now compared
   with forward slashes, whichever way they were written.
+- **Compiler errors handed to the model named files with backslashes on
+  Windows**, such as `src\lib.rs:1:27`, unlike every other path it is shown.
+  They now read `src/lib.rs:1:27`.
 
 ### Changed — `AG-4`: a first start opens at disclosure level 2, not 4
 
