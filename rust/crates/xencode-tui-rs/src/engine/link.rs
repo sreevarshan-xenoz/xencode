@@ -53,6 +53,29 @@ pub fn runs_in_engine(line: &str) -> bool {
     }
 }
 
+/// The name a terminal window gives the engine, so other windows can be
+/// told which window answered (EN-3).
+pub fn window_name() -> String {
+    format!("terminal {}", std::process::id())
+}
+
+/// What a window says when another window answered a prompt it was also
+/// showing: `None` for its own answers and for every other message.
+pub fn answered_elsewhere(msg: &EngineMsg, me: &str) -> Option<String> {
+    match msg {
+        EngineMsg::ApprovalResolved { by, answer, .. } if by != me => {
+            let said = match answer {
+                proto::WireAnswer::Allow => "allow",
+                proto::WireAnswer::AllowForSession => "allow for the session",
+                proto::WireAnswer::Deny => "deny",
+            };
+            Some(format!("answered in {by}: {said}"))
+        }
+        EngineMsg::QuestionAnswered { by, .. } if by != me => Some(format!("answered in {by}")),
+        _ => None,
+    }
+}
+
 /// What the reading task hands the window.
 enum Incoming {
     Msg(EngineMsg),
@@ -61,6 +84,8 @@ enum Incoming {
 
 /// A window's connection to its engine.
 pub struct EngineLink {
+    /// The name this window gave the engine.
+    name: String,
     out: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<Incoming>,
     /// How long the transcript is as the engine last set it. Lines past it
@@ -134,6 +159,7 @@ pub async fn open(addr: &Address, client: &str) -> Result<(EngineLink, View), St
     });
     Ok((
         EngineLink {
+            name: client.to_string(),
             out,
             incoming,
             engine_len: 0,
@@ -148,13 +174,13 @@ pub async fn connect_or_start(
     addr: &Address,
     start: &(dyn Fn() -> io::Result<()> + Send + Sync),
 ) -> Result<(EngineLink, View), String> {
-    if let Ok(linked) = open(addr, "terminal").await {
+    if let Ok(linked) = open(addr, &window_name()).await {
         return Ok(linked);
     }
     start().map_err(|e| format!("cannot start the engine: {e}"))?;
     let begun = Instant::now();
     loop {
-        match open(addr, "terminal").await {
+        match open(addr, &window_name()).await {
             Ok(linked) => return Ok(linked),
             Err(why) if begun.elapsed() >= START_WAIT => return Err(why),
             Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
@@ -214,7 +240,11 @@ pub fn frame(app: &mut App) -> Frame {
             Incoming::Msg(EngineMsg::Error { message }) => {
                 app.push_toast(crate::toast::ToastKind::Warning, message);
             }
-            Incoming::Msg(_) => {}
+            Incoming::Msg(msg) => {
+                if let Some(said) = answered_elsewhere(&msg, &link.name) {
+                    app.push_toast(crate::toast::ToastKind::Info, said);
+                }
+            }
             Incoming::Lost(why) => {
                 done.lost = Some(why);
                 return done;
@@ -335,6 +365,52 @@ mod tests {
                 "{command} is not a command"
             );
         }
+    }
+
+    #[test]
+    fn a_window_is_told_who_else_answered() {
+        use crate::engine::proto::WireAnswer;
+        let me = "terminal 7";
+        let approval = |by: &str, answer| EngineMsg::ApprovalResolved {
+            id: 1,
+            answer,
+            by: by.into(),
+        };
+        assert_eq!(
+            answered_elsewhere(&approval("terminal 9", WireAnswer::Allow), me).as_deref(),
+            Some("answered in terminal 9: allow")
+        );
+        assert_eq!(
+            answered_elsewhere(&approval("desktop", WireAnswer::AllowForSession), me).as_deref(),
+            Some("answered in desktop: allow for the session")
+        );
+        assert_eq!(
+            answered_elsewhere(&approval("terminal 9", WireAnswer::Deny), me).as_deref(),
+            Some("answered in terminal 9: deny")
+        );
+        let question = |by: &str| EngineMsg::QuestionAnswered {
+            id: 2,
+            by: by.into(),
+        };
+        assert_eq!(
+            answered_elsewhere(&question("terminal 9"), me).as_deref(),
+            Some("answered in terminal 9")
+        );
+        // A window's own answers, and anything else, say nothing.
+        assert_eq!(
+            answered_elsewhere(&approval(me, WireAnswer::Allow), me),
+            None
+        );
+        assert_eq!(answered_elsewhere(&question(me), me), None);
+        let other = EngineMsg::Error {
+            message: "x".into(),
+        };
+        assert_eq!(answered_elsewhere(&other, me), None);
+    }
+
+    #[test]
+    fn a_window_names_itself_by_its_process() {
+        assert_eq!(window_name(), format!("terminal {}", std::process::id()));
     }
 
     #[test]
