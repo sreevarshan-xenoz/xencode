@@ -836,6 +836,9 @@ pub struct App<'a> {
     /// The running chat turn's stop flag: `Ctrl+C` sets it to cancel the turn
     /// before it is ever read as quit (TX-9).
     pub(crate) turn_stop: Option<Arc<AtomicBool>>,
+    /// The running ByteBot task's stop flag, set by `Esc` (UX-14). The run
+    /// ends at its next round boundary and the panel reports what it got.
+    pub(crate) bytebot_stop: Option<Arc<AtomicBool>>,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -3151,6 +3154,7 @@ impl<'a> App<'a> {
             quit_armed: false,
             no_color: std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
             turn_stop: None,
+            bytebot_stop: None,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -4829,6 +4833,9 @@ impl<'a> App<'a> {
         );
         run.retrieved_files = assembly.retrieved_files;
         run.approval.redaction = std::sync::Arc::new(assembly.vault);
+        let stop = Arc::new(AtomicBool::new(false));
+        run.stop_flag = Some(stop.clone());
+        self.bytebot_stop = Some(stop);
         Some(run)
     }
 

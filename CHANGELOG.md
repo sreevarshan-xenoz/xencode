@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `UX-14`: Esc stops a running turn, as the screen already promised
+
+Three refusals in the TUI ("can't change the gate / rewind while the agent is
+working — Esc to stop it first") described a key that did nothing: Esc only
+unwound panels. Now a bare Esc pressed while a chat turn is generating, or a
+ByteBot task is running, sets that run's stop flag. The text already streamed
+stays in the transcript, the loop ends at its next boundary (a request in
+flight is dropped at once; a tool call finishes before the loop stops), and the
+chat shows "■ Turn stopped." A second Esc, once the stop is asked for, does what
+Esc always did. Ctrl+C now stops a ByteBot task the same way before it quits.
+
 ### Changed — `SM-2`: a claimed edit that never happened is answered once
 
 When a turn changed no file but the model's answer says it did ("I have fixed the bug"),

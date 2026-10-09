@@ -66,7 +66,7 @@ const UNIVERSAL: &[Binding] = &[
     ("e", "edit code editor"),
     ("m", "model selector (r refresh, l load, u unload)"),
     ("s", "settings (panels that bind s keep it)"),
-    ("Esc", "close popup / leave edit mode"),
+    ("Esc", "stop the turn · close popup / leave edit mode"),
     ("? / F1", "this help"),
 ];
 
