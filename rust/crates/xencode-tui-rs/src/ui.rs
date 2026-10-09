@@ -18,7 +18,31 @@ use crate::focus::{
 };
 use crate::widgets::{gauge, panel_border_set, spinner};
 
+/// Paint one frame. With `NO_COLOR` set (TX-8) every colour is taken out
+/// afterwards, in one place, so no panel can forget to: a cell that stood out
+/// by its background (a selection, the status bar) is shown reversed instead.
 pub fn draw(f: &mut Frame, app: &mut App) {
+    draw_frame(f, app);
+    if app.no_color {
+        strip_colors(f.buffer_mut(), app.theme.bg);
+    }
+}
+
+/// Take every colour out of `buffer`. A background other than the theme's
+/// own is how a cell was marked, so that cell keeps the mark as reverse video.
+pub fn strip_colors(buffer: &mut ratatui::buffer::Buffer, base_bg: ratatui::style::Color) {
+    use ratatui::style::Color;
+    for cell in buffer.content.iter_mut() {
+        let marked = cell.bg != Color::Reset && cell.bg != base_bg;
+        cell.set_fg(Color::Reset);
+        cell.set_bg(Color::Reset);
+        if marked {
+            cell.modifier.insert(Modifier::REVERSED);
+        }
+    }
+}
+
+fn draw_frame(f: &mut Frame, app: &mut App) {
     // AF-2: drain queued agent events and reduce into UI state before drawing.
     app.drain_agent_events();
 
@@ -588,6 +612,12 @@ enum PaneState {
 /// The framed panel block every body pane builds (H1-06): one place that
 /// applies the rounded-borders preference and the focus border convention.
 fn panel_block(app: &App, title: String, state: PaneState) -> Block<'static> {
+    // Focus is said in text as well as by border colour, which a
+    // colour-blind reader or a `NO_COLOR` terminal does not see (TX-8).
+    let title = match state {
+        PaneState::Editing | PaneState::Focused => format!("▶{title}"),
+        PaneState::Active | PaneState::Plain => title,
+    };
     let border = match state {
         PaneState::Editing => Style::default().fg(app.theme.accent),
         PaneState::Focused | PaneState::Active => Style::default().fg(app.theme.border_active),
