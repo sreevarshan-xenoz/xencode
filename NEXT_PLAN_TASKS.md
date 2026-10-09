@@ -4162,7 +4162,7 @@ tests.
     `cargo test -p xencode-tui-rs` on Windows went from 23 failing to none: 804 passed,
     0 failed, 5 ignored. Three were real product bugs, now fixed for every platform: the readme
     lookup reported a name the crate does not have on a case-insensitive disk; the reproduction
-    gate refused every Windows reproduction because `testsepro.rs` never matched
+    gate refused every Windows reproduction because `tests\repro.rs` never matched
     `tests/repro.rs`; and compiler errors reached the model as `src\lib.rs`. The rest were the
     tests' own assumptions: the fetch/search server answering before reading (5 tests), a
     10-second wait for a refused connection that takes 18.8 s on Windows, deleting the current
