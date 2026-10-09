@@ -38,6 +38,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     if app.help_visible {
         return help_modal_key(app, key);
     }
+    // The command palette is modal too (AG-3): everything typed goes into its
+    // own query, so a half-written prompt in the composer is never touched.
+    if app.palette_visible {
+        return palette_modal_key(app, key);
+    }
     // The agent stack overlay is modal the same way: Esc closes, Ctrl+N
     // advances while it is open, everything else is swallowed so typing never
     // lands in chat behind a panel the user is reading.
@@ -122,6 +127,42 @@ fn stop_running_turn(app: &mut App) -> bool {
         );
     }
     stopped
+}
+
+/// Keys while the command palette is open. Printable characters extend the
+/// query; arrows (or Ctrl+P / Ctrl+N) move the highlight; Enter chooses; Esc
+/// or Ctrl+X closes it and leaves focus and mode exactly as they were.
+fn palette_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Esc => app.palette_visible = false,
+        KeyCode::Char('x') | KeyCode::Char('X') if ctrl => app.palette_visible = false,
+        KeyCode::Enter => app.choose_palette_entry(),
+        KeyCode::Up => palette_move(app, -1),
+        KeyCode::Char('p') if ctrl => palette_move(app, -1),
+        KeyCode::Down => palette_move(app, 1),
+        KeyCode::Char('n') if ctrl => palette_move(app, 1),
+        KeyCode::Char('u') if ctrl => {
+            app.palette_query.clear();
+            app.palette_selected = 0;
+        }
+        KeyCode::Backspace => {
+            app.palette_query.pop();
+            app.palette_selected = 0;
+        }
+        KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => {
+            app.palette_query.push(c);
+            app.palette_selected = 0;
+        }
+        _ => {}
+    }
+    done()
+}
+
+/// Move the palette highlight one row, staying inside the matches.
+fn palette_move(app: &mut App, step: isize) {
+    let last = app.palette_matches().len().saturating_sub(1);
+    app.palette_selected = app.palette_selected.saturating_add_signed(step).min(last);
 }
 
 fn done() -> KeyFlow {
@@ -563,6 +604,13 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             if !app.health_check_in_progress {
                 app.run_health_check(tx.clone());
             }
+        }
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            // The command palette (AG-3). Ctrl+K, the chord most editors use,
+            // was already the background tasks panel here and also deletes to
+            // the end of the line in the composer, so the palette takes the
+            // unbound Ctrl+X, Emacs' "run a command" key, and nothing moved.
+            app.open_palette();
         }
         KeyCode::Char('f') => {
             app.focus = if app.focus == FocusArea::FeatureNavigator {
@@ -2706,6 +2754,106 @@ mod tests {
 
         let mut idle = app_with(FocusArea::ChatInput);
         assert_eq!(ctrl_c(&mut idle), KeyFlow::Quit);
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            press(app, KeyCode::Char(c));
+        }
+    }
+
+    fn ctrl(app: &mut App, c: char) -> KeyFlow {
+        press_with_mods(app, KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn the_palette_opens_over_a_draft_and_closing_it_changes_nothing() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.input_mode = InputMode::Editing;
+        type_text(&mut app, "half a prompt");
+        ctrl(&mut app, 'x');
+        assert!(app.palette_visible);
+        // Typing goes to the palette's query, not to the composer.
+        type_text(&mut app, "quit");
+        assert_eq!(app.palette_query, "quit");
+        assert!(
+            !app.quit_armed,
+            "q typed into the palette must not arm quitting"
+        );
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.palette_visible);
+        assert_eq!(app.chat_input.lines().join(""), "half a prompt");
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        assert_eq!(app.input_mode, InputMode::Editing);
+    }
+
+    #[test]
+    fn the_palette_reaches_a_panel_a_setting_and_a_command() {
+        let mut app = app_with(FocusArea::ChatInput);
+        ctrl(&mut app, 'x');
+        type_text(&mut app, "worktree");
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.palette_visible);
+        assert_eq!(app.focus, FocusArea::WorktreePanel);
+
+        let mut app = app_with(FocusArea::ChatInput);
+        ctrl(&mut app, 'x');
+        type_text(&mut app, "ollama");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.focus, FocusArea::Settings);
+        assert_eq!(
+            crate::focus::SETTINGS_ITEMS[app.settings_cursor].label,
+            "Ollama URL"
+        );
+
+        // A command is staged in the composer, and a draft is kept in history.
+        let mut app = app_with(FocusArea::ChatInput);
+        app.input_mode = InputMode::Editing;
+        type_text(&mut app, "my draft");
+        ctrl(&mut app, 'x');
+        type_text(&mut app, "rewind");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.chat_input.lines().join(""), "/rewind ");
+        assert_eq!(
+            app.input_history.last().map(String::as_str),
+            Some("my draft")
+        );
+        assert_eq!(app.input_mode, InputMode::Editing);
+        assert!(
+            app.messages.is_empty(),
+            "staging a command must not send it"
+        );
+    }
+
+    #[test]
+    fn the_palette_highlight_moves_and_stays_inside_the_matches() {
+        let mut app = app_with(FocusArea::ChatInput);
+        ctrl(&mut app, 'x');
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.palette_selected, 0);
+        press(&mut app, KeyCode::Down);
+        ctrl(&mut app, 'n');
+        assert_eq!(app.palette_selected, 2);
+        ctrl(&mut app, 'p');
+        assert_eq!(app.palette_selected, 1);
+        // Typing resets the highlight to the best match.
+        type_text(&mut app, "zzqqxxj");
+        assert_eq!(app.palette_selected, 0);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.palette_selected, 0, "no matches, nowhere to move");
+        // Enter on no match does nothing and keeps the palette open.
+        press(&mut app, KeyCode::Enter);
+        assert!(app.palette_visible);
+        ctrl(&mut app, 'x');
+        assert!(!app.palette_visible, "Ctrl+X closes it again");
+    }
+
+    #[test]
+    fn ctrl_k_is_still_the_background_tasks_panel() {
+        let mut app = app_with(FocusArea::ChatInput);
+        ctrl(&mut app, 'k');
+        assert_eq!(app.focus, FocusArea::TaskManager);
+        assert!(!app.palette_visible);
     }
 
     #[test]

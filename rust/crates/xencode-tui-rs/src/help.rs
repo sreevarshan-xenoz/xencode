@@ -29,6 +29,10 @@ pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+K", "background tasks panel"),
     ("Ctrl+O", "worktree panel"),
     ("Ctrl+L", "insights panel"),
+    (
+        "Ctrl+X",
+        "command palette: every panel, command and setting",
+    ),
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
     ("Ctrl+P", "project analyzer"),
@@ -95,7 +99,7 @@ const APPROVAL: &[Binding] = &[
 ];
 
 /// Commands intercepted by `submit_message` — keep in sync with SLASH_COMMANDS.
-const COMMANDS: &[Binding] = &[
+pub(crate) const COMMANDS: &[Binding] = &[
     ("/help", "this overlay — every key and command"),
     ("/init [abort|status]", "generate & control project docs"),
     (

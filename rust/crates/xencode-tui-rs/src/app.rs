@@ -658,6 +658,12 @@ pub struct App<'a> {
     pub init_log: Vec<String>,
     pub init_visible: bool,
     pub help_visible: bool,
+    /// The command palette (AG-3): open flag, what has been typed into it, and
+    /// which ranked row is highlighted. It has its own query, so opening it
+    /// never touches a draft in the composer.
+    pub palette_visible: bool,
+    pub palette_query: String,
+    pub palette_selected: usize,
     /// Agent stack overlay: visible flag plus the active pane index. The panes
     /// themselves are rebuilt from live state on every draw, so this holds no
     /// content that could go stale — only which pane is frontmost.
@@ -3045,6 +3051,9 @@ impl<'a> App<'a> {
             init_log: Vec::new(),
             init_visible: false,
             help_visible: false,
+            palette_visible: false,
+            palette_query: String::new(),
+            palette_selected: 0,
             agent_stack_visible: false,
             agent_stack_index: 0,
             help_scroll: 0,
@@ -3551,6 +3560,69 @@ impl<'a> App<'a> {
             self.history_index = Some(next as usize);
             let text = self.input_history[next as usize].clone();
             self.set_chat_text(&text);
+        }
+    }
+
+    /// Open the command palette with an empty query (AG-3).
+    pub(crate) fn open_palette(&mut self) {
+        self.palette_visible = true;
+        self.palette_query.clear();
+        self.palette_selected = 0;
+    }
+
+    /// The palette rows that match what has been typed, best first.
+    pub fn palette_matches(&self) -> Vec<crate::palette::PaletteEntry> {
+        let all = crate::palette::entries();
+        crate::palette::rank(&self.palette_query, &all)
+            .into_iter()
+            .map(|i| all[i].clone())
+            .collect()
+    }
+
+    /// Act on the highlighted palette row and close the palette. A panel is
+    /// focused, a setting opens Settings on its row, and a command is put in
+    /// the composer for the person to finish and send: most commands take
+    /// arguments, so running one unasked would guess them. A draft already in
+    /// the composer is kept in the prompt history, where Alt+Up brings it back.
+    pub(crate) fn choose_palette_entry(&mut self) {
+        use crate::palette::PaletteTarget;
+        let Some(entry) = self.palette_matches().get(self.palette_selected).cloned() else {
+            return;
+        };
+        self.palette_visible = false;
+        match entry.target {
+            PaletteTarget::Panel(area) => {
+                self.focus = area;
+                self.input_mode = if area == FocusArea::ChatInput {
+                    InputMode::Editing
+                } else {
+                    InputMode::Normal
+                };
+            }
+            PaletteTarget::Setting(row) => {
+                self.focus = FocusArea::Settings;
+                self.settings_cursor = row;
+                self.input_mode = InputMode::Normal;
+            }
+            PaletteTarget::Command(cmd) => {
+                let draft = self.chat_input.lines().join("\n");
+                if !draft.trim().is_empty() {
+                    if self.input_history.last().is_none_or(|last| *last != draft) {
+                        self.input_history.push(draft);
+                        if self.input_history.len() > INPUT_HISTORY_LIMIT {
+                            self.input_history.remove(0);
+                        }
+                    }
+                    self.push_toast(
+                        crate::toast::ToastKind::Info,
+                        "Your draft is in the prompt history — Alt+Up brings it back".to_string(),
+                    );
+                }
+                self.history_index = None;
+                self.set_chat_text(&format!("{cmd} "));
+                self.focus = FocusArea::ChatInput;
+                self.input_mode = InputMode::Editing;
+            }
         }
     }
 

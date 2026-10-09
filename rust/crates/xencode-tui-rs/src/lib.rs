@@ -19,6 +19,7 @@ pub mod lsp;
 pub mod markdown;
 pub mod mcp;
 pub mod mcp_serve;
+pub mod palette;
 pub mod panic;
 pub mod permission_broker;
 pub mod replay;
