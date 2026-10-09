@@ -120,6 +120,55 @@ pub fn hard_compact_prompt(
     )
 }
 
+/// What a fold is handed beside the transcript (EVd-5): the notes pad (EV-6),
+/// then the runs this project actually recorded — the newest rows of the run
+/// ledger and the checks recent turns ran — labelled as exit codes, so the
+/// summary's "completed" can rest on what ran rather than on what the
+/// conversation said. No third store: the evidence rides in the notes slot the
+/// fold already reads. `None` when there are neither notes nor records.
+pub fn compaction_notes(xencode_dir: &Path) -> Option<String> {
+    const LEDGER_ROWS: usize = 8;
+    const TURN_ROWS: usize = 20;
+    let mut evidence: Vec<String> = Vec::new();
+    let ledger = crate::ledger::read_ledger(xencode_dir);
+    for row in ledger.iter().skip(ledger.len().saturating_sub(LEDGER_ROWS)) {
+        let note = if row.note.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" — {}", row.note.trim())
+        };
+        evidence.push(format!(
+            "- {} run exited {}{note}",
+            row.run_class.as_str(),
+            row.exit_code
+        ));
+    }
+    for trace in crate::trace::read_recent_traces(xencode_dir, TURN_ROWS) {
+        if let Some(checks) = &trace.checks {
+            evidence.push(format!("- after a turn's edits: {}", checks.summary()));
+        }
+    }
+    let notes = crate::notes::read_notes(xencode_dir).filter(|n| !n.trim().is_empty());
+    if evidence.is_empty() {
+        return notes;
+    }
+    let block = format!(
+        "Recorded runs, oldest first (exit codes this program saw; a claim in the \n         conversation that disagrees with these is not a fact):
+{}",
+        evidence.join("
+")
+    );
+    Some(match notes {
+        Some(notes) => format!(
+            "{}
+
+{block}",
+            notes.trim()
+        ),
+        None => block,
+    })
+}
+
 fn transcript_tail(transcript: &Transcript) -> String {
     transcript
         .recent(6)

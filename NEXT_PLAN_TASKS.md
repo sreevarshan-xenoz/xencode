@@ -5010,6 +5010,13 @@ even though the design is not.
   verified.
 - **EVd-5 — Ledger-fed compaction.** Merge into **EV-6**/**SE-2** rather than
   forking a third memory of what happened.
+  *(Done 2026-10-09. `compaction_notes` hands the fold the notes pad (EV-6) followed
+  by the run ledger's newest eight rows and the checks verdicts (EVd-3) of recent turns,
+  oldest first, under a heading that says these are exit codes this program saw and
+  that a conversation claim disagreeing with them is not a fact. It rides in the notes
+  slot the fold already reads, so there is no third store; with nothing recorded the
+  notes go through unchanged. Both `/ctx archive` (shows the prompt) and `/ctx fold`
+  (sends it) use it. The result is still a candidate a person promotes, as before.)*
 - **EVd-6 — False-verified calibration.** Seed broken changes, then measure how
   often the agent's verdict claimed success. *Effort: M.* This is the one thing
   **EV-1** cannot measure, because EV-1 grades task success and not report

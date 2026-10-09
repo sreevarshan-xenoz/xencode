@@ -5934,7 +5934,8 @@ impl<'a> App<'a> {
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                 let state = xencode_context_rs::believed_state(&xencode);
                 let snap = t.snapshot(&xencode).unwrap_or_default();
-                let notes = xencode_context_rs::read_notes(&xencode);
+                // The notes pad plus what the ledger and recent turns recorded (EVd-5).
+                let notes = xencode_context_rs::compaction_notes(&xencode);
                 let prompt = xencode_context_rs::hard_compact_prompt(&state, &t, notes.as_deref());
                 let _ = tx.send("[CTX_START]".to_string());
                 let _ = tx.send(format!(
@@ -5966,7 +5967,7 @@ impl<'a> App<'a> {
                 let prompt = xencode_context_rs::hard_compact_prompt(
                     &state,
                     &t,
-                    xencode_context_rs::read_notes(&xencode).as_deref(),
+                    xencode_context_rs::compaction_notes(&xencode).as_deref(),
                 );
                 let messages = one_shot_messages(&root, prompt);
                 let call = self.single_shot();
