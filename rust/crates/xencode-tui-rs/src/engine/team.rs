@@ -272,7 +272,7 @@ async fn merge_worker(
     timeout: std::time::Duration,
     approvals: &Approvals,
 ) -> MergeOutcome {
-    let run = |checks: Checks| {
+    let run = |checks: Checks, allowed: bool| {
         let (root, wt, base, branch, task) = (
             root.to_path_buf(),
             s.worktree.clone(),
@@ -290,10 +290,16 @@ async fn merge_worker(
             if let Err(why) = merge::commit_work(&wt, &message) {
                 return MergeOutcome::Refused { why };
             }
-            merge::checked_merge(&root, &base, &branch, &checks, timeout)
+            if allowed {
+                merge::checked_merge_person_allowed(&root, &base, &branch, &checks, timeout)
+            } else {
+                merge::checked_merge(&root, &base, &branch, &checks, timeout)
+            }
         })
     };
-    let first = run(merge::checks_for(root))
+    let checks = merge::checks_for(root);
+    let unchecked = matches!(checks, Checks::None);
+    let first = run(checks.clone(), false)
         .await
         .unwrap_or_else(|e| MergeOutcome::Refused { why: e.to_string() });
     let outcome = match first {
@@ -301,7 +307,11 @@ async fn merge_worker(
             let request = ApprovalRequest {
                 tool: format!("merge {id}"),
                 class: ToolClass::External,
-                summary: format!("land {id} on {base} without checks? ({why})"),
+                summary: if unchecked {
+                    format!("land {id} on {base} without checks? ({why})")
+                } else {
+                    format!("land {id} on {base} once its checks pass? ({why})")
+                },
                 preview: String::new(),
                 draft: ApprovalDraft::default(),
             };
@@ -311,12 +321,19 @@ async fn merge_worker(
             }
             match rx.await {
                 Ok(ApprovalAnswer::Approved | ApprovalAnswer::ApprovedForSession) => {
-                    run(Checks::Commands(Vec::new()))
+                    // With no checks the person's yes is the check; otherwise
+                    // the checks still run.
+                    let checks = if unchecked {
+                        Checks::Commands(Vec::new())
+                    } else {
+                        checks
+                    };
+                    run(checks, true)
                         .await
                         .unwrap_or_else(|e| MergeOutcome::Refused { why: e.to_string() })
                 }
                 _ => MergeOutcome::Refused {
-                    why: format!("the person chose not to land {id} without checks"),
+                    why: format!("the person chose not to land {id}"),
                 },
             }
         }

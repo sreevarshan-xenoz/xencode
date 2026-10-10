@@ -112,6 +112,17 @@ pub fn checked_merge(
     checks: &Checks,
     timeout: Duration,
 ) -> MergeOutcome {
+    merge_with(root, base, branch, checks, timeout, false)
+}
+
+fn merge_with(
+    root: &Path,
+    base: &str,
+    branch: &str,
+    checks: &Checks,
+    timeout: Duration,
+    allowed: bool,
+) -> MergeOutcome {
     let root = &crate::worktree::plain(root);
     let commands = match checks {
         Checks::None => return MergeOutcome::NeedsPerson {
@@ -135,7 +146,7 @@ pub fn checked_merge(
         Ok(_) => {}
     }
     for attempt in 0..2 {
-        let outcome = attempt_merge(root, base, branch, &commands, timeout);
+        let outcome = attempt_merge(root, base, branch, &commands, timeout, allowed);
         match outcome {
             Attempt::Done(outcome) => return outcome,
             Attempt::BaseMoved if attempt == 0 => continue,
@@ -147,6 +158,66 @@ pub fn checked_merge(
         }
     }
     unreachable!("the loop returns")
+}
+
+/// As [`checked_merge`], once the person said yes to landing a change that
+/// edits how checks run: the checks still run.
+pub fn checked_merge_person_allowed(
+    root: &Path,
+    base: &str,
+    branch: &str,
+    checks: &Checks,
+    timeout: Duration,
+) -> MergeOutcome {
+    merge_with(root, base, branch, checks, timeout, true)
+}
+
+/// Files that decide what the checks run or which programs they find. A
+/// worker's change to one could choose the checks for this merge or every
+/// later one, so landing it is the person's call.
+fn decides_the_checks(file: &str) -> bool {
+    let file = file.replace('\\', "/");
+    file.starts_with(".xencode/")
+        || file.starts_with(".cargo/")
+        || file == "rust-toolchain"
+        || file == "rust-toolchain.toml"
+}
+
+/// PATH for the checks: only absolute folders, so nothing is found in the
+/// merged tree (the worker's files) by being in the current folder.
+fn check_path(path: &std::ffi::OsStr) -> std::ffi::OsString {
+    let kept: Vec<PathBuf> = std::env::split_paths(path)
+        .filter(|p| p.is_absolute())
+        .collect();
+    std::env::join_paths(kept).unwrap_or_default()
+}
+
+/// The process one check runs as, in `dir`.
+fn check_command(dir: &Path, command: &str) -> Command {
+    #[cfg(windows)]
+    let mut cmd = {
+        // `cmd` reads its command line itself; Rust's usual quoting of an
+        // argument with quotes in it is not what `cmd` expects, so the check
+        // is passed as written.
+        use std::os::windows::process::CommandExt;
+        let mut c = Command::new("cmd");
+        c.arg("/C").raw_arg(command);
+        // Without this `cmd` looks for a program in the current folder before
+        // PATH, and the current folder holds the worker's files.
+        c.env("NoDefaultCurrentDirectoryInExePath", "1");
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
+    if let Some(path) = std::env::var_os("PATH") {
+        cmd.env("PATH", check_path(&path));
+    }
+    cmd.current_dir(dir);
+    cmd
 }
 
 enum Attempt {
@@ -188,6 +259,7 @@ fn attempt_merge(
     branch: &str,
     commands: &[String],
     timeout: Duration,
+    allowed: bool,
 ) -> Attempt {
     let done = Attempt::Done;
     let base_commit = match commit_of(root, base) {
@@ -226,6 +298,25 @@ fn attempt_merge(
         } else {
             MergeOutcome::Conflict { files }
         });
+    }
+    if !allowed {
+        let touched: Vec<String> = git(
+            &scratch.path,
+            &["diff", "--name-only", &base_commit, "HEAD"],
+        )
+        .unwrap_or_default()
+        .lines()
+        .filter(|f| decides_the_checks(f))
+        .map(str::to_string)
+        .collect();
+        if !touched.is_empty() {
+            return done(MergeOutcome::NeedsPerson {
+                why: format!(
+                    "the change edits what decides how checks run ({}); land it only if you                      have read it",
+                    touched.join(", ")
+                ),
+            });
+        }
     }
     for command in commands {
         if let Err(output) = run_check(&scratch.path, command, timeout) {
@@ -272,24 +363,7 @@ fn run_check(dir: &Path, command: &str, timeout: Duration) -> Result<(), String>
     let file =
         std::fs::File::create(&log).map_err(|e| format!("cannot keep the check's output: {e}"))?;
     let errors = file.try_clone().map_err(|e| e.to_string())?;
-    #[cfg(windows)]
-    let mut cmd = {
-        // `cmd` reads its command line itself; Rust's usual quoting of an
-        // argument with quotes in it is not what `cmd` expects, so the check
-        // is passed as written.
-        use std::os::windows::process::CommandExt;
-        let mut c = Command::new("cmd");
-        c.arg("/C").raw_arg(command);
-        c
-    };
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut c = Command::new("sh");
-        c.arg("-c").arg(command);
-        c
-    };
-    let spawned = cmd
-        .current_dir(dir)
+    let spawned = check_command(dir, command)
         .stdin(Stdio::null())
         .stdout(Stdio::from(file))
         .stderr(Stdio::from(errors))
@@ -386,6 +460,87 @@ mod tests {
             "one\ntwo\n"
         );
         assert_eq!(git(&root, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    }
+
+    /// Security review: a worker's change to the files that decide how checks
+    /// run (here the team's own settings) would let it choose the checks for
+    /// every later merge; the person is asked first, and with their yes the
+    /// checks still run.
+    #[test]
+    fn a_change_to_how_checks_run_needs_the_person() {
+        let (_o, root, wt, branch) = project();
+        std::fs::create_dir_all(wt.join(".xencode")).unwrap();
+        std::fs::write(wt.join(".xencode").join("team.toml"), "checks = []\n").unwrap();
+        commit_work(&wt, "no more checks").unwrap();
+        let before = git(&root, &["rev-parse", "main"]);
+        let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
+        match &out {
+            MergeOutcome::NeedsPerson { why } => {
+                assert!(why.contains(".xencode/team.toml"), "{why}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(git(&root, &["rev-parse", "main"]), before);
+
+        let out = checked_merge_person_allowed(
+            &root,
+            "main",
+            &branch,
+            &checks(&["git no-such-command"]),
+            SECS,
+        );
+        assert!(
+            matches!(out, MergeOutcome::ChecksFailed { .. }),
+            "the person's yes does not skip the checks: {out:?}"
+        );
+        let out =
+            checked_merge_person_allowed(&root, "main", &branch, &checks(&["git --version"]), SECS);
+        assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+    }
+
+    /// Security review: on Windows `cmd` looks in the current folder before
+    /// PATH, and the checks run in a tree holding the worker's files; a
+    /// `git.bat` the worker wrote must not be what `git --version` runs.
+    #[cfg(windows)]
+    #[test]
+    fn a_program_the_worker_wrote_is_not_what_a_check_runs() {
+        let (o, root, wt, branch) = project();
+        let marker = o.path().join("hijacked");
+        std::fs::write(
+            wt.join("git.bat"),
+            format!("@echo hijacked> \"{}\"\r\n", marker.display()),
+        )
+        .unwrap();
+        commit_work(&wt, "a helper").unwrap();
+        let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
+        assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+        assert!(!marker.exists(), "the worker's git.bat ran");
+        // This holds even where the person's own environment does not set
+        // the variable: the check's process sets it.
+        let cmd = check_command(&root, "git --version");
+        assert!(cmd
+            .get_envs()
+            .any(|(k, v)| k == "NoDefaultCurrentDirectoryInExePath"
+                && v == Some(std::ffi::OsStr::new("1"))));
+    }
+
+    /// On Unix the same holds through PATH: an entry that names the current
+    /// folder, or any folder relative to it, is left out for the checks.
+    #[test]
+    fn the_checks_path_names_no_folder_relative_to_the_tree() {
+        let abs = std::env::temp_dir();
+        let given = std::env::join_paths([
+            abs.clone(),
+            PathBuf::from("."),
+            PathBuf::from("bin"),
+            PathBuf::from("./tools"),
+            abs.join("x"),
+        ])
+        .unwrap();
+        let kept = check_path(&given);
+        let kept: Vec<_> = std::env::split_paths(&kept).collect();
+        let want = vec![abs.clone(), abs.join("x")];
+        assert_eq!(kept, want);
     }
 
     /// The engine passes its canonical project path (the long Windows form).
