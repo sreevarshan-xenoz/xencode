@@ -632,6 +632,10 @@ pub struct App<'a> {
     pub approval_scroll: usize,
     /// The engine's team of worker agents (TM); empty in a window.
     pub team: crate::engine::team::Team,
+    /// A window's copy of the engine's team, from its view (TM-4).
+    pub team_view: Vec<xencode_team_rs::WorkerSnapshot>,
+    /// The number the next `Team` request from this app carries.
+    pub team_req: u64,
     /// Sender the spawned tool loops use to raise approval prompts.
     pub approval_tx: mpsc::UnboundedSender<(
         crate::agent_tools::ApprovalRequest,
@@ -2893,6 +2897,10 @@ impl<'a> App<'a> {
             panel::sections([
                 (panel::PanelSection::Agents, agents),
                 (
+                    panel::PanelSection::Team,
+                    panel::team_rows(&self.team_shown()),
+                ),
+                (
                     panel::PanelSection::Tasks,
                     panel::task_rows(tasks.as_deref()),
                 ),
@@ -3213,6 +3221,8 @@ impl<'a> App<'a> {
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
             team: Default::default(),
+            team_view: Vec::new(),
+            team_req: 0,
             approval_tx,
             approval_rx: Some(approval_rx),
             ask_tx,
@@ -3877,14 +3887,25 @@ impl<'a> App<'a> {
         if let Some(arx) = self.approval_rx.as_mut() {
             while let Ok((request, responder)) = arx.try_recv() {
                 approvals += 1;
-                waiting = Some(request.summary.clone());
+                waiting = Some((
+                    request.summary.clone(),
+                    crate::engine::team::is_team_approval(&request),
+                ));
                 self.approval_queue.push_back((request, responder));
                 self.approval_ids.push_back(self.next_agent_id);
                 self.next_agent_id += 1;
             }
         }
-        if let Some(summary) = waiting {
-            self.live_approval_waiting(&summary);
+        if let Some((summary, from_team)) = waiting {
+            if from_team {
+                self.live_set(
+                    xencode_live_rs::LiveState::NeedsYou,
+                    xencode_live_rs::LiveSource::Worker,
+                    &format!("a worker agent is waiting for you: {summary}"),
+                );
+            } else {
+                self.live_approval_waiting(&summary);
+            }
         }
         let mut asked = Vec::new();
         if let Some(rx) = self.ask_rx.as_mut() {
@@ -5871,6 +5892,32 @@ impl<'a> App<'a> {
     /// Start the oldest pending task, if any and if nothing is running.
     /// Whether this app is a window onto an engine, connected or
     /// reconnecting (EN-2): it then runs no agent work itself.
+    /// The worker agents to show: a window's copy of the engine's team, or
+    /// the engine's own.
+    pub fn team_shown(&self) -> Vec<xencode_team_rs::WorkerSnapshot> {
+        if self.is_window() {
+            self.team_view.clone()
+        } else {
+            self.team.snapshots()
+        }
+    }
+
+    /// Ask the project's engine to act on its team (TM-4); the reply comes
+    /// back as a toast.
+    pub fn team_command(
+        &mut self,
+        request: crate::engine::proto::TeamRequest,
+        tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    ) {
+        self.team_req += 1;
+        let req = self.team_req;
+        crate::engine::act(
+            self,
+            crate::engine::proto::ClientMsg::Team { req, request },
+            tx,
+        );
+    }
+
     pub fn is_window(&self) -> bool {
         self.engine_link.is_some() || self.engine_reconnect.is_some()
     }
@@ -7763,7 +7810,7 @@ impl<'a> App<'a> {
                     ),
                     ("status", "what mode this is, under what posture, and what was actually read"),
                     (
-                        "agents · tasks · graph · logs · costs [text]",
+                        "agents · team · tasks · graph · logs · costs [text]",
                         "one section of the fleet panel, straight to the row text names",
                     ),
                     ("permissions", "what a launch to each agent on the roster would be allowed to do"),
@@ -7805,12 +7852,13 @@ impl<'a> App<'a> {
                 });
             }
             "status" => self.orchestrator_status(),
-            "agents" | "tasks" | "graph" | "logs" | "costs" => {
+            "agents" | "team" | "tasks" | "graph" | "logs" | "costs" => {
                 if !self.orchestrator_surface_open(&verb) {
                     return;
                 }
                 let section = match verb.as_str() {
                     "agents" => PanelSection::Agents,
+                    "team" => PanelSection::Team,
                     "tasks" => PanelSection::Tasks,
                     "graph" => PanelSection::Graph,
                     "logs" => PanelSection::Logs,
@@ -7824,7 +7872,7 @@ impl<'a> App<'a> {
                     let shown = self.workers_rows.iter().filter(|r| !r.is_header).count();
                     self.system_line(&format!(
                         "Panel filtered to {titled}: {shown} row(s). `r` re-reads it, Enter opens \
-                         where each figure came from, and `/workers` shows all six sections \
+                         where each figure came from, and `/workers` shows all seven sections \
                          again."
                     ));
                 } else {
@@ -21909,9 +21957,17 @@ Content-Length: 0
             "{text}"
         );
         assert!(text.contains("posture "), "{text}");
-        // All six sections are named even though this project has nothing recorded
+        // All seven sections are named even though this project has nothing recorded
         // in them, because the list of what was checked is itself an answer.
-        for section in ["agents", "tasks", "graph", "costs", "logs", "approvals"] {
+        for section in [
+            "agents",
+            "team",
+            "tasks",
+            "graph",
+            "costs",
+            "logs",
+            "approvals",
+        ] {
             assert!(
                 text.contains(section),
                 "{section} is missing from status:\n{text}"
@@ -21965,6 +22021,7 @@ Content-Length: 0
                     sources: vec!["the event stream of this session".to_string()],
                 }],
             ),
+            (crate::worker_panel::PanelSection::Team, Vec::new()),
             (crate::worker_panel::PanelSection::Tasks, Vec::new()),
             (crate::worker_panel::PanelSection::Graph, Vec::new()),
             (crate::worker_panel::PanelSection::Costs, Vec::new()),

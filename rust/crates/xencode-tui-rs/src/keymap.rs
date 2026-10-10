@@ -744,7 +744,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::AdvisePanel => key_advise_panel(app, key),
         FocusArea::ImpactPanel => key_impact_panel(app, key),
         FocusArea::LayoutPanel => key_layout_panel(app, key),
-        FocusArea::WorkerPanel => key_worker_panel(app, key),
+        FocusArea::WorkerPanel => key_worker_panel(app, key, tx),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key, tx),
         FocusArea::CustomModels => key_custom_models(app, key, tx),
@@ -1924,8 +1924,14 @@ fn key_layout_panel(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
-fn key_worker_panel(app: &mut App, key: KeyEvent) -> bool {
+fn key_worker_panel(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     let count = app.workers_rows.len();
+    // A Team row's worker, for `s` and `m` (TM-4).
+    let worker = app
+        .workers_rows
+        .get(app.workers_selected)
+        .and_then(crate::worker_panel::team_worker)
+        .map(str::to_string);
     match key.code {
         KeyCode::Up | KeyCode::Char('k') if app.workers_detail => {
             app.workers_scroll = app.workers_scroll.saturating_sub(1);
@@ -1949,6 +1955,14 @@ fn key_worker_panel(app: &mut App, key: KeyEvent) -> bool {
         }
         KeyCode::Char('r') => {
             app.refresh_worker_panel();
+        }
+        KeyCode::Char('s') if worker.is_some() => {
+            let id = worker.unwrap_or_default();
+            app.team_command(crate::engine::proto::TeamRequest::Stop { id }, tx);
+        }
+        KeyCode::Char('m') if worker.is_some() => {
+            let id = worker.unwrap_or_default();
+            app.team_command(crate::engine::proto::TeamRequest::Merge { id }, tx);
         }
         _ => return false,
     }

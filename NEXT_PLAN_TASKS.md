@@ -17739,7 +17739,11 @@ program; the keys themselves are covered by their own tests.
     and branch removed. Tested with real git repositories and real check commands (pass, fail,
     timeout, conflict, a base that moves during the checks, a dirty working copy) and through the
     real `xencode mcp serve --team` with a real worker.
-  - [ ] **TM-4 — the Team panel and the badge.**
+  - [x] **TM-4 — the Team panel and the badge.** Done 2026-10-10: a `team` section in the worker
+    panel from the engine's view (every window keeps the engine's team), `s` stops and `m` merges
+    the selected worker, the engine's answer shown as a notice; a worker's permission prompt sets
+    the badge to `needs you` with the new `worker` source. Tested with a real window linked to a
+    real engine: a started worker's row appears and `s` stops it.
   - [ ] **TM-5 — the outside agents, sign-in and cost.**
   - [ ] **TM-6 — manuals and the whole flow watched.**
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its

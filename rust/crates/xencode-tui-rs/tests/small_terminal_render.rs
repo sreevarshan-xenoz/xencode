@@ -235,6 +235,10 @@ fn populated(focus: FocusArea) -> App<'static> {
             xencode_tui_rs::worker_panel::fleet_rows(&cards),
         ),
         (
+            xencode_tui_rs::worker_panel::PanelSection::Team,
+            xencode_tui_rs::worker_panel::team_rows(&[]),
+        ),
+        (
             xencode_tui_rs::worker_panel::PanelSection::Tasks,
             xencode_tui_rs::worker_panel::task_rows(None),
         ),

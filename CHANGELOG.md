@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-4`: the worker panel (`/workers`) has a `team` section, one row per
+  worker agent with its state, tool calls, merge outcome and last line; `s`
+  stops the selected worker and `m` merges it. `/orchestrator team` filters to
+  it. A worker's permission prompt makes the badge read `needs you`, from a
+  worker.
 
 ### Added — `M-7`: xencode inside Zed and other ACP editors
 

@@ -4444,8 +4444,9 @@ on cursor motion.
 
 ### TUI slash: `/workers` (or `Ctrl+A`)
 
-Six readings laid end to end: the workers this session launched, every role the
-recipes in `.xencode/teams/` name, the background task registry, one row per
+Seven readings laid end to end: the workers this session launched, every role the
+recipes in `.xencode/teams/` name, the worker agents a lead agent runs through the
+project's engine (`team`, see `xencode mcp serve --team`), the background task registry, one row per
 recorded run in `.xencode/team-runs/`, the newest events across the streams, and
 the approvals waiting on you. `Enter` opens the row you are on and prints where
 each figure on it came from — the event, the record or the file — and the heading
@@ -4453,6 +4454,21 @@ of a section answers the same question for the section. `r` re-reads (the panel
 reads on request and on opening, never on redraw), `Esc` closes the record and
 then the panel. Because `/workers` leaves the composer in insert mode, press
 `Esc` once first if you want the arrow keys to reach the panel.
+
+The `team` section has one row per worker agent, starting with its id:
+
+```
+── team (1) ──
+w1 · xencode · done · 0 tool call(s) — <the worker's last line>
+```
+
+On a worker's row `s` stops it (its worktree is kept) and `m` merges it the way
+`team_merge` does, landing only when the project's checks pass; the engine's
+answer appears as a notice. The row's state follows what the engine last
+reported when the panel was read, so press `r` to see a change; `Enter` names its
+task, worktree, branch and, once merged, the merge's outcome. When a worker asks
+permission, or a merge needs your word, the ordinary approval prompt opens in
+every window and the badge reads `needs you` for it.
 
 Nothing is estimated to fill a gap. A worker whose stream holds no events reads
 `unknown`, and a role that lives only in a recipe — a worker xencode did not
@@ -4509,18 +4525,19 @@ way in:
 
 ```
 /orchestrator on              enter the mode
-/orchestrator status          mode, posture, the six readings, spawns, detached
+/orchestrator status          mode, posture, the seven readings, spawns, detached
                               runs, waiting approvals, and whether there is a
                               real terminal here to hand over
 /orchestrator agents          the panel filtered to the fleet, one section per verb:
-/orchestrator tasks           agents · tasks · graph · logs · costs — each takes an
+/orchestrator team            agents · team · tasks · graph · logs · costs — each takes an
+/orchestrator tasks
 /orchestrator graph           optional text and lands on the row it names
 /orchestrator logs
 /orchestrator costs
 /orchestrator permissions     the grant a launch to each roster agent would get, built
                               by the same function a launch is built with
 /orchestrator inspect <text>  open the sources of the row the text names, searching all
-                              six sections
+                              seven sections
 /orchestrator retry <#id>     re-arm one of this session's spawns
 /orchestrator stop <run-id>   ask a detached run to stop, by the name its directory
                               holds

@@ -2193,8 +2193,10 @@ fn draw_worker_panel(f: &mut Frame, app: &App, area: Rect) {
             app.workers_posture,
             app.workers_rows.len(),
             match app.workers_filter {
-                Some(section) =>
-                    format!("filtered to {} (`/workers` shows all six)", section.title()),
+                Some(section) => format!(
+                    "filtered to {} (`/workers` shows all seven)",
+                    section.title()
+                ),
                 None => "Enter shows where each was read from".to_string(),
             }
         ));

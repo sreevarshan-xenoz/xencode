@@ -32,6 +32,8 @@ pub enum LiveState {
 pub enum LiveSource {
     Chat,
     Bytebot,
+    /// A worker agent the project's engine runs for a lead (TM-4).
+    Worker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

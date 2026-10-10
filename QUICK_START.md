@@ -304,7 +304,7 @@ xencode remote show
 /ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/fold/promote/drop/prompts)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
 /impact <file>        - Blast radius of one file (crates · files · churn, in a fan-out panel)
-/workers              - Worker panel: fleet, recipe roles, tasks, graph, costs, logs, approvals — every figure traces to a real row, and a worker xencode cannot observe reads as unknown, not idle (`Ctrl+A`)
+/workers              - Worker panel: fleet, recipe roles, team (a lead's worker agents: `s` stops, `m` merges), tasks, graph, costs, logs, approvals — every figure traces to a real row, and a worker xencode cannot observe reads as unknown, not idle (`Ctrl+A`)
 /orchestrator <verb>  - The same state as a mode: `on`/`off` (`Ctrl+Space` flips the badge), `status`, `agents`, `tasks`, `graph`, `logs`, `costs`, `permissions`, `inspect`, `retry`, `stop`, `attach`. Leaving the mode leaves the session as it was found; `attach` hands this real terminal to a vendor's own running session and comes back with the exit status that process returned
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
