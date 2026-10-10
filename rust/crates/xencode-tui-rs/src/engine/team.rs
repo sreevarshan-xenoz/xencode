@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
+use xencode_team_rs::merge::{self, Checks, MergeOutcome};
 use xencode_team_rs::worker::{LaunchSpec, WorkerEvent, WorkerHandle};
-use xencode_team_rs::{worktree, WorkerSnapshot};
+use xencode_team_rs::{worktree, MergeState, WorkerSnapshot, WorkerState};
 
 use crate::agent_tools::{ApprovalAnswer, ApprovalDraft, ApprovalRequest, ToolClass};
 use crate::engine::proto::TeamRequest;
@@ -25,7 +26,14 @@ pub struct Team {
     events: mpsc::UnboundedReceiver<WorkerEvent>,
     next: u32,
     limit: usize,
+    /// The branch each worker started from.
+    bases: BTreeMap<String, String>,
+    /// Each worker's merge, kept apart from what the worker reports.
+    merges: BTreeMap<String, MergeState>,
 }
+
+/// The approvals channel: a request and where its answer goes.
+pub type Approvals = mpsc::UnboundedSender<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>;
 
 impl Default for Team {
     fn default() -> Self {
@@ -37,6 +45,8 @@ impl Default for Team {
             events,
             next: 0,
             limit: DEFAULT_LIMIT,
+            bases: BTreeMap::new(),
+            merges: BTreeMap::new(),
         }
     }
 }
@@ -44,7 +54,16 @@ impl Default for Team {
 impl Team {
     /// Every worker as last seen, in id order.
     pub fn snapshots(&self) -> Vec<WorkerSnapshot> {
-        self.shown.values().cloned().collect()
+        self.shown
+            .values()
+            .cloned()
+            .map(|s| self.with_merge(s))
+            .collect()
+    }
+
+    fn with_merge(&self, mut s: WorkerSnapshot) -> WorkerSnapshot {
+        s.merge = self.merges.get(&s.id).cloned();
+        s
     }
 
     /// Take in what the workers reported. A permission prompt is raised on
@@ -58,6 +77,9 @@ impl Team {
             match event {
                 WorkerEvent::Changed(snapshot) => {
                     self.shown.insert(snapshot.id.clone(), snapshot);
+                }
+                WorkerEvent::Merged { worker, outcome } => {
+                    self.merges.insert(worker, MergeState::Finished(outcome));
                 }
                 WorkerEvent::Permission {
                     worker,
@@ -92,7 +114,12 @@ impl Team {
     }
 
     /// Carry out one team request for the project at `root`.
-    pub fn request(&mut self, root: &Path, request: TeamRequest) -> Result<Value, String> {
+    pub fn request(
+        &mut self,
+        root: &Path,
+        request: TeamRequest,
+        approvals: &Approvals,
+    ) -> Result<Value, String> {
         match request {
             TeamRequest::Agents => Ok(json!([{ "name": "xencode", "available": true }])),
             TeamRequest::Start { agent, task, base } => self.start(root, &agent, &task, base),
@@ -116,15 +143,71 @@ impl Team {
                 self.handle(&id)?.stop();
                 Ok(json!({ "id": id, "stopping": true }))
             }
-            TeamRequest::Merge { .. } => Err("merging lands in TM-3".to_string()),
+            TeamRequest::Merge { id } => self.merge(root, &id, approvals),
         }
     }
 
     fn find(&self, id: &str) -> Result<WorkerSnapshot, String> {
         match self.workers.get(id) {
-            Some(handle) => Ok(handle.snapshot()),
+            Some(handle) => Ok(self.with_merge(handle.snapshot())),
             None => Err(format!("no worker {id}")),
         }
+    }
+
+    /// Start the checked merge of worker `id`; its outcome arrives as the
+    /// worker's `merge`.
+    fn merge(&mut self, root: &Path, id: &str, approvals: &Approvals) -> Result<Value, String> {
+        let s = self.find(id)?;
+        if !matches!(s.state, WorkerState::Done | WorkerState::Stopped) {
+            return Err(format!(
+                "{id} is {:?}; it can be merged once its turn is done or it is stopped",
+                s.state
+            ));
+        }
+        if matches!(s.merge, Some(MergeState::Running)) {
+            return Err(format!("{id} is being merged already"));
+        }
+        if matches!(
+            s.merge,
+            Some(MergeState::Finished(MergeOutcome::Landed { .. }))
+        ) {
+            return Err(format!("{id} has landed already"));
+        }
+        let base = self.bases.get(id).cloned().unwrap_or_else(|| base_of(root));
+        self.merges.insert(id.to_string(), MergeState::Running);
+        let settings = merge::team_settings(root);
+        let timeout = std::time::Duration::from_secs(settings.check_timeout_secs.unwrap_or(1200));
+        let stop = self.handle(id)?.stopper();
+        let (root, id_owned, approvals, events) = (
+            root.to_path_buf(),
+            id.to_string(),
+            approvals.clone(),
+            self.events_tx.clone(),
+        );
+        tokio::spawn(async move {
+            let outcome = merge_worker(&root, &id_owned, &s, &base, timeout, &approvals).await;
+            if matches!(outcome, MergeOutcome::Landed { .. }) {
+                // Its work is in; the worker ends and its worktree goes. On
+                // Windows a folder whose files a process holds open cannot be
+                // removed, and the worker's own engine keeps the worktree's
+                // files until it exits, idle, after the worker ends; so the
+                // removal is tried for longer than that.
+                stop();
+                for _ in 0..(2 * crate::engine::server::IDLE_EXIT.as_secs() as usize * 4 + 40) {
+                    if worktree::remove(&root, &s.worktree, &s.branch).is_ok()
+                        || !s.worktree.exists()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+            }
+            let _ = events.send(WorkerEvent::Merged {
+                worker: id_owned,
+                outcome,
+            });
+        });
+        Ok(json!({ "id": id, "merging": true }))
     }
 
     fn handle(&self, id: &str) -> Result<&WorkerHandle, String> {
@@ -153,16 +236,17 @@ impl Team {
                 )
             })
             .count();
-        if running >= self.limit {
+        let limit = merge::team_settings(root).limit.unwrap_or(self.limit);
+        if running >= limit {
             return Err(format!(
-                "{running} workers are already running, the limit is {}; stop one or raise `limit` in .xencode/team.toml",
-                self.limit
+                "{running} workers are already running, the limit is {limit}; stop one or raise `limit` in .xencode/team.toml"
             ));
         }
         self.next += 1;
         let id = format!("w{}", self.next);
         let base = base.unwrap_or_else(|| base_of(root));
         let (path, branch) = worktree::create(root, &id, &base)?;
+        self.bases.insert(id.clone(), base.clone());
         let handle = WorkerHandle::start(
             id.clone(),
             agent,
@@ -176,6 +260,69 @@ impl Team {
         self.workers.insert(id.clone(), handle);
         Ok(json!({ "id": id, "branch": branch, "worktree": path }))
     }
+}
+
+/// The whole merge of one worker: commit its work, merge it with the checks,
+/// ask the person when there are none, and remove its worktree once landed.
+async fn merge_worker(
+    root: &Path,
+    id: &str,
+    s: &WorkerSnapshot,
+    base: &str,
+    timeout: std::time::Duration,
+    approvals: &Approvals,
+) -> MergeOutcome {
+    let run = |checks: Checks| {
+        let (root, wt, base, branch, task) = (
+            root.to_path_buf(),
+            s.worktree.clone(),
+            base.to_string(),
+            s.branch.clone(),
+            s.task.clone(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let message = task
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("work by a worker agent")
+                .to_string();
+            if let Err(why) = merge::commit_work(&wt, &message) {
+                return MergeOutcome::Refused { why };
+            }
+            merge::checked_merge(&root, &base, &branch, &checks, timeout)
+        })
+    };
+    let first = run(merge::checks_for(root))
+        .await
+        .unwrap_or_else(|e| MergeOutcome::Refused { why: e.to_string() });
+    let outcome = match first {
+        MergeOutcome::NeedsPerson { why } => {
+            let request = ApprovalRequest {
+                tool: format!("merge {id}"),
+                class: ToolClass::External,
+                summary: format!("land {id} on {base} without checks? ({why})"),
+                preview: String::new(),
+                draft: ApprovalDraft::default(),
+            };
+            let (tx, rx) = oneshot::channel();
+            if approvals.send((request, tx)).is_err() {
+                return MergeOutcome::NeedsPerson { why };
+            }
+            match rx.await {
+                Ok(ApprovalAnswer::Approved | ApprovalAnswer::ApprovedForSession) => {
+                    run(Checks::Commands(Vec::new()))
+                        .await
+                        .unwrap_or_else(|e| MergeOutcome::Refused { why: e.to_string() })
+                }
+                _ => MergeOutcome::Refused {
+                    why: format!("the person chose not to land {id} without checks"),
+                },
+            }
+        }
+        other => other,
+    };
+    outcome
 }
 
 /// The branch the project has checked out, which workers start from.

@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TM-2`: `xencode mcp serve --team` publishes seven tools a lead agent uses
   to direct the workers: `team_agents`, `team_start`, `team_status`,
   `team_result`, `team_message`, `team_stop`, `team_merge`.
+- `TM-3`: `team_merge` lands a worker's work only when the project's checks
+  pass on the merged result. The checks come from `.xencode/team.toml` (or
+  `cargo test --quiet` in a Rust project); with none, the person is asked. A
+  failed check, a conflict or a refusal is reported in words and nothing lands;
+  a landed worker's worktree and branch are removed.
 
 ### Added — `M-7`: xencode inside Zed and other ACP editors
 

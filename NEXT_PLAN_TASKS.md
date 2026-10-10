@@ -17732,7 +17732,13 @@ program; the keys themselves are covered by their own tests.
     worker is started, followed to `done` and its answer read back, and an unknown worker is
     refused in words. Two security fixes on the way (repository hooks and program-naming
     settings never run under the engine's git; a worker's base must be a commit).
-  - [ ] **TM-3 — the checked merge.**
+  - [x] **TM-3 — the checked merge.** Done 2026-10-10: `team_merge` commits the worker's work,
+    merges it with the base in a scratch worktree, runs the checks from `.xencode/team.toml` (or
+    `cargo test --quiet`) on the merged result and moves the base only when they pass and nothing
+    else moved it; with no checks it asks the person. A landed worker is stopped and its worktree
+    and branch removed. Tested with real git repositories and real check commands (pass, fail,
+    timeout, conflict, a base that moves during the checks, a dirty working copy) and through the
+    real `xencode mcp serve --team` with a real worker.
   - [ ] **TM-4 — the Team panel and the badge.**
   - [ ] **TM-5 — the outside agents, sign-in and cost.**
   - [ ] **TM-6 — manuals and the whole flow watched.**

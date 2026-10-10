@@ -487,3 +487,93 @@ fn an_unknown_worker_is_refused_in_words() {
     assert!(error);
     assert!(text.contains("agent"), "{text}");
 }
+
+// ---- TM-3: the checked merge through the lead's tool ----
+
+fn wait_done(mcp: &mut Mcp, id: &str) {
+    let start = std::time::Instant::now();
+    loop {
+        let (text, error) = mcp.call("team_status", serde_json::json!({ "id": id }));
+        assert!(!error, "{text}");
+        if text.contains("\"done\"") {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(90),
+            "never done: {text}"
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+#[test]
+fn the_lead_merges_a_workers_change_when_the_checks_pass() {
+    let (_outer, root) = repo();
+    std::fs::create_dir_all(root.join(".xencode")).unwrap();
+    std::fs::write(
+        root.join(".xencode").join("team.toml"),
+        "checks = [\"git --version\"]\n",
+    )
+    .unwrap();
+    // The settings file is the person's own; commit it so the working copy
+    // is clean for the merge.
+    std::fs::write(
+        root.join(".gitignore"),
+        ".xencode/cache/\n.xencode/*.json*\n",
+    )
+    .unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-q", "-m", "team settings"]);
+    let config = unreachable();
+    let mut mcp = Mcp::start(&root, config.path());
+    let (text, error) = mcp.call(
+        "team_start",
+        serde_json::json!({"agent": "xencode", "task": "say hi"}),
+    );
+    assert!(!error, "{text}");
+    wait_done(&mut mcp, "w1");
+    // What a worker would have done in its worktree.
+    let worktree = root.parent().unwrap().join("proj-team").join("w1");
+    std::fs::write(worktree.join("from-worker.txt"), "made by w1\n").unwrap();
+
+    let (text, error) = mcp.call("team_merge", serde_json::json!({"id": "w1"}));
+    assert!(!error, "{text}");
+    assert!(text.contains("landed"), "{text}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("from-worker.txt")).unwrap(),
+        "made by w1\n"
+    );
+    assert!(!worktree.exists(), "a landed worker's worktree is removed");
+}
+
+#[test]
+fn red_checks_keep_the_workers_change_off_the_base_branch() {
+    let (_outer, root) = repo();
+    std::fs::create_dir_all(root.join(".xencode")).unwrap();
+    std::fs::write(
+        root.join(".xencode").join("team.toml"),
+        "checks = [\"git no-such-command\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".gitignore"),
+        ".xencode/cache/\n.xencode/*.json*\n",
+    )
+    .unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-q", "-m", "team settings"]);
+    let config = unreachable();
+    let mut mcp = Mcp::start(&root, config.path());
+    mcp.call(
+        "team_start",
+        serde_json::json!({"agent": "xencode", "task": "say hi"}),
+    );
+    wait_done(&mut mcp, "w1");
+    let worktree = root.parent().unwrap().join("proj-team").join("w1");
+    std::fs::write(worktree.join("from-worker.txt"), "made by w1\n").unwrap();
+    let (text, error) = mcp.call("team_merge", serde_json::json!({"id": "w1"}));
+    assert!(error, "{text}");
+    assert!(text.contains("checks_failed"), "{text}");
+    assert!(!root.join("from-worker.txt").exists());
+    assert!(worktree.exists(), "kept for another try");
+}
