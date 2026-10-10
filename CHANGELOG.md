@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `xencode run --stop` ends a detached run on Windows; it used to leave the
   worker running and say it might be ignoring SIGTERM.
 
+### Fixed — console windows flashing on Windows
+
+The engine, the badge and detached `xencode run` workers were started on
+Windows with no console at all. Each command-line program such a process then
+ran (git, a shell command, a llama.cpp check) got a new, visible console window
+from Windows that flashed up and closed; a full test run opened hundreds. They
+now start with a console of their own that is never shown, which the programs
+they run share. Watched on Windows 11: with the change, two runs of the
+`xencode acp` tests opened no windows.
+
 ### Fixed — `xencode colab up` served on the CPU of a GPU machine
 
 - Colab's machines moved from CUDA 12 to CUDA 13, and the pinned llama.cpp build
