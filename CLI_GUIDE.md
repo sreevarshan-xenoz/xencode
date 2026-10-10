@@ -2506,6 +2506,31 @@ xencode engine for E:\work\demo listening on \\.\pipe\xencode-engine-<user>-<16 
 - **One writer.** The engine is the only process that writes the project's
   conversation memory, ByteBot task records and badge status file.
 
+### `xencode acp`
+Runs xencode as an agent for an editor that speaks the Agent Client Protocol
+(ACP), such as Zed. The editor starts `xencode acp` itself and talks to it over
+standard input and output; nothing else is printed there. Each editor session
+works through its folder's engine (see `xencode engine`), starting one when
+none runs, so a terminal on the same folder shares the conversation and a task
+goes on when the editor closes.
+
+In Zed, add xencode to `settings.json`:
+
+```json
+"agent_servers": {
+  "xencode": { "type": "custom", "command": "xencode", "args": ["acp"] }
+}
+```
+
+then choose xencode in the Agent Panel's new-thread menu. Sign-in uses
+xencode's own settings: it needs a model set (`xencode config set
+default_model <model>`).
+
+What works so far: chat with streamed answers, and stopping a turn. A second
+message while a turn runs is refused until the turn ends or is stopped.
+Attached files are passed to the model as text; images are not sent yet. Tool
+servers the editor passes are not used: xencode uses its own.
+
 ### `xencode paths [--format text|json]`
 Print where each kind of file is read from, and name the ones that are still in
 `~/.xencode`.

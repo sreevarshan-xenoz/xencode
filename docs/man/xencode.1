@@ -103,6 +103,9 @@ Name sessions, resolve them, and export redacted transcripts
 xencode\-badge(1)
 Start the floating badge that shows what running xencode sessions are doing and when one needs you
 .TP
+xencode\-acp(1)
+Run xencode as an agent for an editor that speaks the Agent Client Protocol, such as Zed. The editor starts it and talks to it over standard input and output; each session works through its folder\*(Aqs engine, as the terminal app does. In Zed\*(Aqs settings: "agent_servers": {"xencode": {"type": "custom", "command": "xencode", "args": ["acp"]}}
+.TP
 xencode\-engine(1)
 Run the agent work for one project in its own process, for the terminal app and other windows to connect to. It exits on its own once no window is connected and nothing is running
 .TP

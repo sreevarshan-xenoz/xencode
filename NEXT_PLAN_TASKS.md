@@ -2328,6 +2328,22 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       a second ACP client), with a **live** ACP version pinned in `Cargo.toml` —
       the spec is pre-1.0 and this item is explicitly allowed to be blocked by
       upstream churn rather than half-shipped.
+      Designed 2026-10-10 (`docs/superpowers/specs/2026-10-10-acp-agent-design.md`, plan
+      `docs/superpowers/plans/2026-10-10-m7-acp-agent.md`): xencode runs inside stock Zed, no
+      fork; `xencode acp` is one more window onto the project's engine. Stages:
+  - [x] **M-7a — handshake, sessions on the engine, streamed text, stop.** Done 2026-10-10
+    (`rust/crates/xencode-acp-rs`, `agent-client-protocol` pinned at `=3.3.0`). Tested by driving
+    the real `xencode acp` with the crate's own client side: the handshake and sign-in method, a
+    prompt reaching the engine with the model's failure said in words, a second prompt refused
+    while one runs, a cancel ending the turn as cancelled, a missing folder or a file refused, and
+    an engine killed mid-turn ending the prompt with an error and the next prompt starting a new
+    engine. **Live:** with a real llama.cpp server (Qwen3-4B, RTX 3060) the answer "1 2 3 4 5 6 7
+    8 9 10" arrived in 20 streamed pieces. **Not verified:** inside Zed itself (this session
+    cannot click in Zed's window); images in prompts are not sent yet.
+  - [ ] **M-7b — tool calls with kinds and diffs; approvals as permission requests.**
+  - [ ] **M-7c — the model option and the slash-command list.**
+  - [ ] **M-7d — `ask_user` questions; ByteBot as plan updates and its review as Keep or Undo.**
+  - [ ] **M-7e — manuals; watched in real Zed.**
 
 ## Milestone N — the full option space (research appendix, drafted 2026-09-23)
 

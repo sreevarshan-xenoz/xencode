@@ -4401,6 +4401,9 @@ impl<'a> App<'a> {
             self.refresh_git();
         } else if let Some(body) = token.strip_prefix("[TASKS]") {
             self.handle_tasks_command(body);
+        } else if token.starts_with("[TOOLCALL]") || token.starts_with("[TOOLEND]") {
+            // For windows that draw tool calls themselves (`xencode acp`,
+            // M-7); the terminal shows the `[TOOL]` lines instead.
         } else if let Some(body) = token.strip_prefix("[TOOL]") {
             if let Some(call) = body.strip_prefix("→ ") {
                 self.live_tool_started(call.trim());
@@ -12993,6 +12996,25 @@ pub(crate) fn claims_a_change(text: &str) -> bool {
 /// How many plan-only steps a turn may take without spending a round.
 const FREE_PLAN_STEPS: usize = 2;
 
+/// The whole tool call as one token, for windows that show tool calls
+/// themselves (`xencode acp`, M-7). The `[TOOL]→` line beside it is cut to
+/// fit a terminal line; this one carries every argument.
+pub fn tool_call_token(call: &xencode_providers_rs::ToolCall) -> String {
+    let body = serde_json::json!({
+        "id": call.id,
+        "name": call.name,
+        "arguments": call.arguments,
+    });
+    format!("[TOOLCALL]{body}")
+}
+
+/// How a tool call ended, with the first 2000 characters of its result.
+pub fn tool_end_token(id: &str, outcome: &str, result: &str) -> String {
+    let preview: String = result.chars().take(2000).collect();
+    let body = serde_json::json!({"id": id, "outcome": outcome, "preview": preview});
+    format!("[TOOLEND]{body}")
+}
+
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -13315,6 +13337,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                                 "[TOOL]→ {}",
                                 crate::agent_tools::summarize_call(&call)
                             ));
+                            let _ = tx.send(tool_call_token(&call));
                         }
                         let result = crate::agent_tools::execute_tool_call_approved(
                             &task_runtime,
@@ -13330,6 +13353,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                                 "[TOOL]← {}",
                                 crate::agent_tools::truncate_one_line(&result, 120)
                             ));
+                            let _ = tx.send(tool_end_token(&call.id, outcome.label(), &result));
                         }
                         let tail = xencode_context_rs::tail_preview(
                             &result,
@@ -13493,6 +13517,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             match sink {
                 LoopSink::Chat => {
                     let _ = tx.send(format!("[TOOL]→ {summary}"));
+                    let _ = tx.send(tool_call_token(call));
                 }
                 LoopSink::ByteBot => {
                     let _ = tx.send(format!("{BYTEBOT_PREFIX}call:{summary}"));
@@ -13550,6 +13575,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                         "[TOOL]← {}",
                         crate::agent_tools::truncate_one_line(&result, 120)
                     ));
+                    let _ = tx.send(tool_end_token(&call.id, outcome.label(), &result));
                 }
                 LoopSink::ByteBot => {
                     let _ = tx.send(format!("{BYTEBOT_PREFIX}done:{}", outcome.label()));
@@ -19713,6 +19739,42 @@ Content-Length: 0
 
     /// EN-1: the loop's tokens are applied by one App method, the same one
     /// `run_app` calls, so the engine can call it too.
+    #[tokio::test]
+    async fn tool_tokens_carry_the_whole_call_and_draw_nothing() {
+        let call = xencode_providers_rs::ToolCall {
+            id: "call-7".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({"path": "notes.txt", "content": "x".repeat(500)}),
+        };
+        let start = crate::app::tool_call_token(&call);
+        let body: serde_json::Value =
+            serde_json::from_str(start.strip_prefix("[TOOLCALL]").unwrap()).unwrap();
+        assert_eq!(body["id"], "call-7");
+        assert_eq!(body["name"], "write_file");
+        assert_eq!(
+            body["arguments"]["content"].as_str().unwrap().len(),
+            500,
+            "not cut short"
+        );
+
+        let end = crate::app::tool_end_token("call-7", "finished", &"y".repeat(5000));
+        let body: serde_json::Value =
+            serde_json::from_str(end.strip_prefix("[TOOLEND]").unwrap()).unwrap();
+        assert_eq!(body["outcome"], "finished");
+        assert_eq!(body["preview"].as_str().unwrap().chars().count(), 2000);
+
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let before = app.messages.len();
+        app.apply_token(&start, &tx);
+        app.apply_token(&end, &tx);
+        assert_eq!(
+            app.messages.len(),
+            before,
+            "the terminal draws the [TOOL] lines, not these"
+        );
+    }
+
     #[tokio::test]
     async fn apply_token_is_what_the_main_loop_does_with_a_token() {
         let mut app = App::for_tests();

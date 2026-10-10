@@ -545,6 +545,13 @@ enum Commands {
     /// doing and when one needs you
     Badge,
 
+    /// Run xencode as an agent for an editor that speaks the Agent Client
+    /// Protocol, such as Zed. The editor starts it and talks to it over
+    /// standard input and output; each session works through its folder's
+    /// engine, as the terminal app does. In Zed's settings:
+    /// "agent_servers": {"xencode": {"type": "custom", "command": "xencode", "args": ["acp"]}}
+    Acp,
+
     /// Run the agent work for one project in its own process, for the
     /// terminal app and other windows to connect to. It exits on its own once
     /// no window is connected and nothing is running.
@@ -2320,6 +2327,7 @@ async fn async_main() {
         } => run_doctor(env, deps, selfcheck, format).await,
         Commands::Session { action } => run_session(action),
         Commands::Badge => run_badge(),
+        Commands::Acp => xencode_acp_rs::serve_stdio().await,
         Commands::Engine {
             project,
             wait_limit,

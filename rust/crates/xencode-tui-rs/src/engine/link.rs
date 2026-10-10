@@ -76,8 +76,9 @@ pub fn answered_elsewhere(msg: &EngineMsg, me: &str) -> Option<String> {
     }
 }
 
-/// What the reading task hands the window.
-enum Incoming {
+/// What a window hears from its engine.
+#[derive(Debug)]
+pub enum LinkEvent {
     Msg(EngineMsg),
     Lost(String),
 }
@@ -87,7 +88,7 @@ pub struct EngineLink {
     /// The name this window gave the engine.
     name: String,
     out: mpsc::UnboundedSender<String>,
-    incoming: mpsc::UnboundedReceiver<Incoming>,
+    incoming: mpsc::UnboundedReceiver<LinkEvent>,
     /// How long the transcript is as the engine last set it. Lines past it
     /// were added by the window and go to the engine as notes.
     engine_len: usize,
@@ -97,6 +98,16 @@ impl EngineLink {
     /// Send a message. `false` once the connection is gone.
     pub fn send(&self, msg: &ClientMsg) -> bool {
         self.out.send(proto::encode(msg)).is_ok()
+    }
+
+    /// The next thing the engine sent, waiting for it. For a window that
+    /// reads the engine itself rather than through [`frame`] (`xencode acp`,
+    /// M-7). After the connection is lost every call answers `Lost` at once.
+    pub async fn next(&mut self) -> LinkEvent {
+        match self.incoming.recv().await {
+            Some(event) => event,
+            None => LinkEvent::Lost("the connection to the engine is closed".to_string()),
+        }
     }
 }
 
@@ -135,7 +146,7 @@ pub async fn open(addr: &Address, client: &str) -> Result<(EngineLink, View), St
             let why = match reader.recv().await {
                 Ok(Some(line)) => match proto::decode_engine(&line) {
                     Ok(msg) => {
-                        if in_tx.send(Incoming::Msg(msg)).is_err() {
+                        if in_tx.send(LinkEvent::Msg(msg)).is_err() {
                             return;
                         }
                         continue;
@@ -145,7 +156,7 @@ pub async fn open(addr: &Address, client: &str) -> Result<(EngineLink, View), St
                 Ok(None) => "it closed the connection".to_string(),
                 Err(e) => e.to_string(),
             };
-            let _ = in_tx.send(Incoming::Lost(why));
+            let _ = in_tx.send(LinkEvent::Lost(why));
             return;
         }
     });
@@ -174,13 +185,22 @@ pub async fn connect_or_start(
     addr: &Address,
     start: &(dyn Fn() -> io::Result<()> + Send + Sync),
 ) -> Result<(EngineLink, View), String> {
-    if let Ok(linked) = open(addr, &window_name()).await {
+    connect_or_start_as(addr, start, &window_name()).await
+}
+
+/// As [`connect_or_start`], for a window that names itself (`acp <pid>`).
+pub async fn connect_or_start_as(
+    addr: &Address,
+    start: &(dyn Fn() -> io::Result<()> + Send + Sync),
+    client: &str,
+) -> Result<(EngineLink, View), String> {
+    if let Ok(linked) = open(addr, client).await {
         return Ok(linked);
     }
     start().map_err(|e| format!("cannot start the engine: {e}"))?;
     let begun = Instant::now();
     loop {
-        match open(addr, &window_name()).await {
+        match open(addr, client).await {
             Ok(linked) => return Ok(linked),
             Err(why) if begun.elapsed() >= START_WAIT => return Err(why),
             Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
@@ -232,20 +252,20 @@ pub fn frame(app: &mut App) -> Frame {
     }
     while let Ok(incoming) = link.incoming.try_recv() {
         match incoming {
-            Incoming::Msg(EngineMsg::View { view }) => {
+            LinkEvent::Msg(EngineMsg::View { view }) => {
                 view::apply(app, *view);
                 link.engine_len = app.messages.len();
                 done.views += 1;
             }
-            Incoming::Msg(EngineMsg::Error { message }) => {
+            LinkEvent::Msg(EngineMsg::Error { message }) => {
                 app.push_toast(crate::toast::ToastKind::Warning, message);
             }
-            Incoming::Msg(msg) => {
+            LinkEvent::Msg(msg) => {
                 if let Some(said) = answered_elsewhere(&msg, &link.name) {
                     app.push_toast(crate::toast::ToastKind::Info, said);
                 }
             }
-            Incoming::Lost(why) => {
+            LinkEvent::Lost(why) => {
                 done.lost = Some(why);
                 return done;
             }

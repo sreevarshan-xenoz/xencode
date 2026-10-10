@@ -1730,6 +1730,12 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(acp)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (engine)
 _arguments "${_arguments_options[@]}" : \
 '--project=[The project folder (default\: the current folder)]:PROJECT:_files' \
@@ -3223,6 +3229,10 @@ esac
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(acp)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (engine)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3591,6 +3601,7 @@ _xencode_commands() {
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'badge:Start the floating badge that shows what running xencode sessions are doing and when one needs you' \
+'acp:Run xencode as an agent for an editor that speaks the Agent Client Protocol, such as Zed. The editor starts it and talks to it over standard input and output; each session works through its folder'\''s engine, as the terminal app does. In Zed'\''s settings\: "agent_servers"\: {"xencode"\: {"type"\: "custom", "command"\: "xencode", "args"\: \["acp"\]}}' \
 'engine:Run the agent work for one project in its own process, for the terminal app and other windows to connect to. It exits on its own once no window is connected and nothing is running' \
 'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
@@ -3622,6 +3633,11 @@ _xencode_commands() {
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__acp_commands] )) ||
+_xencode__subcmd__acp_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode acp commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__advise_commands] )) ||
 _xencode__subcmd__advise_commands() {
@@ -4183,6 +4199,7 @@ _xencode__subcmd__help_commands() {
 'doctor:Write one bug report\: configuration, secrets, disk, providers, models, MCP servers and the Colab bridge. Flags narrow it to one part' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'badge:Start the floating badge that shows what running xencode sessions are doing and when one needs you' \
+'acp:Run xencode as an agent for an editor that speaks the Agent Client Protocol, such as Zed. The editor starts it and talks to it over standard input and output; each session works through its folder'\''s engine, as the terminal app does. In Zed'\''s settings\: "agent_servers"\: {"xencode"\: {"type"\: "custom", "command"\: "xencode", "args"\: \["acp"\]}}' \
 'engine:Run the agent work for one project in its own process, for the terminal app and other windows to connect to. It exits on its own once no window is connected and nothing is running' \
 'paths:Where xencode keeps its own files\: settings, session records, cache and downloaded models, and whether they are still in \`~/.xencode\`' \
 'migrate:Move the files in \`~/.xencode\` to the four directories they belong in. Nothing is overwritten and the old directory is only removed once empty' \
@@ -4214,6 +4231,11 @@ _xencode__subcmd__help_commands() {
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__acp_commands] )) ||
+_xencode__subcmd__help__subcmd__acp_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help acp commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__advise_commands] )) ||
 _xencode__subcmd__help__subcmd__advise_commands() {

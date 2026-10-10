@@ -1,0 +1,18 @@
+[package]
+name = "xencode-acp-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "xencode as an Agent Client Protocol agent, for editors such as Zed (M-7)"
+publish = false
+
+[dependencies]
+agent-client-protocol = { version = "=3.3.0", features = ["stdio"] }
+xencode-tui-rs = { path = "../xencode-tui-rs" }
+xencode-config-rs = { path = "../xencode-config-rs" }
+xencode-live-rs = { path = "../xencode-live-rs" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

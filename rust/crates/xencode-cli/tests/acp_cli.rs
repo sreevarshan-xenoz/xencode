@@ -1,0 +1,360 @@
+//! M-7: the real `xencode acp`, driven by the official ACP crate's client
+//! side — a second ACP client, as M-7's done-when allows.
+
+use agent_client_protocol::schema::v1::{AuthenticateRequest, InitializeRequest};
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo};
+
+/// Settings whose model server address has nothing listening on it.
+pub fn settings() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("no-llama-server-here");
+    std::fs::write(
+        dir.path().join("config.json"),
+        serde_json::json!({
+            "default_model": "llamacpp:none",
+            "llama_cpp_url": "http://127.0.0.1:9",
+            "llama_cpp_executable": missing.to_string_lossy(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    dir
+}
+
+/// `xencode acp` with `config` as its settings folder.
+pub fn agent(config: &std::path::Path) -> AcpAgent {
+    AcpAgent::new(
+        AcpAgentConfig::new(env!("CARGO_BIN_EXE_xencode"))
+            .arg("acp")
+            .env("XCODE_CONFIG_DIR", config.to_string_lossy().to_string()),
+    )
+}
+
+#[tokio::test]
+async fn the_handshake_names_xencode_and_offers_its_settings_as_sign_in() {
+    let config = settings();
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            let init = c
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            assert_eq!(init.protocol_version, ProtocolVersion::V1);
+            assert_eq!(init.agent_info.as_ref().unwrap().name, "xencode");
+            assert_eq!(init.auth_methods.len(), 1);
+            assert_eq!(init.auth_methods[0].id().to_string(), "xencode-settings");
+            // A model is configured, so signing in with the settings works.
+            c.send_request(AuthenticateRequest::new("xencode-settings"))
+                .block_task()
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn signing_in_without_a_model_says_how_to_set_one() {
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("config.json"),
+        r#"{"default_model": ""}"#,
+    )
+    .unwrap();
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let err = c
+                .send_request(AuthenticateRequest::new("xencode-settings"))
+                .block_task()
+                .await
+                .expect_err("no model is set");
+            assert!(format!("{err:?}").contains("xencode config"), "{err:?}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+use agent_client_protocol::schema::v1::{
+    CancelNotification, ContentBlock, NewSessionRequest, PromptRequest, SessionNotification,
+    SessionUpdate, StopReason, TextContent,
+};
+use std::sync::{Arc, Mutex};
+
+type Seen = Arc<Mutex<Vec<SessionUpdate>>>;
+
+/// Everything the agent said as message text, in order.
+fn said(seen: &Seen) -> String {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter_map(|u| match u {
+            SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                ContentBlock::Text(t) => Some(t.text.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn text(prompt: &str) -> Vec<ContentBlock> {
+    vec![ContentBlock::Text(TextContent::new(prompt))]
+}
+
+/// Settings whose model server accepts connections and never answers, so a
+/// turn stays running until it is stopped. The listener is returned so it
+/// lives as long as the test.
+fn stalled_settings() -> (tempfile::TempDir, std::net::TcpListener) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.json"),
+        serde_json::json!({
+            "default_model": "llamacpp:none",
+            "llama_cpp_url": url,
+            "llama_cpp_executable": dir.path().join("none").to_string_lossy(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    (dir, listener)
+}
+
+#[tokio::test]
+async fn a_prompt_reaches_the_engine_and_the_unreachable_model_is_said() {
+    let config = settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let r = c
+                .send_request(PromptRequest::new(s.session_id, text("say hi")))
+                .block_task()
+                .await?;
+            assert_eq!(r.stop_reason, StopReason::EndTurn);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let text = said(&seen);
+    assert!(
+        text.contains("127.0.0.1:9"),
+        "the failure reached the client: {text}"
+    );
+}
+
+/// Review Focus 1: Zed lets a person send while a turn runs.
+#[tokio::test]
+async fn a_second_prompt_while_one_runs_is_refused_and_a_cancel_stops_the_first() {
+    let (config, _stalled) = stalled_settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let first = c.send_request(PromptRequest::new(s.session_id.clone(), text("one")));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let second = c
+                .send_request(PromptRequest::new(s.session_id.clone(), text("two")))
+                .block_task()
+                .await
+                .expect_err("one turn at a time");
+            assert!(
+                format!("{second:?}").contains("already running"),
+                "{second:?}"
+            );
+            c.send_notification(CancelNotification::new(s.session_id))?;
+            let r = tokio::time::timeout(std::time::Duration::from_secs(30), first.block_task())
+                .await
+                .expect("the cancel ended the turn")?;
+            assert_eq!(r.stop_reason, StopReason::Cancelled);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// Review Focus 3.
+#[tokio::test]
+async fn a_folder_that_does_not_exist_or_is_a_file_is_refused() {
+    let config = settings();
+    let project = tempfile::tempdir().unwrap();
+    let missing = project.path().join("missing");
+    let file = project.path().join("a-file.txt");
+    std::fs::write(&file, "x").unwrap();
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let err = c
+                .send_request(NewSessionRequest::new(missing))
+                .block_task()
+                .await
+                .expect_err("no such folder");
+            assert!(format!("{err:?}").contains("missing"), "{err:?}");
+            let err = c
+                .send_request(NewSessionRequest::new(file))
+                .block_task()
+                .await
+                .expect_err("a file");
+            assert!(format!("{err:?}").contains("not a folder"), "{err:?}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// Review Focus 2: the engine dies; the prompt says so instead of hanging,
+/// and the next prompt gets a new engine.
+#[tokio::test]
+async fn a_lost_engine_ends_the_prompt_with_an_error_and_the_next_gets_a_new_one() {
+    let (config, _stalled) = stalled_settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    // An engine this test owns, so it can be killed; `xencode acp` finds it.
+    let mut engine = std::process::Command::new(env!("CARGO_BIN_EXE_xencode"))
+        .args(["engine", "--project"])
+        .arg(project.path())
+        .env("XCODE_CONFIG_DIR", config.path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::BufRead;
+        let mut line = String::new();
+        std::io::BufReader::new(engine.stdout.as_mut().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert!(line.contains("listening on"), "{line}");
+    }
+    let engine = Arc::new(Mutex::new(engine));
+    let killer = Arc::clone(&engine);
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let first = c.send_request(PromptRequest::new(s.session_id.clone(), text("one")));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            {
+                let mut child = killer.lock().unwrap();
+                child.kill().unwrap();
+                child.wait().unwrap();
+            }
+            let err = tokio::time::timeout(std::time::Duration::from_secs(20), first.block_task())
+                .await
+                .expect("the loss ended the prompt")
+                .expect_err("an error, not a normal end");
+            assert!(format!("{err:?}").contains("engine"), "{err:?}");
+            // The next prompt starts a new engine; it is stopped at once.
+            let next = c.send_request(PromptRequest::new(s.session_id.clone(), text("two")));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            c.send_notification(CancelNotification::new(s.session_id))?;
+            let r = tokio::time::timeout(std::time::Duration::from_secs(30), next.block_task())
+                .await
+                .expect("the new engine took the prompt")?;
+            assert_eq!(r.stop_reason, StopReason::Cancelled);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_real_model_streams_its_answer() {
+    let url = std::env::var("XENCODE_LIVE_LLAMACPP_URL").expect("XENCODE_LIVE_LLAMACPP_URL");
+    let model = std::env::var("XENCODE_LIVE_MODEL").unwrap_or_else(|_| "llamacpp:live".into());
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("config.json"),
+        serde_json::json!({"default_model": model, "llama_cpp_url": url}).to_string(),
+    )
+    .unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let r = c
+                .send_request(PromptRequest::new(
+                    s.session_id,
+                    text("Count from 1 to 10, separated by spaces, and write nothing else."),
+                ))
+                .block_task()
+                .await?;
+            assert_eq!(r.stop_reason, StopReason::EndTurn);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let chunks = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|u| matches!(u, SessionUpdate::AgentMessageChunk(_)))
+        .count();
+    let text = said(&seen);
+    eprintln!("live answer in {chunks} chunks: {text}");
+    assert!(chunks >= 2, "streamed, not sent whole: {chunks}");
+    // What the model says is the model's business; that it arrives, in
+    // pieces, is xencode's.
+    assert!(!text.trim().is_empty(), "an answer arrived");
+}

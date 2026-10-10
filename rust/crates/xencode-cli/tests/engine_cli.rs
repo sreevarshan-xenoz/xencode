@@ -721,3 +721,40 @@ async fn a_wait_with_no_window_ends_by_the_limit() {
         "a denied approval writes nothing"
     );
 }
+
+/// M-7: a window that is not the terminal app reads the engine through
+/// `EngineLink::next` and hears the engine go.
+#[tokio::test]
+async fn a_window_reads_the_engine_with_next_and_hears_it_go() {
+    let project = tempfile::tempdir().unwrap();
+    let config = settings();
+    let mut engine = Engine::start(project.path(), config.path());
+    let addr = engine.address();
+    let start: link::Starter = std::sync::Arc::new(|| Ok(()));
+    let (mut link, _view) = link::connect_or_start_as(&addr, &*start, "acp-test")
+        .await
+        .unwrap();
+    assert!(link.send(&ClientMsg::Note {
+        role: "system".into(),
+        content: "hi".into(),
+    }));
+    let got = tokio::time::timeout(Duration::from_secs(5), link.next())
+        .await
+        .expect("the engine answered");
+    assert!(
+        matches!(got, link::LinkEvent::Msg(EngineMsg::View { .. })),
+        "{got:?}"
+    );
+    engine.child.kill().unwrap();
+    engine.child.wait().unwrap();
+    let gone = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let link::LinkEvent::Lost(why) = link.next().await {
+                break why;
+            }
+        }
+    })
+    .await
+    .expect("the loss was noticed");
+    assert!(!gone.is_empty());
+}
