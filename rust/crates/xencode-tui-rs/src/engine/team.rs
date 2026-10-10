@@ -93,11 +93,11 @@ impl Team {
                     answer,
                 } => {
                     let request = ApprovalRequest {
-                        tool: format!("worker {worker}: {tool}"),
+                        tool: format!("worker {worker}: {}", shown(&tool)),
                         // Another agent's tool: xencode can neither preview,
                         // checkpoint nor undo it.
                         class: ToolClass::External,
-                        summary: format!("{worker} asks: {summary}"),
+                        summary: format!("{worker} asks: {}", shown(&summary)),
                         preview: String::new(),
                         draft: ApprovalDraft::default(),
                     };
@@ -315,8 +315,10 @@ impl Team {
         self.merges.insert(id.to_string(), MergeState::Running);
         let settings = merge::team_settings(root);
         let timeout = std::time::Duration::from_secs(settings.check_timeout_secs.unwrap_or(1200));
-        // A worker an earlier engine left has no process to stop.
+        // A worker an earlier engine left has no process to stop, and
+        // nothing says who made its worktree.
         let stop = self.workers.get(id).map(|h| h.stopper());
+        let unverified = stop.is_none();
         let (root, id_owned, approvals, events) = (
             root.to_path_buf(),
             id.to_string(),
@@ -324,7 +326,17 @@ impl Team {
             self.events_tx.clone(),
         );
         tokio::spawn(async move {
-            let outcome = merge_worker(&root, &id_owned, &s, &base, timeout, &approvals).await;
+            let outcome = if unverified
+                && !left_worker_allowed(&id_owned, &s, &base, &approvals).await
+            {
+                MergeOutcome::Refused {
+                    why: format!(
+                        "{id_owned} was left by an earlier engine and the person chose not to merge it"
+                    ),
+                }
+            } else {
+                merge_worker(&root, &id_owned, &s, &base, timeout, &approvals).await
+            };
             audit_merge(&id_owned, &s, &base, &outcome);
             if matches!(outcome, MergeOutcome::Landed { .. }) {
                 // Its work is in; the worker ends and its worktree goes. On
@@ -500,6 +512,49 @@ async fn merge_worker(
             }
         }
         (other, _) => other,
+    }
+}
+
+/// Ask the person before merging a worker an earlier engine left: xencode
+/// did not start it here, and a worker running git itself could have made
+/// such a worktree. The checks still run after a yes.
+async fn left_worker_allowed(
+    id: &str,
+    s: &WorkerSnapshot,
+    base: &str,
+    approvals: &Approvals,
+) -> bool {
+    let request = ApprovalRequest {
+        tool: format!("merge {id}"),
+        class: ToolClass::External,
+        summary: format!(
+            "merge {id} onto {base}? It was left by an earlier engine, so xencode cannot say \
+             who made it; read {} first",
+            s.branch
+        ),
+        preview: s.worktree.display().to_string(),
+        draft: ApprovalDraft::default(),
+    };
+    let (tx, rx) = oneshot::channel();
+    if approvals.send((request, tx)).is_err() {
+        return false;
+    }
+    matches!(
+        rx.await,
+        Ok(ApprovalAnswer::Approved | ApprovalAnswer::ApprovedForSession)
+    )
+}
+
+/// Text a worker's agent chose, as the person's question shows it: escaped,
+/// so a character that reorders or hides text shows as its code, and clipped.
+fn shown(text: &str) -> String {
+    const LIMIT: usize = 300;
+    let escaped = text.escape_debug().to_string();
+    if escaped.chars().count() > LIMIT {
+        let clipped: String = escaped.chars().take(LIMIT).collect();
+        format!("{clipped}…")
+    } else {
+        escaped
     }
 }
 
@@ -798,6 +853,100 @@ mod tests {
         assert!(is_team_approval(&ask("merge w2")));
         assert!(!is_team_approval(&ask("write_file")));
         assert!(!is_team_approval(&ask("merge_branches")));
+    }
+
+    /// Security review: a worker's agent chooses its permission text, which
+    /// goes into the person's question; it cannot restyle or hide parts of it.
+    #[tokio::test]
+    async fn a_workers_permission_text_cannot_restyle_the_question() {
+        let mut team = Team::default();
+        let (approvals, mut queue) = mpsc::unbounded_channel();
+        let (answer, _wait) = oneshot::channel();
+        team.events_tx
+            .send(WorkerEvent::Permission {
+                worker: "w1".into(),
+                summary: format!("read a file\u{202e}etirw{}", "x".repeat(500)),
+                tool: "edit\u{200b}".into(),
+                answer,
+            })
+            .unwrap();
+        team.pump(&approvals);
+        let (request, _) = queue.recv().await.unwrap();
+        assert!(!request.summary.contains('\u{202e}'), "{}", request.summary);
+        assert!(request.summary.contains("\\u{202e}"), "{}", request.summary);
+        assert!(request.summary.chars().count() < 340, "clipped");
+        assert!(!request.tool.contains('\u{200b}'), "{}", request.tool);
+    }
+
+    /// Security review: a worktree an earlier engine left cannot be traced
+    /// to anyone (a worker could have made one itself), so merging it asks the
+    /// person first, and a no lands nothing.
+    #[tokio::test]
+    async fn merging_a_worker_left_by_an_earlier_engine_asks_the_person_first() {
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("proj");
+        std::fs::create_dir(&root).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["config", "user.email", "t@example.invalid"]);
+        git(&root, &["config", "user.name", "t"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        // Checks that would pass, so only the question stands in the way.
+        std::fs::create_dir_all(root.join(".xencode")).unwrap();
+        std::fs::write(
+            root.join(".xencode").join("team.toml"),
+            "checks = [\"git --version\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".gitignore"), ".xencode/\n").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "-m", "first"]);
+        let (wt, _branch) = worktree::create(&root, "w7", "main").unwrap();
+        std::fs::write(wt.join("planted.txt"), "x\n").unwrap();
+        let before = git(&root, &["rev-parse", "main"]);
+
+        let mut team = Team::default();
+        let (approvals, mut queue) = mpsc::unbounded_channel();
+        let config = XencodeConfig::default();
+        let started = team.request(
+            &root,
+            TeamRequest::Merge { id: "w7".into() },
+            &approvals,
+            &config,
+        );
+        assert!(started.is_ok(), "{started:?}");
+        let (request, answer) = queue.recv().await.unwrap();
+        assert!(
+            request.summary.contains("earlier engine"),
+            "{}",
+            request.summary
+        );
+        answer.send(ApprovalAnswer::Denied).unwrap();
+        let start = std::time::Instant::now();
+        loop {
+            team.pump(&approvals);
+            let s = team.find("w7").unwrap();
+            if let Some(MergeState::Finished(outcome)) = s.merge {
+                assert!(
+                    matches!(outcome, MergeOutcome::Refused { .. }),
+                    "{outcome:?}"
+                );
+                break;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(30));
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(git(&root, &["rev-parse", "main"]), before);
     }
 
     /// Security review: the person says yes to the work they were asked about;

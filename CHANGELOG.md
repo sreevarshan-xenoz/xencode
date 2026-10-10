@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-1`, `TM-3` (security fixes): merging a worker an earlier engine left
+  asks the person first, since nothing says who made its worktree; the
+  merge's checks run without the person's keys, tokens or passwords in
+  their environment; and a worker agent's own permission text is shown
+  escaped and clipped in the person's question.
 - `TM-1`, `TM-3` (review fixes): the engine no longer ends while a worker
   works or a merge runs, so workers outlive the lead's session as the manual
   says; an engine started later shows an earlier one's workers as stopped
