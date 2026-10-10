@@ -17716,6 +17716,20 @@ program; the keys themselves are covered by their own tests.
   Found while mapping DK-3. Done 2026-10-09: the answer is read from `[SPAWN]0:finish:` and
   rounds are counted by the loop's round hook; checked against a real llama.cpp server
   (Qwen3-4B) by an `#[ignore]`d test that needs `XENCODE_LIVE_LLAMACPP_URL`.
+- [ ] **TM — the team orchestrator.** One lead agent chosen by the person (Claude Code, Codex,
+  Gemini CLI, Antigravity) directs worker agents on one project through xencode. Designed
+  2026-10-10 (`docs/superpowers/specs/2026-10-10-team-orchestrator-design.md`, plan
+  `docs/superpowers/plans/2026-10-10-team-orchestrator.md`). Stages:
+  - [x] **TM-1 — workers in the engine.** Done 2026-10-10: `xencode-team-rs` (worktrees, one ACP
+    worker); the engine's `Team` answers `Team` requests and shows workers in the view; a
+    worker's permission prompt becomes an engine approval. Tested with real git repositories and
+    a real `xencode acp` worker (finish, follow-up, stop, an agent that dies), and a real engine
+    starting a worker that every window sees.
+  - [ ] **TM-2 — the lead's tools on `xencode mcp serve --team`.**
+  - [ ] **TM-3 — the checked merge.**
+  - [ ] **TM-4 — the Team panel and the badge.**
+  - [ ] **TM-5 — the outside agents, sign-in and cost.**
+  - [ ] **TM-6 — manuals and the whole flow watched.**
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.

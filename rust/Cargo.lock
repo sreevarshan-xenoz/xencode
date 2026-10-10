@@ -4707,6 +4707,7 @@ dependencies = [
  "xencode-plugin-rs",
  "xencode-providers-rs",
  "xencode-server-rs",
+ "xencode-team-rs",
  "xencode-tui-rs",
 ]
 
@@ -4886,6 +4887,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xencode-team-rs"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "xencode-tui-rs"
 version = "0.1.0"
 dependencies = [
@@ -4920,6 +4932,7 @@ dependencies = [
  "xencode-models-rs",
  "xencode-plugin-rs",
  "xencode-providers-rs",
+ "xencode-team-rs",
 ]
 
 [[package]]

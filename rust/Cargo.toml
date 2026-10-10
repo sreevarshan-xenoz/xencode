@@ -11,6 +11,7 @@ members = [
     "crates/xencode-mcp-rs",
     "crates/xencode-tui-rs",
     "crates/xencode-acp-rs",
+    "crates/xencode-team-rs",
     "crates/xencode-analysis-rs",
     "crates/xencode-cli",
     "crates/xencode-server-rs",

@@ -14,6 +14,7 @@ pub mod address;
 pub mod link;
 pub mod proto;
 pub mod server;
+pub mod team;
 pub mod transport;
 pub mod view;
 
@@ -59,6 +60,8 @@ pub fn pump(
 ) -> Pump {
     let mut out = Vec::new();
     let mut messages = 0;
+    let approvals_tx = app.approval_tx.clone();
+    app.team.pump(&approvals_tx);
     while let Ok(token) = rx.try_recv() {
         messages += 1;
         app.apply_token(&token, tx);
@@ -253,6 +256,14 @@ pub fn handle(
         ClientMsg::Note { role, content } => {
             app.messages.push(crate::app::UiMessage { role, content });
             Vec::new()
+        }
+        ClientMsg::Team { req, request } => {
+            let root = xencode_context_rs::default_root();
+            let (ok, body) = match app.team.request(&root, request) {
+                Ok(body) => (true, body),
+                Err(why) => (false, serde_json::Value::String(why)),
+            };
+            vec![EngineMsg::TeamReply { req, ok, body }]
         }
         ClientMsg::Goodbye => Vec::new(),
     }

@@ -42,6 +42,12 @@ pub enum ClientMsg {
     },
     /// Carry on with ByteBot's queue after a stop paused it.
     ResumeTasks,
+    /// A request to the team of worker agents (TM), answered with a
+    /// `TeamReply` carrying the same `req`, to the asking window only.
+    Team {
+        req: u64,
+        request: TeamRequest,
+    },
     /// A line a window-side command added to the transcript, so every
     /// window's transcript stays the same.
     Note {
@@ -49,6 +55,36 @@ pub enum ClientMsg {
         content: String,
     },
     Goodbye,
+}
+
+/// What a window or the lead asks of the team (TM).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "do", rename_all = "snake_case")]
+pub enum TeamRequest {
+    Agents,
+    Start {
+        agent: String,
+        task: String,
+        #[serde(default)]
+        base: Option<String>,
+    },
+    Status {
+        #[serde(default)]
+        id: Option<String>,
+    },
+    Result {
+        id: String,
+    },
+    Message {
+        id: String,
+        text: String,
+    },
+    Stop {
+        id: String,
+    },
+    Merge {
+        id: String,
+    },
 }
 
 /// An answer to an approval prompt, as it travels.
@@ -142,6 +178,13 @@ pub enum EngineMsg {
     },
     Error {
         message: String,
+    },
+    /// The answer to a `Team` request: `ok` with a JSON body, or not with the
+    /// reason in words.
+    TeamReply {
+        req: u64,
+        ok: bool,
+        body: serde_json::Value,
     },
 }
 

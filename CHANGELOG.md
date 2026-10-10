@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `TM-1`: the engine can run worker agents
+
+- Groundwork for one lead agent directing several worker agents on a project
+  (`docs/superpowers/specs/2026-10-10-team-orchestrator-design.md`). The
+  project's engine can now start a worker agent in its own git worktree
+  (`<repo>-team/<id>` on branch `xencode/team/<id>`), follow what it says, send
+  it a follow-up, and stop it; every window sees the workers. The first worker
+  agent is xencode itself, driven over the Agent Client Protocol. A worker's
+  permission prompts are ordinary approvals, answered by the person in any
+  window. Nothing a person types reaches this yet; the lead's tools come next.
+
 ### Added — `M-7`: xencode inside Zed and other ACP editors
 
 - `xencode acp` runs xencode as an agent for editors that speak the Agent
