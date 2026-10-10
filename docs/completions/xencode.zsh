@@ -2305,6 +2305,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '--workspace=[The directory the tools work on; a \`path\` or \`cwd\` argument that leaves it is refused]:WORKSPACE:_files' \
 '*--allow=[Permit this one tool to run despite the read-only default. Repeat it per tool; the name must be one of the six xencode publishes, so a typo is reported instead of doing nothing]:ALLOW:_default' \
+'--team[Also publish the team tools a lead agent uses to direct worker agents on this project\: team_agents, team_start, team_status, team_result, team_message, team_stop, team_merge. They act through the project'\''s engine, starting it if none runs]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0

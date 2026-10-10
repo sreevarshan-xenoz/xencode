@@ -1179,6 +1179,13 @@ enum McpAction {
         /// typo is reported instead of doing nothing.
         #[arg(long = "allow")]
         allow: Vec<String>,
+
+        /// Also publish the team tools a lead agent uses to direct worker
+        /// agents on this project: team_agents, team_start, team_status,
+        /// team_result, team_message, team_stop, team_merge. They act through
+        /// the project's engine, starting it if none runs.
+        #[arg(long)]
+        team: bool,
     },
 }
 #[derive(Subcommand)]
@@ -14806,7 +14813,11 @@ async fn run_mcp(action: McpAction) -> Result<(), String> {
     use xencode_tui_rs::mcp_serve;
 
     match action {
-        McpAction::Serve { workspace, allow } => {
+        McpAction::Serve {
+            workspace,
+            allow,
+            team,
+        } => {
             let root = std::fs::canonicalize(&workspace).map_err(|error| {
                 format!(
                     "workspace {} cannot be opened: {error}",
@@ -14853,7 +14864,14 @@ async fn run_mcp(action: McpAction) -> Result<(), String> {
                     );
                 }
             }
-            mcp_serve::serve(root, env!("CARGO_PKG_VERSION"), policy, new_task_runtime()).await
+            mcp_serve::serve(
+                root,
+                env!("CARGO_PKG_VERSION"),
+                policy,
+                new_task_runtime(),
+                team,
+            )
+            .await
         }
     }
 }

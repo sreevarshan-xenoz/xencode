@@ -5870,7 +5870,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__mcp__subcmd__serve)
-            opts="-h --workspace --allow --help"
+            opts="-h --workspace --allow --team --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

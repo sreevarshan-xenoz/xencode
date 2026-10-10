@@ -3703,7 +3703,7 @@ commit stays there even when its branch moves on.
 only that one directory; a name containing a path separator or `..` is rejected
 rather than resolved.
 
-### `xencode mcp serve [--workspace <dir>] [--allow <tool>]`
+### `xencode mcp serve [--workspace <dir>] [--allow <tool>] [--team]`
 
 The other direction: instead of xencode calling somebody else's MCP server,
 xencode *is* the server, on standard input and output, for an editor, a script or
@@ -3759,6 +3759,35 @@ the description of the mode and its limits.
 The same six names reach a client as `mcp__xencode__<tool>` once that client
 imports them, which is why published names go through the same sanitize-and-fit-
 in-64 rule xencode's own MCP client applies to a tool it imports.
+
+
+**`--team`: tools for a lead agent.** With `--team` the server also publishes
+seven tools a lead agent (Claude Code, Codex, Gemini CLI, Antigravity — any MCP
+client) uses to direct worker agents on the workspace's project:
+
+| Tool | What it does |
+|---|---|
+| `team_agents` | the worker agents this machine can start |
+| `team_start {agent, task, base?}` | starts a worker in its own git worktree (`<repo>-team/<id>` on branch `xencode/team/<id>`) off `base` (default: the checked-out branch); returns its id (`w1`, …) |
+| `team_status {id?}` | one worker, or all: its state (`starting`, `working`, `needs_you`, `done`, `failed`, `stopped`), last message and tool calls |
+| `team_result {id}` | its latest answer and its diff against the base branch |
+| `team_message {id, text}` | a follow-up in the same session, once its turn is done |
+| `team_stop {id}` | stops it; the worktree is kept |
+| `team_merge {id}` | merges its branch, landing it only when the project's checks pass on the merged result |
+
+The tools act through the project's engine (`xencode engine`), started if none
+runs, so the workers outlive the lead's session and every xencode window sees
+them. A worker's permission prompts are asked of **you**, in any window, never
+of the lead. To give Claude Code these tools:
+
+```bash
+claude mcp add xencode -- xencode mcp serve --team --workspace /path/to/project
+```
+
+The base branch is checked to be a commit before any git command sees it, and
+the engine's git runs no repository hooks; it refuses to run at all while the
+repository's own git settings name a program to run (`core.fsmonitor`, a
+filter, merge or diff driver, `gpg.program`), saying which setting.
 
 ### Recipe: driving a real browser with Playwright MCP (no product code)
 
