@@ -15,8 +15,23 @@ pub fn runs_a_program(key: &str, value: &str) -> bool {
     let ends = |suffix: &str| key.ends_with(suffix);
     match key.as_str() {
         "core.fsmonitor" => !off,
-        "core.sshcommand" | "core.askpass" | "diff.external" | "gpg.program" | "core.pager"
-        | "core.editor" | "sequence.editor" | "credential.helper" => true,
+        "core.sshcommand"
+        | "core.askpass"
+        | "diff.external"
+        | "gpg.program"
+        | "core.pager"
+        | "core.editor"
+        | "sequence.editor"
+        | "credential.helper"
+        | "core.gitproxy"
+        | "core.alternaterefscommand"
+        | "uploadpack.packobjectshook"
+        | "interactive.difffilter"
+        | "core.hookspath"
+        | "diff.tool"
+        | "merge.tool"
+        | "diff.guitool"
+        | "merge.guitool" => true,
         _ => {
             (key.starts_with("diff.") && (ends(".command") || ends(".textconv")))
                 || (key.starts_with("filter.")
@@ -24,6 +39,15 @@ pub fn runs_a_program(key: &str, value: &str) -> bool {
                 || (key.starts_with("merge.") && ends(".driver"))
                 || (key.starts_with("gpg.") && ends(".program"))
                 || (key.starts_with("credential.") && ends(".helper"))
+                || (key.starts_with("remote.") && (ends(".uploadpack") || ends(".receivepack")))
+                // `checkout`, `rebase` and `merge` are git's own; only a `!`
+                // value names a command.
+                || (key.starts_with("submodule.")
+                    && ends(".update")
+                    && value.trim_start().starts_with('!'))
+                || (key.starts_with("difftool.") && ends(".cmd"))
+                || (key.starts_with("mergetool.") && ends(".cmd"))
+                || key.starts_with("pager.")
         }
     }
 }
@@ -52,11 +76,14 @@ fn refuse_program_settings(dir: &Path) -> Result<(), String> {
     // settings (a credential helper, an editor) are theirs, not something a
     // worker could have written. `--includes` follows any file the
     // repository's settings pull in.
+    // Fails closed: settings that cannot be read are not assumed safe.
     let mut listed = run_git(
         dir,
         &["config", "--local", "--includes", "--null", "--list"],
     )
-    .unwrap_or_default();
+    .map_err(|why| {
+        format!("cannot read the repository's git settings, so git is not run: {why}")
+    })?;
     if let Ok(per_worktree) = run_git(
         dir,
         &["config", "--worktree", "--includes", "--null", "--list"],
@@ -369,7 +396,25 @@ mod tests {
         ] {
             assert!(runs_a_program(key, "something"), "{key}");
         }
+        // Security review, third round: more ways to name a program.
+        for key in [
+            "core.gitproxy",
+            "core.alternaterefscommand",
+            "uploadpack.packobjectshook",
+            "remote.origin.uploadpack",
+            "remote.origin.receivepack",
+            "pager.diff",
+            "interactive.difffilter",
+            "core.hookspath",
+            "diff.tool",
+            "difftool.x.cmd",
+            "mergetool.x.cmd",
+        ] {
+            assert!(runs_a_program(key, "something"), "{key}");
+        }
         assert!(!runs_a_program("core.fsmonitor", "false"), "switched off");
+        assert!(runs_a_program("submodule.lib.update", "!make"));
+        assert!(!runs_a_program("submodule.lib.update", "rebase"));
         for key in [
             "user.name",
             "core.autocrlf",
@@ -378,6 +423,15 @@ mod tests {
         ] {
             assert!(!runs_a_program(key, "x"), "{key}");
         }
+    }
+
+    /// Security review, third round: when the settings cannot be read, git is
+    /// not run (the check fails closed).
+    #[test]
+    fn settings_that_cannot_be_read_stop_the_engines_git() {
+        let not_a_repo = tempfile::tempdir().unwrap();
+        let err = changed_files(not_a_repo.path(), "main").unwrap_err();
+        assert!(err.contains("cannot read"), "{err}");
     }
 
     #[test]
