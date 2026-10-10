@@ -150,6 +150,17 @@ the fifth run suggested is really a wrong-edit pattern. Across three changes the
 3–5 of 24, so prompt-side nudges are not the binding limit for this model. What has not been
 measured is the budget itself: several cases ran out at 11 rounds still searching.
 
+**Eighth run, 2026-10-10 — the round budget doubled (`--max-rounds 16`), on a Colab T4.** The
+owner asked that evaluations stop using the laptop's GPU, so this run was the first on a free
+Colab T4 through `xencode colab up` (from WSL), with the server restarted to the earlier runs'
+settings: Qwen3-4B Q4_K_M, `-c 8192 -ngl 99 --jinja --reasoning off`, alias `qwen3-4b`,
+temperature 0, seed 42, prompts `449d6f4fd09a`, 3 repeats. **3 of 24 passed (12%)** in 7.5
+minutes (`off-by-one` 2/3, `missing-value` 1/3). The budget is not what holds this model back:
+most failures ended after 5 to 11 rounds with `src/lib.rs` untouched, well inside the 16
+allowed, and two `inverted-condition` runs again answered in prose with no tool. Different
+hardware from the earlier runs, so the comparison is with their spread (3–5 of 24), not with
+any one of them.
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,
