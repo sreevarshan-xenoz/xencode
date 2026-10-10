@@ -533,3 +533,147 @@ async fn a_cancel_while_permission_is_open_stops_the_turn() {
     assert_eq!(stop, StopReason::Cancelled);
     assert!(!project.path().join("notes.txt").exists());
 }
+
+use agent_client_protocol::schema::v1::{
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOptions, SetSessionConfigOptionRequest,
+};
+
+/// The model option's current value and choices, from a list of options.
+fn model_option(options: &[SessionConfigOption]) -> (String, Vec<String>) {
+    let option = options
+        .iter()
+        .find(|o| o.id.to_string() == "model")
+        .expect("a model option");
+    assert_eq!(option.category, Some(SessionConfigOptionCategory::Model));
+    match &option.kind {
+        SessionConfigKind::Select(select) => {
+            let choices = match &select.options {
+                SessionConfigSelectOptions::Ungrouped(list) => {
+                    list.iter().map(|o| o.value.to_string()).collect()
+                }
+                other => panic!("grouped options: {other:?}"),
+            };
+            (select.current_value.to_string(), choices)
+        }
+        other => panic!("not a select: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_new_session_offers_the_model_and_choosing_one_changes_the_engines_model() {
+    let config = settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd.clone()))
+                .block_task()
+                .await?;
+            let (current, choices) = model_option(s.config_options.as_deref().unwrap_or(&[]));
+            assert_eq!(current, "llamacpp:none");
+            assert!(
+                choices.contains(&"llamacpp:none".to_string()),
+                "{choices:?}"
+            );
+
+            let changed = c
+                .send_request(SetSessionConfigOptionRequest::new(
+                    s.session_id.clone(),
+                    "model",
+                    agent_client_protocol::schema::v1::SessionConfigOptionValue::value_id(
+                        "llamacpp:other",
+                    ),
+                ))
+                .block_task()
+                .await?;
+            assert_eq!(model_option(&changed.config_options).0, "llamacpp:other");
+
+            // The engine itself changed: a second session on the same folder
+            // is told the engine's model.
+            let again = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            assert_eq!(
+                model_option(again.config_options.as_deref().unwrap_or(&[])).0,
+                "llamacpp:other"
+            );
+
+            let err = c
+                .send_request(SetSessionConfigOptionRequest::new(
+                    s.session_id,
+                    "mode",
+                    agent_client_protocol::schema::v1::SessionConfigOptionValue::value_id("x"),
+                ))
+                .block_task()
+                .await
+                .expect_err("only the model option exists");
+            assert!(format!("{err:?}").contains("only the model"), "{err:?}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_command_list_names_bytebot_and_a_terminal_panel_command_is_refused() {
+    let config = settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let err = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                c.send_request(PromptRequest::new(s.session_id, text("/init")))
+                    .block_task(),
+            )
+            .await
+            .expect("refused at once, not run")
+            .expect_err("a terminal panel command");
+            assert!(format!("{err:?}").contains("xencode tui"), "{err:?}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let names: Vec<String> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|u| match u {
+            SessionUpdate::AvailableCommandsUpdate(list) => Some(
+                list.available_commands
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(names.contains(&"bytebot".to_string()), "{names:?}");
+    assert!(names.contains(&"model".to_string()), "{names:?}");
+    assert!(!names.contains(&"init".to_string()), "{names:?}");
+}

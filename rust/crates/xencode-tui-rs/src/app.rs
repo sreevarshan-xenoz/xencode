@@ -4232,8 +4232,10 @@ impl<'a> App<'a> {
                         // The model is the engine's to choose (EN-2): a
                         // window's own list never replaces it.
                         self.selected_model = 0;
-                    } else {
-                        // If current default_model is not installed, select first installed model from Ollama
+                    } else if self.config.default_model.trim().is_empty() {
+                        // No model is chosen yet: take the first one found. A
+                        // chosen model missing from the list stays chosen;
+                        // the list may have been gathered before a switch.
                         if let Some(first) = self.available_models.first().cloned() {
                             self.config.default_model = first;
                             self.selected_model = 0;
@@ -10999,40 +11001,9 @@ impl<'a> App<'a> {
     }
     /// Discover models currently reported by the local model servers.
     pub fn refresh_models(&mut self, tx: mpsc::UnboundedSender<String>) {
-        let ollama_url = self.config.ollama_url.clone();
-        let llama_cpp_url = self.config.llama_cpp_url.clone();
-        let timeout = self.config.response_timeout;
-        let current_default = self.config.default_model.clone();
-
+        let config = self.config.clone();
         tokio::spawn(async move {
-            let client = OllamaClient::new(&ollama_url, timeout.min(5));
-            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout.min(5));
-            let mut models = Vec::new();
-
-            if let Ok(installed) = client.list_models().await {
-                for m in installed {
-                    if !m.name.contains("embed") {
-                        models.push(m.name);
-                    }
-                }
-            }
-
-            // llama.cpp server models
-            if let Ok(llama_models) = llama_client.list_models().await {
-                for m in llama_models {
-                    let prefixed = format!("llamacpp:{}", m.id);
-                    if !models.contains(&prefixed) {
-                        models.push(prefixed);
-                    }
-                }
-            }
-
-            // Preserve the configured model even when local discovery succeeds.
-            // It is a user choice, not a claim that a provider catalog found it.
-            if !current_default.is_empty() && !models.contains(&current_default) {
-                models.push(current_default);
-            }
-
+            let models = discover_models(&config).await;
             if let Ok(serialized) = serde_json::to_string(&models) {
                 let _ = tx.send(format!("[MODELS]{}", serialized));
             }
@@ -12995,6 +12966,37 @@ pub(crate) fn claims_a_change(text: &str) -> bool {
 
 /// How many plan-only steps a turn may take without spending a round.
 const FREE_PLAN_STEPS: usize = 2;
+
+/// The models the Models screen lists: Ollama's (embedding models left
+/// out), the llama.cpp server's as `llamacpp:<id>`, and the configured
+/// model, kept even when no server lists it, because it is the person's
+/// choice. `xencode acp` offers the same list (M-7c).
+pub async fn discover_models(config: &XencodeConfig) -> Vec<String> {
+    let timeout = config.response_timeout;
+    let client = OllamaClient::new(&config.ollama_url, timeout.min(5));
+    let llama_client = LlamaCppClient::new(&config.llama_cpp_url, timeout.min(5));
+    let mut models = Vec::new();
+    if let Ok(installed) = client.list_models().await {
+        for m in installed {
+            if !m.name.contains("embed") {
+                models.push(m.name);
+            }
+        }
+    }
+    if let Ok(llama_models) = llama_client.list_models().await {
+        for m in llama_models {
+            let prefixed = format!("llamacpp:{}", m.id);
+            if !models.contains(&prefixed) {
+                models.push(prefixed);
+            }
+        }
+    }
+    let current = &config.default_model;
+    if !current.is_empty() && !models.contains(current) {
+        models.push(current.clone());
+    }
+    models
+}
 
 /// The whole tool call as one token, for windows that show tool calls
 /// themselves (`xencode acp`, M-7). The `[TOOL]→` line beside it is cut to
@@ -19740,6 +19742,43 @@ Content-Length: 0
 
     /// EN-1: the loop's tokens are applied by one App method, the same one
     /// `run_app` calls, so the engine can call it too.
+    /// A model list that was gathered before the person switched models
+    /// arrives after the switch; it must not undo the choice (seen with
+    /// `xencode acp`, M-7c: the engine went back to the old model).
+    #[tokio::test]
+    async fn a_late_model_list_never_replaces_the_chosen_model() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.config.default_model = "llamacpp:other".to_string();
+        app.apply_token(r#"[MODELS]["llamacpp:none"]"#, &tx);
+        assert_eq!(app.config.default_model, "llamacpp:other");
+        assert_eq!(app.available_models, vec!["llamacpp:none".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn with_no_model_chosen_the_first_found_is_taken() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.config.default_model = String::new();
+        app.apply_token(r#"[MODELS]["qwen3:8b"]"#, &tx);
+        assert_eq!(app.config.default_model, "qwen3:8b");
+    }
+
+    #[tokio::test]
+    async fn the_model_list_keeps_the_chosen_model_when_no_server_answers() {
+        let config = XencodeConfig {
+            ollama_url: "http://127.0.0.1:9".to_string(),
+            llama_cpp_url: "http://127.0.0.1:9".to_string(),
+            default_model: "llamacpp:chosen".to_string(),
+            response_timeout: 2,
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::app::discover_models(&config).await,
+            vec!["llamacpp:chosen".to_string()]
+        );
+    }
+
     #[tokio::test]
     async fn tool_tokens_carry_the_whole_call_and_draw_nothing() {
         let call = xencode_providers_rs::ToolCall {

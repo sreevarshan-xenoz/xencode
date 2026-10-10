@@ -6,14 +6,17 @@
 //! error.
 
 pub mod kinds;
+pub mod options;
 pub mod prompt;
 pub mod session;
 pub mod turn;
 
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    CancelNotification, Implementation, InitializeRequest, InitializeResponse, NewSessionRequest,
-    NewSessionResponse, PromptCapabilities, PromptRequest, SessionId,
+    AvailableCommandsUpdate, CancelNotification, Implementation, InitializeRequest,
+    InitializeResponse, NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
+    SessionId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Stdio};
@@ -33,6 +36,7 @@ pub async fn serve_stdio() -> Result<(), String> {
     let for_new = sessions.clone();
     let for_prompt = sessions.clone();
     let for_cancel = sessions.clone();
+    let for_options = sessions.clone();
     Agent
         .builder()
         .name("xencode")
@@ -66,7 +70,7 @@ pub async fn serve_stdio() -> Result<(), String> {
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |req: NewSessionRequest, responder, _connection| {
+            async move |req: NewSessionRequest, responder, connection| {
                 if !req.mcp_servers.is_empty() {
                     eprintln!(
                         "xencode acp: the editor's {} tool server(s) are not used; xencode uses its own",
@@ -75,12 +79,45 @@ pub async fn serve_stdio() -> Result<(), String> {
                 }
                 match session::Session::open(&req.cwd).await {
                     Ok(session) => {
-                        let id = for_new.add(session);
-                        responder.respond(NewSessionResponse::new(SessionId::new(id)))
+                        let option = options::model_option(&session.model, &options::models().await);
+                        let id = SessionId::new(for_new.add(session));
+                        responder.respond(
+                            NewSessionResponse::new(id.clone()).config_options(vec![option]),
+                        )?;
+                        connection.send_notification(SessionNotification::new(
+                            id,
+                            SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
+                                options::commands(),
+                            )),
+                        ))
                     }
                     Err(why) => {
                         responder.respond_with_error(agent_client_protocol::Error::new(INVALID, why))
                     }
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |req: SetSessionConfigOptionRequest, responder, _connection| {
+                let fail = |why: String| agent_client_protocol::Error::new(INVALID, why);
+                if req.config_id.to_string() != options::MODEL_OPTION {
+                    return responder.respond_with_error(fail(
+                        "xencode offers only the model option".to_string(),
+                    ));
+                }
+                let Some(state) = for_options.get(&req.session_id.to_string()) else {
+                    return responder
+                        .respond_with_error(fail(format!("no session {}", req.session_id)));
+                };
+                let mut session = state.lock().await;
+                match options::set_model(&mut session, &req.value).await {
+                    Ok(()) => {
+                        let option =
+                            options::model_option(&session.model, &options::models().await);
+                        responder.respond(SetSessionConfigOptionResponse::new(vec![option]))
+                    }
+                    Err(why) => responder.respond_with_error(fail(why)),
                 }
             },
             agent_client_protocol::on_receive_request!(),

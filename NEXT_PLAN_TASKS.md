@@ -2349,7 +2349,15 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
     **Live** (Qwen3-4B): an approved `write_file` created `notes.txt` holding `hi` and its diff
     reached the client; a rejected one wrote nothing; a cancel during the prompt ended the turn
     as cancelled with nothing written. **Not verified:** inside Zed.
-  - [ ] **M-7c — the model option and the slash-command list.**
+  - [x] **M-7c — the model option and the slash-command list.** Done 2026-10-10: a new session
+    offers a `model` config option (the Models screen's list, from `app::discover_models`, with
+    the engine's model selected); choosing one sends `SetModel` and answers once the engine's
+    view shows the new model (up to 30 s: a llama.cpp switch first runs the engine's auto-start
+    attempt, measured at several seconds with no server); the command list is the engine's
+    commands; a terminal-panel command is refused in words. Found on the way: a model list
+    gathered before a switch, arriving after it, put the old model back — fixed in `app.rs`
+    (a chosen model stays chosen). **Not verified:** whether Zed shows the option as its model
+    picker (needs Zed).
   - [ ] **M-7d — `ask_user` questions; ByteBot as plan updates and its review as Keep or Undo.**
   - [ ] **M-7e — manuals; watched in real Zed.**
 

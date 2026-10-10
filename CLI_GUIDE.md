@@ -2534,6 +2534,13 @@ editor shows the change. When a tool needs permission the editor asks you:
 allow once, always allow for this session, or reject. If a terminal on the same
 folder answers first, its answer counts. Stopping a turn while the editor is
 asking answers it with no.
+
+Each session offers a **Model** choice listing the models xencode finds (the
+same list as the terminal's Models screen); choosing one switches the engine's
+model, which every window on that folder then uses. While a turn runs the
+model cannot be changed. Typing `/` lists the commands that run in the engine
+(`/bytebot`, `/spawn`, `/rewind`, `/model` and the rest); commands that draw a
+terminal panel, such as `/init`, are refused with a pointer to `xencode tui`.
 Attached files are passed to the model as text; images are not sent yet. Tool
 servers the editor passes are not used: xencode uses its own.
 

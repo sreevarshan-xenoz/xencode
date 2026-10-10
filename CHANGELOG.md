@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Client Protocol, such as Zed. Each editor session works through its folder's
   engine, like the terminal app. It covers chat with streamed answers,
   stopping a turn, tool calls shown as they run with diffs for edits, and
-  permission prompts answered in the editor. The model choice and ByteBot
-  follow.
+  permission prompts answered in the editor, a model choice and the command
+  list. ByteBot follows.
 
 ### Added — `EN-4`: detached runs work on Windows
 
@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same way (see the fix below).
 - `xencode run --stop` ends a detached run on Windows; it used to leave the
   worker running and say it might be ignoring SIGTERM.
+
+### Fixed — a chosen model could be put back to an older one
+
+When a list of models arrived that did not name the current model, the
+engine and the terminal app replaced the person's choice with the first model
+in the list. A list gathered just before a switch arrives just after it, so a
+switch could quietly undo itself. A chosen model now stays chosen; the first
+listed model is taken only when none is set.
 
 ### Fixed — console windows flashing on Windows
 
