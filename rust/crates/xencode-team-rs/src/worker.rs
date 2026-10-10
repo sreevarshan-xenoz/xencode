@@ -28,6 +28,9 @@ pub struct LaunchSpec {
     /// Signed in with the person's own login, so its work is on their plan
     /// and never priced.
     pub on_plan: bool,
+    /// What the worker says before its agent says anything, such as that a
+    /// first start downloads the agent's adapter.
+    pub first_note: Option<String>,
 }
 
 /// What a worker reports.
@@ -81,7 +84,7 @@ impl WorkerHandle {
             state: WorkerState::Starting,
             branch,
             worktree,
-            last_message: String::new(),
+            last_message: spec.first_note.clone().unwrap_or_default(),
             answer: String::new(),
             error: None,
             tool_calls: 0,

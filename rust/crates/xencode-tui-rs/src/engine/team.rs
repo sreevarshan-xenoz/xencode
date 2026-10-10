@@ -814,11 +814,21 @@ fn wrapped(
     all.push("--".to_string());
     all.push(program.to_string_lossy().to_string());
     all.extend(args.iter().map(|a| a.to_string()));
+    // `npx` fetches the adapter on a first start, which can take a minute;
+    // the worker says so rather than looking stuck.
+    let first_note = program
+        .file_stem()
+        .is_some_and(|n| n.eq_ignore_ascii_case("npx"))
+        .then(|| {
+            "starting: the first start downloads this agent's adapter with npx, which can take a minute"
+                .to_string()
+        });
     LaunchSpec {
         program: exe,
         args: all,
         env,
         on_plan,
+        first_note,
     }
 }
 
@@ -832,6 +842,7 @@ fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
                 args: vec!["acp".to_string()],
                 env: Vec::new(),
                 on_plan: false,
+                first_note: None,
             })
         }
         other => Err(format!(
@@ -868,6 +879,24 @@ mod tests {
         );
         assert!(args.ends_with(" --acp"), "{args}");
         assert_eq!(spec.env.len(), 1);
+        assert_eq!(spec.first_note, None, "gemini is not fetched");
+        let fetched = wrapped(
+            PathBuf::from("/bin/xencode"),
+            Path::new("/cfg/team-launch"),
+            &[],
+            Path::new("/usr/bin/npx"),
+            &["-y", "@agentclientprotocol/codex-acp@2.2.2"],
+            Vec::new(),
+            false,
+        );
+        assert!(
+            fetched
+                .first_note
+                .as_deref()
+                .is_some_and(|n| n.contains("downloads")),
+            "{:?}",
+            fetched.first_note
+        );
     }
 
     /// TM-4: the badge says a worker is waiting only for the team's own
