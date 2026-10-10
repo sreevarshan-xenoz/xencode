@@ -100,6 +100,24 @@ impl EngineLink {
         self.out.send(proto::encode(msg)).is_ok()
     }
 
+    /// Everything the engine sent that has not been read yet, without
+    /// waiting. A window that reads only during its own turns (`xencode
+    /// acp`) empties the link first, so another window's turn is not read
+    /// as its own. `Err` once the connection is lost.
+    pub fn drain(&mut self) -> Result<Vec<EngineMsg>, String> {
+        let mut got = Vec::new();
+        loop {
+            match self.incoming.try_recv() {
+                Ok(LinkEvent::Msg(msg)) => got.push(msg),
+                Ok(LinkEvent::Lost(why)) => return Err(why),
+                Err(mpsc::error::TryRecvError::Empty) => return Ok(got),
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    return Err("the connection to the engine is closed".to_string())
+                }
+            }
+        }
+    }
+
     /// The next thing the engine sent, waiting for it. For a window that
     /// reads the engine itself rather than through [`frame`] (`xencode acp`,
     /// M-7). After the connection is lost every call answers `Lost` at once.

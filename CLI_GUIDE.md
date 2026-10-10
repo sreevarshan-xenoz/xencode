@@ -2522,7 +2522,9 @@ In Zed, add xencode to `settings.json`:
 }
 ```
 
-then choose xencode in the Agent Panel's new-thread menu. Sign-in uses
+then, as Zed's documentation describes, choose xencode in the Agent Panel's
+new-thread menu. (Everything below was checked with a second ACP client and a
+real model; it has not yet been watched inside Zed itself.) Sign-in uses
 xencode's own settings: it needs a model set (`xencode config set
 default_model <model>`).
 
@@ -2533,9 +2535,10 @@ run…); an edit to a UTF-8 text file up to 512 KiB carries its diff, so the
 editor shows the change. When a tool needs permission the editor asks you:
 allow once, always allow for this session, or reject. If a terminal on the same
 folder answers first, its answer counts. Stopping a turn while the editor is
-asking answers it with no.
+asking about a tool answers it with no.
 
-Each session offers a **Model** choice listing the models xencode finds (the
+Each session offers a **Model** choice (whether Zed shows it as its model
+picker is not yet seen) listing the models xencode finds (the
 same list as the terminal's Models screen); choosing one switches the engine's
 model, which every window on that folder then uses. While a turn runs the
 model cannot be changed. Typing `/` lists the commands that run in the engine
@@ -2544,9 +2547,12 @@ terminal panel, such as `/init`, are refused with a pointer to `xencode tui`.
 
 `/bytebot <task>` queues a ByteBot task on the engine and follows it: its steps
 show as the editor's plan, its tools ask permission as above, and when it
-changed files the editor asks whether to keep or undo them. When ByteBot asks
+changed files the editor asks whether to keep or undo them; stopping the turn
+at that point keeps them, as the engine does when nobody answers a review
+(`/rewind` undoes them later). When ByteBot asks
 you something, the question appears in the chat ("xencode asks: …") and your
-next message is the answer; the task then carries on in the same turn.
+next message is the answer; the task then carries on in the same turn. A new
+`/bytebot` task while a question waits is refused until it is answered.
 Attached files are passed to the model as text; images are not sent yet. Tool
 servers the editor passes are not used: xencode uses its own.
 

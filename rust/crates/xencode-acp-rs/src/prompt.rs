@@ -86,7 +86,17 @@ pub async fn start(
                 "a turn is already running in this session; wait for it or cancel it",
             ));
         }
-        let link = match s.link.take() {
+        // What the engine sent while no turn was reading belongs to other
+        // windows' turns; it is read now and not mistaken for this one's.
+        let mut drained = Vec::new();
+        let mut link = s.link.take();
+        if let Some(open) = link.as_mut() {
+            match open.drain() {
+                Ok(msgs) => drained = msgs,
+                Err(_) => link = None,
+            }
+        }
+        let link = match link {
             Some(link) => link,
             None => match session::connect(&s.project).await {
                 Ok((link, _view)) => link,
@@ -98,18 +108,16 @@ pub async fn start(
                 }
             },
         };
-        // A waiting question takes this message as its answer, and the
-        // ByteBot task that asked is followed on from there.
-        let (msg, turn) = match (s.question.take(), bytebot_task) {
-            (Some((qid, followed)), None) => (
-                ClientMsg::AnswerQuestion { id: qid, text },
-                Turn::bytebot(&followed),
-            ),
-            (_, Some(task)) => {
-                let turn = Turn::bytebot(&task);
-                (ClientMsg::EnqueueTask { text: task }, turn)
+        let (msg, turn) = match route(s.question.clone(), &drained, bytebot_task, text) {
+            Ok(routed) => {
+                s.question = None;
+                routed
             }
-            (None, None) => (ClientMsg::SubmitChat { prompt: text }, Turn::new()),
+            Err(why) => {
+                // Refused before anything was sent: the question still waits.
+                s.link = Some(link);
+                return responder.respond_with_error(error(crate::INVALID, why));
+            }
         };
         s.busy = true;
         s.cancel = Arc::new(Notify::new());
@@ -151,6 +159,39 @@ pub async fn start(
             }
         }
     })
+}
+
+/// What this prompt sends the engine, and how its turn is followed. A
+/// waiting ByteBot question takes the message as its answer, unless the
+/// question was answered in another window meanwhile (`drained` says so); a
+/// new ByteBot task while a question waits is refused, because it would
+/// queue behind the task that asked.
+pub fn route(
+    question: Option<(u64, String)>,
+    drained: &[EngineMsg],
+    bytebot_task: Option<String>,
+    text: String,
+) -> Result<(ClientMsg, Turn), String> {
+    let question = question.filter(|(qid, _)| {
+        !drained
+            .iter()
+            .any(|m| matches!(m, EngineMsg::QuestionAnswered { id, .. } if id == qid))
+    });
+    match (question, bytebot_task) {
+        (Some(_), Some(_)) => Err(
+            "ByteBot is waiting for your answer to its question; answer it first, or stop it"
+                .to_string(),
+        ),
+        (Some((qid, followed)), None) => Ok((
+            ClientMsg::AnswerQuestion { id: qid, text },
+            Turn::bytebot(&followed),
+        )),
+        (None, Some(task)) => {
+            let turn = Turn::bytebot(&task);
+            Ok((ClientMsg::EnqueueTask { text: task }, turn))
+        }
+        (None, None) => Ok((ClientMsg::SubmitChat { prompt: text }, Turn::new())),
+    }
 }
 
 /// How a turn finished: it ended, or a ByteBot task asked a question and
@@ -201,6 +242,7 @@ impl TurnRun {
                 event = self.link.next() => event,
                 _ = self.cancel.notified() => {
                     self.stop();
+                    turn.stopped_by_the_person();
                     continue;
                 }
                 answered = Self::answer_of(&mut self.asking), if self.asking.is_some() => {
@@ -282,14 +324,24 @@ impl TurnRun {
         )))
     }
 
-    /// The editor cancelled. An open approval is answered no first, so the
-    /// agent loop is not left waiting on it, and then the run is stopped.
+    /// The editor cancelled. An open approval is answered no, so the agent
+    /// loop is not left waiting on it; an open ByteBot review keeps the
+    /// changes, as the engine does when a review waits with nobody there
+    /// (nothing is thrown away on a stop); then the run is stopped.
     fn stop(&mut self) {
-        if let Some((Asking::Approval(id), _)) = self.asking.take() {
-            self.link.send(&ClientMsg::AnswerApproval {
-                id,
-                answer: WireAnswer::Deny,
-            });
+        match self.asking.take() {
+            Some((Asking::Approval(id), _)) => {
+                self.link.send(&ClientMsg::AnswerApproval {
+                    id,
+                    answer: WireAnswer::Deny,
+                });
+            }
+            Some((Asking::Review, _)) => {
+                self.link.send(&ClientMsg::Review {
+                    decision: ReviewDecision::Accept,
+                });
+            }
+            None => {}
         }
         self.waiting.clear();
         let target = if self.bytebot.is_some() {
@@ -544,6 +596,53 @@ async fn finish(
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::SelectedPermissionOutcome;
+
+    fn waiting() -> Option<(u64, String)> {
+        Some((7, "write a note".to_string()))
+    }
+
+    #[test]
+    fn a_waiting_question_takes_the_next_message_as_its_answer() {
+        let (msg, turn) = route(waiting(), &[], None, "blue".into()).unwrap();
+        assert_eq!(
+            msg,
+            ClientMsg::AnswerQuestion {
+                id: 7,
+                text: "blue".into()
+            }
+        );
+        assert_eq!(turn.follows(), Some("write a note"));
+    }
+
+    /// Review finding 3: a question answered in another window meanwhile.
+    #[test]
+    fn a_question_answered_elsewhere_leaves_the_message_as_chat() {
+        let answered = [EngineMsg::QuestionAnswered {
+            id: 7,
+            by: "terminal 1".into(),
+        }];
+        let (msg, turn) = route(waiting(), &answered, None, "hello".into()).unwrap();
+        assert_eq!(
+            msg,
+            ClientMsg::SubmitChat {
+                prompt: "hello".into()
+            }
+        );
+        assert_eq!(turn.follows(), None);
+    }
+
+    /// Review finding 4.
+    #[test]
+    fn a_new_bytebot_task_while_a_question_waits_is_refused() {
+        let why = route(
+            waiting(),
+            &[],
+            Some("another".into()),
+            "/bytebot another".into(),
+        )
+        .unwrap_err();
+        assert!(why.contains("answer"), "{why}");
+    }
 
     #[test]
     fn text_blocks_are_joined_and_links_named() {
