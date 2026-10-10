@@ -25,11 +25,25 @@ pub enum Checks {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum MergeOutcome {
-    Landed { commit: String },
-    ChecksFailed { output: String },
-    Conflict { files: Vec<String> },
-    NeedsPerson { why: String },
-    Refused { why: String },
+    Landed {
+        commit: String,
+    },
+    ChecksFailed {
+        output: String,
+    },
+    Conflict {
+        files: Vec<String>,
+    },
+    NeedsPerson {
+        why: String,
+        /// Every file the question is about, escaped, for the person to read
+        /// in full.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+    },
+    Refused {
+        why: String,
+    },
 }
 
 /// `.xencode/team.toml`.
@@ -130,6 +144,7 @@ fn merge_with(
                 "the project has no checks (no `checks` in .xencode/team.toml and no Cargo.toml), \
                       so nothing can say the merged result works"
                     .to_string(),
+            files: Vec::new(),
         },
         Checks::Cargo => vec!["cargo test --quiet".to_string()],
         Checks::Commands(c) => c.clone(),
@@ -198,10 +213,23 @@ fn decides_the_checks(file: &str) -> bool {
         || (whole && (first == "rust-toolchain" || first == "rust-toolchain.toml"))
 }
 
+/// Whether `file` is, spelled plainly, one of the files the checks read.
+fn is_a_settings_file(file: &str) -> bool {
+    let file = file.replace('\\', "/");
+    file.starts_with(".xencode/")
+        || file.starts_with(".cargo/")
+        || file == "rust-toolchain"
+        || file == "rust-toolchain.toml"
+}
+
 /// The files named in the person's question: escaped, so a character that
 /// reorders or hides text shows as its code, and at most five of them.
 fn named(files: &[String]) -> String {
     const SHOWN: usize = 5;
+    // The settings files themselves first, so names chosen to fill the list
+    // cannot push them out of it.
+    let mut files: Vec<&String> = files.iter().collect();
+    files.sort_by_key(|f| !is_a_settings_file(f));
     let mut out: Vec<String> = files
         .iter()
         .take(SHOWN)
@@ -360,6 +388,10 @@ fn attempt_merge(
                      have read it",
                     named(&touched)
                 ),
+                files: touched
+                    .iter()
+                    .map(|f| f.escape_debug().to_string())
+                    .collect(),
             });
         }
     }
@@ -520,7 +552,7 @@ mod tests {
         let before = git(&root, &["rev-parse", "main"]);
         let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
         match &out {
-            MergeOutcome::NeedsPerson { why } => {
+            MergeOutcome::NeedsPerson { why, .. } => {
                 assert!(why.contains(".xencode/team.toml"), "{why}");
                 assert!(
                     !why.contains("  "),
@@ -584,6 +616,28 @@ mod tests {
         assert!(!said.contains('\u{202e}'), "{said}");
         assert!(said.contains("\\u{202e}"), "{said}");
         assert!(said.contains("and 4 more"), "{said}");
+    }
+
+    /// Security review: a short list must not hide the file that matters
+    /// behind names chosen to fill it; the real settings files come first,
+    /// and the question carries every name.
+    #[test]
+    fn the_settings_file_itself_is_never_the_one_left_out() {
+        let (_o, root, wt, branch) = project();
+        for n in 0..6 {
+            std::fs::create_dir_all(wt.join(format!("XENCOD~{n}"))).unwrap();
+            std::fs::write(wt.join(format!("XENCOD~{n}")).join("a.txt"), "x\n").unwrap();
+        }
+        std::fs::create_dir_all(wt.join(".xencode")).unwrap();
+        std::fs::write(wt.join(".xencode").join("team.toml"), "checks = []\n").unwrap();
+        commit_work(&wt, "many").unwrap();
+        match checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS) {
+            MergeOutcome::NeedsPerson { why, files } => {
+                assert!(why.contains(".xencode/team.toml"), "{why}");
+                assert_eq!(files.len(), 7, "{files:?}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// Security review: Windows folds letter case and drops a trailing dot or
