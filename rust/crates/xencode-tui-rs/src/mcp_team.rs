@@ -61,8 +61,8 @@ pub fn team_tool_definitions() -> Vec<ToolDefinition> {
         ),
         def(
             "team_status",
-            "A worker's state (starting, working, needs_you, done, failed, stopped), last message, tool calls and cost; without an id, every worker.",
-            json!({"id": id}),
+            "A worker's state (starting, working, needs_you, done, failed, stopped), last message, tool calls and cost; without an id, every worker. With wait_secs (up to 120), waits until the worker (or, without an id, every worker) is no longer starting or working, or that long, before answering: use it instead of calling again and again.",
+            json!({"id": id, "wait_secs": {"type": "integer", "description": "How long to wait for the worker to settle, in seconds (0 to 120)"}}),
             &[],
         ),
         def("team_result", "A worker's latest answer and its diff against the base branch.", json!({"id": id}), &["id"]),
@@ -145,8 +145,43 @@ impl TeamClient {
         if let TeamRequest::Merge { id } = &request {
             return self.merge(id.clone()).await;
         }
+        let wait = args
+            .get("wait_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(120);
+        if let (TeamRequest::Status { id }, true) = (&request, wait > 0) {
+            return self
+                .settled_status(id.clone(), Duration::from_secs(wait))
+                .await;
+        }
         let body = self.ask(request, WAIT).await?;
         Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
+    }
+
+    /// `team_status` that waits: asked again each second until no worker in
+    /// question is starting or working, or `wait` has passed.
+    async fn settled_status(&self, id: Option<String>, wait: Duration) -> Result<String, String> {
+        let start = std::time::Instant::now();
+        loop {
+            let body = self
+                .ask(TeamRequest::Status { id: id.clone() }, WAIT)
+                .await?;
+            let busy = |w: &Value| {
+                matches!(
+                    w.get("state").and_then(Value::as_str),
+                    Some("starting" | "working")
+                )
+            };
+            let still = match &body {
+                Value::Array(workers) => workers.iter().any(busy),
+                one => busy(one),
+            };
+            if !still || start.elapsed() >= wait {
+                return Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()));
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
 
     /// Start a merge and wait for its outcome: landed is a success, anything
