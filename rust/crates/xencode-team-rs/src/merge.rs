@@ -252,6 +252,19 @@ fn check_path(path: &std::ffi::OsStr) -> std::ffi::OsString {
     std::env::join_paths(kept).unwrap_or_default()
 }
 
+/// The environment variables, of `names`, that hold a key, a token or a
+/// password: a vendor's own, or any whose name says it is one.
+fn hidden_from_checks(names: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    const MARKS: [&str; 5] = ["API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
+    names
+        .filter(|name| {
+            let upper = name.to_string_lossy().to_uppercase();
+            crate::agents::VENDOR_KEY_VARS.contains(&upper.as_str())
+                || MARKS.iter().any(|m| upper.contains(m))
+        })
+        .collect()
+}
+
 /// The process one check runs as, in `dir`.
 fn check_command(dir: &Path, command: &str) -> Command {
     #[cfg(windows)]
@@ -278,6 +291,10 @@ fn check_command(dir: &Path, command: &str) -> Command {
     };
     if let Some(path) = std::env::var_os("PATH") {
         cmd.env("PATH", check_path(&path));
+    }
+    // The checks run the worker's code: none of the person's keys go with it.
+    for name in hidden_from_checks(std::env::vars_os().map(|(k, _)| k)) {
+        cmd.env_remove(name);
     }
     cmd.current_dir(dir);
     cmd
@@ -841,6 +858,51 @@ mod tests {
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "one\n"
         );
+    }
+
+    /// Security review: the checks run the worker's code, so the person's
+    /// keys and tokens are not in their environment; ordinary settings are.
+    #[test]
+    fn the_checks_never_see_the_persons_keys() {
+        let names = [
+            "ANTHROPIC_API_KEY",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "PGPASSWORD",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "API_KEY_OPENAI",
+            "PATH",
+            "HOME",
+            "CARGO_HOME",
+            "RUST_BACKTRACE",
+        ];
+        let hidden = hidden_from_checks(names.iter().map(std::ffi::OsString::from));
+        let hidden: Vec<String> = hidden
+            .iter()
+            .map(|v| v.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            hidden,
+            [
+                "ANTHROPIC_API_KEY",
+                "GITHUB_TOKEN",
+                "AWS_SECRET_ACCESS_KEY",
+                "PGPASSWORD",
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                "API_KEY_OPENAI",
+            ]
+        );
+        // The command a check really runs as removes them.
+        let cmd = check_command(Path::new("."), "git --version");
+        for (name, _) in std::env::vars_os() {
+            if !hidden_from_checks(std::iter::once(name.clone())).is_empty() {
+                assert!(
+                    cmd.get_envs()
+                        .any(|(k, v)| k == name.as_os_str() && v.is_none()),
+                    "{name:?} reaches the checks"
+                );
+            }
+        }
     }
 
     /// Review: a check that runs too long is ended with everything it
