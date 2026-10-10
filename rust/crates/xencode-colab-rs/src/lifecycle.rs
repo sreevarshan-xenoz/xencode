@@ -1003,6 +1003,7 @@ esac
             model: Some("Qwen/Qwen2.5-7B-Instruct-GGUF".to_string()),
             started_at: Some("2099-01-02T03:04:05Z".to_string()),
             url: Some("http://127.0.0.1:18040/v1".to_string()),
+            warnings: Vec::new(),
         };
         save_state(&state).expect("seed state");
 
@@ -1062,6 +1063,7 @@ esac
             model: Some("Qwen/Qwen2.5-7B-Instruct-GGUF".to_string()),
             started_at: Some("2099-01-02T03:04:05Z".to_string()),
             url: Some("http://127.0.0.1:18050/v1".to_string()),
+            warnings: Vec::new(),
         };
         save_state(&state).expect("seed state");
 
@@ -1189,6 +1191,7 @@ esac
             model: Some("m".to_string()),
             started_at: None,
             url: Some("http://127.0.0.1:18000/v1".to_string()),
+            warnings: Vec::new(),
         };
         state.save().expect("save state");
 
