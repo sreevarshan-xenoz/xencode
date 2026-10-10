@@ -978,11 +978,11 @@ enum Commands {
         #[arg(long)]
         llamacpp_url: Option<String>,
 
-        /// The detached worker itself. Forked by `run --detach`, never typed.
+        /// The detached worker itself. Started by `run --detach`, never typed.
         #[arg(long, hide = true)]
         child: Option<String>,
 
-        /// Where the detached worker's run lives. Passed by the forking
+        /// Where the detached worker's run lives. Passed by the starting
         /// parent, because the worker's own working directory is the run's
         /// tree rather than the project.
         #[arg(long, hide = true)]

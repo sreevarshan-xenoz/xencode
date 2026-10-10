@@ -1,7 +1,7 @@
 //! Detached agent runs (`LF-4`) — `.xencode/cache/detached/<run-id>/`.
 //!
 //! `xencode run --detach` starts an agent turn that survives the terminal: the
-//! work happens in a forked child, and everything another process needs to
+//! work happens in a separate worker process, and everything another process needs to
 //! report on it later is on disk. A second queue is not built for this —
 //! `GL-4` will add `xencode goal` as a row type on this queue rather than a
 //! queue of its own — so the spec carries a `kind` field that says `run` and
@@ -80,7 +80,7 @@ impl Default for DetachedCaps {
     }
 }
 
-/// What a detached run was asked to do. Written once, before the fork, and
+/// What a detached run was asked to do. Written once, before the worker starts, and
 /// never rewritten: a resume reads the same spec, so the second attempt cannot
 /// quietly become a different run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,7 +281,7 @@ pub fn log_path(dir: &Path) -> PathBuf {
     dir.join("log")
 }
 
-/// Write the spec atomically, creating the run directory. The fork happens
+/// Write the spec atomically, creating the run directory. The worker starts
 /// after this returns, so a run with no spec is a run that was never started.
 pub fn write_spec(dir: &Path, spec: &DetachedSpec) -> std::io::Result<()> {
     let text = serde_json::to_string_pretty(spec)
@@ -379,7 +379,7 @@ pub enum DetachedStatus {
     /// No spec here: this id names nothing.
     Missing,
     /// The spec is written but no round completed and no child lives. Either
-    /// the fork never happened or it died before the first round.
+    /// the worker never started or it died before the first round.
     NeverRan,
     /// No exit file and the hinted pid answers in `/proc`.
     Running { pid: u32 },
@@ -493,7 +493,7 @@ fn run_brief(task: &str) -> String {
 /// every round, and leave an exit file saying why it stopped.
 ///
 /// `xencode_dir` is the project's `.xencode` directory; the tools work in the
-/// spec's `tool_root`, which is where the parent forked from.
+/// spec's `tool_root`, which is where the parent started it from.
 pub async fn run_child(xencode_dir: &Path, run_id: &str) -> DetachedExit {
     use crate::app::{agent_rounds, App, LoopSink};
     use xencode_memory_rs::ConversationMemory;
@@ -530,7 +530,7 @@ pub async fn run_child(xencode_dir: &Path, run_id: &str) -> DetachedExit {
     let remaining_rounds = spec.caps.max_rounds.saturating_sub(completed).max(1);
 
     // The rate the cost cap multiplies by, read once. Unpriced is refused
-    // before the fork, so this is a lookup that must succeed — and if the
+    // before the worker starts, so this is a lookup that must succeed — and if the
     // file changed underfoot, the run stops rather than spends unpriced.
     let table = xencode_context_rs::PriceTable::load_with_lookup(
         xencode_dir,
@@ -705,19 +705,20 @@ pub fn read_log_tail(dir: &Path, lines: usize) -> Vec<String> {
     all.into_iter().skip(skip).collect()
 }
 
-/// Detach the current process's child: a fork of this binary that outlives
-/// the terminal, with its output in the run's log. Returns the child's pid.
+/// Detach the run's worker: this same program started again with the hidden
+/// `run --child` options, detached from the terminal, in the run's tree,
+/// writing to the run's log (EN-4). Returns the worker's pid.
 ///
 /// `xencode_dir` is passed through rather than re-derived, because the child
 /// runs with its working directory in the run's tree — re-deriving it there
 /// would point at the tree's own `.xencode`, not the project's.
 ///
-/// On Unix the child is a `fork(2)` of this process. On platforms that are
-/// neither Unix nor Windows this returns `Unsupported` and nothing starts.
-/// Windows has no fork, so the worker is this same program started again
-/// with the hidden `run --child` options, detached from the console, in the
-/// run's tree, writing to the run's log (EN-4).
-#[cfg(windows)]
+/// The worker is never a `fork(2)` of the caller: the caller runs a
+/// multi-threaded async runtime, and a forked child keeps only the forking
+/// thread, so any lock another thread held at that moment stays locked and
+/// the worker hangs. On platforms that are neither Unix nor Windows this
+/// returns `Unsupported` and nothing starts.
+#[cfg(any(unix, windows))]
 pub fn spawn_child(
     exe: &Path,
     run_id: &str,
@@ -744,51 +745,8 @@ pub fn spawn_child(
 ) -> std::io::Result<u32> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "detached runs need fork(2), which this platform does not have; run the task in the foreground instead",
+        "detached runs are not supported on this platform; run the task in the foreground instead",
     ))
-}
-
-#[cfg(unix)]
-pub fn spawn_child(
-    _exe: &Path,
-    run_id: &str,
-    xencode_dir: &Path,
-    cwd: &Path,
-    log: &Path,
-) -> std::io::Result<u32> {
-    use std::os::fd::AsRawFd;
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log)?;
-    let log_fd = file.as_raw_fd();
-    let xencode_dir_buf = xencode_dir.to_path_buf();
-    let run_id_str = run_id.to_string();
-    let cwd_buf = cwd.to_path_buf();
-
-    // SAFETY: fork creates a detached worker child without re-executing this binary (AE-7).
-    // The child sets sid, redirects stdout/stderr, and calls run_child directly in tokio.
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    if pid == 0 {
-        unsafe {
-            libc::setsid();
-            libc::dup2(log_fd, libc::STDOUT_FILENO);
-            libc::dup2(log_fd, libc::STDERR_FILENO);
-        }
-        let _ = std::env::set_current_dir(&cwd_buf);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("detached worker tokio runtime");
-        rt.block_on(async move {
-            let _ = run_child(&xencode_dir_buf, &run_id_str).await;
-        });
-        std::process::exit(0);
-    }
-    Ok(pid as u32)
 }
 
 /// Send the run's child a `SIGTERM` (on Windows, end it) and wait briefly

@@ -17588,7 +17588,7 @@ program; the keys themselves are covered by their own tests.
     `xencode run --detach`. Done 2026-10-09
     (`docs/superpowers/plans/2026-10-09-en4-detached-runs-on-windows.md`). `spawn_detached_logged`
     runs in a given folder and appends to a log; on Windows a detached run starts `xencode run
-    --child <id> --xencode-dir <dir>` that way (Unix keeps forking); `--stop` ends the worker with
+    --child <id> --xencode-dir <dir>` that way (and, since 2026-10-10, on Unix too: forking the multi-threaded process could hang the worker); `--stop` ends the worker with
     `TerminateProcess` and waits for it. **Watched on Windows 11** with a real llama.cpp server
     (Qwen3-4B): a run started from a console that was then closed carried on, wrote and read back
     `notes.txt`, and finished after two rounds; a forty-file run was stopped after four seconds
