@@ -3838,6 +3838,18 @@ limit = 4                 # workers running at once
 check_timeout_secs = 1200 # a check running longer is stopped and counts as failed
 ```
 
+The checks run the worker's code on your machine: `cargo test` builds and runs
+its `build.rs`, its tests and anything they start, as any test run of a branch
+would. The question about files that decide how checks run covers the check
+settings, not that. A check past `check_timeout_secs` is ended with every process
+it started. Every merge's end, landed or not, is a `team_merge` line in the
+audit trail that `xencode audit verify` checks.
+
+Workers belong to the project, not to the lead's session: the engine keeps
+running while a worker works or a merge runs, with no window open. An engine
+that starts where an earlier one left worktrees shows those workers as
+`stopped`, and new workers get the next numbers.
+
 The checks run with a PATH of absolute folders only, and on Windows `cmd` is
 told not to look in the current folder for a program, so a program the worker
 wrote into its tree (a `git.bat`, say) is never what a check runs.

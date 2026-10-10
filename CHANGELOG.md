@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-1`, `TM-3` (review fixes): the engine no longer ends while a worker
+  works or a merge runs, so workers outlive the lead's session as the manual
+  says; an engine started later shows an earlier one's workers as stopped
+  and numbers new ones after them; a check past its time is ended with every
+  process it started; the person's working copy is looked at again just
+  before a merge lands; every merge's end is a line in the audit trail; and
+  the engine's git can no longer be pointed at hooks through a shared temp
+  folder.
 - `TM-6`: the README, Quick Start ("Lead several agents") and user manual
   describe leading a team of agents through `xencode mcp serve --team`.
 - `TM-5`: four outside agents can be workers: `claude-code` and `codex`

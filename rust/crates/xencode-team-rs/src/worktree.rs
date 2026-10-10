@@ -52,9 +52,14 @@ pub fn runs_a_program(key: &str, value: &str) -> bool {
     }
 }
 
-/// A hooks folder that does not exist, so git finds no hooks to run.
+/// A hooks folder that cannot exist, so git finds no hooks to run: a name
+/// under this program's own file, where no folder can ever be made. A shared
+/// temp folder would not do, since anything running as the person could make
+/// it and put hooks in it.
 fn no_hooks() -> String {
-    let path = std::env::temp_dir().join("xencode-team-git-runs-no-hooks");
+    let path = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("/dev/null"))
+        .join("no-hooks");
     format!("core.hooksPath={}", path.to_string_lossy())
 }
 
@@ -493,6 +498,16 @@ mod tests {
 
     /// Security review: the engine runs git on the project; a hook in the
     /// repository is code nobody approved, so the engine's git runs none.
+    #[test]
+    fn the_hooks_folder_can_never_be_made() {
+        // Review: a shared temp folder could be made, and filled with hooks,
+        // by anything running as the person; a folder under a file cannot.
+        let setting = no_hooks();
+        let path = PathBuf::from(setting.strip_prefix("core.hooksPath=").unwrap());
+        assert!(path.parent().unwrap().is_file(), "{setting}");
+        assert!(std::fs::create_dir_all(&path).is_err(), "{setting}");
+    }
+
     #[test]
     fn the_engines_git_runs_no_repository_hooks() {
         let (_outer, root) = repo();

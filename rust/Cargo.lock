@@ -4933,6 +4933,7 @@ dependencies = [
  "xencode-models-rs",
  "xencode-plugin-rs",
  "xencode-providers-rs",
+ "xencode-server-rs",
  "xencode-team-rs",
 ]
 

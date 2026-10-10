@@ -232,7 +232,8 @@ pub async fn serve(project: PathBuf, wait_limit: Duration) -> Result<(), String>
 
 /// Whether anything is running or waiting on the person.
 fn has_work(app: &App) -> bool {
-    app.is_generating
+    app.team.has_work()
+        || app.is_generating
         || app.bytebot_running
         || app.question_id.is_some()
         || !app.approval_queue.is_empty()
