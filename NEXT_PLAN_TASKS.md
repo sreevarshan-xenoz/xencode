@@ -196,7 +196,16 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
   `computers`, `compete`, `team`, `orchestrator`, `badge`, `engine` — and clap's
   built-in `help`, 57 entries in the list)
-- [ ] Workspace gates green — **not green as of 2026-10-08.** CI has not passed since 2026-09-27: the latest runs stopped at two roster tests that required every agent to be installed on the machine running them (fixed in `74d18f08`, not yet observed on CI, so whether the rest of the suite passes on Linux is unknown). The last full count written here was 16 crates, 2823 passing and 19 ignored on 2026-10-08, after the `AR-3` verdict fix, with one machine-dependent roster test left out of it; that run was not on CI and has not been repeated. On Windows (2026-10-08, after `PL-2`): 2723 passed, 19 ignored, 58 failed, sorted by cause under `PL-2`. The build itself has no compiler warnings on Windows.
+- [x] Workspace gates green — **green on CI as of 2026-10-10** (commit `55e4a080`: both the
+  "Xencode CI" and "Xencode CI/CD Pipeline" workflows passed, which run formatting, clippy and
+  `cargo test --workspace` on Linux, plus the Windows build and the badge on Windows and macOS).
+  Getting there took three fixes after the EN-2 to EN-4 push: one over-long line, a badge lock
+  test that failed at random on Linux, and detached runs that hung on Linux because the worker
+  was forked from a multi-threaded process. **2026-10-10, Linux (WSL Arch, as root):** 3063
+  passed, 4 failed, 23 ignored; the failures are the shell completions (regenerated in the next
+  commit) and three tests that need what that machine lacks: `ssh`, `docker`, and a user that
+  read-only files apply to. Windows still has the 35 known failures listed under PL-2.
+  History: **not green as of 2026-10-08.** CI had not passed since 2026-09-27: the latest runs stopped at two roster tests that required every agent to be installed on the machine running them (fixed in `74d18f08`, not yet observed on CI, so whether the rest of the suite passes on Linux is unknown). The last full count written here was 16 crates, 2823 passing and 19 ignored on 2026-10-08, after the `AR-3` verdict fix, with one machine-dependent roster test left out of it; that run was not on CI and has not been repeated. On Windows (2026-10-08, after `PL-2`): 2723 passed, 19 ignored, 58 failed, sorted by cause under `PL-2`. The build itself has no compiler warnings on Windows.
   - **2026-10-09, Windows, after DK-1/DK-2 and BT-1 to BT-5:** `cargo test --workspace` with
     `XCODE_CONFIG_DIR` set: 17 crates, 2872 passed, 35 failed, 20 ignored. The terminal UI crate has
     no failures (840 passed); the 35 are the other crates' Windows causes listed under `PL-2` (test
