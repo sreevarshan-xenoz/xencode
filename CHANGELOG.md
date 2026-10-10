@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it a follow-up, and stop it; every window sees the workers. The first worker
   agent is xencode itself, driven over the Agent Client Protocol. A worker's
   permission prompts are ordinary approvals, answered by the person in any
-  window. Nothing a person types reaches this yet; the lead's tools come next.
+  window.
+- `TM-2`: `xencode mcp serve --team` publishes seven tools a lead agent uses
+  to direct the workers: `team_agents`, `team_start`, `team_status`,
+  `team_result`, `team_message`, `team_stop`, `team_merge`.
 
 ### Added — `M-7`: xencode inside Zed and other ACP editors
 

@@ -82,6 +82,8 @@ pub struct XencodeServer {
     policy: HeadlessPolicy,
     tasks: TaskRuntime,
     version: String,
+    /// The lead's team tools (TM-2), when started with `--team`.
+    team: Option<std::sync::Arc<crate::mcp_team::TeamClient>>,
 }
 
 impl XencodeServer {
@@ -96,7 +98,14 @@ impl XencodeServer {
             policy,
             tasks,
             version: version.into(),
+            team: None,
         }
+    }
+
+    /// Also publish the lead's team tools (TM-2).
+    pub fn with_team(mut self) -> Self {
+        self.team = Some(crate::mcp_team::TeamClient::new(&self.root));
+        self
     }
 
     /// What `tools/list` returns: the agent loop's own name, description and
@@ -106,18 +115,29 @@ impl XencodeServer {
     /// and does not go here — the handshake instructions say what this launch
     /// permits.
     pub fn advertised_tools(&self) -> Vec<Tool> {
+        let team = if self.team.is_some() {
+            crate::mcp_team::team_tool_definitions()
+        } else {
+            Vec::new()
+        };
         tool_definitions()
             .into_iter()
+            .chain(team)
             .map(|def| {
                 let schema = match def.parameters {
                     serde_json::Value::Object(map) => Arc::new(map),
                     _ => Arc::new(serde_json::Map::new()),
                 };
                 let mut tool = Tool::new(advertised_tool_name(&def.name), def.description, schema);
-                tool.annotations = Some(
-                    rmcp::model::ToolAnnotations::new()
-                        .read_only(tool_class(&def.name) == ToolClass::ReadOnly),
-                );
+                let read_only = if def.name.starts_with("team_") {
+                    matches!(
+                        def.name.as_str(),
+                        "team_agents" | "team_status" | "team_result"
+                    )
+                } else {
+                    tool_class(&def.name) == ToolClass::ReadOnly
+                };
+                tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(read_only));
                 tool
             })
             .collect()
@@ -130,6 +150,17 @@ impl XencodeServer {
         name: &str,
         arguments: serde_json::Map<String, serde_json::Value>,
     ) -> Reply {
+        if let Some(team) = &self.team {
+            if crate::mcp_team::TEAM_TOOLS.contains(&name) {
+                return match team.call(name, &arguments).await {
+                    Ok(text) => Reply {
+                        text,
+                        failed: false,
+                    },
+                    Err(text) => Reply { text, failed: true },
+                };
+            }
+        }
         if !EXPOSED.contains(&name) {
             return Reply {
                 text: format!(
@@ -225,8 +256,10 @@ pub async fn serve(
     version: &str,
     policy: HeadlessPolicy,
     tasks: TaskRuntime,
+    team: bool,
 ) -> Result<(), String> {
     let server = XencodeServer::new(root, version, policy, tasks);
+    let server = if team { server.with_team() } else { server };
     let service = server
         .serve(rmcp::transport::stdio())
         .await

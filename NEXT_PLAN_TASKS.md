@@ -17725,7 +17725,13 @@ program; the keys themselves are covered by their own tests.
     worker's permission prompt becomes an engine approval. Tested with real git repositories and
     a real `xencode acp` worker (finish, follow-up, stop, an agent that dies), and a real engine
     starting a worker that every window sees.
-  - [ ] **TM-2 — the lead's tools on `xencode mcp serve --team`.**
+  - [x] **TM-2 — the lead's tools on `xencode mcp serve --team`.** Done 2026-10-10: seven
+    `team_*` tools; the server connects to the project's engine as a window (`mcp <pid>`),
+    starting it when none runs, and waits for the reply to each request by number. Tested by
+    driving the real `xencode mcp serve --team` over stdio: the tools are listed, a xencode
+    worker is started, followed to `done` and its answer read back, and an unknown worker is
+    refused in words. Two security fixes on the way (repository hooks and program-naming
+    settings never run under the engine's git; a worker's base must be a commit).
   - [ ] **TM-3 — the checked merge.**
   - [ ] **TM-4 — the Team panel and the badge.**
   - [ ] **TM-5 — the outside agents, sign-in and cost.**

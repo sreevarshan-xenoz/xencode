@@ -321,3 +321,169 @@ async fn an_unknown_agent_is_refused_in_words() {
     assert!(!ok);
     assert!(body.to_string().contains("nobody"), "{body}");
 }
+
+// ---- TM-2: the lead's tools on `xencode mcp serve --team` ----
+
+/// The real `xencode mcp serve --team`, spoken to as an MCP client would:
+/// JSON-RPC lines over its standard input and output.
+struct Mcp {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    lines: std::sync::mpsc::Receiver<String>,
+    next: u64,
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Mcp {
+    fn start(workspace: &Path, config: &Path) -> Mcp {
+        use std::io::BufRead;
+        let mut child = Command::new(env!("CARGO_BIN_EXE_xencode"))
+            .args(["mcp", "serve", "--team", "--workspace"])
+            .arg(workspace)
+            .env("XCODE_CONFIG_DIR", config)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stdout)
+                .lines()
+                .map_while(Result::ok)
+            {
+                if tx.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        let mut mcp = Mcp {
+            child,
+            stdin,
+            lines,
+            next: 0,
+        };
+        mcp.request(
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "team-test", "version": "1"}
+            }),
+        );
+        mcp.send(serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}));
+        mcp
+    }
+
+    fn send(&mut self, message: serde_json::Value) {
+        use std::io::Write;
+        let mut line = message.to_string();
+        line.push('\n');
+        self.stdin.write_all(line.as_bytes()).unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        self.next += 1;
+        let id = self.next;
+        self.send(
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+        );
+        loop {
+            let line = self
+                .lines
+                .recv_timeout(Duration::from_secs(60))
+                .expect("the server answered");
+            let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if value["id"].as_u64() == Some(id) {
+                assert!(value.get("error").is_none(), "{value}");
+                return value["result"].clone();
+            }
+        }
+    }
+
+    /// Call a tool; its text and whether it was an error result.
+    fn call(&mut self, name: &str, arguments: serde_json::Value) -> (String, bool) {
+        let result = self.request(
+            "tools/call",
+            serde_json::json!({"name": name, "arguments": arguments}),
+        );
+        let text = result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        (text, result["isError"].as_bool().unwrap_or(false))
+    }
+}
+
+#[test]
+fn the_lead_lists_the_team_tools_and_runs_a_worker_through_them() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let mut mcp = Mcp::start(&root, config.path());
+
+    let tools = mcp.request("tools/list", serde_json::json!({}));
+    let names: Vec<String> = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    for want in [
+        "team_agents",
+        "team_start",
+        "team_status",
+        "team_result",
+        "team_message",
+        "team_stop",
+        "team_merge",
+    ] {
+        assert!(names.iter().any(|n| n == want), "{want} missing: {names:?}");
+    }
+
+    let (text, error) = mcp.call(
+        "team_start",
+        serde_json::json!({"agent": "xencode", "task": "say hi"}),
+    );
+    assert!(!error, "{text}");
+    assert!(text.contains("w1"), "{text}");
+
+    let start = std::time::Instant::now();
+    loop {
+        let (text, error) = mcp.call("team_status", serde_json::json!({"id": "w1"}));
+        assert!(!error, "{text}");
+        if text.contains("\"done\"") {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(90),
+            "never done: {text}"
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let (text, error) = mcp.call("team_result", serde_json::json!({"id": "w1"}));
+    assert!(!error, "{text}");
+    assert!(text.contains("127.0.0.1:9"), "the answer came back: {text}");
+}
+
+/// Review Focus 4.
+#[test]
+fn an_unknown_worker_is_refused_in_words() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let mut mcp = Mcp::start(&root, config.path());
+    let (text, error) = mcp.call("team_status", serde_json::json!({"id": "nope"}));
+    assert!(error);
+    assert!(text.contains("no worker nope"), "{text}");
+    let (text, error) = mcp.call("team_start", serde_json::json!({"task": "no agent named"}));
+    assert!(error);
+    assert!(text.contains("agent"), "{text}");
+}
