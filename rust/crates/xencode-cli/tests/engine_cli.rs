@@ -738,12 +738,22 @@ async fn a_window_reads_the_engine_with_next_and_hears_it_go() {
         role: "system".into(),
         content: "hi".into(),
     }));
-    let got = tokio::time::timeout(Duration::from_secs(5), link.next())
-        .await
-        .expect("the engine answered");
+    // The note comes back as a view change; other messages (a llama.cpp
+    // start-up notice, say) may arrive before it.
+    let got = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match link.next().await {
+                link::LinkEvent::Msg(EngineMsg::View { view }) => break Ok(view),
+                link::LinkEvent::Msg(_) => continue,
+                link::LinkEvent::Lost(why) => break Err(why),
+            }
+        }
+    })
+    .await
+    .expect("the engine answered");
     assert!(
-        matches!(got, link::LinkEvent::Msg(EngineMsg::View { .. })),
-        "{got:?}"
+        got.is_ok_and(|view| view.messages.iter().any(|m| m.content == "hi")),
+        "the note came back"
     );
     engine.child.kill().unwrap();
     engine.child.wait().unwrap();
