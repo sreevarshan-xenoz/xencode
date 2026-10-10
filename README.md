@@ -33,9 +33,9 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, about 2,800
+At its core is a fast, single-file **Rust** binary (18 crates, about 3,000
 tests) wrapped around an agentic coding loop that can plan, edit, test,
-and fix your code — driven entirely from your terminal.
+and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
 ---
 
@@ -52,10 +52,14 @@ and fix your code — driven entirely from your terminal.
   uses — through re-exports — and leaves a field or local variable with the same name alone.
 - **Debugs for real.** `debug_test` stops a failing Rust test at a line under GDB or
   lldb-dap and reads back what the variables actually held.
+- **Works inside Zed.** `xencode acp` speaks the Agent Client Protocol, so Zed (and other
+  ACP editors) can use xencode as its agent: streamed answers, tool calls with diffs,
+  permission prompts, a model choice and ByteBot tasks — all through the same engine a
+  terminal on that folder uses.
 - **Measures itself.** `xencode eval run` seeds eight real bugs and grades each fix with the
   bug's own tests and the exact files it changed — and reports a failure as a failure.
 
-One Rust binary: 17 crates, 56 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
+One Rust binary: 18 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
 
 ## 📍 Where it stands, honestly
 

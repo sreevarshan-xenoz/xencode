@@ -645,6 +645,40 @@ can be started. `xencode engine` runs an engine by hand; see
 [CLI_GUIDE.md](../CLI_GUIDE.md) for where it listens and how it is kept to your
 own account.
 
+### xencode inside Zed (`xencode acp`)
+
+Zed, and any editor that speaks the Agent Client Protocol, can use xencode as
+its agent. The editor starts `xencode acp` itself; add it to Zed's
+`settings.json`:
+
+```json
+"agent_servers": {
+  "xencode": { "type": "custom", "command": "xencode", "args": ["acp"] }
+}
+```
+
+Each editor session is one more window onto its folder's engine, like a
+terminal: a task goes on when the editor closes, a terminal on the same folder
+sees the same conversation, and a prompt answered in either counts once.
+
+- **Chat** streams the answer. A second message while a turn runs is refused
+  until the turn ends or you stop it.
+- **Tool calls** show as they run, with their kind; an edit to a text file up
+  to 512 KiB shows as a diff.
+- **Permission** prompts appear in the editor: allow once, always allow for
+  this session, or reject.
+- **Model**: the session offers the models xencode finds; choosing one
+  switches the engine's model.
+- **Commands**: `/` lists the engine's commands. Commands that draw a terminal
+  panel, such as `/init`, are refused with a pointer to `xencode tui`.
+- **ByteBot**: `/bytebot <task>` shows its steps as the editor's plan, asks
+  whether to keep or undo its changes, and puts its questions in the chat —
+  your next message is the answer.
+
+Not supported yet: images in prompts, loading an earlier session, the
+editor's own terminals, and tool servers the editor passes (xencode uses its
+own).
+
 ### Floating badge
 
 A small round xencode logo that stays above other windows and shows what every
