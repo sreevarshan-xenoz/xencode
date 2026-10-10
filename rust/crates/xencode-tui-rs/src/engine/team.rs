@@ -209,3 +209,38 @@ fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Security review (authorization scope): a worker's prompt is asked as an
+    /// ordinary approval, and "always allow" answers that one prompt only —
+    /// nothing is remembered, so the next prompt from any worker or from the
+    /// person's own agent is asked again.
+    #[tokio::test]
+    async fn always_allow_on_a_worker_prompt_answers_that_prompt_only() {
+        let mut team = Team::default();
+        let (approvals, mut queue) = mpsc::unbounded_channel();
+        for n in 0..2 {
+            let (tx, rx) = oneshot::channel();
+            team.events_tx
+                .send(WorkerEvent::Permission {
+                    worker: "w1".into(),
+                    summary: format!("write notes {n}"),
+                    tool: "edit".into(),
+                    answer: tx,
+                })
+                .unwrap();
+            team.pump(&approvals);
+            let (request, answer) = queue.try_recv().expect("asked as an approval");
+            assert_eq!(request.class, ToolClass::External);
+            assert!(request.summary.starts_with("w1 asks"), "{}", request.summary);
+            answer.send(ApprovalAnswer::ApprovedForSession).unwrap();
+            assert!(rx.await.unwrap(), "that prompt was allowed");
+        }
+        // The second prompt above was queued and asked again: nothing was
+        // allowed in advance.
+        assert!(queue.try_recv().is_err());
+    }
+}
