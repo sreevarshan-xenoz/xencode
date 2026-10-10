@@ -4,6 +4,30 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Whether a git setting names a program for git to run: the ways besides
+/// hooks that a repository's own config makes git execute something.
+pub fn runs_a_program(key: &str, value: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    let off = matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "false" | "0" | "no" | "off"
+    );
+    let ends = |suffix: &str| key.ends_with(suffix);
+    match key.as_str() {
+        "core.fsmonitor" => !off,
+        "core.sshcommand" | "core.askpass" | "diff.external" | "gpg.program" | "core.pager"
+        | "core.editor" | "sequence.editor" | "credential.helper" => true,
+        _ => {
+            (key.starts_with("diff.") && (ends(".command") || ends(".textconv")))
+                || (key.starts_with("filter.")
+                    && (ends(".clean") || ends(".smudge") || ends(".process")))
+                || (key.starts_with("merge.") && ends(".driver"))
+                || (key.starts_with("gpg.") && ends(".program"))
+                || (key.starts_with("credential.") && ends(".helper"))
+        }
+    }
+}
+
 /// A hooks folder that does not exist, so git finds no hooks to run.
 fn no_hooks() -> String {
     let path = std::env::temp_dir().join("xencode-team-git-runs-no-hooks");
@@ -16,9 +40,48 @@ fn no_hooks() -> String {
 /// agent working in the repository could have written, and the engine runs
 /// these commands on its own, without anyone approving them.
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    refuse_program_settings(dir)?;
+    run_git(dir, args)
+}
+
+/// The project's effective settings (git follows any `include`) are read
+/// before each command, and git is not run while one of them names a
+/// program: a worker agent can write the shared `.git/config`.
+fn refuse_program_settings(dir: &Path) -> Result<(), String> {
+    // Only what the repository itself holds: the person's own user-wide
+    // settings (a credential helper, an editor) are theirs, not something a
+    // worker could have written. `--includes` follows any file the
+    // repository's settings pull in.
+    let mut listed = run_git(
+        dir,
+        &["config", "--local", "--includes", "--null", "--list"],
+    )
+    .unwrap_or_default();
+    if let Ok(per_worktree) = run_git(
+        dir,
+        &["config", "--worktree", "--includes", "--null", "--list"],
+    ) {
+        listed.push_str(&per_worktree);
+    }
+    for entry in listed.split('\0').filter(|e| !e.is_empty()) {
+        let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+        if runs_a_program(key, value) {
+            return Err(format!(
+                "the repository's git settings name a program (`{key}`), which git would run; \
+                 xencode does not run git here until that setting is removed"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Run git with hooks and the file monitor switched off, whatever the
+/// settings say; diffs are asked for with `--no-ext-diff --no-textconv`.
+fn run_git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-c")
         .arg(no_hooks())
+        .args(["-c", "core.fsmonitor=false"])
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -94,6 +157,7 @@ pub fn commit_of(root: &Path, base: &str) -> Result<String, String> {
         ],
     ) {
         Ok(hash) if !hash.trim().is_empty() => Ok(hash.trim().to_string()),
+        Err(why) if why.contains("name a program") => Err(why),
         _ => Err(format!("`{base}` is not a commit in this repository")),
     }
 }
@@ -125,7 +189,7 @@ pub fn changed_files(worktree: &Path, base: &str) -> Result<Vec<String>, String>
 /// The worker's whole change against `base`, as a diff.
 pub fn diff(worktree: &Path, base: &str) -> Result<String, String> {
     include_new_files(worktree)?;
-    git(worktree, &["diff", base])
+    git(worktree, &["diff", "--no-ext-diff", "--no-textconv", base])
 }
 
 #[cfg(test)]
@@ -249,6 +313,71 @@ mod tests {
             !marker.exists(),
             "a repository hook ran under the engine's git"
         );
+    }
+
+    /// Security review, second round: hooks are not git's only way to run a
+    /// program. A repository setting that names one (here `core.fsmonitor`)
+    /// makes the engine refuse to run git there, naming the setting, and the
+    /// program never runs.
+    #[test]
+    fn a_repository_setting_that_runs_a_program_stops_the_engines_git() {
+        let (_outer, root) = repo();
+        let (path, _branch) = create(&root, "w1", "main").unwrap();
+        let marker = root.join("monitor-ran");
+        let script = root.join("monitor.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho ran > '{}'\n",
+                marker.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        git(
+            &root,
+            &[
+                "config",
+                "core.fsmonitor",
+                &script.to_string_lossy().replace('\\', "/"),
+            ],
+        );
+        std::fs::write(path.join("b.txt"), "x").unwrap();
+        let err = changed_files(&path, "main").unwrap_err();
+        assert!(err.contains("core.fsmonitor"), "{err}");
+        assert!(!marker.exists(), "the configured program ran");
+    }
+
+    #[test]
+    fn the_settings_that_run_programs_are_recognised() {
+        for key in [
+            "core.fsmonitor",
+            "core.sshcommand",
+            "diff.external",
+            "diff.foo.command",
+            "diff.foo.textconv",
+            "filter.lfs.smudge",
+            "filter.x.clean",
+            "filter.x.process",
+            "merge.ours.driver",
+            "gpg.program",
+            "gpg.ssh.program",
+        ] {
+            assert!(runs_a_program(key, "something"), "{key}");
+        }
+        assert!(!runs_a_program("core.fsmonitor", "false"), "switched off");
+        for key in [
+            "user.name",
+            "core.autocrlf",
+            "remote.origin.url",
+            "branch.main.merge",
+        ] {
+            assert!(!runs_a_program(key, "x"), "{key}");
+        }
     }
 
     #[test]
