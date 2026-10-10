@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (18 crates, about 3,000
+At its core is a fast, single-file **Rust** binary (19 crates, about 3,000
 tests) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -56,10 +56,14 @@ and fix your code — driven from your terminal, or from Zed through `xencode ac
   ACP editors) can use xencode as its agent: streamed answers, tool calls with diffs,
   permission prompts, a model choice and ByteBot tasks — all through the same engine a
   terminal on that folder uses.
+- **Leads a team of agents.** `xencode mcp serve --team` gives an agent such as Claude Code
+  seven tools to start worker agents (xencode, Claude Code, Codex, Gemini CLI or Antigravity),
+  each in its own git worktree, and to merge a worker's work only when the project's checks
+  pass on the merged result. Workers' permission prompts come to you, and `/workers` shows them.
 - **Measures itself.** `xencode eval run` seeds eight real bugs and grades each fix with the
   bug's own tests and the exact files it changed — and reports a failure as a failure.
 
-One Rust binary: 18 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
+One Rust binary: 19 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
 
 ## 📍 Where it stands, honestly
 
@@ -849,7 +853,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (about 2,900 tests)
+cargo test                          # Full workspace suite (about 3,050 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

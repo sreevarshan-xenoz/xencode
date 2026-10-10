@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-6`: the README, Quick Start ("Lead several agents") and user manual
+  describe leading a team of agents through `xencode mcp serve --team`.
 - `TM-5`: four outside agents can be workers: `claude-code` and `codex`
   through their ACP adapters (pinned at 0.89.1 and 2.2.2), `gemini --acp`
   and Antigravity's `agy_acp_server`. Each signs in with its vendor's API

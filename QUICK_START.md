@@ -259,6 +259,31 @@ It uses the model set in xencode (`xencode config set default_model <model>`).
 Edits show as diffs and ask before they happen; `/bytebot <task>` runs a
 ByteBot task there too. `CLI_GUIDE.md` → `xencode acp` says what works.
 
+### Lead several agents
+Give an agent you already use (Claude Code, say) xencode's team tools, and it
+can hand parts of a job to worker agents on the same project:
+
+```bash
+claude mcp add xencode -- xencode mcp serve --team --workspace /path/to/project
+```
+
+Then ask it, for example, to start two xencode workers, one per part of the job,
+and to merge each one when its checks pass. Each worker works in its own git
+worktree beside the project (`<repo>-team/w1` on branch `xencode/team/w1`), so
+they never edit the same files. A worker's permission prompts come to **you**,
+in any xencode window, never to the lead. `team_merge` lands a worker's work
+only when the project's checks pass on the merged result: the `checks` in
+`.xencode/team.toml`, or `cargo test --quiet` in a Rust project; with no checks
+you are asked. `/workers` shows the team in the terminal, where `s` stops a
+worker and `m` merges it.
+
+Claude Code, Codex, Gemini CLI and Antigravity can be workers too, once
+`xencode config set allow_external_workers true` is set and their API key is
+(or, after `xencode team login-optin <agent>`, your own login). `CLI_GUIDE.md`
+→ `xencode mcp serve --team` has the tools, the agents and the merge outcomes.
+A whole run with a real lead agent has not been watched yet; each piece was
+tested on its own with real git repositories and real xencode workers.
+
 ### Rented GPU (Google Colab)
 No GPU locally? Rent one for the length of a session and Xencode talks to it
 over an SSH tunnel. Requires the official `google-colab-cli` (>= 0.7.0) on PATH
