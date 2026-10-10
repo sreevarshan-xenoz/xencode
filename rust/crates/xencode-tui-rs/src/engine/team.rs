@@ -305,7 +305,8 @@ async fn merge_worker(
                 Some(asked) if committed || tip != asked => (
                     MergeOutcome::Refused {
                         why: format!(
-                            "{id}'s work changed after you were asked; merge it again to be                              asked about what it is now"
+                            "{id}'s work changed after you were asked; merge it again to be \
+                             asked about what it is now"
                         ),
                     },
                     None,
