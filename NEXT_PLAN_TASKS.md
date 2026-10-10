@@ -189,13 +189,13 @@ the server afterwards — it holds about 5.7 GB of the 6 GB GPU.
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-10-09, after `EN-2`: it lists 56 subcommands — the
+  (verified against `xencode --help` on 2026-10-10, after `M-7`: it lists 57 subcommands — the
   ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
   `session`, `verify`, `envcheck`, `agents`, `hotspots`, `impact`, `removal`,
   `generate`, `mutants`, `cov`, `perf`, `prices`, `test`, `release-notes`,
   `paths`, `migrate`, `deps`, `run`, `runs`, `merge`, `bootstrap`, `remote`,
-  `computers`, `compete`, `team`, `orchestrator`, `badge`, `engine` — and clap's
-  built-in `help`, 57 entries in the list)
+  `computers`, `compete`, `team`, `orchestrator`, `badge`, `engine`, `acp` — and clap's
+  built-in `help`, 58 entries in the list)
 - [x] Workspace gates green — **green on CI as of 2026-10-10** (commit `55e4a080`: both the
   "Xencode CI" and "Xencode CI/CD Pipeline" workflows passed, which run formatting, clippy and
   `cargo test --workspace` on Linux, plus the Windows build and the badge on Windows and macOS).
@@ -2320,7 +2320,9 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       status lines, read and prompt paths were driven against that same server.
       Token masking is pinned by `mask_secret`/`masked_url` tests; header values
       never reach a screen or an error line.)*
-- [ ] **M-7 — `xencode acp`: run the agent inside an editor.** Put the existing
+- [x] **M-7 — `xencode acp`: run the agent inside an editor.** Done 2026-10-10 against a
+      second ACP client (the protocol crate's own client side) and a real model; watching it in
+      Zed itself is left open below. Put the existing
       turn loop behind the ACP Rust SDK over stdio, mapping xencode's approval
       requests onto ACP permission requests and the plan/tool stream onto ACP
       session updates.
@@ -2366,7 +2368,13 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
     left it; a task asked "What is your favorite color?", the next message "blue" answered it and
     `color.txt` held `blue`. The editor's form dialog for questions (elicitation) is not used:
     questions are chat text in every editor.
-  - [ ] **M-7e — manuals; watched in real Zed.**
+  - [x] **M-7e — manuals.** Done 2026-10-10: `xencode acp` in `README.md`, `QUICK_START.md`,
+    `CLI_GUIDE.md` and `docs/USER_MANUAL.md`; counts are 18 crates and 57 commands; the full
+    test run after M-7d on Windows: 2989 passed, 36 failed (the 35 known Windows failures and one
+    model-download test that fails on and off), 30 ignored.
+  - [ ] **Watched in real Zed.** Not done by the agent: this session cannot click in Zed's
+    window. To check by hand: add the `agent_servers` entry from `QUICK_START.md`, open a folder,
+    and try a chat, an edit (allow it, then see the diff), the Model choice, and `/bytebot`.
 
 ## Milestone N — the full option space (research appendix, drafted 2026-09-23)
 

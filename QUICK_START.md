@@ -243,6 +243,21 @@ The panel shows only the real connection state — transport, session id,
 live members with roles. Flags, tokens, TLS and the audit log are in
 `CLI_GUIDE.md`.
 
+### Use xencode inside Zed
+Zed can run xencode as its agent. Add this to Zed's `settings.json` (point
+`command` at the full path of `xencode` if it is not on PATH):
+
+```json
+"agent_servers": {
+  "xencode": { "type": "custom", "command": "xencode", "args": ["acp"] }
+}
+```
+
+Open a folder in Zed, start a new thread in the Agent Panel and pick xencode.
+It uses the model set in xencode (`xencode config set default_model <model>`).
+Edits show as diffs and ask before they happen; `/bytebot <task>` runs a
+ByteBot task there too. `CLI_GUIDE.md` → `xencode acp` says what works.
+
 ### Rented GPU (Google Colab)
 No GPU locally? Rent one for the length of a session and Xencode talks to it
 over an SSH tunnel. Requires the official `google-colab-cli` (>= 0.7.0) on PATH
