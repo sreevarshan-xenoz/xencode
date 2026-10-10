@@ -747,6 +747,10 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     continue;
                 };
+                // On Windows an accepted socket inherits the listener's
+                // non-blocking mode, and a read that finds no bytes yet would
+                // end the request before its headers arrived.
+                let _ = stream.set_nonblocking(false);
                 let mut probe = Vec::new();
                 let mut buffer = [0u8; 1024];
                 // Read just the request line and headers: the body of a GET is
@@ -1106,6 +1110,10 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     continue;
                 };
+                // On Windows an accepted socket inherits the listener's
+                // non-blocking mode, and a read that finds no bytes yet would
+                // end the request before its headers arrived.
+                let _ = stream.set_nonblocking(false);
                 let mut probe = Vec::new();
                 let mut buffer = [0u8; 1024];
                 loop {
@@ -1398,6 +1406,10 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     continue;
                 };
+                // On Windows an accepted socket inherits the listener's
+                // non-blocking mode, and a read that finds no bytes yet would
+                // end the request before its headers arrived.
+                let _ = stream.set_nonblocking(false);
                 let mut probe = Vec::new();
                 let mut buffer = [0u8; 512];
                 loop {
