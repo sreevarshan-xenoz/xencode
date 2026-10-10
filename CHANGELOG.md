@@ -12,9 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `xencode run --detach` and `xencode run --resume <id> --detach` work on
   Windows. They used to refuse with "detached runs need fork(2)"; the run now
   starts `xencode` again as its worker, detached from the console, in the run's
-  folder, writing to the run's log. Unix keeps forking.
+  folder, writing to the run's log. Linux and macOS now start their worker the
+  same way (see the fix below).
 - `xencode run --stop` ends a detached run on Windows; it used to leave the
   worker running and say it might be ignoring SIGTERM.
+
+### Fixed — detached runs hung on Linux and macOS
+
+Since 2026-10-07 a detached run on Linux or macOS started its worker by
+forking the running `xencode` process. That process runs several threads,
+and a forked copy keeps only one of them, so a lock another thread held at
+that moment stayed locked and the worker could hang before its first model
+call: the run read "running" forever. The worker is now `xencode` started
+again with the hidden `run --child` options, as on Windows. Checked on Linux:
+a run whose model server was unreachable finished at once and read "Error"
+with the reason.
 
 ### Fixed — a detached process held open the output of the command that started it
 
