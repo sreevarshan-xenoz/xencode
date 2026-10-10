@@ -191,15 +191,7 @@ pub fn checked_merge_person_allowed(
 /// worker's change to one could choose the checks for this merge or every
 /// later one, so landing it is the person's call.
 fn decides_the_checks(file: &str) -> bool {
-    // Compared as the file system would see each name: Windows (and macOS by
-    // default) fold letter case, and Windows drops a name's trailing dots and
-    // spaces, so `.XENCODE./team.toml` is `.xencode/team.toml` there.
-    let parts: Vec<String> = file
-        .split(['/', '\\'])
-        .map(|p| p.trim_end_matches(['.', ' ']).to_lowercase())
-        .collect();
-    let first = parts.first().map(String::as_str).unwrap_or("");
-    let whole = parts.len() == 1;
+    let (first, _) = top_name(file);
     // A top name a file system may read as another one cannot be judged by
     // its spelling: a Windows short name (`XENCOD~1`), a character macOS
     // ignores, a look-alike letter. Anything but plain ASCII without `~`
@@ -207,19 +199,32 @@ fn decides_the_checks(file: &str) -> bool {
     let plain = first
         .chars()
         .all(|c| c.is_ascii_graphic() && c != '~' || c == ' ');
-    !plain
-        || first == ".xencode"
+    !plain || is_a_settings_file(file)
+}
+
+/// Whether `file` is one of the files the checks read, compared the same way
+/// [`decides_the_checks`] compares it but without counting names that only
+/// might alias one.
+fn is_a_settings_file(file: &str) -> bool {
+    let (first, whole) = top_name(file);
+    first == ".xencode"
         || first == ".cargo"
         || (whole && (first == "rust-toolchain" || first == "rust-toolchain.toml"))
 }
 
-/// Whether `file` is, spelled plainly, one of the files the checks read.
-fn is_a_settings_file(file: &str) -> bool {
-    let file = file.replace('\\', "/");
-    file.starts_with(".xencode/")
-        || file.starts_with(".cargo/")
-        || file == "rust-toolchain"
-        || file == "rust-toolchain.toml"
+/// A path's top folder (or the file, for a path of one part) as a file
+/// system would see it, and whether the path is that one part.
+fn top_name(file: &str) -> (String, bool) {
+    // Windows (and macOS by default) fold letter case, and Windows drops a
+    // name's trailing dots and spaces, so `.XENCODE./team.toml` is
+    // `.xencode/team.toml` there.
+    let mut parts = file.split(['/', '\\']);
+    let first = parts
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(['.', ' '])
+        .to_lowercase();
+    (first, parts.next().is_none())
 }
 
 /// The files named in the person's question: escaped, so a character that
@@ -621,6 +626,16 @@ mod tests {
     /// Security review: a short list must not hide the file that matters
     /// behind names chosen to fill it; the real settings files come first,
     /// and the question carries every name.
+    /// Security review: the settings file spelled another way (`.XENCODE/…`,
+    /// `.xencode./…`) is the same file on Windows, so it is named first too.
+    #[test]
+    fn a_settings_file_spelled_another_way_is_named_first() {
+        let mut names: Vec<String> = (0..6).map(|n| format!("XENCOD~{n}/a.txt")).collect();
+        names.push(".XENCODE./team.toml".to_string());
+        let said = named(&names);
+        assert!(said.contains(".XENCODE./team.toml"), "{said}");
+    }
+
     #[test]
     fn the_settings_file_itself_is_never_the_one_left_out() {
         let (_o, root, wt, branch) = project();
