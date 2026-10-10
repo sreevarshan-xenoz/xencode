@@ -235,7 +235,11 @@ mod tests {
             team.pump(&approvals);
             let (request, answer) = queue.try_recv().expect("asked as an approval");
             assert_eq!(request.class, ToolClass::External);
-            assert!(request.summary.starts_with("w1 asks"), "{}", request.summary);
+            assert!(
+                request.summary.starts_with("w1 asks"),
+                "{}",
+                request.summary
+            );
             answer.send(ApprovalAnswer::ApprovedForSession).unwrap();
             assert!(rx.await.unwrap(), "that prompt was allowed");
         }
