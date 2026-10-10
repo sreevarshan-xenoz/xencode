@@ -106,7 +106,7 @@ async fn until(
     tokio::time::timeout(wait, async {
         loop {
             match events.recv().await {
-                Some(WorkerEvent::Changed(s)) if s.state == state => return s,
+                Some(WorkerEvent::Changed(s)) if s.state == state => return *s,
                 Some(_) => {}
                 None => panic!("the worker's events ended before {state:?}"),
             }

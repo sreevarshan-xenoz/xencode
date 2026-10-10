@@ -76,7 +76,7 @@ impl Team {
         while let Ok(event) = self.events.try_recv() {
             match event {
                 WorkerEvent::Changed(snapshot) => {
-                    self.shown.insert(snapshot.id.clone(), snapshot);
+                    self.shown.insert(snapshot.id.clone(), *snapshot);
                 }
                 WorkerEvent::Merged { worker, outcome } => {
                     self.merges.insert(worker, MergeState::Finished(outcome));
@@ -323,7 +323,7 @@ async fn merge_worker(
     let unchecked = matches!(checks, Checks::None);
     let (first, tip) = run(checks.clone(), None).await.unwrap_or_else(refused);
     match (first, tip) {
-        (MergeOutcome::NeedsPerson { why }, Some(tip)) => {
+        (MergeOutcome::NeedsPerson { why, files }, Some(tip)) => {
             let short: String = tip.chars().take(10).collect();
             let request = ApprovalRequest {
                 tool: format!("merge {id}"),
@@ -333,12 +333,13 @@ async fn merge_worker(
                 } else {
                     format!("land {id} (commit {short}) on {base} once its checks pass? ({why})")
                 },
-                preview: String::new(),
+                // Every file the question is about, in full.
+                preview: files.join("\n"),
                 draft: ApprovalDraft::default(),
             };
             let (tx, rx) = oneshot::channel();
             if approvals.send((request, tx)).is_err() {
-                return MergeOutcome::NeedsPerson { why };
+                return MergeOutcome::NeedsPerson { why, files };
             }
             match rx.await {
                 Ok(ApprovalAnswer::Approved | ApprovalAnswer::ApprovedForSession) => {

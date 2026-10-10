@@ -31,7 +31,7 @@ pub struct LaunchSpec {
 #[derive(Debug)]
 pub enum WorkerEvent {
     /// Its state or what it said changed.
-    Changed(WorkerSnapshot),
+    Changed(Box<WorkerSnapshot>),
     /// Its merge ended (TM-3).
     Merged {
         worker: WorkerId,
@@ -155,7 +155,7 @@ impl Shared {
             change(&mut s);
             s.clone()
         };
-        let _ = self.events.send(WorkerEvent::Changed(copy));
+        let _ = self.events.send(WorkerEvent::Changed(Box::new(copy)));
     }
 
     fn id(&self) -> WorkerId {
