@@ -677,6 +677,8 @@ async fn run_case(options: &TaskEvalOptions, shape: BugShape, attempt: usize) ->
     let assembly = app.delegated_context(&task.path, &task.case.task, subagent_brief);
     let messages = App::chat_messages(assembly.turns);
     let mut run = app.agent_run(LoopSink::Chat, messages, &task.case.task);
+    // Every case is a fix that must change a file (SM-2 task mode).
+    run.expect_edit = true;
     run.tool_root = task.path.clone();
     run.trace_dir = trace_dir.clone();
     // The eval grades with its own grader command, on the outside of the run;
