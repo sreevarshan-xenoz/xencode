@@ -10,6 +10,7 @@ members = [
     "crates/xencode-providers-rs",
     "crates/xencode-mcp-rs",
     "crates/xencode-tui-rs",
+    "crates/xencode-acp-rs",
     "crates/xencode-analysis-rs",
     "crates/xencode-cli",
     "crates/xencode-server-rs",

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `M-7`: xencode inside Zed and other ACP editors
+
+- `xencode acp` runs xencode as an agent for editors that speak the Agent
+  Client Protocol, such as Zed. Each editor session works through its folder's
+  engine, like the terminal app. This first part covers chat with streamed
+  answers and stopping a turn; edits, approvals, the model choice and ByteBot
+  follow.
+
 ### Added — `EN-4`: detached runs work on Windows
 
 - `xencode run --detach` and `xencode run --resume <id> --detach` work on
