@@ -1208,9 +1208,23 @@ pub fn start_llama_server(
     // launch in this program able to report only that something did not happen.
     cmd.stderr(Stdio::piped());
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| LlamaCppError::Api(format!("failed to start llama-server: {e}")))?;
+    // On Linux a program another thread has just written can be "busy" for a
+    // moment, while a process that thread forked still holds it open for
+    // writing; that ends on its own, so the start is tried again briefly.
+    let mut tries = 0;
+    let mut child = loop {
+        match cmd.spawn() {
+            Err(e) if e.raw_os_error() == Some(26) && cfg!(unix) && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            spawned => {
+                break spawned.map_err(|e| {
+                    LlamaCppError::Api(format!("failed to start llama-server: {e}"))
+                })?
+            }
+        }
+    };
     let log = ServerLog::default();
     let mut reader = None;
     if let Some(stderr) = child.stderr.take() {
