@@ -113,9 +113,7 @@ fn git_with(dir: &Path, extra: &[String], args: &[&str]) -> Result<String, Strin
 /// Commit everything the worker changed in its worktree. `false` when there
 /// was nothing to commit.
 pub fn commit_work(worktree: &Path, message: &str) -> Result<bool, String> {
-    let mut add = vec!["add", "-A"];
-    add.extend_from_slice(&crate::worktree::WORK);
-    git(worktree, &add)?;
+    crate::worktree::stage_work(worktree, false)?;
     if git(worktree, &["diff", "--cached", "--name-only"])?
         .trim()
         .is_empty()
@@ -466,6 +464,20 @@ fn attempt_merge(
         Ok(c) => c,
         Err(why) => return done(MergeOutcome::Refused { why }),
     };
+    // A worker whose branch holds nothing the base lacks has nothing to land;
+    // calling that "landed" would read as its work being in.
+    if git(
+        root,
+        &["merge-base", "--is-ancestor", &branch_commit, &base_commit],
+    )
+    .is_ok()
+    {
+        return done(MergeOutcome::Refused {
+            why: format!(
+                "{branch} has nothing that is not on {base} already, so there is nothing to merge"
+            ),
+        });
+    }
     let path = scratch_path(root);
     let target = path.to_string_lossy().to_string();
     if let Err(why) = git(
@@ -752,6 +764,44 @@ mod tests {
         let tree = git(&wt, &["ls-tree", "-r", "--name-only", "HEAD"]);
         assert!(tree.contains("b.txt"), "{tree}");
         assert!(!tree.contains(".xencode"), "{tree}");
+    }
+
+    /// Found by a real lead run: a project whose `.gitignore` lists
+    /// `.xencode/` (the usual setup) must still commit and merge a worker's
+    /// work; naming the ignored folder to git made every merge fail.
+    #[test]
+    fn a_project_that_ignores_xencode_still_merges() {
+        let (_o, root, wt, branch) = project();
+        std::fs::write(
+            root.join(".gitignore"),
+            ".xencode/
+",
+        )
+        .unwrap();
+        git(&root, &["add", ".gitignore"]);
+        git(&root, &["commit", "-q", "-m", "ignore xencode"]);
+        git(&wt, &["merge", "-q", "main"]);
+        std::fs::create_dir_all(wt.join(".xencode")).unwrap();
+        std::fs::write(
+            wt.join(".xencode").join("session.json"),
+            "{}
+",
+        )
+        .unwrap();
+        std::fs::write(
+            wt.join("new.txt"),
+            "work
+",
+        )
+        .unwrap();
+        assert!(crate::worktree::has_changes(&wt).unwrap());
+        assert!(crate::worktree::changed_files(&wt, "main")
+            .unwrap()
+            .contains(&"new.txt".to_string()));
+        assert!(commit_work(&wt, "work").unwrap());
+        let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
+        assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+        assert!(root.join("new.txt").exists());
     }
 
     /// Security review: a top folder named with characters a file system may
@@ -1141,6 +1191,13 @@ mod tests {
         git(&root, &["commit", "-q", "-m", "first"]);
         let (wt, _branch) = crate::worktree::create(&root, "w1", "main").unwrap();
         assert!(!commit_work(&wt, "nothing").unwrap(), "nothing to commit");
+        // Found by a real lead run: merging such a worker said "landed" on
+        // the commit the base already had; it is said as nothing to merge.
+        let (_branch_wt, branch) = (wt.clone(), crate::worktree::branch_for("w1"));
+        match checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS) {
+            MergeOutcome::Refused { why } => assert!(why.contains("nothing"), "{why}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
