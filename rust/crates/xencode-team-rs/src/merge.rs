@@ -109,8 +109,13 @@ fn git_with(dir: &Path, extra: &[String], args: &[&str]) -> Result<String, Strin
 /// Commit everything the worker changed in its worktree. `false` when there
 /// was nothing to commit.
 pub fn commit_work(worktree: &Path, message: &str) -> Result<bool, String> {
-    git(worktree, &["add", "-A"])?;
-    if git(worktree, &["status", "--porcelain"])?.trim().is_empty() {
+    let mut add = vec!["add", "-A"];
+    add.extend_from_slice(&crate::worktree::WORK);
+    git(worktree, &add)?;
+    if git(worktree, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty()
+    {
         return Ok(false);
     }
     let who = identity(worktree);
@@ -526,6 +531,13 @@ mod tests {
         (outer, root, wt, branch)
     }
 
+    /// What an agent that runs git itself would do: commit everything,
+    /// `.xencode/` included, which `commit_work` never does for it.
+    fn agent_commits(wt: &Path) {
+        git(wt, &["add", "-A"]);
+        git(wt, &["commit", "-q", "-m", "the agent's own commit"]);
+    }
+
     fn checks(commands: &[&str]) -> Checks {
         Checks::Commands(commands.iter().map(|c| c.to_string()).collect())
     }
@@ -553,7 +565,7 @@ mod tests {
         let (_o, root, wt, branch) = project();
         std::fs::create_dir_all(wt.join(".xencode")).unwrap();
         std::fs::write(wt.join(".xencode").join("team.toml"), "checks = []\n").unwrap();
-        commit_work(&wt, "no more checks").unwrap();
+        agent_commits(&wt);
         let before = git(&root, &["rev-parse", "main"]);
         let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
         match &out {
@@ -582,6 +594,25 @@ mod tests {
         let out =
             checked_merge_person_allowed(&root, "main", &branch, &checks(&["git --version"]), SECS);
         assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+    }
+
+    /// A xencode worker's own engine keeps its state in the worktree's
+    /// `.xencode/`; that is not the worker's work, so it is never committed,
+    /// and a worktree holding only it has no changes.
+    #[test]
+    fn xencodes_own_state_in_a_worktree_is_not_the_workers_work() {
+        let (_o, _root, wt, _branch) = project();
+        std::fs::create_dir_all(wt.join(".xencode")).unwrap();
+        std::fs::write(wt.join(".xencode").join("session.json"), "{}\n").unwrap();
+        assert!(!crate::worktree::has_changes(&wt).unwrap());
+        assert!(!commit_work(&wt, "nothing").unwrap());
+
+        std::fs::write(wt.join("b.txt"), "work\n").unwrap();
+        assert!(crate::worktree::has_changes(&wt).unwrap());
+        assert!(commit_work(&wt, "work").unwrap());
+        let tree = git(&wt, &["ls-tree", "-r", "--name-only", "HEAD"]);
+        assert!(tree.contains("b.txt"), "{tree}");
+        assert!(!tree.contains(".xencode"), "{tree}");
     }
 
     /// Security review: a top folder named with characters a file system may
@@ -645,7 +676,7 @@ mod tests {
         }
         std::fs::create_dir_all(wt.join(".xencode")).unwrap();
         std::fs::write(wt.join(".xencode").join("team.toml"), "checks = []\n").unwrap();
-        commit_work(&wt, "many").unwrap();
+        agent_commits(&wt);
         match checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS) {
             MergeOutcome::NeedsPerson { why, files } => {
                 assert!(why.contains(".xencode/team.toml"), "{why}");
@@ -687,7 +718,7 @@ mod tests {
         let (_o, root, wt, branch) = project();
         std::fs::create_dir_all(wt.join(".xencode")).unwrap();
         std::fs::write(wt.join(".xencode").join("é.toml"), "x\n").unwrap();
-        commit_work(&wt, "settings").unwrap();
+        agent_commits(&wt);
         let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
         assert!(matches!(out, MergeOutcome::NeedsPerson { .. }), "{out:?}");
     }

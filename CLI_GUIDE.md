@@ -3784,6 +3784,35 @@ of the lead. To give Claude Code these tools:
 claude mcp add xencode -- xencode mcp serve --team --workspace /path/to/project
 ```
 
+**Which agents can be workers.** `xencode` itself is always one. Four outside
+agents can be too, started over the Agent Client Protocol at pinned versions:
+
+| `agent` | Started as | Signs in with |
+|---|---|---|
+| `claude-code` | `npx -y @agentclientprotocol/claude-agent-acp@0.89.1` | `ANTHROPIC_API_KEY` |
+| `codex` | `npx -y @agentclientprotocol/codex-acp@2.2.2` | `CODEX_API_KEY` or `OPENAI_API_KEY`, or xencode's `openai_api_key` |
+| `gemini` | `gemini --acp` | `GEMINI_API_KEY`, or xencode's `google_gemini_api_key` |
+| `antigravity` | `agy_acp_server` | `GEMINI_API_KEY`, used only when `~/.gemini/antigravity-cli/settings.json` says `"modelProvider": "gemini"` |
+
+An outside agent is another vendor's, so the Local Only posture refuses it until
+`xencode config set allow_external_workers true`. A key is handed to the worker
+alone, through its environment. Without a key, the worker can use your own login
+only after `xencode team login-optin <agent>`. `team_agents` says for each one
+whether it can start here and, if not, what to do. This is what it answered on
+a machine with Node.js and the Gemini CLI installed, no keys set and outside
+agents allowed:
+
+```
+claude-code  available: false  sign_in: set ANTHROPIC_API_KEY, or run `xencode team login-optin claude-code` to use your own login
+codex        available: false  sign_in: set CODEX_API_KEY or OPENAI_API_KEY (or `xencode config set openai_api_key …`), or run `xencode team login-optin codex` to use your own login
+gemini       available: false  sign_in: set GEMINI_API_KEY (or `xencode config set google_gemini_api_key …`), or run `xencode team login-optin gemini` to use your own login
+antigravity  available: false  missing: `agy_acp_server` is not on PATH; install Google Antigravity, which puts `agy_acp_server` on PATH
+```
+
+A worker's cost is what its agent reports, in US dollars, shown by `team_status`
+and the Team panel. A worker on your login is shown as `on your plan` and never
+priced; an agent that reports no cost shows none, never `$0`.
+
 **How `team_merge` lands a worker's work.** The worker must be `done` or
 `stopped`. Its uncommitted changes are committed on its branch, the branch is
 merged with the base in a scratch worktree, and the project's checks run on that
@@ -4848,7 +4877,24 @@ Lift one open veto. The name is refused if it matches the blocked worker (compar
 
 List the vetoes on record for this repository, all of them or only the ones still blocking.
 
-### `xencode team [list|show|plan|run] [--format text|json]`
+### `xencode team [list|show|plan|run|login-optin|clean]`
+
+`login-optin` and `clean` are about the worker agents a lead directs
+(`xencode mcp serve --team`):
+
+- `xencode team login-optin <agent>` — let `claude-code`, `codex`, `gemini` or
+  `antigravity` sign in with your own login when no API key is set. It prints
+  what that vendor's terms say about using a login through another program, with
+  the link, and turns the login on only when you type `yes`; anything else
+  leaves it off and exits non-zero. The choice is kept in `team-optins.json` in
+  xencode's settings folder.
+- `xencode team clean` — remove the worktrees of workers that are not running:
+  stopped, failed, or left by an engine that ended. It goes through the
+  project's engine, which knows which workers still run, and prints `removed:`
+  and one `kept <id>: <why>` line for each it left, such as a worktree with
+  changes nobody committed.
+
+The rest of this section is about team recipes.
 
 A **team recipe** is one TOML file under `.xencode/teams/` naming the roles on a
 team, which worker plays each one, and which checks gate that role's output. That

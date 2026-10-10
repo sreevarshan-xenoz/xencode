@@ -1344,6 +1344,19 @@ _arguments "${_arguments_options[@]}" : \
 ':name -- The recipe'\''s `name`, as written in the file:_default' \
 && ret=0
 ;;
+(login-optin)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':agent -- The agent\: claude-code, codex, gemini or antigravity:_default' \
+&& ret=0
+;;
+(clean)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__team__subcmd__help_commands" \
@@ -1369,6 +1382,14 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(login-optin)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clean)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -3095,6 +3116,14 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(login-optin)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clean)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -5100,13 +5129,25 @@ _xencode__subcmd__help__subcmd__team_commands() {
 'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
 'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run' \
 'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
+'login-optin:Let a worker agent sign in with your own login instead of an API key. Prints what that vendor'\''s terms say about it and asks for \`yes\`' \
+'clean:Remove the worktrees of worker agents that are not running (stopped, failed, or left by an engine that ended). A worktree with changes nobody committed is kept and named' \
     )
     _describe -t commands 'xencode help team commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__clean_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team clean commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__list_commands] )) ||
 _xencode__subcmd__help__subcmd__team__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help team list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__login-optin_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__login-optin_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team login-optin commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__plan_commands] )) ||
 _xencode__subcmd__help__subcmd__team__subcmd__plan_commands() {
@@ -6396,9 +6437,16 @@ _xencode__subcmd__team_commands() {
 'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
 'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run' \
 'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
+'login-optin:Let a worker agent sign in with your own login instead of an API key. Prints what that vendor'\''s terms say about it and asks for \`yes\`' \
+'clean:Remove the worktrees of worker agents that are not running (stopped, failed, or left by an engine that ended). A worktree with changes nobody committed is kept and named' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode team commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__clean_commands] )) ||
+_xencode__subcmd__team__subcmd__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team clean commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__help_commands] )) ||
 _xencode__subcmd__team__subcmd__help_commands() {
@@ -6407,9 +6455,16 @@ _xencode__subcmd__team__subcmd__help_commands() {
 'show:Print one recipe'\''s roles, workers, gates and capacity as it was written' \
 'plan:Compile one recipe into the task graph the scheduler would run, and show the order, the critical path, what limits it, and what a previous run of the same recipe took. Nothing is launched and no check is run' \
 'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
+'login-optin:Let a worker agent sign in with your own login instead of an API key. Prints what that vendor'\''s terms say about it and asks for \`yes\`' \
+'clean:Remove the worktrees of worker agents that are not running (stopped, failed, or left by an engine that ended). A worktree with changes nobody committed is kept and named' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode team help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__clean_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help clean commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__team__subcmd__help__subcmd__help_commands() {
@@ -6420,6 +6475,11 @@ _xencode__subcmd__team__subcmd__help__subcmd__help_commands() {
 _xencode__subcmd__team__subcmd__help__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode team help list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__login-optin_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__login-optin_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help login-optin commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__plan_commands] )) ||
 _xencode__subcmd__team__subcmd__help__subcmd__plan_commands() {
@@ -6440,6 +6500,11 @@ _xencode__subcmd__team__subcmd__help__subcmd__show_commands() {
 _xencode__subcmd__team__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'xencode team list commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__login-optin_commands] )) ||
+_xencode__subcmd__team__subcmd__login-optin_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team login-optin commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__plan_commands] )) ||
 _xencode__subcmd__team__subcmd__plan_commands() {

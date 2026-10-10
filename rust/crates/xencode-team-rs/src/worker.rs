@@ -25,6 +25,9 @@ pub struct LaunchSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Signed in with the person's own login, so its work is on their plan
+    /// and never priced.
+    pub on_plan: bool,
 }
 
 /// What a worker reports.
@@ -84,7 +87,7 @@ impl WorkerHandle {
             tool_calls: 0,
             tokens: None,
             cost_micros: None,
-            on_plan: false,
+            on_plan: spec.on_plan,
             merge: None,
         }));
         let (commands, receiver) = mpsc::unbounded_channel();
@@ -308,6 +311,71 @@ fn record(s: &mut WorkerSnapshot, update: &SessionUpdate) {
             }
         }
         SessionUpdate::ToolCall(_) => s.tool_calls += 1,
+        SessionUpdate::UsageUpdate(usage) => {
+            s.tokens = Some(usage.used);
+            // The agent's own running total, kept only in US dollars, the
+            // currency the rest of xencode prices in; a login is on the
+            // person's plan and never priced.
+            if let Some(cost) = &usage.cost {
+                if cost.currency == "USD"
+                    && cost.amount.is_finite()
+                    && cost.amount >= 0.0
+                    && !s.on_plan
+                {
+                    s.cost_micros = Some((cost.amount * 1_000_000.0).round() as u64);
+                }
+            }
+        }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::{Cost, UsageUpdate};
+
+    fn snapshot(on_plan: bool) -> WorkerSnapshot {
+        WorkerSnapshot {
+            id: "w1".into(),
+            agent: "codex".into(),
+            task: "t".into(),
+            state: WorkerState::Working,
+            branch: "b".into(),
+            worktree: PathBuf::from("/w"),
+            last_message: String::new(),
+            answer: String::new(),
+            error: None,
+            tool_calls: 0,
+            tokens: None,
+            cost_micros: None,
+            on_plan,
+            merge: None,
+        }
+    }
+
+    /// TM-5: the agent's own usage report gives the worker its tokens and,
+    /// in US dollars, its cost; a worker on the person's plan is never priced.
+    #[test]
+    fn a_usage_report_prices_a_key_worker_and_never_a_plan_worker() {
+        let usage = SessionUpdate::UsageUpdate(
+            UsageUpdate::new(53_000, 200_000).cost(Cost::new(0.045, "USD")),
+        );
+        let mut keyed = snapshot(false);
+        record(&mut keyed, &usage);
+        assert_eq!(keyed.tokens, Some(53_000));
+        assert_eq!(keyed.cost_micros, Some(45_000));
+
+        let mut planned = snapshot(true);
+        record(&mut planned, &usage);
+        assert_eq!(planned.tokens, Some(53_000));
+        assert_eq!(planned.cost_micros, None);
+
+        let mut euros = snapshot(false);
+        record(
+            &mut euros,
+            &SessionUpdate::UsageUpdate(UsageUpdate::new(1, 2).cost(Cost::new(1.0, "EUR"))),
+        );
+        assert_eq!(euros.cost_micros, None, "only dollars are kept");
     }
 }

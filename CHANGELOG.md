@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-5`: four outside agents can be workers: `claude-code` and `codex`
+  through their ACP adapters (pinned at 0.89.1 and 2.2.2), `gemini --acp`
+  and Antigravity's `agy_acp_server`. Each signs in with its vendor's API
+  key, or with the person's own login after `xencode team login-optin
+  <agent>`, which shows that vendor's terms first. `team_agents` says which
+  can start and what each one is missing; the Local Only posture refuses
+  them until `allow_external_workers` is on. A worker's cost is what its
+  agent reports, and a login is "on your plan", never priced.
+  `xencode team clean` removes the worktrees of workers that are not running.
+  A worker's automatic commit no longer includes xencode's own `.xencode/`
+  state.
 - `TM-4`: the worker panel (`/workers`) has a `team` section, one row per
   worker agent with its state, tool calls, merge outcome and last line; `s`
   stops the selected worker and `m` merges it. `/orchestrator team` filters to

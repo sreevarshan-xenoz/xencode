@@ -780,6 +780,13 @@ pub fn team_rows(workers: &[xencode_team_rs::WorkerSnapshot]) -> Vec<PanelRow> {
                 "{} · {} · {state} · {} tool call(s)",
                 w.id, w.agent, w.tool_calls
             );
+            // Cost as the agent reported it (TM-5); a login is on the person's
+            // plan, and an agent that reported none shows none, never $0.
+            if w.on_plan {
+                line.push_str(" · on your plan");
+            } else if let Some(micros) = w.cost_micros {
+                line.push_str(&format!(" · ${:.4}", micros as f64 / 1_000_000.0));
+            }
             match &w.merge {
                 Some(MergeState::Running) => line.push_str(" · merging"),
                 Some(MergeState::Finished(outcome)) => line.push_str(match outcome {
@@ -1279,6 +1286,19 @@ mod tests {
             rows[0].detail().contains("1 test failed"),
             "{}",
             rows[0].detail()
+        );
+
+        let mut priced = worker.clone();
+        priced.merge = None;
+        priced.cost_micros = Some(45_000);
+        assert!(team_rows(std::slice::from_ref(&priced))[0]
+            .line
+            .contains(" · $0.0450"));
+        priced.on_plan = true;
+        let planned = &team_rows(std::slice::from_ref(&priced))[0].line;
+        assert!(
+            planned.contains(" · on your plan") && !planned.contains('$'),
+            "{planned}"
         );
 
         let none = team_rows(&[]);
