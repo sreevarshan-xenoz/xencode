@@ -3768,7 +3768,7 @@ client) uses to direct worker agents on the workspace's project:
 | Tool | What it does |
 |---|---|
 | `team_agents` | the worker agents this machine can start |
-| `team_start {agent, task, base?}` | starts a worker in its own git worktree (`<repo>-team/<id>` on branch `xencode/team/<id>`) off `base`, which must be a local branch (default: the checked-out branch); returns its id (`w1`, …) |
+| `team_start {agent, task, base?}` | starts a worker in its own git worktree (`<repo>-team/<id>` on branch `xencode/team/<id>`) off `base`, which must be a local branch (default: the checked-out branch); returns its id (`w1`, …). A file the task names with `@path` is claimed for that worker in `.xencode/leases.json`, as `/spawn` does; while another worker holds it, the start is refused, naming that worker, until it is merged or cleaned |
 | `team_status {id?}` | one worker, or all: its state (`starting`, `working`, `needs_you`, `done`, `failed`, `stopped`), last message and tool calls |
 | `team_result {id}` | its latest answer and its diff against the base branch |
 | `team_message {id, text}` | a follow-up in the same session, once its turn is done |

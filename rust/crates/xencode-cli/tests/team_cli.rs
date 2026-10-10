@@ -1103,3 +1103,56 @@ async fn a_worker_whose_agent_dies_between_turns_is_failed() {
         "worktree kept"
     );
 }
+
+/// Spec §5: a file a task names with `@path` is claimed for that worker, as
+/// `/spawn` does; a second worker naming it is refused while the first holds
+/// it, and can start once the first is cleaned away.
+#[tokio::test]
+async fn a_file_named_with_at_is_claimed_for_one_worker_at_a_time() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let start = |n: u64, task: &str| {
+        (
+            n,
+            TeamRequest::Start {
+                agent: "xencode".into(),
+                task: task.into(),
+                base: None,
+            },
+        )
+    };
+    let (n, request) = start(1, "fix the greeting in @a.txt");
+    let (ok, body) = ask(&mut link, n, request).await;
+    assert!(ok, "{body}");
+    let leases = std::fs::read_to_string(root.join(".xencode").join("leases.json")).unwrap();
+    assert!(
+        leases.contains("a.txt") && leases.contains("team-w1"),
+        "{leases}"
+    );
+
+    let (n, request) = start(2, "also change @a.txt");
+    let (ok, body) = ask(&mut link, n, request).await;
+    assert!(!ok, "{body}");
+    let said = body.as_str().unwrap();
+    assert!(said.contains("a.txt") && said.contains("team-w1"), "{said}");
+
+    team_until(&mut link, "w1", WorkerState::Done).await;
+    let (ok, _) = ask(&mut link, 3, TeamRequest::Stop { id: "w1".into() }).await;
+    assert!(ok);
+    team_until(&mut link, "w1", WorkerState::Stopped).await;
+    let started = std::time::Instant::now();
+    loop {
+        let (ok, body) = ask(&mut link, 4, TeamRequest::Clean).await;
+        assert!(ok, "{body}");
+        if body["removed"].to_string().contains("w1") {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(40), "{body}");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let (n, request) = start(5, "also change @a.txt");
+    let (ok, body) = ask(&mut link, n, request).await;
+    assert!(ok, "the claim ended with w1: {body}");
+}
