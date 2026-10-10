@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-1`, `TM-3` (security fixes): cleaning the team folder never follows a
+  symlink or junction into another folder, and `check_env` cannot pass a
+  variable whose name marks a secret.
+- `L-10`: starting `llama-server` is tried again for a moment when Linux
+  says the program file is busy, which happens right after it was written.
 - `TM-1`, `TM-3`, `TM-4` (smaller review fixes): a worker's base must be a
   local branch; a worker being merged is not sent new messages; the lead's
   `team_merge` waits as long as the checks may run; `xencode team clean`

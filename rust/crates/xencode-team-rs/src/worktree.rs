@@ -177,7 +177,7 @@ pub fn leftover_folders(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
         let is_worker = is_worker_id(&name);
         let path = entry.path();
         let listed = registered.iter().any(|r| same_folder(r, &path));
-        if is_worker && path.is_dir() && !listed {
+        if is_worker && is_real_dir(&path) && !listed {
             found.push((name, path));
         }
     }
@@ -219,6 +219,9 @@ pub fn sweep_scratch(root: &Path) -> Vec<String> {
     let Ok(dir) = team_dir(root) else {
         return Vec::new();
     };
+    if !is_real_dir(&dir) {
+        return Vec::new();
+    }
     let mut removed = Vec::new();
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -226,7 +229,7 @@ pub fn sweep_scratch(root: &Path) -> Vec<String> {
             !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit() || c == '-')
         });
         let path = entry.path();
-        if !scratch || !path.is_dir() {
+        if !scratch || !is_real_dir(&path) {
             continue;
         }
         let target = path.to_string_lossy().to_string();
@@ -240,6 +243,24 @@ pub fn sweep_scratch(root: &Path) -> Vec<String> {
         }
     }
     removed
+}
+
+/// Whether `path` is a folder itself, not a symlink or (on Windows) a
+/// junction or other reparse point standing for another folder. Nothing is
+/// ever deleted through a link: emptying it would empty what it points at.
+pub fn is_real_dir(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
+    }
+    meta.file_type().is_dir() && !meta.file_type().is_symlink()
 }
 
 /// Whether `name` is a worker id: `w` and a number.
@@ -314,6 +335,13 @@ pub fn remove(root: &Path, path: &Path, branch: &str) -> Result<(), String> {
     let target = path.to_string_lossy().to_string();
     // Only ever a worker's own folder: a worktree made elsewhere on a
     // worker-looking branch (by a worker running git itself) is not deleted.
+    let linked = path.exists() && !is_real_dir(path)
+        || team_dir(root).is_ok_and(|d| d.exists() && !is_real_dir(&d));
+    if linked {
+        return Err(format!(
+            "{target} is a link, not a worker's own folder; it is left alone"
+        ));
+    }
     if !is_workers_folder(root, path) {
         return Err(format!(
             "{target} is not a worker's folder in {}; it is left alone",
@@ -475,6 +503,53 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    }
+
+    /// Security review: a link in the team folder (a symlink, or a junction
+    /// on Windows) named like scratch or a worker is never followed into
+    /// another folder and emptied.
+    #[test]
+    fn a_link_in_the_team_folder_is_never_followed_when_cleaning() {
+        let (outer, root) = repo();
+        let precious = outer.path().join("precious");
+        std::fs::create_dir_all(&precious).unwrap();
+        std::fs::write(
+            precious.join("keep.txt"),
+            "mine
+",
+        )
+        .unwrap();
+        let dir = team_dir(&root).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["merge-9-9", "w8"] {
+            let link = dir.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&precious, &link).unwrap();
+            #[cfg(windows)]
+            {
+                let made = Command::new("cmd")
+                    .arg("/C")
+                    .arg("mklink")
+                    .arg("/J")
+                    .arg(&link)
+                    .arg(&precious)
+                    .output()
+                    .unwrap();
+                assert!(
+                    made.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&made.stderr)
+                );
+            }
+        }
+        let swept = sweep_scratch(&root);
+        assert!(swept.is_empty(), "{swept:?}");
+        assert!(leftover_folders(&root).unwrap().is_empty());
+        assert!(remove(&root, &dir.join("w8"), "xencode/team/w8").is_err());
+        assert!(
+            precious.join("keep.txt").exists(),
+            "a linked folder was emptied"
+        );
     }
 
     /// Review: scratch worktrees a merge left are swept; nothing else in the
