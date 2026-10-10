@@ -906,3 +906,48 @@ async fn live_gemini_answers_as_a_worker() {
 async fn live_antigravity_answers_as_a_worker() {
     an_outside_agent_answers("antigravity").await;
 }
+
+/// Security review: the wrapper an outside agent starts through runs the
+/// program in the folder it is given, with the named variables gone.
+#[test]
+fn team_exec_runs_in_its_folder_without_the_hidden_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let printer: Vec<&str> = if cfg!(windows) {
+        vec![
+            "cmd",
+            "/C",
+            "cd & echo [%XENCODE_TEST_HIDDEN%] [%XENCODE_TEST_KEPT%]",
+        ]
+    } else {
+        vec![
+            "sh",
+            "-c",
+            "pwd; echo \"[${XENCODE_TEST_HIDDEN-gone}] [${XENCODE_TEST_KEPT}]\"",
+        ]
+    };
+    let out = Command::new(env!("CARGO_BIN_EXE_xencode"))
+        .args(["team", "exec", "--cwd"])
+        .arg(dir.path())
+        .args(["--unset", "XENCODE_TEST_HIDDEN", "--"])
+        .args(&printer)
+        .env("XENCODE_TEST_HIDDEN", "FAKE-NOT-A-REAL-KEY")
+        .env("XENCODE_TEST_KEPT", "kept")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        out.status.success(),
+        "{said}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!said.contains("FAKE-NOT-A-REAL-KEY"), "{said}");
+    assert!(said.contains("[kept]"), "{said}");
+    let name = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert!(said.contains(&name), "ran in its folder: {said}");
+}

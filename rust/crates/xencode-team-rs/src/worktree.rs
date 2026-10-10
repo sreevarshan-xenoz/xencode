@@ -169,9 +169,7 @@ pub fn leftover_folders(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let is_worker = name.len() > 1
-            && name.starts_with('w')
-            && name[1..].chars().all(|c| c.is_ascii_digit());
+        let is_worker = is_worker_id(&name);
         let path = entry.path();
         let listed = registered.iter().any(|r| same_folder(r, &path));
         if is_worker && path.is_dir() && !listed {
@@ -179,6 +177,24 @@ pub fn leftover_folders(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
         }
     }
     Ok(found)
+}
+
+/// Whether `name` is a worker id: `w` and a number.
+pub fn is_worker_id(name: &str) -> bool {
+    name.len() > 1 && name.starts_with('w') && name[1..].chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether `path` is a worker's folder: directly inside the project's team
+/// folder and named like a worker.
+fn is_workers_folder(root: &Path, path: &Path) -> bool {
+    let (Ok(dir), Some(parent), Some(name)) = (
+        team_dir(root),
+        path.parent(),
+        path.file_name().and_then(|n| n.to_str()),
+    ) else {
+        return false;
+    };
+    is_worker_id(name) && same_folder(&dir, parent)
 }
 
 fn same_folder(a: &Path, b: &Path) -> bool {
@@ -233,6 +249,16 @@ pub fn remove(root: &Path, path: &Path, branch: &str) -> Result<(), String> {
     let root = &plain(root);
     let path = &plain(path);
     let target = path.to_string_lossy().to_string();
+    // Only ever a worker's own folder: a worktree made elsewhere on a
+    // worker-looking branch (by a worker running git itself) is not deleted.
+    if !is_workers_folder(root, path) {
+        return Err(format!(
+            "{target} is not a worker's folder in {}; it is left alone",
+            team_dir(root)
+                .map(|d| d.display().to_string())
+                .unwrap_or_default()
+        ));
+    }
     // git unregisters the worktree and deletes its files even when the folder
     // itself cannot go yet (on Windows, while a process works in it); a later
     // try then finds no worktree, so what git left is finished here.
@@ -274,7 +300,13 @@ pub fn team_worktrees(root: &Path) -> Result<Vec<(String, PathBuf, String)>, Str
             .find_map(|l| l.strip_prefix("branch refs/heads/"));
         if let (Some(path), Some(branch)) = (path, branch) {
             if let Some(id) = branch.strip_prefix(BRANCH_PREFIX) {
-                found.push((id.to_string(), PathBuf::from(path), branch.to_string()));
+                let path = PathBuf::from(path);
+                // Only worktrees where xencode makes them, named for their
+                // worker; one made anywhere else is not the team's.
+                let named = path.file_name().and_then(|n| n.to_str()) == Some(id);
+                if named && is_workers_folder(root, &path) {
+                    found.push((id.to_string(), path, branch.to_string()));
+                }
             }
         }
     }
@@ -380,6 +412,44 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    }
+
+    /// Security review: a worker could make a worktree of its own anywhere
+    /// on a worker-looking branch; removing one is refused unless it is a
+    /// worker's folder inside the project's team folder, so nothing else is
+    /// ever deleted.
+    #[test]
+    fn only_a_workers_own_folder_is_ever_removed() {
+        let (outer, root) = repo();
+        let elsewhere = outer.path().join("precious");
+        let target = elsewhere.to_string_lossy().to_string();
+        super::git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "xencode/team/w9",
+                &target,
+                "main",
+            ],
+        )
+        .unwrap();
+        std::fs::write(elsewhere.join("keep.txt"), "mine\n").unwrap();
+        let err = remove(&root, &elsewhere, "xencode/team/w9").unwrap_err();
+        assert!(err.contains("not a worker's folder"), "{err}");
+        assert!(elsewhere.join("keep.txt").exists());
+        let named = team_dir(&root).unwrap().join("notes");
+        std::fs::create_dir_all(&named).unwrap();
+        assert!(remove(&root, &named, "xencode/team/notes").is_err());
+        assert!(named.exists());
+        let listed: Vec<String> = team_worktrees(&root)
+            .unwrap()
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        assert!(!listed.contains(&"w9".to_string()), "{listed:?}");
     }
 
     /// git can unregister a worktree and delete its files but leave the
