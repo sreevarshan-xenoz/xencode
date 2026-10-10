@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 xencode-models-rs = { path = "../xencode-models-rs" }
+xencode-team-rs = { path = "../xencode-team-rs" }
 xencode-providers-rs = { path = "../xencode-providers-rs" }
 xencode-memory-rs = { path = "../xencode-memory-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }

@@ -630,6 +630,8 @@ pub struct App<'a> {
         tokio::sync::oneshot::Sender<crate::agent_tools::ApprovalAnswer>,
     )>,
     pub approval_scroll: usize,
+    /// The engine's team of worker agents (TM); empty in a window.
+    pub team: crate::engine::team::Team,
     /// Sender the spawned tool loops use to raise approval prompts.
     pub approval_tx: mpsc::UnboundedSender<(
         crate::agent_tools::ApprovalRequest,
@@ -3210,6 +3212,7 @@ impl<'a> App<'a> {
             tasks_root: None,
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
+            team: Default::default(),
             approval_tx,
             approval_rx: Some(approval_rx),
             ask_tx,

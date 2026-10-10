@@ -55,6 +55,9 @@ pub struct View {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm_calls: Option<u64>,
+    /// The team of worker agents (TM).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<Vec<xencode_team_rs::WorkerSnapshot>>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -87,6 +90,7 @@ struct Agent {
     model: String,
     llm_calls: u64,
     timings: Option<LlamaCppTimings>,
+    team: Vec<xencode_team_rs::WorkerSnapshot>,
 }
 
 impl Agent {
@@ -123,6 +127,7 @@ impl Agent {
             model: app.config.default_model.clone(),
             llm_calls: app.total_llm_calls,
             timings: app.last_llamacpp_timings.clone(),
+            team: app.team.snapshots(),
         }
     }
 }
@@ -155,6 +160,7 @@ impl Watcher {
             model: Some(agent.model.clone()),
             llm_calls: Some(agent.llm_calls),
             timings: Some(agent.timings.clone()),
+            team: Some(agent.team.clone()),
         };
         self.last = Some(agent);
         view
@@ -205,6 +211,7 @@ impl Watcher {
         field!(model);
         field!(llm_calls);
         field!(timings);
+        field!(team);
 
         self.last = Some(now);
         changed.then_some(view)

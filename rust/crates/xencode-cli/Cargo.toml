@@ -20,6 +20,7 @@ xencode-memory-rs = { path = "../xencode-memory-rs" }
 xencode-providers-rs = { path = "../xencode-providers-rs" }
 xencode-tui-rs = { path = "../xencode-tui-rs" }
 xencode-acp-rs = { path = "../xencode-acp-rs" }
+xencode-team-rs = { path = "../xencode-team-rs" }
 xencode-server-rs = { path = "../xencode-server-rs" }
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-plugin-rs = { path = "../xencode-plugin-rs" }
