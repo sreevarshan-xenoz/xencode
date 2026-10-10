@@ -275,9 +275,13 @@ fn start_detached(mut cmd: std::process::Command) -> std::io::Result<u32> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        // A console of its own that is never shown. With no console at all
+        // (`DETACHED_PROCESS`), Windows opens a new visible console window
+        // for every command-line program the process runs — git, a shell
+        // command, llama.cpp — and each one flashes up and closes.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
     #[cfg(unix)]
     {
@@ -426,6 +430,65 @@ mod tests {
         let exe = xencode_core_rs::sys::which(exe).expect("a long-running program on PATH");
         let pid = spawn_detached_logged(&exe, &args, &dir, &dir.join("log")).unwrap();
         std::fs::write(dir.join("pid"), pid.to_string()).unwrap();
+    }
+
+    #[cfg(windows)]
+    const CONSOLE_PROBE: &str = "XENCODE_TEST_CONSOLE_PROBE";
+
+    /// Does nothing in a normal run. Started detached as the probe, it
+    /// writes how many processes share its console: 0 when it has none.
+    #[cfg(windows)]
+    #[test]
+    fn console_probe_reports_its_console() {
+        let Some(dir) = std::env::var_os(CONSOLE_PROBE) else {
+            return;
+        };
+        let mut ids = [0u32; 16];
+        // SAFETY: `ids` is a local buffer of the length passed.
+        let count = unsafe {
+            windows_sys::Win32::System::Console::GetConsoleProcessList(
+                ids.as_mut_ptr(),
+                ids.len() as u32,
+            )
+        };
+        std::fs::write(std::path::Path::new(&dir).join("count"), count.to_string()).unwrap();
+    }
+
+    /// A detached process with no console at all makes Windows open a new,
+    /// visible console window for every command-line program it runs (git,
+    /// a shell command), which flashes up and closes. A detached process
+    /// has a hidden console instead, which its programs share.
+    #[cfg(windows)]
+    #[test]
+    fn a_detached_process_has_a_hidden_console_its_programs_share() {
+        let _turn = no_process_starts();
+        let dir = tempfile::tempdir().unwrap();
+        // Only the probe reads this; the lock keeps other starts away.
+        std::env::set_var(CONSOLE_PROBE, dir.path());
+        let exe = std::env::current_exe().unwrap();
+        let started = spawn_detached(
+            &exe,
+            &[
+                "--exact",
+                "tests::console_probe_reports_its_console",
+                "--test-threads",
+                "1",
+            ],
+        );
+        std::env::remove_var(CONSOLE_PROBE);
+        started.unwrap();
+        let count_file = dir.path().join("count");
+        let begin = std::time::Instant::now();
+        while !count_file.exists() && begin.elapsed() < std::time::Duration::from_secs(20) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let count: u32 = std::fs::read_to_string(&count_file)
+            .expect("the probe ran")
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(count >= 1, "the detached process has no console of its own");
     }
 
     /// A program reading what `xencode run --detach` prints (a shell's
