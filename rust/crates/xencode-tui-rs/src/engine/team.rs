@@ -192,6 +192,7 @@ impl Team {
             }
             match worktree::remove(root, &path, &worktree::branch_for(&id)) {
                 Ok(()) => {
+                    release_claim(root, &worktree::branch_for(&id));
                     self.workers.remove(&id);
                     self.shown.remove(&id);
                     removed.push(id);
@@ -225,6 +226,7 @@ impl Team {
             }
             match worktree::remove(root, &path, &branch) {
                 Ok(()) => {
+                    release_claim(root, &worktree::branch_for(&id));
                     self.workers.remove(&id);
                     self.shown.remove(&id);
                     removed.push(id);
@@ -354,6 +356,9 @@ impl Team {
             };
             audit_merge(&id_owned, &s, &base, &outcome);
             if matches!(outcome, MergeOutcome::Landed { .. }) {
+                release_claim(&root, &s.branch);
+            }
+            if matches!(outcome, MergeOutcome::Landed { .. }) {
                 // Its work is in; the worker ends and its worktree goes. On
                 // Windows a folder whose files a process holds open cannot be
                 // removed, and the worker's own engine keeps the worktree's
@@ -421,7 +426,13 @@ impl Team {
                  must be one"
             ));
         }
-        let (path, branch) = worktree::create(root, &id, &base)?;
+        let (path, branch) = match claim_and_create(root, &id, task, &base) {
+            Ok(made) => made,
+            Err(why) => {
+                self.next -= 1;
+                return Err(why);
+            }
+        };
         self.bases.insert(id.clone(), base.clone());
         let handle = WorkerHandle::start(
             id.clone(),
@@ -538,6 +549,67 @@ async fn merge_worker(
         }
         (other, _) => other,
     }
+}
+
+/// Where the claims on files live, shared with `/spawn`.
+fn leases_file(root: &Path) -> PathBuf {
+    root.join(xencode_context_rs::XENCODE_DIR)
+        .join("leases.json")
+}
+
+/// Make worker `id`'s worktree. A file its task names with `@path` is claimed
+/// for it first, as `/spawn` does; while another worker holds one, the start
+/// is refused in words naming that worker.
+fn claim_and_create(
+    root: &Path,
+    id: &str,
+    task: &str,
+    base: &str,
+) -> Result<(PathBuf, String), String> {
+    let declared = crate::app::spawn_declared_files(task);
+    if declared.is_empty() {
+        return worktree::create(root, id, base);
+    }
+    let file = leases_file(root);
+    let mut registry = xencode_core_rs::LeaseRegistry::load(root.to_path_buf(), &file)?;
+    let branch = worktree::branch_for(id);
+    let decision =
+        registry.request_lease_with(&format!("team-{id}"), task, &branch, &declared, |_| {
+            worktree::create(root, id, base).map(|(path, _)| path)
+        })?;
+    match decision {
+        xencode_core_rs::LeaseDecision::Granted(lease) => {
+            registry
+                .save(&file)
+                .map_err(|e| format!("cannot save {}: {e}", file.display()))?;
+            Ok((lease.worktree_path, branch))
+        }
+        // Not saved: the lead is told now, rather than the start being queued
+        // where it cannot see it.
+        xencode_core_rs::LeaseDecision::WaitBeforeLaunch { conflict } => Err(format!(
+            "`{}` is claimed by {} (\"{}\"); start this worker once that one is merged or cleaned",
+            conflict.conflicting_file,
+            conflict.held_by_worker,
+            shown(&conflict.held_by_task)
+        )),
+        xencode_core_rs::LeaseDecision::Refused { reason } => Err(reason),
+    }
+}
+
+/// End the claim a worker's branch holds, if any.
+fn release_claim(root: &Path, branch: &str) {
+    let file = leases_file(root);
+    let Ok(mut registry) = xencode_core_rs::LeaseRegistry::load(root.to_path_buf(), &file) else {
+        return;
+    };
+    let Some(lease_id) = registry
+        .lease_for_branch(branch)
+        .map(|l| l.lease_id.clone())
+    else {
+        return;
+    };
+    registry.end_lease(&lease_id);
+    let _ = registry.save(&file);
 }
 
 /// Ask the person before merging a worker an earlier engine left: xencode
