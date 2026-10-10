@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 use xencode_tui_rs::engine::address::Address;
 use xencode_tui_rs::engine::link::{self, EngineLink};
+use xencode_tui_rs::engine::view::View;
 
 /// Every open session of this `xencode acp` process, by session id.
 #[derive(Clone, Default)]
@@ -49,18 +50,21 @@ pub struct Session {
     pub busy: bool,
     /// Wakes the running turn when the editor cancels it.
     pub cancel: Arc<Notify>,
+    /// The engine's model, as last set or told.
+    pub model: String,
 }
 
 impl Session {
     /// Check `cwd` and reach its engine, starting one if none answers.
     pub async fn open(cwd: &Path) -> Result<Session, String> {
         let project = checked_folder(cwd)?;
-        let link = connect(&project).await?;
+        let (link, view) = connect(&project).await?;
         Ok(Session {
             project,
             link: Some(link),
             busy: false,
             cancel: Arc::new(Notify::new()),
+            model: view.model.unwrap_or_default(),
         })
     }
 }
@@ -76,8 +80,9 @@ pub fn checked_folder(cwd: &Path) -> Result<PathBuf, String> {
 }
 
 /// Connect to the engine for `project`, starting it detached when none
-/// answers, as the terminal app does.
-pub async fn connect(project: &Path) -> Result<EngineLink, String> {
+/// answers, as the terminal app does. Gives back the engine's full view
+/// too.
+pub async fn connect(project: &Path) -> Result<(EngineLink, View), String> {
     let addr = Address::for_project(project)?;
     let folder = project.to_string_lossy().to_string();
     let start: link::Starter = Arc::new(move || -> std::io::Result<()> {
@@ -85,6 +90,5 @@ pub async fn connect(project: &Path) -> Result<EngineLink, String> {
         xencode_live_rs::spawn_detached(&exe, &["engine", "--project", &folder]).map(|_| ())
     });
     let name = format!("acp {}", std::process::id());
-    let (link, _view) = link::connect_or_start_as(&addr, &*start, &name).await?;
-    Ok(link)
+    link::connect_or_start_as(&addr, &*start, &name).await
 }

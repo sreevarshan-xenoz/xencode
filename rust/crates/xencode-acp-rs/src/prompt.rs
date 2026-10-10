@@ -61,6 +61,10 @@ pub async fn start(
     connection: ConnectionTo<Client>,
 ) -> Result<(), agent_client_protocol::Error> {
     let id = req.session_id.to_string();
+    let text = prompt_text(&req.prompt);
+    if let Some(why) = crate::options::window_only(&text) {
+        return responder.respond_with_error(error(crate::INVALID, why));
+    }
     let Some(state) = sessions.get(&id) else {
         return responder.respond_with_error(error(crate::INVALID, format!("no session {id}")));
     };
@@ -75,7 +79,7 @@ pub async fn start(
         let link = match s.link.take() {
             Some(link) => link,
             None => match session::connect(&s.project).await {
-                Ok(link) => link,
+                Ok((link, _view)) => link,
                 Err(why) => {
                     return responder.respond_with_error(error(
                         INTERNAL,
@@ -88,7 +92,6 @@ pub async fn start(
         s.cancel = Arc::new(Notify::new());
         (link, Arc::clone(&s.cancel), s.project.clone())
     };
-    let text = prompt_text(&req.prompt);
     if !link.send(&ClientMsg::SubmitChat { prompt: text }) {
         finish(&state, None).await;
         return responder.respond_with_error(error(
