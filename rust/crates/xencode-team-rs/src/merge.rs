@@ -154,16 +154,8 @@ fn merge_with(
         Checks::Cargo => vec!["cargo test --quiet".to_string()],
         Checks::Commands(c) => c.clone(),
     };
-    match git(root, &["status", "--porcelain", "--untracked-files=no"]) {
-        Ok(dirty) if !dirty.trim().is_empty() => {
-            return MergeOutcome::Refused {
-                why: "the working copy has uncommitted changes; commit or stash them first, \
-                      so the merge cannot land on top of them"
-                    .to_string(),
-            }
-        }
-        Err(why) => return MergeOutcome::Refused { why },
-        Ok(_) => {}
+    if let Some(refused) = dirty_working_copy(root) {
+        return refused;
     }
     for attempt in 0..2 {
         let outcome = attempt_merge(root, base, branch, &commands, timeout, allowed);
@@ -277,8 +269,11 @@ fn check_command(dir: &Path, command: &str) -> Command {
     };
     #[cfg(not(windows))]
     let mut cmd = {
+        use std::os::unix::process::CommandExt;
         let mut c = Command::new("sh");
-        c.arg("-c").arg(command);
+        // Its own process group, so a check past its time is ended with
+        // everything it started.
+        c.arg("-c").arg(command).process_group(0);
         c
     };
     if let Some(path) = std::env::var_os("PATH") {
@@ -286,6 +281,46 @@ fn check_command(dir: &Path, command: &str) -> Command {
     }
     cmd.current_dir(dir);
     cmd
+}
+
+/// End process `pid` and every process it started: a check's shell is not
+/// the only thing a check runs (`cargo test` starts the test binaries).
+fn end_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        let system = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let _ = Command::new(system.join("System32").join("taskkill.exe"))
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        // The check runs in its own process group, whose id is its pid.
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{pid}")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+/// A refusal when the person's working copy has changes nobody committed.
+fn dirty_working_copy(root: &Path) -> Option<MergeOutcome> {
+    match git(root, &["status", "--porcelain", "--untracked-files=no"]) {
+        Ok(dirty) if !dirty.trim().is_empty() => Some(MergeOutcome::Refused {
+            why: "the working copy has uncommitted changes; commit or stash them first, \
+                  so the merge cannot land on top of them"
+                .to_string(),
+        }),
+        Err(why) => Some(MergeOutcome::Refused { why }),
+        Ok(_) => None,
+    }
 }
 
 enum Attempt {
@@ -415,6 +450,11 @@ fn attempt_merge(
         Err(why) => return done(MergeOutcome::Refused { why }),
     };
     drop(scratch);
+    // The checks can take minutes; edits the person started meanwhile are
+    // never landed on.
+    if let Some(refused) = dirty_working_copy(root) {
+        return done(refused);
+    }
     let checked_out = git(root, &["rev-parse", "--abbrev-ref", "HEAD"])
         .map(|b| b.trim().to_string())
         .unwrap_or_default();
@@ -467,6 +507,7 @@ fn run_check(dir: &Path, command: &str, timeout: Duration) -> Result<(), String>
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if start.elapsed() > timeout => {
+                end_tree(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 break None;
@@ -802,6 +843,36 @@ mod tests {
         );
     }
 
+    /// Review: a check that runs too long is ended with everything it
+    /// started, not just its shell; here its own child would write a file
+    /// after the time is up.
+    #[test]
+    fn a_check_past_its_time_is_ended_with_everything_it_started() {
+        let (o, root, _wt, branch) = project();
+        let marker = o.path().join("still-running");
+        let slow = if cfg!(windows) {
+            format!(
+                "cmd /C \"ping -n 7 127.0.0.1 >nul & echo late> \"{}\"\"",
+                marker.display()
+            )
+        } else {
+            format!(
+                "sh -c 'sleep 6; echo late > \"{}\"'; true",
+                marker.display()
+            )
+        };
+        let out = checked_merge(
+            &root,
+            "main",
+            &branch,
+            &checks(&[&slow]),
+            Duration::from_secs(2),
+        );
+        assert!(matches!(out, MergeOutcome::ChecksFailed { .. }), "{out:?}");
+        std::thread::sleep(Duration::from_secs(9));
+        assert!(!marker.exists(), "a process the check started kept running");
+    }
+
     #[test]
     fn a_check_that_runs_too_long_is_stopped_and_lands_nothing() {
         let (_o, root, _wt, branch) = project();
@@ -843,6 +914,26 @@ mod tests {
             MergeOutcome::Conflict { files } => assert_eq!(files, vec!["a.txt".to_string()]),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// Review: the person may start editing while the checks run; the
+    /// working copy is looked at again just before landing.
+    #[test]
+    fn edits_made_while_the_checks_run_stop_the_landing() {
+        let (_o, root, _wt, branch) = project();
+        let before = git(&root, &["rev-parse", "main"]);
+        let file = root.join("a.txt");
+        let edit = if cfg!(windows) {
+            format!("echo edited>> \"{}\"", file.display())
+        } else {
+            format!("echo edited >> '{}'", file.display())
+        };
+        let out = checked_merge(&root, "main", &branch, &checks(&[&edit]), SECS);
+        match &out {
+            MergeOutcome::Refused { why } => assert!(why.contains("uncommitted"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(git(&root, &["rev-parse", "main"]), before);
     }
 
     /// Review Focus 3.

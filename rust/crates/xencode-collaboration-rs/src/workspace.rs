@@ -79,6 +79,9 @@ pub enum AuditAction {
     MergeVetoed,
     /// An open veto was lifted, by whom and under what authority (`OR-17`).
     MergeVetoCleared,
+    /// A lead agent's merge of a worker agent's work ended: landed, or why
+    /// not (TM-3).
+    TeamMerge,
 }
 
 impl std::fmt::Display for AuditAction {
@@ -91,6 +94,7 @@ impl std::fmt::Display for AuditAction {
             AuditAction::Denied => write!(f, "denied"),
             AuditAction::MergeVetoed => write!(f, "merge_vetoed"),
             AuditAction::MergeVetoCleared => write!(f, "merge_veto_cleared"),
+            AuditAction::TeamMerge => write!(f, "team_merge"),
         }
     }
 }

@@ -32,6 +32,8 @@ pub struct Team {
     bases: BTreeMap<String, String>,
     /// Each worker's merge, kept apart from what the worker reports.
     merges: BTreeMap<String, MergeState>,
+    /// Whether the worktrees an earlier engine left were looked for yet.
+    adopted: bool,
 }
 
 /// The approvals channel: a request and where its answer goes.
@@ -49,6 +51,7 @@ impl Default for Team {
             limit: DEFAULT_LIMIT,
             bases: BTreeMap::new(),
             merges: BTreeMap::new(),
+            adopted: false,
         }
     }
 }
@@ -123,6 +126,10 @@ impl Team {
         approvals: &Approvals,
         config: &XencodeConfig,
     ) -> Result<Value, String> {
+        if !self.adopted {
+            self.adopted = true;
+            self.adopt(root);
+        }
         match request {
             TeamRequest::Agents => Ok(agents_listing(config)),
             TeamRequest::Start { agent, task, base } => {
@@ -221,10 +228,67 @@ impl Team {
         Ok(json!({ "removed": removed, "kept": kept }))
     }
 
+    /// Take in the workers an earlier engine on this project left: each
+    /// worktree it made is shown as a stopped worker, which can be merged or
+    /// cleaned, and the next worker gets a number after theirs.
+    fn adopt(&mut self, root: &Path) {
+        let mut found: Vec<(String, PathBuf, String)> =
+            worktree::team_worktrees(root).unwrap_or_default();
+        for (id, path) in worktree::leftover_folders(root).unwrap_or_default() {
+            let branch = worktree::branch_for(&id);
+            found.push((id, path, branch));
+        }
+        for (id, path, branch) in found {
+            let Ok(n) = id[1..].parse::<u32>() else {
+                continue;
+            };
+            self.next = self.next.max(n);
+            if self.shown.contains_key(&id) {
+                continue;
+            }
+            self.shown.insert(
+                id.clone(),
+                WorkerSnapshot {
+                    id,
+                    agent: "unknown".to_string(),
+                    task: String::new(),
+                    state: WorkerState::Stopped,
+                    branch,
+                    worktree: path,
+                    last_message: "left by an engine that ended".to_string(),
+                    answer: String::new(),
+                    error: None,
+                    tool_calls: 0,
+                    tokens: None,
+                    cost_micros: None,
+                    on_plan: false,
+                    merge: None,
+                },
+            );
+        }
+    }
+
+    /// Whether a worker is still going (starting, working or waiting on the
+    /// person) or a merge is running: the engine does not end while one is,
+    /// since workers belong to the project, not to the lead's session.
+    pub fn has_work(&self) -> bool {
+        self.merges
+            .values()
+            .any(|m| matches!(m, MergeState::Running))
+            || self.workers.values().any(|h| {
+                matches!(
+                    h.snapshot().state,
+                    WorkerState::Starting | WorkerState::Working | WorkerState::NeedsYou
+                )
+            })
+    }
+
     fn find(&self, id: &str) -> Result<WorkerSnapshot, String> {
-        match self.workers.get(id) {
-            Some(handle) => Ok(self.with_merge(handle.snapshot())),
-            None => Err(format!("no worker {id}")),
+        match (self.workers.get(id), self.shown.get(id)) {
+            (Some(handle), _) => Ok(self.with_merge(handle.snapshot())),
+            // One an earlier engine left: stopped, with no process to ask.
+            (None, Some(s)) => Ok(self.with_merge(s.clone())),
+            (None, None) => Err(format!("no worker {id}")),
         }
     }
 
@@ -251,7 +315,8 @@ impl Team {
         self.merges.insert(id.to_string(), MergeState::Running);
         let settings = merge::team_settings(root);
         let timeout = std::time::Duration::from_secs(settings.check_timeout_secs.unwrap_or(1200));
-        let stop = self.handle(id)?.stopper();
+        // A worker an earlier engine left has no process to stop.
+        let stop = self.workers.get(id).map(|h| h.stopper());
         let (root, id_owned, approvals, events) = (
             root.to_path_buf(),
             id.to_string(),
@@ -260,13 +325,16 @@ impl Team {
         );
         tokio::spawn(async move {
             let outcome = merge_worker(&root, &id_owned, &s, &base, timeout, &approvals).await;
+            audit_merge(&id_owned, &s, &base, &outcome);
             if matches!(outcome, MergeOutcome::Landed { .. }) {
                 // Its work is in; the worker ends and its worktree goes. On
                 // Windows a folder whose files a process holds open cannot be
                 // removed, and the worker's own engine keeps the worktree's
                 // files until it exits, idle, after the worker ends; so the
                 // removal is tried for longer than that.
-                stop();
+                if let Some(stop) = &stop {
+                    stop();
+                }
                 for _ in 0..(2 * crate::engine::server::IDLE_EXIT.as_secs() as usize * 4 + 40) {
                     if worktree::remove(&root, &s.worktree, &s.branch).is_ok()
                         || !s.worktree.exists()
@@ -432,6 +500,48 @@ async fn merge_worker(
             }
         }
         (other, _) => other,
+    }
+}
+
+/// One line in the chained audit trail (`xencode audit verify`) for every
+/// merge's end: which worker, onto which branch, and what happened. A
+/// trail that cannot be written is said on the engine's standard error; the
+/// merge itself has already ended.
+fn audit_merge(id: &str, s: &WorkerSnapshot, base: &str, outcome: &MergeOutcome) {
+    let detail = match outcome {
+        MergeOutcome::Landed { commit } => {
+            format!("landed {commit} from {} ({})", s.branch, s.agent)
+        }
+        MergeOutcome::ChecksFailed { .. } => format!("checks failed; {} kept off {base}", s.branch),
+        MergeOutcome::Conflict { files } => format!("conflict in {} file(s)", files.len()),
+        MergeOutcome::NeedsPerson { why, .. } => format!("needs the person: {why}"),
+        MergeOutcome::Refused { why } => format!("refused: {why}"),
+    };
+    let outcome_word = serde_json::to_value(outcome)
+        .ok()
+        .and_then(|v| {
+            v.get("outcome")
+                .and_then(|o| o.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    let event = xencode_collaboration_rs::AuditEvent {
+        seq: 0,
+        at: xencode_collaboration_rs::audit_stamp(),
+        actor: format!("lead agent, worker {id}"),
+        action: xencode_collaboration_rs::AuditAction::TeamMerge,
+        target: base.to_string(),
+        detail: format!("{outcome_word}: {detail}"),
+    };
+    let written = xencode_config_rs::paths::state_dir()
+        .map_err(|e| e.to_string())
+        .and_then(|dir| {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            xencode_server_rs::audit::AuditSink::to_file(dir.join("audit.jsonl"))
+                .append_external(&event)
+        });
+    if let Err(why) = written {
+        eprintln!("could not write the audit line for {id}'s merge: {why}");
     }
 }
 

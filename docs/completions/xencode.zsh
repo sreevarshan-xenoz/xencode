@@ -1357,6 +1357,15 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(exec)
+_arguments "${_arguments_options[@]}" : \
+'--cwd=[The folder to run the program in]:CWD:_files' \
+'*--unset=[An environment variable to remove; repeat for each]:UNSET:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+'*::command -- The program and its arguments, after `--`:_default' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__team__subcmd__help_commands" \
@@ -1390,6 +1399,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (clean)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(exec)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -3124,6 +3137,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (clean)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(exec)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -5131,6 +5148,7 @@ _xencode__subcmd__help__subcmd__team_commands() {
 'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
 'login-optin:Let a worker agent sign in with your own login instead of an API key. Prints what that vendor'\''s terms say about it and asks for \`yes\`' \
 'clean:Remove the worktrees of worker agents that are not running (stopped, failed, or left by an engine that ended). A worktree with changes nobody committed is kept and named' \
+'exec:Run an outside worker agent'\''s program from \`--cwd\` with the named environment variables removed. The engine starts outside agents this way, so an adapter never reads the worker'\''s tree and never sees another vendor'\''s key' \
     )
     _describe -t commands 'xencode help team commands' commands "$@"
 }
@@ -5138,6 +5156,11 @@ _xencode__subcmd__help__subcmd__team_commands() {
 _xencode__subcmd__help__subcmd__team__subcmd__clean_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help team clean commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__exec_commands] )) ||
+_xencode__subcmd__help__subcmd__team__subcmd__exec_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help team exec commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__team__subcmd__list_commands] )) ||
 _xencode__subcmd__help__subcmd__team__subcmd__list_commands() {
@@ -6439,6 +6462,7 @@ _xencode__subcmd__team_commands() {
 'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
 'login-optin:Let a worker agent sign in with your own login instead of an API key. Prints what that vendor'\''s terms say about it and asks for \`yes\`' \
 'clean:Remove the worktrees of worker agents that are not running (stopped, failed, or left by an engine that ended). A worktree with changes nobody committed is kept and named' \
+'exec:Run an outside worker agent'\''s program from \`--cwd\` with the named environment variables removed. The engine starts outside agents this way, so an adapter never reads the worker'\''s tree and never sees another vendor'\''s key' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode team commands' commands "$@"
@@ -6447,6 +6471,11 @@ _xencode__subcmd__team_commands() {
 _xencode__subcmd__team__subcmd__clean_commands() {
     local commands; commands=()
     _describe -t commands 'xencode team clean commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__exec_commands] )) ||
+_xencode__subcmd__team__subcmd__exec_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team exec commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__help_commands] )) ||
 _xencode__subcmd__team__subcmd__help_commands() {
@@ -6457,6 +6486,7 @@ _xencode__subcmd__team__subcmd__help_commands() {
 'run:Run one recipe'\''s roles as real tasks through the scheduler. Without \`--approved-by\` this prints the plan and launches nothing, and writes nothing either. With it, the same plan prints first and then the roles run, and what the run took is recorded so the next plan can quote it' \
 'login-optin:Let a worker agent sign in with your own login instead of an API key. Prints what that vendor'\''s terms say about it and asks for \`yes\`' \
 'clean:Remove the worktrees of worker agents that are not running (stopped, failed, or left by an engine that ended). A worktree with changes nobody committed is kept and named' \
+'exec:Run an outside worker agent'\''s program from \`--cwd\` with the named environment variables removed. The engine starts outside agents this way, so an adapter never reads the worker'\''s tree and never sees another vendor'\''s key' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode team help commands' commands "$@"
@@ -6465,6 +6495,11 @@ _xencode__subcmd__team__subcmd__help_commands() {
 _xencode__subcmd__team__subcmd__help__subcmd__clean_commands() {
     local commands; commands=()
     _describe -t commands 'xencode team help clean commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__exec_commands] )) ||
+_xencode__subcmd__team__subcmd__help__subcmd__exec_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode team help exec commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__team__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__team__subcmd__help__subcmd__help_commands() {

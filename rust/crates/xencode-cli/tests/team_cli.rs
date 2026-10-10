@@ -561,6 +561,25 @@ fn the_lead_merges_a_workers_change_when_the_checks_pass() {
         "made by w1\n"
     );
     assert!(!worktree.exists(), "a landed worker's worktree is removed");
+
+    // Every merge leaves a line in the chained audit trail, which verifies.
+    let trail = std::fs::read_to_string(config.path().join("audit.jsonl")).unwrap_or_default();
+    assert!(
+        trail.contains("team_merge") && trail.contains("landed"),
+        "{trail}"
+    );
+    let verified = Command::new(env!("CARGO_BIN_EXE_xencode"))
+        .args(["audit", "verify"])
+        .arg(config.path().join("audit.jsonl"))
+        .env("XCODE_CONFIG_DIR", config.path())
+        .output()
+        .unwrap();
+    assert!(
+        verified.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&verified.stdout),
+        String::from_utf8_lossy(&verified.stderr)
+    );
 }
 
 #[test]
@@ -950,4 +969,135 @@ fn team_exec_runs_in_its_folder_without_the_hidden_keys() {
         .to_string_lossy()
         .to_string();
     assert!(said.contains(&name), "ran in its folder: {said}");
+}
+
+/// Review: a worker belongs to the project, not to the lead's session; the
+/// engine does not end while one is working, even with no window open.
+#[tokio::test]
+async fn a_working_worker_keeps_the_engine_alive_after_every_window_closes() {
+    let (_outer, root) = repo();
+    let (config, _listener) = stalled();
+    let (mut engine, addr) = engine(&root, config.path());
+    {
+        let mut link = window(&addr).await;
+        let (ok, body) = ask(
+            &mut link,
+            1,
+            TeamRequest::Start {
+                agent: "xencode".into(),
+                task: "say hi".into(),
+                base: None,
+            },
+        )
+        .await;
+        assert!(ok, "{body}");
+        team_until(&mut link, "w1", WorkerState::Working).await;
+        // The lead's session ends.
+        assert!(link.send(&ClientMsg::Goodbye));
+    }
+    tokio::time::sleep(Duration::from_secs(16)).await;
+    assert!(
+        engine.0.try_wait().unwrap().is_none(),
+        "the engine ended with a worker still working"
+    );
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(
+        &mut link,
+        2,
+        TeamRequest::Status {
+            id: Some("w1".into()),
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    assert_eq!(body["state"], "working", "{body}");
+}
+
+/// Review: an engine that starts where another left workers' worktrees
+/// shows them as stopped, and the next worker gets a new id.
+#[tokio::test]
+async fn a_new_engine_shows_the_last_ones_workers_as_stopped_and_starts_the_next() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    {
+        let (_engine, addr) = engine(&root, config.path());
+        let mut link = window(&addr).await;
+        let (ok, body) = ask(
+            &mut link,
+            1,
+            TeamRequest::Start {
+                agent: "xencode".into(),
+                task: "say hi".into(),
+                base: None,
+            },
+        )
+        .await;
+        assert!(ok, "{body}");
+        team_until(&mut link, "w1", WorkerState::Done).await;
+    }
+    // The first engine is gone; a new one starts on the same project.
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(&mut link, 1, TeamRequest::Status { id: None }).await;
+    assert!(ok, "{body}");
+    assert_eq!(body[0]["id"], "w1", "{body}");
+    assert_eq!(body[0]["state"], "stopped", "{body}");
+    let (ok, body) = ask(
+        &mut link,
+        2,
+        TeamRequest::Start {
+            agent: "xencode".into(),
+            task: "say hi again".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    assert_eq!(body["id"], "w2", "{body}");
+}
+
+/// End every process `parent` started: here the engine's worker agents.
+fn kill_children_of(parent: u32) {
+    if cfg!(windows) {
+        let script = format!(
+            "Get-CimInstance Win32_Process -Filter \"ParentProcessId={parent}\" | \
+             ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+        );
+        let _ = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .status();
+    } else {
+        let _ = Command::new("pkill")
+            .args(["-KILL", "-P", &parent.to_string()])
+            .status();
+    }
+}
+
+/// Review Focus 1, the idle half: a worker whose agent dies between turns
+/// is failed, not left saying done.
+#[tokio::test]
+async fn a_worker_whose_agent_dies_between_turns_is_failed() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let (engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(
+        &mut link,
+        1,
+        TeamRequest::Start {
+            agent: "xencode".into(),
+            task: "say hi".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    team_until(&mut link, "w1", WorkerState::Done).await;
+    kill_children_of(engine.0.id());
+    let failed = team_until(&mut link, "w1", WorkerState::Failed).await;
+    assert!(failed.error.is_some(), "{failed:?}");
+    assert!(
+        root.parent().unwrap().join("proj-team").join("w1").exists(),
+        "worktree kept"
+    );
 }

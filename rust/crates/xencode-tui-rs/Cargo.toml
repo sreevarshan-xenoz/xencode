@@ -23,6 +23,7 @@ xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
 xencode-colab-rs = { path = "../xencode-colab-rs" }
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
+xencode-server-rs = { path = "../xencode-server-rs" }
 xencode-agents-rs = { path = "../xencode-agents-rs" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.29", features = ["connect", "rustls-tls-webpki-roots"] }
