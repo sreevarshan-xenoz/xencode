@@ -76,6 +76,12 @@ impl Turn {
         Turn::default()
     }
 
+    /// The person stopped this turn: however it ends from here, it ends as
+    /// stopped.
+    pub fn stopped_by_the_person(&mut self) {
+        self.stopped = true;
+    }
+
     /// The words of the ByteBot task this turn follows, if it does.
     pub fn follows(&self) -> Option<&str> {
         self.bytebot.as_ref().map(|f| f.text.as_str())
@@ -100,6 +106,10 @@ impl Turn {
             }
             if let Some(tasks) = &view.tasks {
                 if let Some(ended) = followed.read(tasks) {
+                    let ended = match ended {
+                        Out::Ended(Ending::Done) if self.stopped => Out::Ended(Ending::Stopped),
+                        other => other,
+                    };
                     out.push(ended);
                 }
             }
@@ -109,6 +119,14 @@ impl Turn {
             EngineMsg::Event { token } => self.token(token),
             EngineMsg::ApprovalRequested { approval } => vec![Out::Permission(approval.clone())],
             EngineMsg::QuestionAsked { id, text } => vec![Out::Question(*id, text.clone())],
+            // Another window answered first; this window's late answer was
+            // refused and the turn goes on.
+            EngineMsg::Error { message }
+                if message == xencode_tui_rs::engine::APPROVAL_GONE
+                    || message == xencode_tui_rs::engine::QUESTION_GONE =>
+            {
+                Vec::new()
+            }
             EngineMsg::Error { message } => vec![Out::Ended(Ending::Failed(message.clone()))],
             _ => Vec::new(),
         }
@@ -375,6 +393,19 @@ mod tests {
         );
     }
 
+    /// Review finding 2: Stop while the review is open keeps the changes
+    /// and ends the turn as stopped, instead of waiting forever.
+    #[test]
+    fn a_stop_during_the_review_ends_the_turn_as_stopped() {
+        let mut turn = Turn::bytebot("write a note");
+        turn.feed(&view_with_task("write a note", TaskState::NeedsReview));
+        turn.stopped_by_the_person();
+        assert_eq!(
+            turn.feed(&view_with_task("write a note", TaskState::Completed)),
+            vec![Out::Ended(Ending::Stopped)]
+        );
+    }
+
     #[test]
     fn an_undone_review_is_a_normal_end() {
         let mut turn = Turn::bytebot("write a note");
@@ -414,6 +445,25 @@ mod tests {
             turn.feed(&view_with_task("write a note", TaskState::Cancelled)),
             vec![Out::Ended(Ending::Stopped)]
         );
+    }
+
+    /// Review finding 7: another window answered first, so this window's
+    /// late answer is refused; the turn goes on.
+    #[test]
+    fn a_late_answer_refused_by_the_engine_does_not_end_the_turn() {
+        let mut turn = Turn::new();
+        for message in [
+            xencode_tui_rs::engine::APPROVAL_GONE,
+            xencode_tui_rs::engine::QUESTION_GONE,
+        ] {
+            assert!(
+                turn.feed(&EngineMsg::Error {
+                    message: message.to_string()
+                })
+                .is_empty(),
+                "{message}"
+            );
+        }
     }
 
     #[test]

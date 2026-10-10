@@ -253,7 +253,8 @@ Zed can run xencode as its agent. Add this to Zed's `settings.json` (point
 }
 ```
 
-Open a folder in Zed, start a new thread in the Agent Panel and pick xencode.
+Open a folder in Zed, start a new thread in the Agent Panel and pick xencode
+(the steps Zed's documentation gives; not yet watched in Zed here).
 It uses the model set in xencode (`xencode config set default_model <model>`).
 Edits show as diffs and ask before they happen; `/bytebot <task>` runs a
 ByteBot task there too. `CLI_GUIDE.md` → `xencode acp` says what works.

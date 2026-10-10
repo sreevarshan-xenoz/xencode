@@ -3,6 +3,13 @@
 //! runs inside the terminal app; `EN-2` carries the same messages over a
 //! local socket to an engine in its own process.
 
+/// What the engine answers to an answer for a question that was answered
+/// or withdrawn already. Windows that answer late recognise it by this text.
+pub const QUESTION_GONE: &str = "that question is no longer waiting";
+
+/// As [`QUESTION_GONE`], for an approval prompt.
+pub const APPROVAL_GONE: &str = "that approval is no longer waiting";
+
 pub mod address;
 pub mod link;
 pub mod proto;
@@ -168,7 +175,7 @@ pub fn handle(
         ClientMsg::AnswerQuestion { id, text } => {
             if app.question_id != Some(id) {
                 return vec![EngineMsg::Error {
-                    message: "that question is no longer waiting".to_string(),
+                    message: QUESTION_GONE.to_string(),
                 }];
             }
             if text.trim().is_empty() {
@@ -187,7 +194,7 @@ pub fn handle(
         ClientMsg::AnswerApproval { id, answer } => {
             if app.approval_ids.front() != Some(&id) {
                 return vec![EngineMsg::Error {
-                    message: "that approval is no longer waiting".to_string(),
+                    message: APPROVAL_GONE.to_string(),
                 }];
             }
             app.resolve_approval(answer.into());

@@ -85,42 +85,69 @@ pub async fn models() -> Vec<String> {
 /// Change the engine's model to `value`, waiting until the engine says it
 /// changed. Refused while a turn holds the engine link.
 pub async fn set_model(
-    session: &mut Session,
+    state: &tokio::sync::Mutex<Session>,
     value: &SessionConfigOptionValue,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let SessionConfigOptionValue::ValueId { value } = value else {
         return Err("the model option takes a model name".to_string());
     };
     let name = value.to_string();
-    let Some(link) = session.link.as_mut() else {
-        return Err("a turn is running in this session; change the model when it ends".to_string());
-    };
-    if !link.send(&ClientMsg::SetModel { name: name.clone() }) {
-        session.link = None;
-        return Err("the engine was lost; send a message to reconnect".to_string());
-    }
-    // Switching can take seconds: the engine first tries to start the
-    // llama.cpp server for a llama.cpp model.
-    let changed = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            match link.next().await {
-                LinkEvent::Msg(EngineMsg::View { view })
-                    if view.model.as_deref() == Some(&name) =>
-                {
-                    return Ok(())
-                }
-                LinkEvent::Msg(EngineMsg::Error { message }) => return Err(message),
-                LinkEvent::Msg(_) => {}
-                LinkEvent::Lost(why) => return Err(format!("the engine was lost: {why}")),
+    // The link is taken out for the switch, as a turn does, so the
+    // session's lock is not held while the engine works: a message or a
+    // stop for this session is answered at once in the meantime.
+    let mut link = {
+        let mut s = state.lock().await;
+        if s.busy {
+            return Err(
+                "a turn is running in this session; change the model when it ends".to_string(),
+            );
+        }
+        match s.link.take() {
+            Some(link) => {
+                s.busy = true;
+                link
+            }
+            None => {
+                return Err("the engine was lost; send a message to reconnect".to_string());
             }
         }
-    })
-    .await
-    .unwrap_or_else(|_| Err("the engine did not confirm the new model".to_string()));
-    if changed.is_ok() {
-        session.model = name;
+    };
+    let changed = if link.send(&ClientMsg::SetModel { name: name.clone() }) {
+        // Switching can take seconds: the engine first tries to start the
+        // llama.cpp server for a llama.cpp model.
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                match link.next().await {
+                    LinkEvent::Msg(EngineMsg::View { view })
+                        if view.model.as_deref() == Some(&name) =>
+                    {
+                        return Ok(())
+                    }
+                    LinkEvent::Msg(EngineMsg::Error { message }) => return Err(message),
+                    LinkEvent::Msg(_) => {}
+                    LinkEvent::Lost(why) => return Err(format!("the engine was lost: {why}")),
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err("the engine did not confirm the new model".to_string()))
+    } else {
+        Err("the engine was lost; send a message to reconnect".to_string())
+    };
+    let mut s = state.lock().await;
+    s.busy = false;
+    if changed
+        .as_ref()
+        .is_err_and(|why| why.starts_with("the engine was lost"))
+    {
+        s.link = None;
+    } else {
+        s.link = Some(link);
     }
-    changed
+    if changed.is_ok() {
+        s.model = name;
+    }
+    changed.map(|()| s.model.clone())
 }
 
 #[cfg(test)]

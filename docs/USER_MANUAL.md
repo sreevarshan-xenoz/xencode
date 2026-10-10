@@ -668,12 +668,16 @@ sees the same conversation, and a prompt answered in either counts once.
 - **Permission** prompts appear in the editor: allow once, always allow for
   this session, or reject.
 - **Model**: the session offers the models xencode finds; choosing one
-  switches the engine's model.
+  switches the engine's model. Whether Zed shows this as its model picker has
+  not been seen yet.
 - **Commands**: `/` lists the engine's commands. Commands that draw a terminal
   panel, such as `/init`, are refused with a pointer to `xencode tui`.
 - **ByteBot**: `/bytebot <task>` shows its steps as the editor's plan, asks
-  whether to keep or undo its changes, and puts its questions in the chat —
-  your next message is the answer.
+  whether to keep or undo its changes (stopping at that point keeps them), and
+  puts its questions in the chat — your next message is the answer.
+
+All of this was checked with a second ACP client and a real model; it has
+not yet been watched inside Zed itself.
 
 Not supported yet: images in prompts, loading an earlier session, the
 editor's own terminals, and tool servers the editor passes (xencode uses its

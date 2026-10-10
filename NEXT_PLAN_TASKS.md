@@ -2372,6 +2372,12 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
     `CLI_GUIDE.md` and `docs/USER_MANUAL.md`; counts are 18 crates and 57 commands; the full
     test run after M-7d on Windows: 2989 passed, 36 failed (the 35 known Windows failures and one
     model-download test that fails on and off), 30 ignored.
+  - [ ] **Engine started from `xencode acp` inherits its handles (Windows).** Found 2026-10-10:
+    `start_detached` stops only the three standard handles from being inherited, so an engine
+    started by `xencode acp` also inherits whatever `xencode acp` inherited (seen: a test runner's
+    output pipe, held while the engine waited on a review). An editor that waits for its agent's
+    pipe to close could wait on the engine. Fix: start the process with an explicit list of the
+    handles it may inherit (`CreateProcessW` with `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`).
   - [ ] **Watched in real Zed.** Not done by the agent: this session cannot click in Zed's
     window. To check by hand: add the `agent_servers` entry from `QUICK_START.md`, open a folder,
     and try a chat, an edit (allow it, then see the diff), the Model choice, and `/bytebot`.

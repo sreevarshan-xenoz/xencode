@@ -900,3 +900,186 @@ async fn a_bytebot_question_is_asked_in_the_chat_and_the_next_message_answers_it
     eprintln!("color.txt: {wrote:?}; said: {}", said(&seen));
     assert!(wrote.to_lowercase().contains("blue"), "{wrote:?}");
 }
+
+/// Review finding 1: another window's turn on the same engine must not be
+/// read as this session's next turn. Session B runs and stops a turn while
+/// session A is idle; A's next prompt must then run its own turn, not end at
+/// once on B's leftover end-of-turn.
+#[tokio::test]
+async fn another_windows_turn_is_not_read_as_this_sessions_next_turn() {
+    let (config, _stalled) = stalled_settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let a = c
+                .send_request(NewSessionRequest::new(cwd.clone()))
+                .block_task()
+                .await?;
+            let b = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let b_turn = c.send_request(PromptRequest::new(b.session_id.clone(), text("one")));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            c.send_notification(CancelNotification::new(b.session_id))?;
+            let r = tokio::time::timeout(std::time::Duration::from_secs(30), b_turn.block_task())
+                .await
+                .expect("b stopped")?;
+            assert_eq!(r.stop_reason, StopReason::Cancelled);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            let a_turn = c.send_request(PromptRequest::new(a.session_id.clone(), text("two")));
+            let mut a_turn = Box::pin(a_turn.block_task());
+            let early = tokio::time::timeout(std::time::Duration::from_secs(3), &mut a_turn).await;
+            assert!(
+                early.is_err(),
+                "A's turn ended at once on B's leftovers: {early:?}"
+            );
+            c.send_notification(CancelNotification::new(a.session_id))?;
+            let r = tokio::time::timeout(std::time::Duration::from_secs(30), a_turn)
+                .await
+                .expect("a stopped")?;
+            assert_eq!(r.stop_reason, StopReason::Cancelled);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// Review finding 2, live: Stop while the Keep/Undo review is open keeps the
+/// changes, ends the turn as cancelled, and frees the session.
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_stop_during_the_bytebot_review_keeps_the_changes_and_frees_the_session() {
+    let config = live_settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    let (review_tx, review_rx) = tokio::sync::watch::channel(false);
+    let mut review_rx = review_rx;
+    Client
+        .builder()
+        .on_receive_request(
+            async move |req: RequestPermissionRequest, responder, connection| {
+                let review = req
+                    .options
+                    .iter()
+                    .any(|o| o.option_id.to_string() == "keep");
+                if review {
+                    // Not answered: the test presses Stop instead.
+                    let _ = review_tx.send(true);
+                    connection.spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ))
+                    })
+                } else {
+                    responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                            "allow".to_string(),
+                        )),
+                    ))
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let turn = c.send_request(PromptRequest::new(
+                s.session_id.clone(),
+                text(&format!("/bytebot {WRITE_NOTE}")),
+            ));
+            tokio::time::timeout(
+                std::time::Duration::from_secs(300),
+                review_rx.wait_for(|asked| *asked),
+            )
+            .await
+            .expect("the review was asked")
+            .unwrap();
+            c.send_notification(CancelNotification::new(s.session_id.clone()))?;
+            let r = tokio::time::timeout(std::time::Duration::from_secs(60), turn.block_task())
+                .await
+                .expect("the stop ended the turn")?;
+            assert_eq!(r.stop_reason, StopReason::Cancelled);
+            // The session is free again: a window-only command is refused
+            // for what it is, not because a turn is still running.
+            let err = c
+                .send_request(PromptRequest::new(s.session_id, text("/init")))
+                .block_task()
+                .await
+                .expect_err("refused");
+            assert!(format!("{err:?}").contains("xencode tui"), "{err:?}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("notes.txt"))
+            .unwrap_or_default()
+            .trim(),
+        "hi",
+        "the stop kept the changes"
+    );
+}
+
+/// Review finding 5: a slow model switch must not hold up every other
+/// request. While session X's switch waits on the engine (a llama.cpp model
+/// first runs the engine's auto-start attempt, several seconds with no
+/// server), a prompt on session Y is answered at once.
+#[tokio::test]
+async fn a_slow_model_switch_does_not_hold_up_other_requests() {
+    let config = settings();
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let (x_dir, y_dir) = (first.path().to_path_buf(), second.path().to_path_buf());
+    Client
+        .builder()
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let x = c
+                .send_request(NewSessionRequest::new(x_dir))
+                .block_task()
+                .await?;
+            let y = c
+                .send_request(NewSessionRequest::new(y_dir))
+                .block_task()
+                .await?;
+            let switch = c.send_request(SetSessionConfigOptionRequest::new(
+                x.session_id,
+                "model",
+                agent_client_protocol::schema::v1::SessionConfigOptionValue::value_id(
+                    "llamacpp:other",
+                ),
+            ));
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let asked = std::time::Instant::now();
+            let err = c
+                .send_request(PromptRequest::new(y.session_id, text("/init")))
+                .block_task()
+                .await
+                .expect_err("refused");
+            let waited = asked.elapsed();
+            assert!(format!("{err:?}").contains("xencode tui"), "{err:?}");
+            assert!(
+                waited < std::time::Duration::from_secs(2),
+                "the prompt waited {waited:?} behind the model switch"
+            );
+            switch.block_task().await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}

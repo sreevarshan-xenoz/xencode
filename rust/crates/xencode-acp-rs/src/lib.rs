@@ -77,29 +77,35 @@ pub async fn serve_stdio() -> Result<(), String> {
                         req.mcp_servers.len()
                     );
                 }
-                match session::Session::open(&req.cwd).await {
-                    Ok(session) => {
-                        let option = options::model_option(&session.model, &options::models().await);
-                        let id = SessionId::new(for_new.add(session));
-                        responder.respond(
-                            NewSessionResponse::new(id.clone()).config_options(vec![option]),
-                        )?;
-                        connection.send_notification(SessionNotification::new(
-                            id,
-                            SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
-                                options::commands(),
-                            )),
-                        ))
+                // Starting an engine and asking model servers take seconds;
+                // the dispatch loop must not wait for them.
+                let sessions = for_new.clone();
+                let notify = connection.clone();
+                connection.spawn(async move {
+                    match session::Session::open(&req.cwd).await {
+                        Ok(session) => {
+                            let option =
+                                options::model_option(&session.model, &options::models().await);
+                            let id = SessionId::new(sessions.add(session));
+                            responder.respond(
+                                NewSessionResponse::new(id.clone()).config_options(vec![option]),
+                            )?;
+                            notify.send_notification(SessionNotification::new(
+                                id,
+                                SessionUpdate::AvailableCommandsUpdate(
+                                    AvailableCommandsUpdate::new(options::commands()),
+                                ),
+                            ))
+                        }
+                        Err(why) => responder
+                            .respond_with_error(agent_client_protocol::Error::new(INVALID, why)),
                     }
-                    Err(why) => {
-                        responder.respond_with_error(agent_client_protocol::Error::new(INVALID, why))
-                    }
-                }
+                })
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |req: SetSessionConfigOptionRequest, responder, _connection| {
+            async move |req: SetSessionConfigOptionRequest, responder, connection| {
                 let fail = |why: String| agent_client_protocol::Error::new(INVALID, why);
                 if req.config_id.to_string() != options::MODEL_OPTION {
                     return responder.respond_with_error(fail(
@@ -110,15 +116,16 @@ pub async fn serve_stdio() -> Result<(), String> {
                     return responder
                         .respond_with_error(fail(format!("no session {}", req.session_id)));
                 };
-                let mut session = state.lock().await;
-                match options::set_model(&mut session, &req.value).await {
-                    Ok(()) => {
-                        let option =
-                            options::model_option(&session.model, &options::models().await);
-                        responder.respond(SetSessionConfigOptionResponse::new(vec![option]))
+                // The switch waits on the engine; the dispatch loop must not.
+                connection.spawn(async move {
+                    match options::set_model(&state, &req.value).await {
+                        Ok(model) => {
+                            let option = options::model_option(&model, &options::models().await);
+                            responder.respond(SetSessionConfigOptionResponse::new(vec![option]))
+                        }
+                        Err(why) => responder.respond_with_error(fail(why)),
                     }
-                    Err(why) => responder.respond_with_error(fail(why)),
-                }
+                })
             },
             agent_client_protocol::on_receive_request!(),
         )
