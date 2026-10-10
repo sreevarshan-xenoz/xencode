@@ -4,9 +4,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// A hooks folder that does not exist, so git finds no hooks to run.
+fn no_hooks() -> String {
+    let path = std::env::temp_dir().join("xencode-team-git-runs-no-hooks");
+    format!("core.hooksPath={}", path.to_string_lossy())
+}
+
 /// Run git in `dir`; its standard output, or why it failed in words.
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+///
+/// Repository hooks never run: they are files in `.git`, which a worker
+/// agent working in the repository could have written, and the engine runs
+/// these commands on its own, without anyone approving them.
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
+        .arg("-c")
+        .arg(no_hooks())
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -55,13 +67,35 @@ pub fn create(root: &Path, id: &str, base: &str) -> Result<(PathBuf, String), St
             path.display()
         ));
     }
+    let commit = commit_of(root, base)?;
     let branch = branch_for(id);
     let target = path.to_string_lossy().to_string();
     git(
         root,
-        &["worktree", "add", "-q", "-b", &branch, &target, base],
+        &["worktree", "add", "-q", "-b", &branch, &target, &commit],
     )?;
     Ok((path, branch))
+}
+
+/// The commit `base` names. `base` comes from the lead agent, a model, so
+/// it is resolved before it reaches any other git command: what is not a
+/// commit — an option such as `--help`, a branch that does not exist — is
+/// refused here, and only the commit's hash travels on.
+pub fn commit_of(root: &Path, base: &str) -> Result<String, String> {
+    let wanted = format!("{base}^{{commit}}");
+    match git(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &wanted,
+        ],
+    ) {
+        Ok(hash) if !hash.trim().is_empty() => Ok(hash.trim().to_string()),
+        _ => Err(format!("`{base}` is not a commit in this repository")),
+    }
 }
 
 /// Remove a worker's worktree and its branch.
@@ -167,6 +201,54 @@ mod tests {
         let canonical = std::fs::canonicalize(&root).unwrap();
         let (path, _branch) = create(&canonical, "w1", "main").unwrap();
         assert!(path.join("a.txt").exists(), "{path:?}");
+    }
+
+    /// Security review: `base` comes from the lead agent, a model, and goes to
+    /// git; something that is not a commit, such as an option, is refused.
+    #[test]
+    fn a_base_that_is_not_a_commit_is_refused() {
+        let (_outer, root) = repo();
+        for bad in ["--help", "-c", "no-such-branch", "main;echo"] {
+            let err = create(&root, "w1", bad).unwrap_err();
+            assert!(err.contains("not a commit"), "{bad}: {err}");
+        }
+    }
+
+    /// Security review: the engine runs git on the project; a hook in the
+    /// repository is code nobody approved, so the engine's git runs none.
+    #[test]
+    fn the_engines_git_runs_no_repository_hooks() {
+        let (_outer, root) = repo();
+        let marker = root.join("hook-ran");
+        let hook = root.join(".git").join("hooks").join("post-checkout");
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\necho ran > '{}'\n",
+                marker.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // Sanity: plain git does run it.
+        git(&root, &["checkout", "-q", "-b", "probe"]);
+        assert!(marker.exists(), "the hook is a real one");
+        std::fs::remove_file(&marker).unwrap();
+        git(&root, &["checkout", "-q", "main"]);
+        std::fs::remove_file(&marker).ok();
+
+        let (path, branch) = create(&root, "w1", "main").unwrap();
+        std::fs::write(path.join("b.txt"), "x").unwrap();
+        changed_files(&path, "main").unwrap();
+        remove(&root, &path, &branch).unwrap();
+        assert!(
+            !marker.exists(),
+            "a repository hook ran under the engine's git"
+        );
     }
 
     #[test]
