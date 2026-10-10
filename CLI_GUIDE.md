@@ -3794,6 +3794,10 @@ agents can be too, started over the Agent Client Protocol at pinned versions:
 | `gemini` | `gemini --acp` | `GEMINI_API_KEY`, or xencode's `google_gemini_api_key` |
 | `antigravity` | `agy_acp_server` | `GEMINI_API_KEY`, used only when `~/.gemini/antigravity-cli/settings.json` says `"modelProvider": "gemini"` |
 
+A `claude-code` or `codex` worker's first start downloads its adapter with
+`npx`, which can take a minute; until the agent says something the worker's
+last line says so.
+
 An outside agent is another vendor's, so the Local Only posture refuses it until
 `xencode config set allow_external_workers true`. A key is handed to the worker
 alone, through its environment. Without a key, the worker can use your own login

@@ -84,6 +84,7 @@ fn xencode_worker(config: &Path) -> LaunchSpec {
             config.to_string_lossy().to_string(),
         )],
         on_plan: false,
+        first_note: None,
     }
 }
 
@@ -163,6 +164,7 @@ async fn a_worker_whose_agent_ends_is_failed_and_keeps_its_worktree() {
         args: vec!["--version".to_string()],
         env: Vec::new(),
         on_plan: false,
+        first_note: None,
     };
     let (_handle, mut events, path) = start(&root, spec, "say hi");
     let failed = until(&mut events, WorkerState::Failed, Duration::from_secs(30)).await;
