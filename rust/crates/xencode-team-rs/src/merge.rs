@@ -185,9 +185,32 @@ fn decides_the_checks(file: &str) -> bool {
         .collect();
     let first = parts.first().map(String::as_str).unwrap_or("");
     let whole = parts.len() == 1;
-    first == ".xencode"
+    // A top name a file system may read as another one cannot be judged by
+    // its spelling: a Windows short name (`XENCOD~1`), a character macOS
+    // ignores, a look-alike letter. Anything but plain ASCII without `~`
+    // counts, so the person is asked.
+    let plain = first
+        .chars()
+        .all(|c| c.is_ascii_graphic() && c != '~' || c == ' ');
+    !plain
+        || first == ".xencode"
         || first == ".cargo"
         || (whole && (first == "rust-toolchain" || first == "rust-toolchain.toml"))
+}
+
+/// The files named in the person's question: escaped, so a character that
+/// reorders or hides text shows as its code, and at most five of them.
+fn named(files: &[String]) -> String {
+    const SHOWN: usize = 5;
+    let mut out: Vec<String> = files
+        .iter()
+        .take(SHOWN)
+        .map(|f| f.escape_debug().to_string())
+        .collect();
+    if files.len() > SHOWN {
+        out.push(format!("and {} more", files.len() - SHOWN));
+    }
+    out.join(", ")
 }
 
 /// PATH for the checks: only absolute folders, so nothing is found in the
@@ -333,8 +356,9 @@ fn attempt_merge(
         if !touched.is_empty() {
             return done(MergeOutcome::NeedsPerson {
                 why: format!(
-                    "the change edits what decides how checks run ({}); land it only if you                      have read it",
-                    touched.join(", ")
+                    "the change edits what decides how checks run ({}); land it only if you \
+                     have read it",
+                    named(&touched)
                 ),
             });
         }
@@ -497,7 +521,11 @@ mod tests {
         let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
         match &out {
             MergeOutcome::NeedsPerson { why } => {
-                assert!(why.contains(".xencode/team.toml"), "{why}")
+                assert!(why.contains(".xencode/team.toml"), "{why}");
+                assert!(
+                    !why.contains("  "),
+                    "the question reads as one sentence: {why}"
+                );
             }
             other => panic!("{other:?}"),
         }
@@ -517,6 +545,45 @@ mod tests {
         let out =
             checked_merge_person_allowed(&root, "main", &branch, &checks(&["git --version"]), SECS);
         assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+    }
+
+    /// Security review: a top folder named with characters a file system may
+    /// read as other ones (a Windows short name such as `XENCOD~1`, a
+    /// character macOS ignores, a look-alike letter) cannot be told apart from
+    /// `.xencode` by its spelling, so it counts, and the person is asked.
+    #[test]
+    fn a_top_folder_that_might_be_another_name_counts() {
+        for file in [
+            "XENCOD~1/team.toml",
+            ".xen\u{200c}code/team.toml",
+            ".\u{ff58}encode/team.toml",
+            "\u{fffd}/team.toml",
+            "RUST-T~1.TOM",
+        ] {
+            assert!(decides_the_checks(file), "{file:?}");
+        }
+        for file in [
+            "src/a~1.rs",
+            "docs/caf\u{e9}.md",
+            "README.md",
+            "my notes.txt",
+        ] {
+            assert!(!decides_the_checks(file), "{file:?}");
+        }
+    }
+
+    /// Security review: the names a worker chose go into the person's
+    /// question, so a character that reorders or hides text is shown escaped,
+    /// and only the first few names are listed.
+    #[test]
+    fn the_names_in_the_question_cannot_restyle_it() {
+        let names: Vec<String> = (0..9)
+            .map(|n| format!(".xencode/\u{202e}lmot{n}.toml"))
+            .collect();
+        let said = named(&names);
+        assert!(!said.contains('\u{202e}'), "{said}");
+        assert!(said.contains("\\u{202e}"), "{said}");
+        assert!(said.contains("and 4 more"), "{said}");
     }
 
     /// Security review: Windows folds letter case and drops a trailing dot or
