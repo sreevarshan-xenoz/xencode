@@ -155,6 +155,13 @@ impl Team {
                 Ok(json!({ "id": id, "state": s.state, "answer": s.answer, "diff": diff }))
             }
             TeamRequest::Message { id, text } => {
+                // A landing stops the worker and removes its worktree; it is
+                // not given new work meanwhile.
+                if matches!(self.merges.get(&id), Some(MergeState::Running)) {
+                    return Err(format!(
+                        "{id} is being merged; message it once the merge ends"
+                    ));
+                }
                 self.handle(&id)?.message(&text)?;
                 Ok(json!({ "id": id, "sent": true }))
             }
@@ -224,6 +231,14 @@ impl Team {
                 }
                 Err(why) => kept.push(json!({ "id": id, "why": why })),
             }
+        }
+        // Scratch worktrees merges left; never while a merge runs.
+        if !self
+            .merges
+            .values()
+            .any(|m| matches!(m, MergeState::Running))
+        {
+            removed.extend(worktree::sweep_scratch(root));
         }
         Ok(json!({ "removed": removed, "kept": kept }))
     }
@@ -326,16 +341,16 @@ impl Team {
             self.events_tx.clone(),
         );
         tokio::spawn(async move {
-            let outcome = if unverified
-                && !left_worker_allowed(&id_owned, &s, &base, &approvals).await
-            {
-                MergeOutcome::Refused {
-                    why: format!(
-                        "{id_owned} was left by an earlier engine and the person chose not to merge it"
-                    ),
+            let outcome = if unverified {
+                match left_worker_allowed(&id_owned, &s, &base, &approvals).await {
+                    Ok(tip) => {
+                        merge_worker(&root, &id_owned, &s, &base, timeout, &approvals, Some(tip))
+                            .await
+                    }
+                    Err(refused) => refused,
                 }
             } else {
-                merge_worker(&root, &id_owned, &s, &base, timeout, &approvals).await
+                merge_worker(&root, &id_owned, &s, &base, timeout, &approvals, None).await
             };
             audit_merge(&id_owned, &s, &base, &outcome);
             if matches!(outcome, MergeOutcome::Landed { .. }) {
@@ -399,6 +414,13 @@ impl Team {
         self.next += 1;
         let id = format!("w{}", self.next);
         let base = base.unwrap_or_else(|| base_of(root));
+        if !worktree::is_branch(root, &base) {
+            self.next -= 1;
+            return Err(format!(
+                "`{base}` is not a branch here; a worker's work lands on a branch, so its base \
+                 must be one"
+            ));
+        }
         let (path, branch) = worktree::create(root, &id, &base)?;
         self.bases.insert(id.clone(), base.clone());
         let handle = WorkerHandle::start(
@@ -425,16 +447,19 @@ async fn merge_worker(
     base: &str,
     timeout: std::time::Duration,
     approvals: &Approvals,
+    pinned: Option<String>,
 ) -> MergeOutcome {
     // `asked` is the commit the person was asked about: once they answer,
     // exactly that commit is merged, or nothing if the work moved since.
+    // `pinned` is one they were asked about before the merge began.
     let run = |checks: Checks, asked: Option<String>| {
-        let (root, wt, base, task, id) = (
+        let (root, wt, base, task, id, pinned) = (
             root.to_path_buf(),
             s.worktree.clone(),
             base.to_string(),
             s.task.clone(),
             id.to_string(),
+            pinned.clone(),
         );
         tokio::task::spawn_blocking(move || {
             let message = task
@@ -451,20 +476,20 @@ async fn merge_worker(
                 Ok(tip) => tip,
                 Err(why) => return (MergeOutcome::Refused { why }, None),
             };
+            let moved = |since: &str| committed || tip != since;
+            let changed = || MergeOutcome::Refused {
+                why: format!(
+                    "{id}'s work changed after you were asked; merge it again to be asked \
+                     about what it is now"
+                ),
+            };
             match asked {
+                None if pinned.as_deref().is_some_and(moved) => (changed(), None),
                 None => {
                     let outcome = merge::checked_merge(&root, &base, &tip, &checks, timeout);
                     (outcome, Some(tip))
                 }
-                Some(asked) if committed || tip != asked => (
-                    MergeOutcome::Refused {
-                        why: format!(
-                            "{id}'s work changed after you were asked; merge it again to be \
-                             asked about what it is now"
-                        ),
-                    },
-                    None,
-                ),
+                Some(asked) if moved(&asked) => (changed(), None),
                 Some(asked) => (
                     merge::checked_merge_person_allowed(&root, &base, &asked, &checks, timeout),
                     None,
@@ -517,32 +542,47 @@ async fn merge_worker(
 
 /// Ask the person before merging a worker an earlier engine left: xencode
 /// did not start it here, and a worker running git itself could have made
-/// such a worktree. The checks still run after a yes.
+/// such a worktree. Its work is committed first and the question names that
+/// commit; `Ok` with it after a yes, so only it is merged. The checks still
+/// run.
 async fn left_worker_allowed(
     id: &str,
     s: &WorkerSnapshot,
     base: &str,
     approvals: &Approvals,
-) -> bool {
+) -> Result<String, MergeOutcome> {
+    let wt = s.worktree.clone();
+    let tip = tokio::task::spawn_blocking(move || {
+        merge::commit_work(&wt, "work by a worker an earlier engine left")?;
+        worktree::commit_of(&wt, "HEAD")
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r)
+    .map_err(|why| MergeOutcome::Refused { why })?;
+    let short: String = tip.chars().take(10).collect();
     let request = ApprovalRequest {
         tool: format!("merge {id}"),
         class: ToolClass::External,
         summary: format!(
-            "merge {id} onto {base}? It was left by an earlier engine, so xencode cannot say \
-             who made it; read {} first",
+            "merge {id} (commit {short}) onto {base}? It was left by an earlier engine, so \
+             xencode cannot say who made it; read {} first",
             s.branch
         ),
         preview: s.worktree.display().to_string(),
         draft: ApprovalDraft::default(),
     };
     let (tx, rx) = oneshot::channel();
+    let refused = MergeOutcome::Refused {
+        why: format!("{id} was left by an earlier engine and the person did not agree to merge it"),
+    };
     if approvals.send((request, tx)).is_err() {
-        return false;
+        return Err(refused);
     }
-    matches!(
-        rx.await,
-        Ok(ApprovalAnswer::Approved | ApprovalAnswer::ApprovedForSession)
-    )
+    match rx.await {
+        Ok(ApprovalAnswer::Approved | ApprovalAnswer::ApprovedForSession) => Ok(tip),
+        _ => Err(refused),
+    }
 }
 
 /// Text a worker's agent chose, as the person's question shows it: escaped,
@@ -610,15 +650,7 @@ pub fn is_team_approval(request: &ApprovalRequest) -> bool {
 
 /// The branch the project has checked out, which workers start from.
 fn base_of(root: &Path) -> String {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "HEAD".to_string())
+    worktree::current_branch(root).unwrap_or_else(|| "HEAD".to_string())
 }
 
 /// How to start `agent`. TM-1 knows xencode itself; the outside agents come
@@ -855,6 +887,29 @@ mod tests {
         assert!(!is_team_approval(&ask("merge_branches")));
     }
 
+    /// Review: a worker being merged is not given new work.
+    #[test]
+    fn a_message_to_a_worker_being_merged_is_refused() {
+        let mut team = Team {
+            adopted: true,
+            ..Team::default()
+        };
+        team.merges.insert("w1".into(), MergeState::Running);
+        let (approvals, _queue) = mpsc::unbounded_channel();
+        let err = team
+            .request(
+                Path::new("."),
+                TeamRequest::Message {
+                    id: "w1".into(),
+                    text: "more".into(),
+                },
+                &approvals,
+                &XencodeConfig::default(),
+            )
+            .unwrap_err();
+        assert!(err.contains("being merged"), "{err}");
+    }
+
     /// Security review: a worker's agent chooses its permission text, which
     /// goes into the person's question; it cannot restyle or hide parts of it.
     #[tokio::test]
@@ -949,6 +1004,70 @@ mod tests {
         assert_eq!(git(&root, &["rev-parse", "main"]), before);
     }
 
+    /// Security review: the yes to merging a left worker is for the commit
+    /// it named; work added while the question waited is not merged.
+    #[tokio::test]
+    async fn a_left_worker_that_changes_after_the_yes_is_not_merged() {
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("proj");
+        std::fs::create_dir(&root).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["config", "user.email", "t@example.invalid"]);
+        git(&root, &["config", "user.name", "t"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        std::fs::create_dir_all(root.join(".xencode")).unwrap();
+        std::fs::write(
+            root.join(".xencode").join("team.toml"),
+            "checks = [\"git --version\"]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".gitignore"), ".xencode/\n").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "-m", "first"]);
+        let (wt, _branch) = worktree::create(&root, "w7", "main").unwrap();
+        std::fs::write(wt.join("shown.txt"), "x\n").unwrap();
+        let before = git(&root, &["rev-parse", "main"]);
+
+        let mut team = Team::default();
+        let (approvals, mut queue) = mpsc::unbounded_channel();
+        let started = team.request(
+            &root,
+            TeamRequest::Merge { id: "w7".into() },
+            &approvals,
+            &XencodeConfig::default(),
+        );
+        assert!(started.is_ok(), "{started:?}");
+        let (request, answer) = queue.recv().await.unwrap();
+        assert!(request.summary.contains("commit "), "{}", request.summary);
+        std::fs::write(wt.join("added-while-asking.txt"), "y\n").unwrap();
+        answer.send(ApprovalAnswer::Approved).unwrap();
+        let start = std::time::Instant::now();
+        loop {
+            team.pump(&approvals);
+            if let Some(MergeState::Finished(outcome)) = team.find("w7").unwrap().merge {
+                match outcome {
+                    MergeOutcome::Refused { why } => assert!(why.contains("changed"), "{why}"),
+                    other => panic!("{other:?}"),
+                }
+                break;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(30));
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(git(&root, &["rev-parse", "main"]), before);
+    }
+
     /// Security review: the person says yes to the work they were asked about;
     /// if the worker's work changed while the question waited, that is not
     /// what lands.
@@ -1004,6 +1123,7 @@ mod tests {
                     "main",
                     std::time::Duration::from_secs(60),
                     &approvals,
+                    None,
                 )
                 .await
             })

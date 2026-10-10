@@ -3768,7 +3768,7 @@ client) uses to direct worker agents on the workspace's project:
 | Tool | What it does |
 |---|---|
 | `team_agents` | the worker agents this machine can start |
-| `team_start {agent, task, base?}` | starts a worker in its own git worktree (`<repo>-team/<id>` on branch `xencode/team/<id>`) off `base` (default: the checked-out branch); returns its id (`w1`, …) |
+| `team_start {agent, task, base?}` | starts a worker in its own git worktree (`<repo>-team/<id>` on branch `xencode/team/<id>`) off `base`, which must be a local branch (default: the checked-out branch); returns its id (`w1`, …) |
 | `team_status {id?}` | one worker, or all: its state (`starting`, `working`, `needs_you`, `done`, `failed`, `stopped`), last message and tool calls |
 | `team_result {id}` | its latest answer and its diff against the base branch |
 | `team_message {id, text}` | a follow-up in the same session, once its turn is done |
@@ -3838,9 +3838,13 @@ limit = 4                 # workers running at once
 check_timeout_secs = 1200 # a check running longer is stopped and counts as failed
 ```
 
-The checks run without any environment variable that holds a key, a token or a
-password (any name containing `API_KEY`, `TOKEN`, `SECRET`, `PASSWORD` or
-`CREDENTIAL`, and each vendor's key variable). The checks run the worker's code on your machine: `cargo test` builds and runs
+The checks start from an empty environment and get only what a build or test
+ordinarily needs: `PATH` (absolute folders only), the home, temp and system
+folders, locale, and `CARGO_*`, `RUSTUP_*` and `RUST*` settings. Nothing whose
+name marks it as a secret (`API_KEY`, `ACCESS_KEY`, `TOKEN`, `SECRET`,
+`PASSWORD`, `CREDENTIAL`, `AUTH`, `PRIVATE`) goes with them. A project whose
+tests need more names them in `.xencode/team.toml`, for example
+`check_env = ["DATABASE_URL"]`; only those pass, on purpose. The checks run the worker's code on your machine: `cargo test` builds and runs
 its `build.rs`, its tests and anything they start, as any test run of a branch
 would. The question about files that decide how checks run covers the check
 settings, not that. A check past `check_timeout_secs` is ended with every process
@@ -3851,7 +3855,9 @@ Workers belong to the project, not to the lead's session: the engine keeps
 running while a worker works or a merge runs, with no window open. An engine
 that starts where an earlier one left worktrees shows those workers as
 `stopped`, and new workers get the next numbers. Merging one of them asks you
-first, because nothing says who made it.
+first, because nothing says who made it. A top-level folder whose name is not
+plain ASCII counts as one that might stand for `.xencode`, so a change under it
+also asks you.
 
 The checks run with a PATH of absolute folders only, and on Windows `cmd` is
 told not to look in the current folder for a program, so a program the worker
@@ -4907,7 +4913,8 @@ List the vetoes on record for this repository, all of them or only the ones stil
   stopped, failed, or left by an engine that ended. It goes through the
   project's engine, which knows which workers still run, and prints `removed:`
   and one `kept <id>: <why>` line for each it left, such as a worktree with
-  changes nobody committed.
+  changes nobody committed. It also removes scratch folders (`merge-…`) a merge
+  left behind, unless a merge is running.
 
 The rest of this section is about team recipes.
 

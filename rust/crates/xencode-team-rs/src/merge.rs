@@ -56,6 +56,10 @@ pub struct TeamSettings {
     pub limit: Option<usize>,
     /// Seconds one check may take.
     pub check_timeout_secs: Option<u64>,
+    /// Environment variables the checks are given beyond the ordinary ones
+    /// (paths, locale, temp folders, toolchain settings), named on purpose.
+    #[serde(default)]
+    pub check_env: Vec<String>,
 }
 
 /// The project's team settings; defaults when the file is absent or cannot
@@ -252,21 +256,85 @@ fn check_path(path: &std::ffi::OsStr) -> std::ffi::OsString {
     std::env::join_paths(kept).unwrap_or_default()
 }
 
-/// The environment variables, of `names`, that hold a key, a token or a
-/// password: a vendor's own, or any whose name says it is one.
-fn hidden_from_checks(names: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
-    const MARKS: [&str; 5] = ["API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
-    names
-        .filter(|name| {
-            let upper = name.to_string_lossy().to_uppercase();
-            crate::agents::VENDOR_KEY_VARS.contains(&upper.as_str())
-                || MARKS.iter().any(|m| upper.contains(m))
-        })
-        .collect()
+/// Whether an environment variable's name says it holds a key, a token, a
+/// password or access to one: a vendor's own, or any with such a word in it.
+fn is_secret_name(name: &str) -> bool {
+    const MARKS: [&str; 9] = [
+        "API_KEY",
+        "ACCESS_KEY",
+        "PRIVATE",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "CREDENTIAL",
+        "AUTH",
+    ];
+    let upper = name.to_uppercase();
+    crate::agents::VENDOR_KEY_VARS.contains(&upper.as_str())
+        || MARKS.iter().any(|m| upper.contains(m))
+}
+
+/// Whether the checks are given the variable `name`. They run the worker's
+/// code, so only what a build or test ordinarily needs goes with them, and
+/// what the project's `check_env` names on purpose; nothing whose name says
+/// it is a secret, unless named there.
+fn passes_to_checks(name: &str, check_env: &[String]) -> bool {
+    const NAMES: [&str; 40] = [
+        "HOME",
+        "USERPROFILE",
+        "USERNAME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        "LANG",
+        "LANGUAGE",
+        "TZ",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "SYSTEMDRIVE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "OS",
+        "JAVA_HOME",
+        "GOPATH",
+        "GOROOT",
+        "CC",
+        "CXX",
+        "AR",
+        "NO_COLOR",
+    ];
+    const PREFIXES: [&str; 5] = ["LC_", "XDG_", "CARGO_", "RUSTUP_", "RUST"];
+    if check_env.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+        return true;
+    }
+    if is_secret_name(name) {
+        return false;
+    }
+    let upper = name.to_uppercase();
+    NAMES.contains(&upper.as_str()) || PREFIXES.iter().any(|p| upper.starts_with(p))
 }
 
 /// The process one check runs as, in `dir`.
-fn check_command(dir: &Path, command: &str) -> Command {
+fn check_command(dir: &Path, command: &str, check_env: &[String]) -> Command {
     #[cfg(windows)]
     let mut cmd = {
         // `cmd` reads its command line itself; Rust's usual quoting of an
@@ -275,9 +343,6 @@ fn check_command(dir: &Path, command: &str) -> Command {
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("cmd");
         c.arg("/C").raw_arg(command);
-        // Without this `cmd` looks for a program in the current folder before
-        // PATH, and the current folder holds the worker's files.
-        c.env("NoDefaultCurrentDirectoryInExePath", "1");
         c
     };
     #[cfg(not(windows))]
@@ -289,13 +354,21 @@ fn check_command(dir: &Path, command: &str) -> Command {
         c.arg("-c").arg(command).process_group(0);
         c
     };
+    // The checks run the worker's code: they start from an empty
+    // environment and get only what `passes_to_checks` allows.
+    cmd.env_clear();
+    for (name, value) in std::env::vars_os() {
+        if passes_to_checks(&name.to_string_lossy(), check_env) {
+            cmd.env(name, value);
+        }
+    }
     if let Some(path) = std::env::var_os("PATH") {
         cmd.env("PATH", check_path(&path));
     }
-    // The checks run the worker's code: none of the person's keys go with it.
-    for name in hidden_from_checks(std::env::vars_os().map(|(k, _)| k)) {
-        cmd.env_remove(name);
-    }
+    // Without this `cmd` looks for a program in the current folder before
+    // PATH, and the current folder holds the worker's files.
+    #[cfg(windows)]
+    cmd.env("NoDefaultCurrentDirectoryInExePath", "1");
     cmd.current_dir(dir);
     cmd
 }
@@ -382,6 +455,7 @@ fn attempt_merge(
     allowed: bool,
 ) -> Attempt {
     let done = Attempt::Done;
+    let check_env = team_settings(root).check_env;
     let base_commit = match commit_of(root, base) {
         Ok(c) => c,
         Err(why) => return done(MergeOutcome::Refused { why }),
@@ -458,7 +532,7 @@ fn attempt_merge(
         }
     }
     for command in commands {
-        if let Err(output) = run_check(&scratch.path, command, timeout) {
+        if let Err(output) = run_check(&scratch.path, command, timeout, &check_env) {
             return done(MergeOutcome::ChecksFailed { output });
         }
     }
@@ -495,7 +569,12 @@ fn attempt_merge(
 
 /// Run one check in `dir`; `Err` with the end of its output when it fails
 /// or runs past `timeout`.
-fn run_check(dir: &Path, command: &str, timeout: Duration) -> Result<(), String> {
+fn run_check(
+    dir: &Path,
+    command: &str,
+    timeout: Duration,
+    check_env: &[String],
+) -> Result<(), String> {
     let log = std::env::temp_dir().join(format!(
         "xencode-team-check-{}-{}.log",
         std::process::id(),
@@ -507,7 +586,7 @@ fn run_check(dir: &Path, command: &str, timeout: Duration) -> Result<(), String>
     let file =
         std::fs::File::create(&log).map_err(|e| format!("cannot keep the check's output: {e}"))?;
     let errors = file.try_clone().map_err(|e| e.to_string())?;
-    let spawned = check_command(dir, command)
+    let spawned = check_command(dir, command, check_env)
         .stdin(Stdio::null())
         .stdout(Stdio::from(file))
         .stderr(Stdio::from(errors))
@@ -800,7 +879,7 @@ mod tests {
         assert!(!marker.exists(), "the worker's git.bat ran");
         // This holds even where the person's own environment does not set
         // the variable: the check's process sets it.
-        let cmd = check_command(&root, "git --version");
+        let cmd = check_command(&root, "git --version", &[]);
         assert!(cmd
             .get_envs()
             .any(|(k, v)| k == "NoDefaultCurrentDirectoryInExePath"
@@ -864,44 +943,46 @@ mod tests {
     /// keys and tokens are not in their environment; ordinary settings are.
     #[test]
     fn the_checks_never_see_the_persons_keys() {
-        let names = [
+        for name in [
             "ANTHROPIC_API_KEY",
             "GITHUB_TOKEN",
+            "CARGO_REGISTRY_TOKEN",
+            "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
             "PGPASSWORD",
             "GOOGLE_APPLICATION_CREDENTIALS",
-            "API_KEY_OPENAI",
-            "PATH",
+            "SSH_AUTH_SOCK",
+            "DATABASE_URL",
+            "MY_OWN_THING",
+        ] {
+            assert!(!passes_to_checks(name, &[]), "{name}");
+        }
+        for name in [
             "HOME",
             "CARGO_HOME",
-            "RUST_BACKTRACE",
-        ];
-        let hidden = hidden_from_checks(names.iter().map(std::ffi::OsString::from));
-        let hidden: Vec<String> = hidden
-            .iter()
-            .map(|v| v.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(
-            hidden,
-            [
-                "ANTHROPIC_API_KEY",
-                "GITHUB_TOKEN",
-                "AWS_SECRET_ACCESS_KEY",
-                "PGPASSWORD",
-                "GOOGLE_APPLICATION_CREDENTIALS",
-                "API_KEY_OPENAI",
-            ]
+            "RUSTUP_TOOLCHAIN",
+            "LANG",
+            "TEMP",
+            "SystemRoot",
+        ] {
+            assert!(passes_to_checks(name, &[]), "{name}");
+        }
+        let named = vec!["DATABASE_URL".to_string()];
+        assert!(
+            passes_to_checks("DATABASE_URL", &named),
+            "a name the project gives passes"
         );
-        // The command a check really runs as removes them.
-        let cmd = check_command(Path::new("."), "git --version");
-        for (name, _) in std::env::vars_os() {
-            if !hidden_from_checks(std::iter::once(name.clone())).is_empty() {
-                assert!(
-                    cmd.get_envs()
-                        .any(|(k, v)| k == name.as_os_str() && v.is_none()),
-                    "{name:?} reaches the checks"
-                );
-            }
+        // The command a check really runs as carries nothing else.
+        let cmd = check_command(Path::new("."), "git --version", &[]);
+        for (name, value) in cmd.get_envs() {
+            let name = name.to_string_lossy();
+            assert!(
+                value.is_none()
+                    || name == "PATH"
+                    || name == "NoDefaultCurrentDirectoryInExePath"
+                    || passes_to_checks(&name, &[]),
+                "{name} reaches the checks"
+            );
         }
     }
 
