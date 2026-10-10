@@ -4517,7 +4517,8 @@ On a worker's row `s` stops it (its worktree is kept) and `m` merges it the way
 `team_merge` does, landing only when the project's checks pass; the engine's
 answer appears as a notice. The row's state follows what the engine last
 reported when the panel was read, so press `r` to see a change; `Enter` names its
-task, worktree, branch and, once merged, the merge's outcome. When a worker asks
+task, worktree and branch, its latest answer, and, once merged, the merge's
+outcome. When a worker asks
 permission, or a merge needs your word, the ordinary approval prompt opens in
 every window and the badge reads `needs you` for it.
 
