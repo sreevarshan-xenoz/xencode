@@ -1207,3 +1207,85 @@ async fn orchestrator_costs_reads_the_workers_of_a_running_engine_only() {
         "{some}"
     );
 }
+
+/// Found by a real lead run: two xencode workers started together, sharing
+/// one settings folder, must each finish their turn.
+#[tokio::test]
+async fn two_xencode_workers_started_together_both_finish() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    for (n, task) in [(1, "make hello.txt"), (2, "make bye.txt")] {
+        let (ok, body) = ask(
+            &mut link,
+            n,
+            TeamRequest::Start {
+                agent: "xencode".into(),
+                task: task.into(),
+                base: None,
+            },
+        )
+        .await;
+        assert!(ok, "{body}");
+    }
+    team_until(&mut link, "w1", WorkerState::Done).await;
+    let (ok, body) = ask(
+        &mut link,
+        3,
+        TeamRequest::Status {
+            id: Some("w2".into()),
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    if body["state"] != "done" {
+        team_until(&mut link, "w2", WorkerState::Done).await;
+    }
+}
+
+/// Found by a real lead run: a lead polls `team_status` as fast as it can
+/// and gives up before a worker's turn ends. With `wait_secs` the call waits
+/// for the worker to settle, up to that long.
+#[test]
+fn team_status_can_wait_for_a_worker_to_settle() {
+    let (_outer, root) = repo();
+    let (config, _listener) = stalled();
+    let mut mcp = Mcp::start(&root, config.path());
+    let (text, error) = mcp.call(
+        "team_start",
+        serde_json::json!({"agent": "xencode", "task": "say hi"}),
+    );
+    assert!(!error, "{text}");
+    let started = std::time::Instant::now();
+    let (text, error) = mcp.call(
+        "team_status",
+        serde_json::json!({"id": "w1", "wait_secs": 4}),
+    );
+    assert!(!error, "{text}");
+    assert!(
+        started.elapsed() >= Duration::from_secs(4),
+        "it waited for the stalled worker: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        text.contains("\"working\"") || text.contains("\"starting\""),
+        "{text}"
+    );
+
+    let (_outer2, root2) = repo();
+    let config2 = unreachable();
+    let mut fast = Mcp::start(&root2, config2.path());
+    fast.call(
+        "team_start",
+        serde_json::json!({"agent": "xencode", "task": "say hi"}),
+    );
+    let started = std::time::Instant::now();
+    let (text, error) = fast.call("team_status", serde_json::json!({"wait_secs": 120}));
+    assert!(!error, "{text}");
+    assert!(text.contains("\"done\""), "{text}");
+    assert!(
+        started.elapsed() < Duration::from_secs(110),
+        "it returned once settled"
+    );
+}
