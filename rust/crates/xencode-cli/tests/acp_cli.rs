@@ -358,3 +358,178 @@ async fn a_real_model_streams_its_answer() {
     // pieces, is xencode's.
     assert!(!text.trim().is_empty(), "an answer arrived");
 }
+
+use agent_client_protocol::schema::v1::{
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, ToolCallContent, ToolKind,
+};
+
+/// Settings for a real llama.cpp server named by `XENCODE_LIVE_LLAMACPP_URL`.
+fn live_settings() -> tempfile::TempDir {
+    let url = std::env::var("XENCODE_LIVE_LLAMACPP_URL").expect("XENCODE_LIVE_LLAMACPP_URL");
+    let model = std::env::var("XENCODE_LIVE_MODEL").unwrap_or_else(|_| "llamacpp:live".into());
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("config.json"),
+        serde_json::json!({"default_model": model, "llama_cpp_url": url}).to_string(),
+    )
+    .unwrap();
+    config
+}
+
+/// How the test's client answers permission requests.
+#[derive(Clone, Copy)]
+enum Answer {
+    Pick(&'static str),
+    /// Never answer; the test cancels instead.
+    Never,
+}
+
+const WRITE_NOTE: &str =
+    "Use the write_file tool to create the file notes.txt containing exactly: hi. \
+Do not do anything else.";
+
+/// Run one prompt on a fresh session in `project`, answering permission
+/// requests with `answer`. Returns the updates seen, the permission
+/// requests seen and the stop reason.
+async fn live_turn(
+    project: &std::path::Path,
+    answer: Answer,
+    cancel_on_permission: bool,
+) -> (Vec<SessionUpdate>, usize, StopReason) {
+    let config = live_settings();
+    let cwd = project.to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    let asked = Arc::new(Mutex::new(0usize));
+    let counted = Arc::clone(&asked);
+    let (asked_tx, asked_rx) = tokio::sync::watch::channel(false);
+    let mut asked_rx = asked_rx;
+    let stop = Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |_req: RequestPermissionRequest, responder, connection| {
+                *counted.lock().unwrap() += 1;
+                let _ = asked_tx.send(true);
+                match answer {
+                    Answer::Pick(id) => responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                            id.to_string(),
+                        )),
+                    )),
+                    Answer::Never => connection.spawn(async move {
+                        // Answered only when the turn is cancelled, as the
+                        // protocol asks of a client.
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ))
+                    }),
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let turn = c.send_request(PromptRequest::new(s.session_id.clone(), text(WRITE_NOTE)));
+            if cancel_on_permission {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(300),
+                    asked_rx.wait_for(|asked| *asked),
+                )
+                .await;
+                c.send_notification(CancelNotification::new(s.session_id))?;
+            }
+            let r = turn.block_task().await?;
+            Ok(r.stop_reason)
+        })
+        .await
+        .unwrap();
+    let updates = seen.lock().unwrap().clone();
+    let asked = *asked.lock().unwrap();
+    (updates, asked, stop)
+}
+
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn an_approved_edit_writes_the_file_and_shows_a_diff() {
+    let project = tempfile::tempdir().unwrap();
+    let (updates, asked, stop) = live_turn(project.path(), Answer::Pick("allow"), false).await;
+    eprintln!(
+        "asked {asked} time(s); stop {stop:?}; {} updates",
+        updates.len()
+    );
+    assert_eq!(stop, StopReason::EndTurn);
+    assert!(asked >= 1, "the edit asked first");
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("notes.txt"))
+            .unwrap()
+            .trim(),
+        "hi"
+    );
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u, SessionUpdate::ToolCall(c) if c.kind == ToolKind::Edit)),
+        "an edit tool call was shown"
+    );
+    let diff = updates.iter().find_map(|u| match u {
+        SessionUpdate::ToolCallUpdate(u) => {
+            u.fields.content.as_ref()?.iter().find_map(|c| match c {
+                ToolCallContent::Diff(d) => Some(d.clone()),
+                _ => None,
+            })
+        }
+        _ => None,
+    });
+    let diff = diff.unwrap_or_else(|| {
+        let tools: Vec<_> = updates
+            .iter()
+            .filter(|u| {
+                matches!(
+                    u,
+                    SessionUpdate::ToolCall(_) | SessionUpdate::ToolCallUpdate(_)
+                )
+            })
+            .collect();
+        panic!("the edit's diff was sent: {tools:#?}")
+    });
+    assert!(diff.path.ends_with("notes.txt"), "{:?}", diff.path);
+    assert_eq!(diff.new_text.trim(), "hi");
+    assert_eq!(diff.old_text, None, "a new file");
+}
+
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_rejected_edit_writes_nothing() {
+    let project = tempfile::tempdir().unwrap();
+    let (_updates, asked, stop) = live_turn(project.path(), Answer::Pick("deny"), false).await;
+    eprintln!("asked {asked} time(s); stop {stop:?}");
+    assert!(asked >= 1, "the edit asked first");
+    assert!(!project.path().join("notes.txt").exists());
+}
+
+/// Review Focus 4.
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_cancel_while_permission_is_open_stops_the_turn() {
+    let project = tempfile::tempdir().unwrap();
+    let (_updates, asked, stop) = live_turn(project.path(), Answer::Never, true).await;
+    eprintln!("asked {asked} time(s); stop {stop:?}");
+    assert!(asked >= 1, "the edit asked first");
+    assert_eq!(stop, StopReason::Cancelled);
+    assert!(!project.path().join("notes.txt").exists());
+}

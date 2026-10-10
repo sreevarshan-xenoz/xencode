@@ -13003,7 +13003,8 @@ pub fn tool_call_token(call: &xencode_providers_rs::ToolCall) -> String {
     let body = serde_json::json!({
         "id": call.id,
         "name": call.name,
-        "arguments": call.arguments,
+        // As an object even when the model sent them as a JSON string.
+        "arguments": serde_json::Value::Object(call.arguments_object()),
     });
     format!("[TOOLCALL]{body}")
 }
@@ -19756,6 +19757,21 @@ Content-Length: 0
             500,
             "not cut short"
         );
+
+        // llama.cpp hands arguments over as a JSON string; the token carries
+        // them as an object either way.
+        let as_text = xencode_providers_rs::ToolCall {
+            id: "call-8".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::Value::String(r#"{"path": "notes.txt"}"#.to_string()),
+        };
+        let body: serde_json::Value = serde_json::from_str(
+            crate::app::tool_call_token(&as_text)
+                .strip_prefix("[TOOLCALL]")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["arguments"]["path"], "notes.txt");
 
         let end = crate::app::tool_end_token("call-7", "finished", &"y".repeat(5000));
         let body: serde_json::Value =

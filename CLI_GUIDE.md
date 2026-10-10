@@ -2527,7 +2527,13 @@ xencode's own settings: it needs a model set (`xencode config set
 default_model <model>`).
 
 What works so far: chat with streamed answers, and stopping a turn. A second
-message while a turn runs is refused until the turn ends or is stopped.
+message while a turn runs is refused until the turn ends or is stopped. Tool
+calls show in the editor as they run, with their kind (read, edit, search,
+run…); an edit to a UTF-8 text file up to 512 KiB carries its diff, so the
+editor shows the change. When a tool needs permission the editor asks you:
+allow once, always allow for this session, or reject. If a terminal on the same
+folder answers first, its answer counts. Stopping a turn while the editor is
+asking answers it with no.
 Attached files are passed to the model as text; images are not sent yet. Tool
 servers the editor passes are not used: xencode uses its own.
 

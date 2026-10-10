@@ -9,12 +9,35 @@ use xencode_tui_rs::engine::proto::{ApprovalView, EngineMsg};
 pub enum Out {
     /// Streamed answer text.
     Text(String),
+    /// A tool call began.
+    ToolStart(ToolStart),
+    /// A tool call ended.
+    ToolEnd(ToolEnd),
     /// An approval prompt to ask the editor about.
     Permission(ApprovalView),
     /// A question from the agent (`ask_user`), with its id.
     Question(u64, String),
     /// The turn is over.
     Ended(Ending),
+}
+
+/// A tool call as the agent loop began it (`[TOOLCALL]`).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ToolStart {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: serde_json::Value,
+}
+
+/// How a tool call ended (`[TOOLEND]`): its outcome label and the start of
+/// its result.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ToolEnd {
+    pub id: String,
+    pub outcome: String,
+    #[serde(default)]
+    pub preview: String,
 }
 
 /// How a turn ended.
@@ -58,6 +81,18 @@ impl Turn {
         if token == "[STOPPED]" {
             self.stopped = true;
             return Vec::new();
+        }
+        if let Some(body) = token.strip_prefix("[TOOLCALL]") {
+            return serde_json::from_str(body)
+                .map(Out::ToolStart)
+                .into_iter()
+                .collect();
+        }
+        if let Some(body) = token.strip_prefix("[TOOLEND]") {
+            return serde_json::from_str(body)
+                .map(Out::ToolEnd)
+                .into_iter()
+                .collect();
         }
         if let Some(why) = token.strip_prefix("[TURNERR]") {
             // The model call failed; the terminal shows it in the chat, and
@@ -161,6 +196,41 @@ mod tests {
                 Out::Ended(Ending::Done)
             ]
         );
+    }
+
+    #[test]
+    fn a_tool_call_is_seen_start_and_end() {
+        let mut turn = Turn::new();
+        let out = run(
+            &mut turn,
+            &[
+                ev(
+                    r#"[TOOLCALL]{"id":"c1","name":"write_file","arguments":{"path":"n.txt","content":"hi"}}"#,
+                ),
+                ev(r#"[TOOLEND]{"id":"c1","outcome":"done","preview":"wrote n.txt"}"#),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                Out::ToolStart(ToolStart {
+                    id: "c1".into(),
+                    name: "write_file".into(),
+                    arguments: serde_json::json!({"path": "n.txt", "content": "hi"}),
+                }),
+                Out::ToolEnd(ToolEnd {
+                    id: "c1".into(),
+                    outcome: "done".into(),
+                    preview: "wrote n.txt".into(),
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tool_token_that_does_not_parse_is_dropped() {
+        let mut turn = Turn::new();
+        assert!(turn.feed(&ev("[TOOLCALL]{not json")).is_empty());
     }
 
     #[test]

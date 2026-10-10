@@ -13,6 +13,7 @@ xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-live-rs = { path = "../xencode-live-rs" }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

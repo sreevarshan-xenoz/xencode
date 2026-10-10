@@ -2340,7 +2340,15 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
     engine. **Live:** with a real llama.cpp server (Qwen3-4B, RTX 3060) the answer "1 2 3 4 5 6 7
     8 9 10" arrived in 20 streamed pieces. **Not verified:** inside Zed itself (this session
     cannot click in Zed's window); images in prompts are not sent yet.
-  - [ ] **M-7b — tool calls with kinds and diffs; approvals as permission requests.**
+  - [x] **M-7b — tool calls with kinds and diffs; approvals as permission requests.** Done
+    2026-10-10: chat runs send each tool call whole (`[TOOLCALL]`/`[TOOLEND]`, arguments as an
+    object even when the model sent a JSON string); `xencode acp` shows them as ACP tool calls
+    with their kind, and an edit to a UTF-8 file up to 512 KiB ends with a diff. Approval prompts
+    are ACP permission requests (allow once, always allow this session, reject); one answered by
+    another window first is dropped; a cancel while one is open answers it no and stops the turn.
+    **Live** (Qwen3-4B): an approved `write_file` created `notes.txt` holding `hi` and its diff
+    reached the client; a rejected one wrote nothing; a cancel during the prompt ended the turn
+    as cancelled with nothing written. **Not verified:** inside Zed.
   - [ ] **M-7c — the model option and the slash-command list.**
   - [ ] **M-7d — `ask_user` questions; ByteBot as plan updates and its review as Keep or Undo.**
   - [ ] **M-7e — manuals; watched in real Zed.**
