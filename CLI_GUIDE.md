@@ -3796,7 +3796,7 @@ call answers with one outcome:
 | `landed` | the checks passed and the base branch now holds the merge commit; the worker stops and its worktree and branch are removed |
 | `checks_failed` | a check failed on the merged result; its output is returned and nothing landed; the worktree is kept for another try |
 | `conflict` | the branch does not merge cleanly with the base; the conflicting files are named |
-| `needs_person` | the project has no checks; you are asked, in any window, whether to land without them |
+| `needs_person` | the project has no checks, or the change edits what decides how checks run (anything under `.xencode/` or `.cargo/`, or `rust-toolchain`/`rust-toolchain.toml`); you are asked, in any window, and with your yes the checks still run (or, with none, the work lands) |
 | `refused` | something stops the merge before it starts, such as uncommitted changes in your own working copy, said in words |
 
 The checks are the `checks` list in `.xencode/team.toml`, run in order in the
@@ -3808,6 +3808,10 @@ checks = ["cargo fmt --all -- --check", "cargo test --quiet"]
 limit = 4                 # workers running at once
 check_timeout_secs = 1200 # a check running longer is stopped and counts as failed
 ```
+
+The checks run with a PATH of absolute folders only, and on Windows `cmd` is
+told not to look in the current folder for a program, so a program the worker
+wrote into its tree (a `git.bat`, say) is never what a check runs.
 
 The base branch is checked to be a commit before any git command sees it, and
 the engine's git runs no repository hooks; it refuses to run at all while the
