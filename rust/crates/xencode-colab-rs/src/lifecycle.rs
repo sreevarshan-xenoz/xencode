@@ -145,7 +145,7 @@ pub async fn bring_up<B: Backend>(
         quant,
         remote_port,
     )?;
-    run_bootstrap(backend, op, &opts.session, &script).await?;
+    let warnings = run_bootstrap(backend, op, &opts.session, &script).await?;
 
     let (url, child) =
         spawn_forward_ready(backend, op, &opts.session, opts.local_port, remote_port).await?;
@@ -169,6 +169,7 @@ pub async fn bring_up<B: Backend>(
         model: Some(opts.model.clone()),
         started_at: Some(now_rfc3339()),
         url: Some(url.clone()),
+        warnings,
     };
     save_state(&state).map_err(|e| format!("{op}: {e}"))?;
 
@@ -244,7 +245,15 @@ pub async fn reconnect_bridge<B: Backend>(
             .await
             .is_ok()
         {
-            record_bridge(backend, op, pid, local_port, remote_port, opts, &url)?;
+            record_bridge(
+                backend,
+                op,
+                pid,
+                remote_port,
+                opts,
+                &url,
+                state.warnings.clone(),
+            )?;
             return Ok(url);
         }
         // Release the runtime's single SSH slot for the bootstrap below.
@@ -264,7 +273,7 @@ pub async fn reconnect_bridge<B: Backend>(
         quant,
         remote_port,
     )?;
-    run_bootstrap(backend, op, &session, &script).await?;
+    let warnings = run_bootstrap(backend, op, &session, &script).await?;
 
     let (url, child) = spawn_forward_ready(backend, op, &session, local_port, remote_port).await?;
     let forward_pid = child.id().expect("a just-spawned forward always has a pid");
@@ -276,15 +285,7 @@ pub async fn reconnect_bridge<B: Backend>(
             format!("{op}: forward came up but the endpoint did not answer: {e}")
         })?;
 
-    record_bridge(
-        backend,
-        op,
-        forward_pid,
-        local_port,
-        remote_port,
-        opts,
-        &url,
-    )?;
+    record_bridge(backend, op, forward_pid, remote_port, opts, &url, warnings)?;
 
     Ok(url)
 }
@@ -295,22 +296,23 @@ fn record_bridge<B: Backend>(
     backend: &B,
     op: &str,
     forward_pid: u32,
-    local_port: u16,
     remote_port: u16,
     opts: &UpOptions,
     url: &str,
+    warnings: Vec<String>,
 ) -> Result<(), String> {
     save_state(&ColabState {
         backend: Some(backend.id().to_string()),
         session: Some(opts.session.clone()),
         forward_pid: Some(forward_pid),
         keepalive_pid: None,
-        local_port: Some(local_port),
+        local_port: Some(opts.local_port),
         remote_port: Some(remote_port),
         runtime: Some(opts.runtime.clone()),
         model: Some(opts.model.clone()),
         started_at: Some(now_rfc3339()),
         url: Some(url.to_string()),
+        warnings,
     })
     .map_err(|e| format!("{op}: {e}"))
 }
@@ -432,6 +434,7 @@ pub async fn bridge_status<B: Backend>(backend: &B, asked_session: &str) -> Stat
     if let Some(ts) = &state.started_at {
         lines.push(format!("started: {ts}"));
     }
+    lines.extend(state.warnings.iter().cloned());
     if let Some(hint) = backend.reap_hint(state.started_at.as_deref(), endpoint_ok) {
         lines.push(hint);
     }
@@ -510,12 +513,15 @@ async fn run_bootstrap<B: Backend>(
     op: &str,
     session: &str,
     script: &str,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let cmd = backend.exec_command(session, "bash -s");
     let mut busy = String::new();
     for attempt in 1..=BRIDGE_ATTEMPTS {
         let result = bootstrap_once(&cmd, op, script).await;
-        let Err(err) = result else { return Ok(()) };
+        let err = match result {
+            Ok(warnings) => return Ok(warnings),
+            Err(err) => err,
+        };
         if !backend.is_transient(&err) {
             return Err(err);
         }
@@ -531,7 +537,7 @@ async fn run_bootstrap<B: Backend>(
     ))
 }
 
-async fn bootstrap_once(cmd: &TransportCmd, op: &str, script: &str) -> Result<(), String> {
+async fn bootstrap_once(cmd: &TransportCmd, op: &str, script: &str) -> Result<Vec<String>, String> {
     let mut child = tokio::process::Command::new(&cmd.exe)
         .args(cmd.argv.iter().skip(1))
         .stdin(Stdio::piped())
@@ -575,7 +581,18 @@ async fn bootstrap_once(cmd: &TransportCmd, op: &str, script: &str) -> Result<()
     if !stdout.contains("READY") {
         return Err(format!("{op}: VM bootstrap did not report READY"));
     }
-    Ok(())
+    Ok(bootstrap_warnings(&stdout))
+}
+
+/// The lines of a successful bootstrap's output that the person should see:
+/// its `warning:` lines and the note that a runtime has no GPU.
+fn bootstrap_warnings(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("warning:") || l.starts_with("no GPU visible"))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Spawn the forward, tolerating a transport slot that frees slowly: the
@@ -613,6 +630,33 @@ mod tests {
     // their helpers are unused when the module is built anywhere else.
     #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
     use super::*;
+
+    #[test]
+    fn the_bootstrap_warnings_are_kept_and_the_rest_is_not() {
+        let stdout = "weights: a-00001-of-00002.gguf a-00002-of-00002.gguf 
+            warning: llama-server is not using the GPU and is serving on the CPU
+            READY 18080
+";
+        assert_eq!(
+            bootstrap_warnings(stdout),
+            vec![
+                "warning: llama-server is not using the GPU and is serving on the CPU".to_string()
+            ]
+        );
+        let cpu_only = "no GPU visible in this runtime — serving on CPU
+READY 18080
+";
+        assert_eq!(
+            bootstrap_warnings(cpu_only).len(),
+            1,
+            "a runtime with no GPU is said too"
+        );
+        assert!(bootstrap_warnings(
+            "READY 18080
+"
+        )
+        .is_empty());
+    }
     #[cfg(unix)]
     use crate::orchestrate::pid_alive;
     #[cfg(unix)]

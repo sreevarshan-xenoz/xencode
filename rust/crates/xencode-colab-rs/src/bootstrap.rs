@@ -53,17 +53,34 @@ pub fn llama_cpp_bootstrap(
     Ok(format!(
         r#"set -euo pipefail
 # xencode bootstrap — llama-server {build} on 127.0.0.1:{port}
-export LD_LIBRARY_PATH="{nvidia_lib}:/usr/local/cuda-12.8/lib64:${{LD_LIBRARY_PATH:-}}"
+export LD_LIBRARY_PATH="{nvidia_lib}:${{LD_LIBRARY_PATH:-}}"
 DIR="${{HOME}}/xencode-llama"
+RELEASE="https://github.com/ggml-org/llama.cpp/releases/download/{build}"
+# A server from an earlier bring-up still holds the port, and would answer the
+# readiness check for the new one; stop it and give the port time to free.
+if pkill -x llama-server; then sleep 3; fi
 rm -rf "$DIR"; mkdir -p "$DIR"
+# The CUDA 12 build needs libcudart.so.12 and libcublas.so.12. Colab's runtime
+# moved to CUDA 13 (seen 2026-10-10) and has neither, and without them
+# llama.cpp quietly serves on the CPU, so the runtime libraries the same
+# release ships beside the build are fetched with it. The newer driver runs
+# CUDA 12 programs.
 if nvidia-smi -L >/dev/null 2>&1; then
   ASSET='llama-{build}-bin-ubuntu-cuda-12.8-x64.tar.gz'; OFFLOAD='--n-gpu-layers 99'
+  CUDART='cudart-llama-{build}-bin-ubuntu-cuda-12.8-x64.tar.gz'
 else
-  ASSET='llama-{build}-bin-ubuntu-x64.tar.gz'; OFFLOAD=''
+  ASSET='llama-{build}-bin-ubuntu-x64.tar.gz'; OFFLOAD=''; CUDART=''
   echo "no GPU visible in this runtime — serving on CPU (colab new --gpu T4 gets a real one)"
 fi
-curl -fsSL -o "$DIR/llama.tar.gz" "https://github.com/ggml-org/llama.cpp/releases/download/{build}/${{ASSET}}"
+curl -fsSL -o "$DIR/llama.tar.gz" "$RELEASE/${{ASSET}}"
 tar -xzf "$DIR/llama.tar.gz" -C "$DIR"
+if [ -n "$CUDART" ]; then
+  mkdir -p "$DIR/cudart"
+  curl -fsSL -o "$DIR/cudart.tar.gz" "$RELEASE/${{CUDART}}"
+  tar -xzf "$DIR/cudart.tar.gz" -C "$DIR/cudart"
+  CUDART_DIR=$(dirname "$(find "$DIR/cudart" -name 'libcudart.so.12*' | head -n1)")
+  export LD_LIBRARY_PATH="${{CUDART_DIR}}:${{LD_LIBRARY_PATH}}"
+fi
 SERVER=$(find "$DIR" -name llama-server -type f | head -n1)
 test -n "$SERVER" || {{ echo "llama-server missing from ${{ASSET}}"; exit 1; }}
 LIBDIR=$(dirname "$(find "$DIR" -name 'libggml*.so' | head -n1)")
@@ -98,6 +115,17 @@ until curl -fsS "http://127.0.0.1:{port}/v1/models" >/dev/null 2>&1; do
     exit 1
   fi
 done
+# The first request on a fresh server pays a one-time start-up cost (36 s for
+# a 7B on a T4, measured 2026-10-10, against 34 tokens a second afterwards);
+# pay it here so the person's first question does not.
+curl -fsS "http://127.0.0.1:{port}/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d '{{"messages":[{{"role":"user","content":"hi"}}],"max_tokens":1}}' >/dev/null 2>&1 || true
+# llama.cpp falls back to the CPU without a word, and its log names no device
+# at the default detail level, so ask the GPU which processes it holds.
+if [ -n "$OFFLOAD" ] && ! nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null \
+    | tr -d ' ' | grep -qx "$SERVER_PID"; then
+  echo "warning: llama-server is not using the GPU and is serving on the CPU, which is many times slower; see ~/xencode-llama.log on the VM"
+fi
 echo "READY {port}"
 "#,
         build = LLAMA_CPP_BUILD,
@@ -180,7 +208,7 @@ mod tests {
         let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q4_K_M", 18080)
             .expect("hf supported");
         // The pinned prebuilt release, no on-VM compilation.
-        assert!(script.contains(&format!("releases/download/{LLAMA_CPP_BUILD}/")));
+        assert!(script.contains(&format!("releases/download/{LLAMA_CPP_BUILD}\"")));
         assert!(script.contains(&format!(
             "llama-{LLAMA_CPP_BUILD}-bin-ubuntu-cuda-12.8-x64.tar.gz"
         )));
@@ -293,6 +321,40 @@ qwen2.5-7b-instruct-q8_0-00003-of-00003.gguf";
         // The wait stops as soon as the server process is gone.
         assert!(script.contains("SERVER_PID=$!"), "{script}");
         assert!(script.contains("kill -0 \"$SERVER_PID\""), "{script}");
+    }
+
+    #[test]
+    fn the_gpu_build_brings_its_own_cuda_runtime_and_says_when_it_fell_back() {
+        let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q4_K_M", 18080)
+            .expect("hf supported");
+        // Colab moved from CUDA 12 to 13; the CUDA 12 build needs the runtime
+        // libraries that the same release ships beside it.
+        assert!(
+            script.contains(&format!(
+                "cudart-llama-{LLAMA_CPP_BUILD}-bin-ubuntu-cuda-12.8-x64.tar.gz"
+            )),
+            "{script}"
+        );
+        assert!(script.contains("libcudart.so.12"), "{script}");
+        // llama.cpp falls back to the CPU silently; the bootstrap does not.
+        // Its log names no device at the default detail level, so the GPU's
+        // own list of processes is what is asked.
+        assert!(script.contains("serving on the CPU"), "{script}");
+        assert!(
+            script.contains("nvidia-smi --query-compute-apps=pid"),
+            "{script}"
+        );
+        assert!(!script.contains("grep -q 'CUDA0'"), "{script}");
+        // The first request on a fresh server pays a one-time start-up cost
+        // (36 s on a T4, 2026-10-10); the bootstrap pays it before READY.
+        let warm = script.find("max_tokens\":1").expect("one warm-up request");
+        assert!(warm < script.find("echo \"READY").unwrap(), "{script}");
+        // A server left by an earlier bring-up holds the port and would
+        // answer for the new one, so it is stopped before anything starts.
+        let stop = script
+            .find("pkill -x llama-server")
+            .expect("stops an earlier server");
+        assert!(stop < script.find("nohup").unwrap(), "{script}");
     }
 
     #[test]

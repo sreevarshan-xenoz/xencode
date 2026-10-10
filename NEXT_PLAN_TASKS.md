@@ -1532,6 +1532,16 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
   is fetched under its own name, a dead server is reported at once with its log, and the
   download prints only errors. The part-picking step is tested by running it in a real `bash`
   against the repo's real file list; the whole bring-up was watched on a real T4.
+- [x] **K-6 — the GPU build ran on the CPU.** Found 2026-10-10 in the same run: Colab's runtime
+  now has CUDA 13 and no CUDA 12 runtime libraries, so the pinned CUDA 12 build fell back to the
+  CPU without a word (1.7 tokens a second on a T4). Done 2026-10-10: the bootstrap fetches the
+  release's own CUDA runtime bundle, stops a server left by an earlier bring-up (it held the port
+  and answered for the new one), sends one warm-up request before `READY` (the first request
+  took 36 s), and records a `warning:` in `colab.json` when the server is not among the GPU's
+  processes; `up` and `status` print it. **Watched on a real T4:** 32.7 tokens a second, the
+  first real request answered in 2.0 s, and no warning. **Not watched:** the warning firing on a
+  real CPU fallback with the new check (the earlier log-based check did fire on one, wrongly
+  worded, before the runtime fix).
 - [x] **L-1 — extract a `Backend` trait from `xencode-colab-rs`.** Split the
       generic half of `orchestrate.rs` + `lifecycle.rs` (bootstrap,
       poll-until-serving, forward spawn/hold, state file, reconnect) behind a

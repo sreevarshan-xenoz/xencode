@@ -2326,11 +2326,17 @@ bootstrap, and re-spawns the forward, then re-probes and rewrites state.
 Without a `colab.json` it errors with a pointer to a full `xencode colab up`.
 
 `runtime` chooses what is installed on the VM: `llama.cpp` (pinned prebuilt
-llama.cpp release — CUDA build when `nvidia-smi` answers, the plain x64 build
-otherwise — serving one GGUF fetched from Hugging Face) or `ollama`
+llama.cpp release — CUDA build, with the CUDA runtime libraries that release
+ships for it, when `nvidia-smi` answers, the plain x64 build otherwise —
+serving one GGUF fetched from Hugging Face, every part of it when the model is
+split into parts) or `ollama`
 (`ollama serve` + the pull — its tags then flow into the model picker for free
 via the existing provider list). llama.cpp listens on `127.0.0.1:18080` by
 default because Colab's own runtime proxy permanently holds `8080` on the VM.
+A server left by an earlier `up` is stopped first, and one warm-up request is
+sent before `up` reports ready, so the first real question is not the slow one.
+When the llama.cpp server is not among the GPU's processes, `up` and `status`
+print a `warning:` line saying it serves on the CPU.
 `weights` is `hf` for llama.cpp; `drive`/`gcs` are refused with a fix message.
 Session names are validated before they touch a shell (`[A-Za-z0-9_-]`,
 1–64 chars).
