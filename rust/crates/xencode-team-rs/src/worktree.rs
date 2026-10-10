@@ -184,6 +184,64 @@ pub fn leftover_folders(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     Ok(found)
 }
 
+/// The branch the project has checked out, read with the engine's own git.
+pub fn current_branch(root: &Path) -> Option<String> {
+    let root = &plain(root);
+    git(root, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
+}
+
+/// Whether `name` is one of the project's local branches. A worker's work
+/// lands on a branch, so its base must be one.
+pub fn is_branch(root: &Path, name: &str) -> bool {
+    let root = &plain(root);
+    !name.starts_with('-')
+        && git(
+            root,
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{name}"),
+            ],
+        )
+        .is_ok()
+}
+
+/// Remove the scratch worktrees (`merge-…`) merges left in the team folder,
+/// which a removal can leave behind on Windows. Call only while no merge
+/// runs. Returns the folders removed.
+pub fn sweep_scratch(root: &Path) -> Vec<String> {
+    let root = &plain(root);
+    let _ = git(root, &["worktree", "prune"]);
+    let Ok(dir) = team_dir(root) else {
+        return Vec::new();
+    };
+    let mut removed = Vec::new();
+    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let scratch = name.strip_prefix("merge-").is_some_and(|rest| {
+            !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit() || c == '-')
+        });
+        let path = entry.path();
+        if !scratch || !path.is_dir() {
+            continue;
+        }
+        let target = path.to_string_lossy().to_string();
+        let _ = git(root, &["worktree", "remove", "--force", &target]);
+        let _ = git(root, &["worktree", "prune"]);
+        if path.exists() {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+        if !path.exists() {
+            removed.push(name);
+        }
+    }
+    removed
+}
+
 /// Whether `name` is a worker id: `w` and a number.
 pub fn is_worker_id(name: &str) -> bool {
     name.len() > 1 && name.starts_with('w') && name[1..].chars().all(|c| c.is_ascii_digit())
@@ -417,6 +475,35 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    }
+
+    /// Review: scratch worktrees a merge left are swept; nothing else in the
+    /// team folder is touched.
+    #[test]
+    fn leftover_merge_scratch_is_swept_and_nothing_else() {
+        let (_outer, root) = repo();
+        let dir = team_dir(&root).unwrap();
+        let registered = dir.join("merge-1-2");
+        let target = registered.to_string_lossy().to_string();
+        super::git(
+            &root,
+            &["worktree", "add", "-q", "--detach", &target, "main"],
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("merge-3-4")).unwrap();
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        let mut removed = sweep_scratch(&root);
+        removed.sort();
+        assert_eq!(
+            removed,
+            vec!["merge-1-2".to_string(), "merge-3-4".to_string()]
+        );
+        assert!(dir.join("notes").exists());
+        assert!(is_branch(&root, "main"));
+        assert!(!is_branch(&root, "--help"));
+        let head = super::git(&root, &["rev-parse", "HEAD"]).unwrap();
+        assert!(!is_branch(&root, head.trim()), "a commit is not a branch");
+        assert_eq!(current_branch(&root).as_deref(), Some("main"));
     }
 
     /// Security review: a worker could make a worktree of its own anywhere

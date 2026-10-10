@@ -211,7 +211,7 @@ async fn run(
                         .title
                         .clone()
                         .unwrap_or_else(|| "a tool".to_string());
-                    let tool = format!("{:?}", req.tool_call.fields.kind).to_lowercase();
+                    let tool = tool_name(req.tool_call.fields.kind);
                     shared.update(|s| s.state = WorkerState::NeedsYou);
                     let _ = shared.events.send(WorkerEvent::Permission {
                         worker: shared.id(),
@@ -299,6 +299,14 @@ async fn run(
         .map_err(|e| format!("the worker's agent ended: {e}"))
 }
 
+/// A tool kind as the protocol names it (`edit`, `execute`, …), or `tool`
+/// when the agent gave none.
+fn tool_name(kind: Option<agent_client_protocol::schema::v1::ToolKind>) -> String {
+    kind.and_then(|k| serde_json::to_value(k).ok())
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "tool".to_string())
+}
+
 /// Fold one session update into the snapshot.
 fn record(s: &mut WorkerSnapshot, update: &SessionUpdate) {
     match update {
@@ -352,6 +360,16 @@ mod tests {
             on_plan,
             merge: None,
         }
+    }
+
+    /// Review: the kind a worker's prompt shows is the protocol's own name,
+    /// not Rust's debug text (`some(edit)`).
+    #[test]
+    fn a_tool_kind_is_shown_by_its_protocol_name() {
+        use agent_client_protocol::schema::v1::ToolKind;
+        assert_eq!(tool_name(Some(ToolKind::Edit)), "edit");
+        assert_eq!(tool_name(Some(ToolKind::SwitchMode)), "switch_mode");
+        assert_eq!(tool_name(None), "tool");
     }
 
     /// TM-5: the agent's own usage report gives the worker its tokens and,

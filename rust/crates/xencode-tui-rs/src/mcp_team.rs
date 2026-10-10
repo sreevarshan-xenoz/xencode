@@ -18,7 +18,14 @@ use crate::engine::proto::{ClientMsg, EngineMsg, TeamRequest};
 /// How long an ordinary team request may take.
 const WAIT: Duration = Duration::from_secs(30);
 /// A merge runs the project's checks first.
-const MERGE_WAIT: Duration = Duration::from_secs(1500);
+/// How long `team_merge` waits for a merge: every check may run to its
+/// time limit (`.xencode/team.toml`), plus five minutes for git.
+fn merge_wait(root: &Path) -> Duration {
+    let settings = xencode_team_rs::merge::team_settings(root);
+    let checks = settings.checks.len().max(1) as u64;
+    let each = settings.check_timeout_secs.unwrap_or(1200);
+    Duration::from_secs(checks.saturating_mul(each).saturating_add(300))
+}
 
 /// The published tool names, in this order.
 pub const TEAM_TOOLS: [&str; 7] = [
@@ -153,10 +160,12 @@ impl TeamClient {
                     Err(text)
                 };
             }
-            if start.elapsed() > MERGE_WAIT {
+            let wait = merge_wait(&self.root);
+            if start.elapsed() > wait {
                 return Err(format!(
-                    "{id}'s merge did not finish within {} s",
-                    MERGE_WAIT.as_secs()
+                    "{id}'s merge did not finish within {} s; it is still running, and \
+                     team_status shows its outcome when it ends",
+                    wait.as_secs()
                 ));
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -222,5 +231,25 @@ impl TeamClient {
             .await
             .map(|(link, _view)| link)
             .map_err(|why| format!("cannot reach the engine for {}: {why}", self.root.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review: `team_merge` waits as long as the checks may run, not a fixed
+    /// time shorter than them.
+    #[test]
+    fn the_merge_wait_covers_every_check_running_to_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(merge_wait(dir.path()), Duration::from_secs(1500));
+        std::fs::create_dir_all(dir.path().join(".xencode")).unwrap();
+        std::fs::write(
+            dir.path().join(".xencode").join("team.toml"),
+            "checks = [\"a\", \"b\", \"c\"]\ncheck_timeout_secs = 1200\n",
+        )
+        .unwrap();
+        assert_eq!(merge_wait(dir.path()), Duration::from_secs(3 * 1200 + 300));
     }
 }

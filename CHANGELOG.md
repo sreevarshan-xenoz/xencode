@@ -25,11 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-1`, `TM-3`, `TM-4` (smaller review fixes): a worker's base must be a
+  local branch; a worker being merged is not sent new messages; the lead's
+  `team_merge` waits as long as the checks may run; `xencode team clean`
+  also removes scratch folders merges left; a worker's prompt names its
+  tool kind as the protocol does (`edit`, not `some(edit)`); and the
+  engine finds the checked-out branch with its own hardened git.
 - `TM-1`, `TM-3` (security fixes): merging a worker an earlier engine left
   asks the person first, since nothing says who made its worktree; the
   merge's checks run without the person's keys, tokens or passwords in
   their environment; and a worker agent's own permission text is shown
-  escaped and clipped in the person's question.
+  escaped and clipped in the person's question. The checks now start from an
+  empty environment with only ordinary build settings, plus what
+  `check_env` in `.xencode/team.toml` names; and the question about a
+  left-behind worker names its commit, and only that commit is merged.
 - `TM-1`, `TM-3` (review fixes): the engine no longer ends while a worker
   works or a merge runs, so workers outlive the lead's session as the manual
   says; an engine started later shows an earlier one's workers as stopped
