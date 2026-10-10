@@ -82,6 +82,8 @@ pub enum TeamRequest {
     Stop {
         id: String,
     },
+    /// Remove the worktrees of workers that are not running.
+    Clean,
     Merge {
         id: String,
     },

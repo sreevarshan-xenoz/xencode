@@ -127,8 +127,11 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String, String> {
 
 /// The branch a worker with this id works on.
 pub fn branch_for(id: &str) -> String {
-    format!("xencode/team/{id}")
+    format!("{BRANCH_PREFIX}{id}")
 }
+
+/// What every worker branch's name starts with.
+pub const BRANCH_PREFIX: &str = "xencode/team/";
 
 /// `path` without Windows' long-path prefix (`\\?\C:\…`), which a canonical
 /// path carries and git cannot make folders under.
@@ -140,8 +143,9 @@ pub(crate) fn plain(path: &Path) -> PathBuf {
     }
 }
 
-/// Make worker `id`'s worktree off `base`. Returns its path and branch.
-pub fn create(root: &Path, id: &str, base: &str) -> Result<(PathBuf, String), String> {
+/// The folder beside the project that holds its worker worktrees:
+/// `<parent>/<repo>-team`.
+pub fn team_dir(root: &Path) -> Result<PathBuf, String> {
     let root = &plain(root);
     let name = root
         .file_name()
@@ -150,7 +154,42 @@ pub fn create(root: &Path, id: &str, base: &str) -> Result<(PathBuf, String), St
     let parent = root
         .parent()
         .ok_or_else(|| format!("{} has no parent folder", root.display()))?;
-    let path = parent.join(format!("{name}-team")).join(id);
+    Ok(parent.join(format!("{name}-team")))
+}
+
+/// Folders in the team folder named like a worker (`w1`, `w2`, …) that git
+/// no longer lists as worktrees: what a removal left behind while a process
+/// still had the folder open.
+pub fn leftover_folders(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    let registered: Vec<PathBuf> = team_worktrees(root)?
+        .into_iter()
+        .map(|(_, path, _)| path)
+        .collect();
+    let dir = team_dir(root)?;
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_worker = name.len() > 1
+            && name.starts_with('w')
+            && name[1..].chars().all(|c| c.is_ascii_digit());
+        let path = entry.path();
+        let listed = registered.iter().any(|r| same_folder(r, &path));
+        if is_worker && path.is_dir() && !listed {
+            found.push((name, path));
+        }
+    }
+    Ok(found)
+}
+
+fn same_folder(a: &Path, b: &Path) -> bool {
+    let norm = |p: &Path| plain(p).to_string_lossy().replace('\\', "/").to_lowercase();
+    norm(a) == norm(b)
+}
+
+/// Make worker `id`'s worktree off `base`. Returns its path and branch.
+pub fn create(root: &Path, id: &str, base: &str) -> Result<(PathBuf, String), String> {
+    let root = &plain(root);
+    let path = team_dir(root)?.join(id);
     if path.exists() {
         return Err(format!(
             "a worktree for {id} already exists at {}",
@@ -222,10 +261,44 @@ fn registered(root: &Path, path: &Path) -> Result<bool, String> {
         .any(|l| l.replace('\\', "/").to_lowercase() == wanted))
 }
 
+/// The project's worker worktrees git knows about: each worker's id, its
+/// folder and its branch.
+pub fn team_worktrees(root: &Path) -> Result<Vec<(String, PathBuf, String)>, String> {
+    let root = &plain(root);
+    let listing = git(root, &["worktree", "list", "--porcelain"])?;
+    let mut found = Vec::new();
+    for entry in listing.split("\n\n") {
+        let path = entry.lines().find_map(|l| l.strip_prefix("worktree "));
+        let branch = entry
+            .lines()
+            .find_map(|l| l.strip_prefix("branch refs/heads/"));
+        if let (Some(path), Some(branch)) = (path, branch) {
+            if let Some(id) = branch.strip_prefix(BRANCH_PREFIX) {
+                found.push((id.to_string(), PathBuf::from(path), branch.to_string()));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Whether the worktree holds changes nobody committed.
+pub fn has_changes(worktree: &Path) -> Result<bool, String> {
+    let mut args = vec!["status", "--porcelain"];
+    args.extend_from_slice(&WORK);
+    Ok(!git(worktree, &args)?.trim().is_empty())
+}
+
+/// What counts as the worker's work: every path but `.xencode/`, where a
+/// xencode worker's own engine keeps its state and the person keeps the
+/// team's settings. A worker's change there is never committed for it.
+pub const WORK: [&str; 3] = ["--", ".", ":(exclude).xencode"];
+
 /// Make files the worker created but never added show in `git diff`. Only
 /// the worktree's index changes; nothing is committed.
 fn include_new_files(worktree: &Path) -> Result<(), String> {
-    git(worktree, &["add", "-A", "-N"]).map(|_| ())
+    let mut args = vec!["add", "-A", "-N"];
+    args.extend_from_slice(&WORK);
+    git(worktree, &args).map(|_| ())
 }
 
 /// The files the worker changed against `base`, committed or not.

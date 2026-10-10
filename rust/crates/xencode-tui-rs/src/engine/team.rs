@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
+use xencode_config_rs::XencodeConfig;
+use xencode_team_rs::agents::{self, AgentSpec, Availability, SignIn, StoredKey};
 use xencode_team_rs::merge::{self, Checks, MergeOutcome};
 use xencode_team_rs::worker::{LaunchSpec, WorkerEvent, WorkerHandle};
 use xencode_team_rs::{worktree, MergeState, WorkerSnapshot, WorkerState};
@@ -119,10 +121,15 @@ impl Team {
         root: &Path,
         request: TeamRequest,
         approvals: &Approvals,
+        config: &XencodeConfig,
     ) -> Result<Value, String> {
         match request {
-            TeamRequest::Agents => Ok(json!([{ "name": "xencode", "available": true }])),
-            TeamRequest::Start { agent, task, base } => self.start(root, &agent, &task, base),
+            TeamRequest::Agents => Ok(agents_listing(config)),
+            TeamRequest::Start { agent, task, base } => {
+                let spec = launch_for(&agent, config)?;
+                self.start(root, &agent, &task, base, spec)
+            }
+            TeamRequest::Clean => self.clean(root),
             TeamRequest::Status { id: Some(id) } => {
                 let s = self.find(&id)?;
                 serde_json::to_value(s).map_err(|e| e.to_string())
@@ -132,7 +139,12 @@ impl Team {
             }
             TeamRequest::Result { id } => {
                 let s = self.find(&id)?;
-                let diff = worktree::diff(&s.worktree, &base_of(root))?;
+                let base = self
+                    .bases
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| base_of(root));
+                let diff = worktree::diff(&s.worktree, &base)?;
                 Ok(json!({ "id": id, "state": s.state, "answer": s.answer, "diff": diff }))
             }
             TeamRequest::Message { id, text } => {
@@ -145,6 +157,68 @@ impl Team {
             }
             TeamRequest::Merge { id } => self.merge(root, &id, approvals),
         }
+    }
+
+    /// Remove the worktrees of workers that are not running: stopped,
+    /// failed, or left by an engine that has ended. One with changes nobody
+    /// committed is kept and said.
+    fn clean(&mut self, root: &Path) -> Result<Value, String> {
+        let mut removed = Vec::new();
+        let mut kept = Vec::new();
+        // A folder a removal left behind (git no longer lists it) is xencode's
+        // own leftover, finished off unless its worker still runs.
+        for (id, path) in worktree::leftover_folders(root)? {
+            if self.workers.get(&id).is_some_and(|h| {
+                !matches!(
+                    h.snapshot().state,
+                    WorkerState::Stopped | WorkerState::Failed
+                )
+            }) {
+                continue;
+            }
+            match worktree::remove(root, &path, &worktree::branch_for(&id)) {
+                Ok(()) => {
+                    self.workers.remove(&id);
+                    self.shown.remove(&id);
+                    removed.push(id);
+                }
+                Err(why) => kept.push(json!({ "id": id, "why": why })),
+            }
+        }
+        for (id, path, branch) in worktree::team_worktrees(root)? {
+            if let Some(handle) = self.workers.get(&id) {
+                let state = handle.snapshot().state;
+                if !matches!(state, WorkerState::Stopped | WorkerState::Failed) {
+                    kept.push(
+                        json!({ "id": id, "why": format!("it is {state:?}; stop it first") }),
+                    );
+                    continue;
+                }
+            }
+            match worktree::has_changes(&path) {
+                Ok(false) => {}
+                Ok(true) => {
+                    kept.push(json!({
+                        "id": id,
+                        "why": format!("{} has changes nobody committed", path.display())
+                    }));
+                    continue;
+                }
+                Err(why) => {
+                    kept.push(json!({ "id": id, "why": why }));
+                    continue;
+                }
+            }
+            match worktree::remove(root, &path, &branch) {
+                Ok(()) => {
+                    self.workers.remove(&id);
+                    self.shown.remove(&id);
+                    removed.push(id);
+                }
+                Err(why) => kept.push(json!({ "id": id, "why": why })),
+            }
+        }
+        Ok(json!({ "removed": removed, "kept": kept }))
     }
 
     fn find(&self, id: &str) -> Result<WorkerSnapshot, String> {
@@ -222,8 +296,8 @@ impl Team {
         agent: &str,
         task: &str,
         base: Option<String>,
+        spec: LaunchSpec,
     ) -> Result<Value, String> {
-        let spec = launch_spec(agent)?;
         let running = self
             .workers
             .values()
@@ -384,6 +458,119 @@ fn base_of(root: &Path) -> String {
 
 /// How to start `agent`. TM-1 knows xencode itself; the outside agents come
 /// with sign-in in TM-5.
+/// What `team_agents` says: xencode, then each outside agent and whether it
+/// can start here now.
+fn agents_listing(config: &XencodeConfig) -> Value {
+    let mut out = vec![json!({ "name": "xencode", "available": true, "sign_in": "none needed" })];
+    for spec in agents::AGENTS {
+        let mut row = match describe(spec, config) {
+            Availability::Ready {
+                sign_in: SignIn::Key { var },
+                ..
+            } => {
+                json!({ "name": spec.name, "available": true, "sign_in": format!("API key ({var})") })
+            }
+            Availability::Ready {
+                sign_in: SignIn::Login,
+                ..
+            } => json!({
+                "name": spec.name,
+                "available": true,
+                "sign_in": "your own login (turned on with `xencode team login-optin`); on your plan, not priced"
+            }),
+            Availability::Missing { install } => {
+                json!({ "name": spec.name, "available": false, "missing": install })
+            }
+            Availability::NoSignIn { fix } => {
+                json!({ "name": spec.name, "available": false, "sign_in": fix })
+            }
+        };
+        if !config.allow_external_workers {
+            row["available"] = json!(false);
+            row["refused"] = json!(POSTURE_REFUSAL);
+        }
+        out.push(row);
+    }
+    Value::Array(out)
+}
+
+const POSTURE_REFUSAL: &str = "Local Only refuses another vendor's agent; \
+     `xencode config set allow_external_workers true` allows it";
+
+/// Whether an outside agent can start here now, read from this machine.
+fn describe(spec: &AgentSpec, config: &XencodeConfig) -> Availability {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let program = agents::find_program(spec.program, &path);
+    let key = key_for(spec, config);
+    let settings_dir = XencodeConfig::config_dir().ok();
+    let opted_in = settings_dir
+        .as_deref()
+        .map(|d| agents::optins(d).iter().any(|n| n == spec.name))
+        .unwrap_or(false);
+    let home = dirs::home_dir().map(|h| agents::antigravity_settings(&h));
+    agents::availability(
+        spec,
+        program,
+        key.as_ref().map(|(var, _)| var.as_str()),
+        opted_in,
+        home.as_deref(),
+    )
+}
+
+/// The API key for `spec`: from its own environment variables, else from
+/// xencode's settings, handed on under the variable the agent reads.
+fn key_for(spec: &AgentSpec, config: &XencodeConfig) -> Option<(String, String)> {
+    for var in spec.key_vars {
+        if let Ok(value) = std::env::var(var) {
+            if !value.trim().is_empty() {
+                return Some((var.to_string(), value));
+            }
+        }
+    }
+    let provider = match spec.stored_key? {
+        StoredKey::OpenAi => xencode_config_rs::SecretProvider::OpenAi,
+        StoredKey::Gemini => xencode_config_rs::SecretProvider::Gemini,
+    };
+    let value = config.api_keys.secret(provider).ok().flatten()?;
+    let var = spec.key_vars.last()?;
+    Some((var.to_string(), value))
+}
+
+/// How to start `agent`, refused in words when it cannot start.
+fn launch_for(agent: &str, config: &XencodeConfig) -> Result<LaunchSpec, String> {
+    if agent == "xencode" {
+        return launch_spec(agent);
+    }
+    let Some(spec) = agents::find(agent) else {
+        let known: Vec<&str> = std::iter::once("xencode")
+            .chain(agents::AGENTS.iter().map(|a| a.name))
+            .collect();
+        return Err(format!(
+            "xencode cannot start an agent called `{agent}`; it knows: {}",
+            known.join(", ")
+        ));
+    };
+    if !config.allow_external_workers {
+        return Err(format!("{agent}: {POSTURE_REFUSAL}"));
+    }
+    match describe(spec, config) {
+        Availability::Ready { program, sign_in } => {
+            let (env, on_plan) = match sign_in {
+                SignIn::Key { .. } => (key_for(spec, config).into_iter().collect(), false),
+                SignIn::Login => (Vec::new(), true),
+            };
+            Ok(LaunchSpec {
+                program,
+                args: spec.args.iter().map(|a| a.to_string()).collect(),
+                env,
+                on_plan,
+            })
+        }
+        Availability::Missing { install } => Err(format!("{agent} cannot start: {install}")),
+        Availability::NoSignIn { fix } => Err(format!("{agent} cannot sign in: {fix}")),
+    }
+}
+
 fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
     match agent {
         "xencode" => {
@@ -393,6 +580,7 @@ fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
                 program: exe,
                 args: vec!["acp".to_string()],
                 env: Vec::new(),
+                on_plan: false,
             })
         }
         other => Err(format!(

@@ -17744,7 +17744,15 @@ program; the keys themselves are covered by their own tests.
     the selected worker, the engine's answer shown as a notice; a worker's permission prompt sets
     the badge to `needs you` with the new `worker` source. Tested with a real window linked to a
     real engine: a started worker's row appears and `s` stops it.
-  - [ ] **TM-5 — the outside agents, sign-in and cost.**
+  - [ ] **TM-5 — the outside agents, sign-in and cost.** Built 2026-10-10, live runs pending:
+    `claude-code`, `codex`, `gemini` and `antigravity` start over ACP at pinned versions with a
+    key from the environment or xencode's settings, or with a login after `xencode team
+    login-optin`; `team_agents` says which can start and why not; the Local Only posture refuses
+    them; cost is the agent's own report and a login is "on your plan"; `xencode team clean`.
+    Tested for real: the listing and refusals through a real engine, the opt-in through the real
+    binary, `team clean` on a stopped worker. **Not yet watched:** each outside agent finishing a
+    task, which needs that vendor's key and costs money — the four `live_*` tests in
+    `team_cli.rs` are ignored until the owner provides keys and asks.
   - [ ] **TM-6 — manuals and the whole flow watched.**
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.

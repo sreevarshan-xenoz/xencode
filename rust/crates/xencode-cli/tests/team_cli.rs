@@ -83,6 +83,7 @@ fn xencode_worker(config: &Path) -> LaunchSpec {
             "XCODE_CONFIG_DIR".to_string(),
             config.to_string_lossy().to_string(),
         )],
+        on_plan: false,
     }
 }
 
@@ -161,6 +162,7 @@ async fn a_worker_whose_agent_ends_is_failed_and_keeps_its_worktree() {
         program: PathBuf::from(env!("CARGO_BIN_EXE_xencode")),
         args: vec!["--version".to_string()],
         env: Vec::new(),
+        on_plan: false,
     };
     let (_handle, mut events, path) = start(&root, spec, "say hi");
     let failed = until(&mut events, WorkerState::Failed, Duration::from_secs(30)).await;
@@ -186,16 +188,31 @@ impl Drop for Engine {
 }
 
 fn engine(project: &Path, config: &Path) -> (Engine, Address) {
+    engine_with(project, config, true)
+}
+
+/// A real engine for `project`; `without_keys` keeps the person's vendor
+/// keys from reaching it.
+fn engine_with(project: &Path, config: &Path, without_keys: bool) -> (Engine, Address) {
     use std::io::BufRead;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xencode"))
-        .args(["engine", "--project"])
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_xencode"));
+    cmd.args(["engine", "--project"])
         .arg(project)
         .env("XCODE_CONFIG_DIR", config)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+        .stderr(std::process::Stdio::null());
+    if without_keys {
+        for var in [
+            "ANTHROPIC_API_KEY",
+            "CODEX_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+        ] {
+            cmd.env_remove(var);
+        }
+    }
+    let mut child = cmd.spawn().unwrap();
     let mut line = String::new();
     std::io::BufReader::new(child.stdout.as_mut().unwrap())
         .read_line(&mut line)
@@ -651,4 +668,241 @@ async fn a_window_shows_the_team_and_s_stops_the_selected_worker() {
         worker_is(a, "w1", WorkerState::Stopped)
     })
     .await;
+}
+
+// ---- TM-5: the outside agents ----
+
+/// `unreachable()` settings with another vendor's agents allowed.
+fn outside_allowed() -> tempfile::TempDir {
+    let dir = unreachable();
+    let path = dir.path().join("config.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    config["allow_external_workers"] = serde_json::json!(true);
+    std::fs::write(&path, config.to_string()).unwrap();
+    dir
+}
+
+#[tokio::test]
+async fn local_only_lists_the_outside_agents_and_refuses_to_start_one() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(&mut link, 1, TeamRequest::Agents).await;
+    assert!(ok, "{body}");
+    let names: Vec<&str> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["xencode", "claude-code", "codex", "gemini", "antigravity"]
+    );
+    assert_eq!(body[0]["available"], true);
+    assert_eq!(body[1]["available"], false);
+    assert!(
+        body[1]["refused"].as_str().unwrap().contains("Local Only"),
+        "{body}"
+    );
+
+    let (ok, body) = ask(
+        &mut link,
+        2,
+        TeamRequest::Start {
+            agent: "claude-code".into(),
+            task: "say hi".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(!ok);
+    assert!(
+        body.to_string().contains("allow_external_workers"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn an_outside_agent_without_a_key_or_login_is_refused_with_the_fix() {
+    let (_outer, root) = repo();
+    let config = outside_allowed();
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(
+        &mut link,
+        1,
+        TeamRequest::Start {
+            agent: "codex".into(),
+            task: "say hi".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(!ok, "{body}");
+    let said = body.as_str().unwrap();
+    // Which of the two this machine gets depends on whether Node.js is
+    // installed here; both say what to do.
+    assert!(
+        said.contains("cannot sign in: set CODEX_API_KEY or OPENAI_API_KEY")
+            || said.contains("cannot start: `npx` is not on PATH"),
+        "{said}"
+    );
+    assert!(
+        !root.parent().unwrap().join("proj-team").join("w1").exists(),
+        "a refused start makes no worktree"
+    );
+}
+
+#[test]
+fn a_login_is_turned_on_only_by_a_typed_yes() {
+    use std::io::Write;
+    let config = tempfile::tempdir().unwrap();
+    let optin = |answer: &str| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_xencode"))
+            .args(["team", "login-optin", "gemini"])
+            .env("XCODE_CONFIG_DIR", config.path())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(answer.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    };
+    let no = optin("no\n");
+    assert!(!no.status.success());
+    let shown = String::from_utf8_lossy(&no.stdout);
+    assert!(
+        shown.contains("geminicli.com/docs/resources/tos-privacy"),
+        "{shown}"
+    );
+    assert!(!config.path().join("team-optins.json").exists());
+
+    let yes = optin("yes\n");
+    assert!(
+        yes.status.success(),
+        "{}",
+        String::from_utf8_lossy(&yes.stderr)
+    );
+    let kept = std::fs::read_to_string(config.path().join("team-optins.json")).unwrap();
+    assert!(kept.contains("gemini"), "{kept}");
+
+    let unknown = Command::new(env!("CARGO_BIN_EXE_xencode"))
+        .args(["team", "login-optin", "xencode"])
+        .env("XCODE_CONFIG_DIR", config.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
+}
+
+#[tokio::test]
+async fn team_clean_removes_a_stopped_workers_worktree() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(
+        &mut link,
+        1,
+        TeamRequest::Start {
+            agent: "xencode".into(),
+            task: "say hi".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    team_until(&mut link, "w1", WorkerState::Done).await;
+    let (ok, _) = ask(&mut link, 2, TeamRequest::Stop { id: "w1".into() }).await;
+    assert!(ok);
+    team_until(&mut link, "w1", WorkerState::Stopped).await;
+    let worktree = root.parent().unwrap().join("proj-team").join("w1");
+    assert!(worktree.exists());
+
+    // The person's command, from the project folder, through the same engine.
+    let start = std::time::Instant::now();
+    loop {
+        let out = Command::new(env!("CARGO_BIN_EXE_xencode"))
+            .args(["team", "clean"])
+            .current_dir(&root)
+            .env("XCODE_CONFIG_DIR", config.path())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stdout).to_string();
+        assert!(
+            out.status.success(),
+            "{said}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if said.contains("removed: w1") {
+            break;
+        }
+        // On Windows the stopped worker's own engine can hold the folder for
+        // a few seconds after it ends.
+        assert!(start.elapsed() < Duration::from_secs(40), "{said}");
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    assert!(!worktree.exists());
+}
+
+/// Each outside agent, live: it needs that vendor's key and costs money, so
+/// it runs only when asked (`cargo test -- --ignored <name>`).
+async fn an_outside_agent_answers(agent: &str) {
+    let (_outer, root) = repo();
+    let config = outside_allowed();
+    let (_engine, addr) = engine_keeping_keys(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(
+        &mut link,
+        1,
+        TeamRequest::Start {
+            agent: agent.into(),
+            task: "Reply with the single word: ready".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    let id = body["id"].as_str().unwrap().to_string();
+    let done = team_until(&mut link, &id, WorkerState::Done).await;
+    assert!(!done.answer.trim().is_empty(), "{done:?}");
+}
+
+/// As `engine`, but the person's vendor keys reach it.
+fn engine_keeping_keys(project: &Path, config: &Path) -> (Engine, Address) {
+    engine_with(project, config, false)
+}
+
+#[tokio::test]
+#[ignore = "needs ANTHROPIC_API_KEY and Node.js, and costs money"]
+async fn live_claude_code_answers_as_a_worker() {
+    an_outside_agent_answers("claude-code").await;
+}
+
+#[tokio::test]
+#[ignore = "needs CODEX_API_KEY or OPENAI_API_KEY and Node.js, and costs money"]
+async fn live_codex_answers_as_a_worker() {
+    an_outside_agent_answers("codex").await;
+}
+
+#[tokio::test]
+#[ignore = "needs GEMINI_API_KEY and the gemini CLI, and costs money"]
+async fn live_gemini_answers_as_a_worker() {
+    an_outside_agent_answers("gemini").await;
+}
+
+#[tokio::test]
+#[ignore = "needs GEMINI_API_KEY, Antigravity set to Gemini, and costs money"]
+async fn live_antigravity_answers_as_a_worker() {
+    an_outside_agent_answers("antigravity").await;
 }

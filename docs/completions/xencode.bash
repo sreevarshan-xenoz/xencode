@@ -856,8 +856,14 @@ _xencode() {
             xencode__subcmd__help__subcmd__tasks,stop)
                 cmd="xencode__subcmd__help__subcmd__tasks__subcmd__stop"
                 ;;
+            xencode__subcmd__help__subcmd__team,clean)
+                cmd="xencode__subcmd__help__subcmd__team__subcmd__clean"
+                ;;
             xencode__subcmd__help__subcmd__team,list)
                 cmd="xencode__subcmd__help__subcmd__team__subcmd__list"
+                ;;
+            xencode__subcmd__help__subcmd__team,login-optin)
+                cmd="xencode__subcmd__help__subcmd__team__subcmd__login__subcmd__optin"
                 ;;
             xencode__subcmd__help__subcmd__team,plan)
                 cmd="xencode__subcmd__help__subcmd__team__subcmd__plan"
@@ -1399,11 +1405,17 @@ _xencode() {
             xencode__subcmd__tasks__subcmd__help,stop)
                 cmd="xencode__subcmd__tasks__subcmd__help__subcmd__stop"
                 ;;
+            xencode__subcmd__team,clean)
+                cmd="xencode__subcmd__team__subcmd__clean"
+                ;;
             xencode__subcmd__team,help)
                 cmd="xencode__subcmd__team__subcmd__help"
                 ;;
             xencode__subcmd__team,list)
                 cmd="xencode__subcmd__team__subcmd__list"
+                ;;
+            xencode__subcmd__team,login-optin)
+                cmd="xencode__subcmd__team__subcmd__login__subcmd__optin"
                 ;;
             xencode__subcmd__team,plan)
                 cmd="xencode__subcmd__team__subcmd__plan"
@@ -1414,11 +1426,17 @@ _xencode() {
             xencode__subcmd__team,show)
                 cmd="xencode__subcmd__team__subcmd__show"
                 ;;
+            xencode__subcmd__team__subcmd__help,clean)
+                cmd="xencode__subcmd__team__subcmd__help__subcmd__clean"
+                ;;
             xencode__subcmd__team__subcmd__help,help)
                 cmd="xencode__subcmd__team__subcmd__help__subcmd__help"
                 ;;
             xencode__subcmd__team__subcmd__help,list)
                 cmd="xencode__subcmd__team__subcmd__help__subcmd__list"
+                ;;
+            xencode__subcmd__team__subcmd__help,login-optin)
+                cmd="xencode__subcmd__team__subcmd__help__subcmd__login__subcmd__optin"
                 ;;
             xencode__subcmd__team__subcmd__help,plan)
                 cmd="xencode__subcmd__team__subcmd__help__subcmd__plan"
@@ -5068,7 +5086,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__team)
-            opts="list show plan run"
+            opts="list show plan run login-optin clean"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -5081,7 +5099,35 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__help__subcmd__team__subcmd__clean)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__help__subcmd__team__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__team__subcmd__login__subcmd__optin)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -8660,7 +8706,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__team)
-            opts="-h --help list show plan run help"
+            opts="-h --help list show plan run login-optin clean help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -8673,9 +8719,37 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        xencode__subcmd__team__subcmd__help)
-            opts="list show plan run help"
+        xencode__subcmd__team__subcmd__clean)
+            opts="-h --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__team__subcmd__help)
+            opts="list show plan run login-optin clean help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__team__subcmd__help__subcmd__clean)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -8702,6 +8776,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__team__subcmd__help__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__team__subcmd__help__subcmd__login__subcmd__optin)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -8768,6 +8856,20 @@ _xencode() {
                     COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0
                     ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__team__subcmd__login__subcmd__optin)
+            opts="-h --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
                 *)
                     COMPREPLY=()
                     ;;

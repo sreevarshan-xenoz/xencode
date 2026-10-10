@@ -163,6 +163,11 @@ impl TeamClient {
         }
     }
 
+    /// Send one request to the engine and return its answer.
+    pub async fn request(&self, request: TeamRequest) -> Result<Value, String> {
+        self.ask(request, WAIT).await
+    }
+
     async fn ask(&self, request: TeamRequest, wait: Duration) -> Result<Value, String> {
         let mut guard = self.link.lock().await;
         if guard.is_none() {

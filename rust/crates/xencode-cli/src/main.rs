@@ -1389,6 +1389,18 @@ enum TeamAction {
         #[arg(long, default_value = "text")]
         format: OutputFormat,
     },
+
+    /// Let a worker agent sign in with your own login instead of an API key.
+    /// Prints what that vendor's terms say about it and asks for `yes`
+    LoginOptin {
+        /// The agent: claude-code, codex, gemini or antigravity
+        agent: String,
+    },
+
+    /// Remove the worktrees of worker agents that are not running (stopped,
+    /// failed, or left by an engine that ended). A worktree with changes
+    /// nobody committed is kept and named
+    Clean,
 }
 
 /// The control surface `OR-14` puts beside the TUI's `/orchestrator` mode.
@@ -5069,11 +5081,90 @@ fn team_recipes_dir() -> std::path::PathBuf {
 /// `OR-9` and `OR-10` — read the team recipes, and run one that has been
 /// approved. Listing, showing and planning are reads; `run` launches roles only
 /// under a name, and only after it has printed the same plan the read shows.
+/// `xencode team login-optin <agent>` (TM-5): the vendor's terms line, then
+/// a `yes` read from the terminal turns the login on.
+fn team_login_optin(agent: &str) -> Result<(), String> {
+    use std::io::{BufRead, Write};
+    let spec = xencode_team_rs::agents::find(agent).ok_or_else(|| {
+        let known: Vec<&str> = xencode_team_rs::agents::AGENTS
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        format!(
+            "no outside agent called `{agent}`; the ones that can use a login are: {}",
+            known.join(", ")
+        )
+    })?;
+    println!("What the vendor's terms say about using your own login through another program:");
+    println!();
+    println!("  {}", spec.terms_line);
+    println!("  {}", spec.terms_url);
+    println!();
+    println!(
+        "With a login, {}'s work is on your own plan and xencode does not price it.",
+        spec.name
+    );
+    print!("Type yes to let {} use your login: ", spec.name);
+    std::io::stdout().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut answer)
+        .map_err(|e| format!("could not read the answer: {e}"))?;
+    if answer.trim() != "yes" {
+        return Err("not turned on: the answer was not `yes`".to_string());
+    }
+    let dir = xencode_config_rs::XencodeConfig::config_dir().map_err(|e| e.to_string())?;
+    xencode_team_rs::agents::opt_in(&dir, spec.name)?;
+    println!(
+        "{} may now use your login; this is kept in {}.",
+        spec.name,
+        dir.join(xencode_team_rs::agents::OPTINS_FILE).display()
+    );
+    Ok(())
+}
+
+/// `xencode team clean` (TM-5): asks the project's engine, which knows which
+/// workers still run, to remove the rest's worktrees.
+async fn team_clean() -> Result<(), String> {
+    let root = xencode_context_rs::default_root();
+    let client = xencode_tui_rs::mcp_team::TeamClient::new(&root);
+    let body = client
+        .request(xencode_tui_rs::engine::proto::TeamRequest::Clean)
+        .await?;
+    let removed: Vec<&str> = body["removed"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    if removed.is_empty() {
+        println!("removed: none");
+    } else {
+        println!("removed: {}", removed.join(", "));
+    }
+    for kept in body["kept"].as_array().into_iter().flatten() {
+        println!(
+            "kept {}: {}",
+            kept["id"].as_str().unwrap_or("?"),
+            kept["why"].as_str().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
 async fn run_team(action: TeamAction) -> Result<(), String> {
+    // These two read no recipe, so a recipe folder that cannot be read does
+    // not stop them.
+    let action = match action {
+        TeamAction::LoginOptin { agent } => return team_login_optin(&agent),
+        TeamAction::Clean => return team_clean().await,
+        other => other,
+    };
     let dir = team_recipes_dir();
     let files = xencode_core_rs::load_recipes(&dir)
         .map_err(|e| format!("cannot read the team recipes in {}: {e}", dir.display()))?;
     match action {
+        TeamAction::LoginOptin { agent } => team_login_optin(&agent),
+        TeamAction::Clean => team_clean().await,
         TeamAction::List { format } => {
             if matches!(format, OutputFormat::Json) {
                 let out = serde_json::json!({

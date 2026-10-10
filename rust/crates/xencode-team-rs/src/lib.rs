@@ -4,6 +4,7 @@
 //! on the merged result. The engine hosts the team; this crate holds what does
 //! not need the terminal app.
 
+pub mod agents;
 pub mod merge;
 pub mod worker;
 pub mod worktree;
