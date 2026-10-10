@@ -272,13 +272,15 @@ async fn merge_worker(
     timeout: std::time::Duration,
     approvals: &Approvals,
 ) -> MergeOutcome {
-    let run = |checks: Checks, allowed: bool| {
-        let (root, wt, base, branch, task) = (
+    // `asked` is the commit the person was asked about: once they answer,
+    // exactly that commit is merged, or nothing if the work moved since.
+    let run = |checks: Checks, asked: Option<String>| {
+        let (root, wt, base, task, id) = (
             root.to_path_buf(),
             s.worktree.clone(),
             base.to_string(),
-            s.branch.clone(),
             s.task.clone(),
+            id.to_string(),
         );
         tokio::task::spawn_blocking(move || {
             let message = task
@@ -287,30 +289,48 @@ async fn merge_worker(
                 .find(|l| !l.is_empty())
                 .unwrap_or("work by a worker agent")
                 .to_string();
-            if let Err(why) = merge::commit_work(&wt, &message) {
-                return MergeOutcome::Refused { why };
-            }
-            if allowed {
-                merge::checked_merge_person_allowed(&root, &base, &branch, &checks, timeout)
-            } else {
-                merge::checked_merge(&root, &base, &branch, &checks, timeout)
+            let committed = match merge::commit_work(&wt, &message) {
+                Ok(committed) => committed,
+                Err(why) => return (MergeOutcome::Refused { why }, None),
+            };
+            let tip = match worktree::commit_of(&wt, "HEAD") {
+                Ok(tip) => tip,
+                Err(why) => return (MergeOutcome::Refused { why }, None),
+            };
+            match asked {
+                None => {
+                    let outcome = merge::checked_merge(&root, &base, &tip, &checks, timeout);
+                    (outcome, Some(tip))
+                }
+                Some(asked) if committed || tip != asked => (
+                    MergeOutcome::Refused {
+                        why: format!(
+                            "{id}'s work changed after you were asked; merge it again to be                              asked about what it is now"
+                        ),
+                    },
+                    None,
+                ),
+                Some(asked) => (
+                    merge::checked_merge_person_allowed(&root, &base, &asked, &checks, timeout),
+                    None,
+                ),
             }
         })
     };
+    let refused = |e: tokio::task::JoinError| (MergeOutcome::Refused { why: e.to_string() }, None);
     let checks = merge::checks_for(root);
     let unchecked = matches!(checks, Checks::None);
-    let first = run(checks.clone(), false)
-        .await
-        .unwrap_or_else(|e| MergeOutcome::Refused { why: e.to_string() });
-    let outcome = match first {
-        MergeOutcome::NeedsPerson { why } => {
+    let (first, tip) = run(checks.clone(), None).await.unwrap_or_else(refused);
+    match (first, tip) {
+        (MergeOutcome::NeedsPerson { why }, Some(tip)) => {
+            let short: String = tip.chars().take(10).collect();
             let request = ApprovalRequest {
                 tool: format!("merge {id}"),
                 class: ToolClass::External,
                 summary: if unchecked {
-                    format!("land {id} on {base} without checks? ({why})")
+                    format!("land {id} (commit {short}) on {base} without checks? ({why})")
                 } else {
-                    format!("land {id} on {base} once its checks pass? ({why})")
+                    format!("land {id} (commit {short}) on {base} once its checks pass? ({why})")
                 },
                 preview: String::new(),
                 draft: ApprovalDraft::default(),
@@ -328,18 +348,15 @@ async fn merge_worker(
                     } else {
                         checks
                     };
-                    run(checks, true)
-                        .await
-                        .unwrap_or_else(|e| MergeOutcome::Refused { why: e.to_string() })
+                    run(checks, Some(tip)).await.unwrap_or_else(refused).0
                 }
                 _ => MergeOutcome::Refused {
                     why: format!("the person chose not to land {id}"),
                 },
             }
         }
-        other => other,
-    };
-    outcome
+        (other, _) => other,
+    }
 }
 
 /// The branch the project has checked out, which workers start from.
@@ -377,6 +394,77 @@ fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Security review: the person says yes to the work they were asked about;
+    /// if the worker's work changed while the question waited, that is not
+    /// what lands.
+    #[tokio::test]
+    async fn work_that_changed_after_the_person_was_asked_does_not_land() {
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("proj");
+        std::fs::create_dir(&root).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["config", "user.email", "t@example.invalid"]);
+        git(&root, &["config", "user.name", "t"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "-m", "first"]);
+        let (wt, branch) = worktree::create(&root, "w1", "main").unwrap();
+        std::fs::write(wt.join("a.txt"), "asked about\n").unwrap();
+        let s = WorkerSnapshot {
+            id: "w1".into(),
+            agent: "xencode".into(),
+            task: "change a".into(),
+            state: WorkerState::Done,
+            branch,
+            worktree: wt.clone(),
+            last_message: String::new(),
+            answer: String::new(),
+            error: None,
+            tool_calls: 0,
+            tokens: None,
+            cost_micros: None,
+            on_plan: false,
+            merge: None,
+        };
+        let before = git(&root, &["rev-parse", "main"]);
+        let (approvals, mut queue) = mpsc::unbounded_channel();
+        let merging = {
+            let (root, s) = (root.clone(), s.clone());
+            tokio::spawn(async move {
+                merge_worker(
+                    &root,
+                    "w1",
+                    &s,
+                    "main",
+                    std::time::Duration::from_secs(60),
+                    &approvals,
+                )
+                .await
+            })
+        };
+        // The project has no checks, so the person is asked.
+        let (_request, answer) = queue.recv().await.unwrap();
+        std::fs::write(wt.join("a.txt"), "changed while asking\n").unwrap();
+        answer.send(ApprovalAnswer::Approved).unwrap();
+        let outcome = merging.await.unwrap();
+        match &outcome {
+            MergeOutcome::Refused { why } => assert!(why.contains("changed"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(git(&root, &["rev-parse", "main"]), before);
+    }
 
     /// Security review (authorization scope): a worker's prompt is asked as an
     /// ordinary approval, and "always allow" answers that one prompt only —

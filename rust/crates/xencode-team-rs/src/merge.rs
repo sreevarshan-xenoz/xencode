@@ -176,11 +176,18 @@ pub fn checked_merge_person_allowed(
 /// worker's change to one could choose the checks for this merge or every
 /// later one, so landing it is the person's call.
 fn decides_the_checks(file: &str) -> bool {
-    let file = file.replace('\\', "/");
-    file.starts_with(".xencode/")
-        || file.starts_with(".cargo/")
-        || file == "rust-toolchain"
-        || file == "rust-toolchain.toml"
+    // Compared as the file system would see each name: Windows (and macOS by
+    // default) fold letter case, and Windows drops a name's trailing dots and
+    // spaces, so `.XENCODE./team.toml` is `.xencode/team.toml` there.
+    let parts: Vec<String> = file
+        .split(['/', '\\'])
+        .map(|p| p.trim_end_matches(['.', ' ']).to_lowercase())
+        .collect();
+    let first = parts.first().map(String::as_str).unwrap_or("");
+    let whole = parts.len() == 1;
+    first == ".xencode"
+        || first == ".cargo"
+        || (whole && (first == "rust-toolchain" || first == "rust-toolchain.toml"))
 }
 
 /// PATH for the checks: only absolute folders, so nothing is found in the
@@ -300,15 +307,29 @@ fn attempt_merge(
         });
     }
     if !allowed {
-        let touched: Vec<String> = git(
+        // Names as stored, one per NUL, never quoted; if git cannot say which
+        // files changed, nothing lands.
+        let changed = match git(
             &scratch.path,
-            &["diff", "--name-only", &base_commit, "HEAD"],
-        )
-        .unwrap_or_default()
-        .lines()
-        .filter(|f| decides_the_checks(f))
-        .map(str::to_string)
-        .collect();
+            &[
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                &base_commit,
+                "HEAD",
+            ],
+        ) {
+            Ok(names) => names,
+            Err(why) => return done(MergeOutcome::Refused { why }),
+        };
+        let touched: Vec<String> = changed
+            .split('\0')
+            .filter(|f| !f.is_empty() && decides_the_checks(f))
+            .map(str::to_string)
+            .collect();
         if !touched.is_empty() {
             return done(MergeOutcome::NeedsPerson {
                 why: format!(
@@ -496,6 +517,43 @@ mod tests {
         let out =
             checked_merge_person_allowed(&root, "main", &branch, &checks(&["git --version"]), SECS);
         assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+    }
+
+    /// Security review: Windows folds letter case and drops a trailing dot or
+    /// space from a folder name, so each of these is the same file as one the
+    /// checks read; they are told apart the way the file system would.
+    #[test]
+    fn a_settings_file_spelled_another_way_still_counts() {
+        for file in [
+            ".XENCODE/team.toml",
+            ".xencode./team.toml",
+            ".xencode /team.toml",
+            ".Cargo/config.toml",
+            "Rust-Toolchain.toml",
+            "rust-toolchain.",
+        ] {
+            assert!(decides_the_checks(file), "{file}");
+        }
+        for file in [
+            "src/.xencode.rs",
+            "xencode/team.toml",
+            "docs/rust-toolchain.md",
+        ] {
+            assert!(!decides_the_checks(file), "{file}");
+        }
+    }
+
+    /// Security review: git quotes a name with characters outside ASCII
+    /// (`".xencode/\303\251.toml"`) unless told not to; a quoted name must not
+    /// slip past the guard.
+    #[test]
+    fn a_settings_file_with_a_quoted_name_still_needs_the_person() {
+        let (_o, root, wt, branch) = project();
+        std::fs::create_dir_all(wt.join(".xencode")).unwrap();
+        std::fs::write(wt.join(".xencode").join("é.toml"), "x\n").unwrap();
+        commit_work(&wt, "settings").unwrap();
+        let out = checked_merge(&root, "main", &branch, &checks(&["git --version"]), SECS);
+        assert!(matches!(out, MergeOutcome::NeedsPerson { .. }), "{out:?}");
     }
 
     /// Security review: on Windows `cmd` looks in the current folder before
