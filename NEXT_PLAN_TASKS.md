@@ -17753,7 +17753,11 @@ program; the keys themselves are covered by their own tests.
     binary, `team clean` on a stopped worker. **Not yet watched:** each outside agent finishing a
     task, which needs that vendor's key and costs money — the four `live_*` tests in
     `team_cli.rs` are ignored until the owner provides keys and asks.
-  - [ ] **TM-6 — manuals and the whole flow watched.**
+  - [ ] **TM-6 — manuals and the whole flow watched.** Manuals done 2026-10-10: README, Quick
+    Start ("Lead several agents"), CLI guide, user manual, changelog; 19 crates; `cargo test --workspace` on Windows: 3,053
+    passed, 35 known Windows-only failures, 35 ignored. **Not yet watched:** a real lead agent starting two workers, following them and
+    landing a merge — it needs a model for the xencode workers (Colab) and a lead session the
+    owner chooses to spend.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
