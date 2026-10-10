@@ -191,6 +191,18 @@ impl XencodeServer {
     }
 }
 
+impl XencodeServer {
+    /// The `tools/list` result. MCP 2026-07-28 requires every list result to
+    /// say how long it may be cached and by whom; a client on that version
+    /// rejects a list without them and shows no tools. The list can change
+    /// with each launch, so it is fresh for no time and private.
+    pub fn tool_list(&self) -> ListToolsResult {
+        ListToolsResult::with_all_items(self.advertised_tools())
+            .with_ttl_ms(0)
+            .with_cache_scope(rmcp::model::CacheScope::Private)
+    }
+}
+
 impl ServerHandler for XencodeServer {
     fn get_info(&self) -> InitializeResult {
         // What this launch will actually run, said once at handshake instead of
@@ -211,6 +223,15 @@ impl ServerHandler for XencodeServer {
                 self.root.display()
             )
         };
+        // The lead's team tools are their own surface: they start and merge
+        // worker agents through the engine, whatever the file tools permit.
+        let instructions = if self.team.is_some() {
+            format!(
+                "{instructions} The team tools (team_agents, team_start, team_status,                  team_result, team_message, team_stop, team_merge) are served too: they start                  worker agents in their own git worktrees through the project's engine and                  merge a worker's work only when the project's checks pass. They work                  whatever the file tools above permit."
+            )
+        } else {
+            instructions
+        };
         InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(SERVER_NAME, self.version.clone()))
             .with_instructions(instructions)
@@ -221,11 +242,7 @@ impl ServerHandler for XencodeServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let result = ListToolsResult {
-            tools: self.advertised_tools(),
-            ..Default::default()
-        };
-        Ok(result)
+        Ok(self.tool_list())
     }
 
     async fn call_tool(
@@ -293,6 +310,40 @@ mod tests {
         use std::sync::atomic::{AtomicU32, Ordering};
         static N: AtomicU32 = AtomicU32::new(0);
         N.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Found by a real Claude Code run: a client on MCP 2026-07-28 rejects a
+    /// tool list without `ttlMs` and `cacheScope`, so it saw no tools at all.
+    #[test]
+    fn the_tool_list_says_how_long_it_may_be_cached() {
+        let root = workspace("ttl");
+        let listed = serde_json::to_value(server(root.clone(), &[]).tool_list()).unwrap();
+        assert_eq!(listed["ttlMs"], 0, "{listed}");
+        assert_eq!(listed["cacheScope"], "private", "{listed}");
+        assert!(listed["tools"].as_array().is_some_and(|t| !t.is_empty()));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Found by the same run: with `--team` the handshake said only
+    /// "read-only", and the lead took that as there being no team tools.
+    #[test]
+    fn the_handshake_names_the_team_tools_when_they_are_served() {
+        let root = workspace("team-info");
+        let plain = server(root.clone(), &[])
+            .get_info()
+            .instructions
+            .unwrap_or_default();
+        assert!(!plain.contains("team_start"), "{plain}");
+        let team = server(root.clone(), &[])
+            .with_team()
+            .get_info()
+            .instructions
+            .unwrap_or_default();
+        assert!(
+            team.contains("team_start") && team.contains("team_merge"),
+            "{team}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn server(root: PathBuf, allowed: &[&str]) -> XencodeServer {
