@@ -35,9 +35,28 @@ pub fn act(app: &mut App, msg: ClientMsg, tx: &mpsc::UnboundedSender<String>) {
         return;
     }
     for reply in handle(app, msg, tx, "terminal") {
-        if let EngineMsg::Error { message } = reply {
-            app.push_toast(crate::toast::ToastKind::Warning, message);
+        match reply {
+            EngineMsg::Error { message } => {
+                app.push_toast(crate::toast::ToastKind::Warning, message);
+            }
+            EngineMsg::TeamReply { ok, body, .. } => team_toast(app, ok, &body),
+            _ => {}
         }
+    }
+}
+
+/// The engine's answer to a team request this app sent (TM-4), as a toast:
+/// what was done, or why not, in the engine's words.
+pub fn team_toast(app: &mut App, ok: bool, body: &serde_json::Value) {
+    let text = match body {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    let clipped: String = text.chars().take(160).collect();
+    if ok {
+        app.push_toast(crate::toast::ToastKind::Info, format!("team: {clipped}"));
+    } else {
+        app.push_toast(crate::toast::ToastKind::Warning, format!("team: {clipped}"));
     }
 }
 

@@ -278,6 +278,9 @@ pub fn frame(app: &mut App) -> Frame {
             LinkEvent::Msg(EngineMsg::Error { message }) => {
                 app.push_toast(crate::toast::ToastKind::Warning, message);
             }
+            LinkEvent::Msg(EngineMsg::TeamReply { ok, body, .. }) => {
+                super::team_toast(app, ok, &body);
+            }
             LinkEvent::Msg(msg) => {
                 if let Some(said) = answered_elsewhere(&msg, &link.name) {
                     app.push_toast(crate::toast::ToastKind::Info, said);

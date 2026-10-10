@@ -1,8 +1,9 @@
-//! The worker panel (`OR-12`): six readings laid end to end, each one naming
+//! The worker panel (`OR-12`): seven readings laid end to end, each one naming
 //! the row its figures came from.
 //!
 //! The sections are the fleet of workers xencode launched, the roles a team
-//! recipe names that xencode does not launch itself, the task registry, what the
+//! recipe names that xencode does not launch itself, the worker agents a lead
+//! directs through the project's engine (TM-4), the task registry, what the
 //! recorded team runs say about the graph and the energy of a run, the event
 //! timeline, and the approvals waiting on a human. Everything the panel can
 //! print is a value some other part of xencode already holds or wrote: a
@@ -40,10 +41,11 @@ use xencode_core_rs::team_runs::{Estimate, RunFile};
 use crate::app::SpendSnapshot;
 use crate::control_room::{CardStatus, FleetCard, PendingApproval, TimelineEntry, Trace};
 
-/// The six headings, in the order the panel lays them out.
+/// The seven headings, in the order the panel lays them out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelSection {
     Agents,
+    Team,
     Tasks,
     Graph,
     Costs,
@@ -55,8 +57,9 @@ impl PanelSection {
     /// Every section, in the order the panel lays them out. `/orchestrator status`
     /// (`OR-14`) walks this list so a section with nothing in it is named as one
     /// rather than going missing from the report.
-    pub const ALL: [PanelSection; 6] = [
+    pub const ALL: [PanelSection; 7] = [
         PanelSection::Agents,
+        PanelSection::Team,
         PanelSection::Tasks,
         PanelSection::Graph,
         PanelSection::Costs,
@@ -69,6 +72,7 @@ impl PanelSection {
     pub fn title(self) -> &'static str {
         match self {
             PanelSection::Agents => "agents",
+            PanelSection::Team => "team",
             PanelSection::Tasks => "tasks",
             PanelSection::Graph => "graph",
             PanelSection::Costs => "costs",
@@ -85,6 +89,11 @@ impl PanelSection {
                 "fleet cards from the normalised event streams, plus every role a recipe in \
                  `.xencode/teams/` names — a role xencode did not launch has no stream, so it \
                  shows no figures"
+            }
+            PanelSection::Team => {
+                "the worker agents the project's engine runs for a lead agent \
+                 (`xencode mcp serve --team`), as the engine reported them; `s` stops the \
+                 selected worker and `m` merges it when the project's checks pass"
             }
             PanelSection::Tasks => {
                 "the task registry, read without waiting on it: a locked \
@@ -150,12 +159,12 @@ impl PanelRow {
     }
 }
 
-/// Lay the six sections out in order, each behind its own heading. A section with
+/// Lay the seven sections out in order, each behind its own heading. A section with
 /// nothing in it gets no heading: the heading carries the count, and a heading
 /// over an empty list would be a figure with nothing behind it. `App` reads the
 /// missing heading as "this section found nothing to say", which is what
 /// `/orchestrator status` (`OR-14`) prints in that case.
-pub fn sections(parts: [(PanelSection, Vec<PanelRow>); 6]) -> Vec<PanelRow> {
+pub fn sections(parts: [(PanelSection, Vec<PanelRow>); 7]) -> Vec<PanelRow> {
     let mut out = Vec::new();
     for (section, rows) in parts {
         if !rows.is_empty() {
@@ -740,6 +749,88 @@ pub fn log_rows(entries: &[TimelineEntry], keep: usize) -> Vec<PanelRow> {
     rows
 }
 
+/// One row per worker agent the project's engine runs (TM-4). Each row starts
+/// with the worker's id, which is what `s` and `m` act on.
+pub fn team_rows(workers: &[xencode_team_rs::WorkerSnapshot]) -> Vec<PanelRow> {
+    use xencode_team_rs::{merge::MergeOutcome, MergeState, WorkerState};
+    if workers.is_empty() {
+        return vec![PanelRow {
+            section: PanelSection::Team,
+            is_header: false,
+            line: "team: no worker agents are running".to_string(),
+            sources: vec![
+                "the project's engine runs none; a lead agent starts them with `team_start` \
+                 through `xencode mcp serve --team`"
+                    .to_string(),
+            ],
+        }];
+    }
+    workers
+        .iter()
+        .map(|w| {
+            let state = match w.state {
+                WorkerState::Starting => "starting",
+                WorkerState::Working => "working",
+                WorkerState::NeedsYou => "needs you",
+                WorkerState::Done => "done",
+                WorkerState::Failed => "failed",
+                WorkerState::Stopped => "stopped",
+            };
+            let mut line = format!(
+                "{} · {} · {state} · {} tool call(s)",
+                w.id, w.agent, w.tool_calls
+            );
+            match &w.merge {
+                Some(MergeState::Running) => line.push_str(" · merging"),
+                Some(MergeState::Finished(outcome)) => line.push_str(match outcome {
+                    MergeOutcome::Landed { .. } => " · landed",
+                    MergeOutcome::ChecksFailed { .. } => " · checks failed",
+                    MergeOutcome::Conflict { .. } => " · merge conflict",
+                    MergeOutcome::NeedsPerson { .. } => " · merge needs you",
+                    MergeOutcome::Refused { .. } => " · merge refused",
+                }),
+                None => {}
+            }
+            let said = w.error.as_deref().unwrap_or(&w.last_message);
+            if !said.is_empty() {
+                let clipped: String = said.chars().take(80).collect();
+                line.push_str(" — ");
+                line.push_str(&clipped);
+            }
+            let mut sources = vec![
+                format!("worker {} in the project's engine, task: {}", w.id, w.task),
+                format!(
+                    "its worktree {} on branch {}",
+                    w.worktree.display(),
+                    w.branch
+                ),
+            ];
+            if let Some(MergeState::Finished(outcome)) = &w.merge {
+                sources.push(format!(
+                    "its merge: {}",
+                    serde_json::to_string(outcome).unwrap_or_default()
+                ));
+            }
+            PanelRow {
+                section: PanelSection::Team,
+                is_header: false,
+                line,
+                sources,
+            }
+        })
+        .collect()
+}
+
+/// The worker a Team row is about, read back from the id it starts with.
+pub fn team_worker(row: &PanelRow) -> Option<&str> {
+    if row.section != PanelSection::Team || row.is_header {
+        return None;
+    }
+    let id = row.line.split(' ').next()?;
+    (id.starts_with('w') && id.len() > 1 && id[1..].chars().all(|c| c.is_ascii_digit()))
+        .then_some(id)
+}
+
 /// The approvals waiting on a person, from both places that can hold one.
 pub fn approval_rows(live: &[String], raised: &[PendingApproval]) -> Vec<PanelRow> {
     if live.is_empty() && raised.is_empty() {
@@ -1155,6 +1246,57 @@ mod tests {
     }
 
     /// The empty approvals section is a measured nothing — both places were read.
+    /// TM-4: a worker's row starts with its id, which `s` and `m` act on, and
+    /// says its state and its merge; no workers is a row that says so.
+    #[test]
+    fn a_team_row_names_its_worker_its_state_and_its_merge() {
+        use xencode_team_rs::{merge::MergeOutcome, MergeState, WorkerSnapshot, WorkerState};
+        let worker = WorkerSnapshot {
+            id: "w12".into(),
+            agent: "xencode".into(),
+            task: "fix the parser".into(),
+            state: WorkerState::NeedsYou,
+            branch: "xencode/team/w12".into(),
+            worktree: "/p/proj-team/w12".into(),
+            last_message: "may I edit src/parse.rs?".into(),
+            answer: String::new(),
+            error: None,
+            tool_calls: 3,
+            tokens: None,
+            cost_micros: None,
+            on_plan: false,
+            merge: Some(MergeState::Finished(MergeOutcome::ChecksFailed {
+                output: "1 test failed".into(),
+            })),
+        };
+        let rows = team_rows(std::slice::from_ref(&worker));
+        assert_eq!(
+            rows[0].line,
+            "w12 · xencode · needs you · 3 tool call(s) · checks failed — may I edit src/parse.rs?"
+        );
+        assert_eq!(team_worker(&rows[0]), Some("w12"));
+        assert!(
+            rows[0].detail().contains("1 test failed"),
+            "{}",
+            rows[0].detail()
+        );
+
+        let none = team_rows(&[]);
+        assert_eq!(none[0].line, "team: no worker agents are running");
+        assert_eq!(team_worker(&none[0]), None);
+        let heading = sections([
+            (PanelSection::Agents, vec![]),
+            (PanelSection::Team, rows),
+            (PanelSection::Tasks, vec![]),
+            (PanelSection::Graph, vec![]),
+            (PanelSection::Costs, vec![]),
+            (PanelSection::Logs, vec![]),
+            (PanelSection::Approvals, vec![]),
+        ]);
+        assert_eq!(heading[0].line, "── team (1) ──");
+        assert_eq!(team_worker(&heading[0]), None, "a heading is no worker");
+    }
+
     /// The heading, the rows and the count in it all trace to the same list.
     #[test]
     fn nothing_waiting_is_reported_as_a_checked_nothing() {
@@ -1167,6 +1309,7 @@ mod tests {
         );
         let laid = sections([
             (PanelSection::Agents, vec![]),
+            (PanelSection::Team, vec![]),
             (PanelSection::Tasks, vec![]),
             (PanelSection::Graph, vec![]),
             (PanelSection::Costs, vec![]),
@@ -1185,6 +1328,7 @@ mod tests {
     fn an_empty_section_is_left_out_rather_than_counted() {
         let laid = sections([
             (PanelSection::Agents, vec![]),
+            (PanelSection::Team, vec![]),
             (PanelSection::Tasks, task_rows(Some(&[]))),
             (PanelSection::Graph, vec![]),
             (PanelSection::Costs, vec![]),
@@ -1219,6 +1363,7 @@ mod tests {
                     sources: vec!["the fleet this session launched".to_string()],
                 }],
             ),
+            (PanelSection::Team, team_rows(&[])),
             (PanelSection::Tasks, task_rows(Some(&[]))),
             (
                 PanelSection::Graph,
@@ -1236,7 +1381,7 @@ mod tests {
         assert_eq!(
             headed,
             Vec::from(PanelSection::ALL),
-            "a fresh session shows all six headings, so `/orchestrator status` and the panel \
+            "a fresh session shows all seven headings, so `/orchestrator status` and the panel \
              agree"
         );
     }

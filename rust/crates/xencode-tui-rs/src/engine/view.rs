@@ -226,6 +226,9 @@ pub fn apply(app: &mut App, view: View) {
     if let Some(value) = view.generating {
         app.is_generating = value;
     }
+    if let Some(value) = view.team {
+        app.team_view = value;
+    }
     if let Some(value) = view.bytebot_running {
         app.bytebot_running = value;
     }

@@ -577,3 +577,78 @@ fn red_checks_keep_the_workers_change_off_the_base_branch() {
     assert!(!root.join("from-worker.txt").exists());
     assert!(worktree.exists(), "kept for another try");
 }
+
+// ---- TM-4: the Team section of the worker panel ----
+
+async fn frames_until(
+    app: &mut xencode_tui_rs::app::App<'_>,
+    what: &str,
+    done: impl Fn(&xencode_tui_rs::app::App<'_>) -> bool,
+) {
+    let start = std::time::Instant::now();
+    loop {
+        let frame = link::frame(app);
+        assert!(
+            frame.lost.is_none(),
+            "the engine went away: {:?}",
+            frame.lost
+        );
+        if done(app) {
+            return;
+        }
+        assert!(start.elapsed() < Duration::from_secs(60), "never: {what}");
+        tokio::time::sleep(Duration::from_millis(33)).await;
+    }
+}
+
+fn worker_is(app: &xencode_tui_rs::app::App<'_>, id: &str, state: WorkerState) -> bool {
+    app.team_view.iter().any(|w| w.id == id && w.state == state)
+}
+
+#[tokio::test]
+async fn a_window_shows_the_team_and_s_stops_the_selected_worker() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let (_engine, addr) = engine(&root, config.path());
+    let (linked, view) = link::open(&addr, "terminal").await.unwrap();
+    let mut app = xencode_tui_rs::app::App::for_tests();
+    link::become_window(&mut app, linked, view);
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    app.team_command(
+        TeamRequest::Start {
+            agent: "xencode".into(),
+            task: "say hi".into(),
+            base: None,
+        },
+        &tx,
+    );
+    frames_until(&mut app, "w1 done", |a| {
+        worker_is(a, "w1", WorkerState::Done)
+    })
+    .await;
+
+    app.refresh_worker_panel();
+    let at = app
+        .workers_rows
+        .iter()
+        .position(|r| xencode_tui_rs::worker_panel::team_worker(r) == Some("w1"))
+        .unwrap_or_else(|| panic!("no row for w1: {:#?}", app.workers_rows));
+    assert!(
+        app.workers_rows[at].line.contains("xencode · done"),
+        "{}",
+        app.workers_rows[at].line
+    );
+    app.focus = xencode_tui_rs::app::FocusArea::WorkerPanel;
+    app.workers_selected = at;
+    xencode_tui_rs::keymap::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+        &tx,
+    );
+    frames_until(&mut app, "w1 stopped", |a| {
+        worker_is(a, "w1", WorkerState::Stopped)
+    })
+    .await;
+}

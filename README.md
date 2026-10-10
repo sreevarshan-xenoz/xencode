@@ -340,8 +340,8 @@ These twenty-four are the only strings the chat input intercepts (`SLASH_COMMAND
                             the durable task summary and the prompt files this build sends
 /advise [filter]            Live refactor insights (same report as Ctrl+L)
 /impact <file>              Blast radius of one file — crates, files, churn (fan-out panel)
-/workers                    The fleet, your recipes' roles, tasks, recorded runs, newest events and
-                            waiting approvals (Ctrl+A). Every figure names the row it was read from,
+/workers                    The fleet, your recipes' roles, a lead agent's worker agents (s stops,
+                            m merges), tasks, recorded runs, newest events and waiting approvals (Ctrl+A). Every figure names the row it was read from,
                             and a worker xencode cannot observe says unknown rather than idle
 /orchestrator <verb>        The same state as a way of working: on|off (Ctrl+Space flips the badge),
                             status, agents, tasks, graph, logs, costs, permissions, inspect, retry,

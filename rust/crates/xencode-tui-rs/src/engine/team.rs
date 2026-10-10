@@ -359,6 +359,14 @@ async fn merge_worker(
     }
 }
 
+/// Whether an approval is one the team asked for: a worker's permission
+/// prompt or a merge without checks. The badge says those are a worker's.
+pub fn is_team_approval(request: &ApprovalRequest) -> bool {
+    ["worker w", "merge w"]
+        .iter()
+        .any(|p| request.tool.starts_with(p))
+}
+
 /// The branch the project has checked out, which workers start from.
 fn base_of(root: &Path) -> String {
     std::process::Command::new("git")
@@ -394,6 +402,23 @@ fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TM-4: the badge says a worker is waiting only for the team's own
+    /// approvals, not for the person's agent's tools.
+    #[test]
+    fn the_teams_approvals_are_told_apart() {
+        let ask = |tool: &str| ApprovalRequest {
+            tool: tool.to_string(),
+            class: ToolClass::External,
+            summary: String::new(),
+            preview: String::new(),
+            draft: ApprovalDraft::default(),
+        };
+        assert!(is_team_approval(&ask("worker w1: edit")));
+        assert!(is_team_approval(&ask("merge w2")));
+        assert!(!is_team_approval(&ask("write_file")));
+        assert!(!is_team_approval(&ask("merge_branches")));
+    }
 
     /// Security review: the person says yes to the work they were asked about;
     /// if the worker's work changed while the question waited, that is not
