@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-4`: `Enter` on a worker's row in the Team panel also shows its latest
+  answer, escaped and clipped.
 - `TM-1`, `TM-3` (security fixes): cleaning the team folder never follows a
   symlink or junction into another folder, and `check_env` cannot pass a
   variable whose name marks a secret.

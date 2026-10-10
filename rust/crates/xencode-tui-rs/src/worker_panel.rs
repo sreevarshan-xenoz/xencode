@@ -812,6 +812,12 @@ pub fn team_rows(workers: &[xencode_team_rs::WorkerSnapshot]) -> Vec<PanelRow> {
                     w.branch
                 ),
             ];
+            if !w.answer.trim().is_empty() {
+                // What the worker last said, as its agent wrote it: escaped,
+                // so it cannot restyle the panel, and clipped.
+                let said: String = w.answer.trim().escape_debug().take(2000).collect();
+                sources.push(format!("its latest answer: {said}"));
+            }
             if let Some(MergeState::Finished(outcome)) = &w.merge {
                 sources.push(format!(
                     "its merge: {}",
@@ -1287,6 +1293,17 @@ mod tests {
             "{}",
             rows[0].detail()
         );
+
+        // Enter shows what the worker last said, escaped and clipped.
+        let mut talked = worker.clone();
+        talked.answer = format!("I changed parse.rs\u{202e}{}", "y".repeat(5000));
+        let detail = team_rows(std::slice::from_ref(&talked))[0].detail();
+        assert!(
+            detail.contains("its latest answer: I changed parse.rs"),
+            "{detail}"
+        );
+        assert!(!detail.contains('\u{202e}'), "{detail}");
+        assert!(detail.chars().count() < 3000, "clipped");
 
         let mut priced = worker.clone();
         priced.merge = None;
