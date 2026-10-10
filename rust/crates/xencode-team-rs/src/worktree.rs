@@ -132,7 +132,7 @@ pub fn branch_for(id: &str) -> String {
 
 /// `path` without Windows' long-path prefix (`\\?\C:\…`), which a canonical
 /// path carries and git cannot make folders under.
-fn plain(path: &Path) -> PathBuf {
+pub(crate) fn plain(path: &Path) -> PathBuf {
     let text = path.to_string_lossy();
     match text.strip_prefix(r"\\?\") {
         Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
@@ -191,10 +191,35 @@ pub fn commit_of(root: &Path, base: &str) -> Result<String, String> {
 
 /// Remove a worker's worktree and its branch.
 pub fn remove(root: &Path, path: &Path, branch: &str) -> Result<(), String> {
+    let root = &plain(root);
+    let path = &plain(path);
     let target = path.to_string_lossy().to_string();
-    git(root, &["worktree", "remove", "--force", &target])?;
-    git(root, &["branch", "-D", branch])?;
+    // git unregisters the worktree and deletes its files even when the folder
+    // itself cannot go yet (on Windows, while a process works in it); a later
+    // try then finds no worktree, so what git left is finished here.
+    if git(root, &["worktree", "remove", "--force", &target]).is_err() {
+        git(root, &["worktree", "prune"])?;
+        if registered(root, path)? {
+            return Err(format!("git could not remove the worktree {target}"));
+        }
+    }
+    if path.exists() {
+        std::fs::remove_dir_all(path).map_err(|e| format!("could not remove {target}: {e}"))?;
+    }
+    let known = git(root, &["branch", "--list", branch])?;
+    if !known.trim().is_empty() {
+        git(root, &["branch", "-D", branch])?;
+    }
     Ok(())
+}
+
+/// Whether git still lists `path` as one of the project's worktrees.
+fn registered(root: &Path, path: &Path) -> Result<bool, String> {
+    let wanted = path.to_string_lossy().replace('\\', "/").to_lowercase();
+    Ok(git(root, &["worktree", "list", "--porcelain"])?
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .any(|l| l.replace('\\', "/").to_lowercase() == wanted))
 }
 
 /// Make files the worker created but never added show in `git diff`. Only
@@ -282,6 +307,24 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    }
+
+    /// git can unregister a worktree and delete its files but leave the
+    /// folder (on Windows, while a process works in it); removing it again
+    /// finishes the job instead of failing on "not a working tree".
+    #[test]
+    fn a_half_removed_worktree_is_finished_off() {
+        let (_outer, root) = repo();
+        let canonical = std::fs::canonicalize(&root).unwrap();
+        let (path, branch) = create(&canonical, "w1", "main").unwrap();
+        let target = path.to_string_lossy().to_string();
+        super::git(&root, &["worktree", "remove", "--force", &target]).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
+
+        remove(&canonical, &std::fs::canonicalize(&path).unwrap(), &branch).unwrap();
+        assert!(!path.exists());
+        let branches = super::git(&root, &["branch", "--list", &branch]).unwrap();
+        assert!(branches.trim().is_empty(), "{branches}");
     }
 
     /// The engine works from a canonical project path, which on Windows has

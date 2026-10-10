@@ -123,13 +123,44 @@ impl TeamClient {
     /// Carry out one tool call: its text, or why it failed in words.
     pub async fn call(&self, name: &str, args: &Map<String, Value>) -> Result<String, String> {
         let request = request_for(name, args)?;
-        let wait = if matches!(request, TeamRequest::Merge { .. }) {
-            MERGE_WAIT
-        } else {
-            WAIT
-        };
-        let body = self.ask(request, wait).await?;
+        if let TeamRequest::Merge { id } = &request {
+            return self.merge(id.clone()).await;
+        }
+        let body = self.ask(request, WAIT).await?;
         Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
+    }
+
+    /// Start a merge and wait for its outcome: landed is a success, anything
+    /// else is said as a failed call with the reason.
+    async fn merge(&self, id: String) -> Result<String, String> {
+        self.ask(TeamRequest::Merge { id: id.clone() }, WAIT)
+            .await?;
+        let start = std::time::Instant::now();
+        loop {
+            let status = self
+                .ask(
+                    TeamRequest::Status {
+                        id: Some(id.clone()),
+                    },
+                    WAIT,
+                )
+                .await?;
+            if let Some(finished) = status.get("merge").and_then(|m| m.get("finished")) {
+                let text = serde_json::to_string_pretty(finished).unwrap_or_default();
+                return if finished.get("outcome").and_then(Value::as_str) == Some("landed") {
+                    Ok(text)
+                } else {
+                    Err(text)
+                };
+            }
+            if start.elapsed() > MERGE_WAIT {
+                return Err(format!(
+                    "{id}'s merge did not finish within {} s",
+                    MERGE_WAIT.as_secs()
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
     }
 
     async fn ask(&self, request: TeamRequest, wait: Duration) -> Result<Value, String> {

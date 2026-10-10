@@ -32,6 +32,11 @@ pub struct LaunchSpec {
 pub enum WorkerEvent {
     /// Its state or what it said changed.
     Changed(WorkerSnapshot),
+    /// Its merge ended (TM-3).
+    Merged {
+        worker: WorkerId,
+        outcome: crate::merge::MergeOutcome,
+    },
     /// It asks permission for a tool; `answer` takes yes or no.
     Permission {
         worker: WorkerId,
@@ -80,6 +85,7 @@ impl WorkerHandle {
             tokens: None,
             cost_micros: None,
             on_plan: false,
+            merge: None,
         }));
         let (commands, receiver) = mpsc::unbounded_channel();
         let shared = Shared {
@@ -124,6 +130,14 @@ impl WorkerHandle {
     /// Stop the worker; its worktree is kept.
     pub fn stop(&self) {
         let _ = self.commands.send(Command::Stop);
+    }
+
+    /// Something that stops this worker later, from another task.
+    pub fn stopper(&self) -> impl Fn() + Send + Sync + 'static {
+        let commands = self.commands.clone();
+        move || {
+            let _ = commands.send(Command::Stop);
+        }
     }
 }
 

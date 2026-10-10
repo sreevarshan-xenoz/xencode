@@ -3784,6 +3784,31 @@ of the lead. To give Claude Code these tools:
 claude mcp add xencode -- xencode mcp serve --team --workspace /path/to/project
 ```
 
+**How `team_merge` lands a worker's work.** The worker must be `done` or
+`stopped`. Its uncommitted changes are committed on its branch, the branch is
+merged with the base in a scratch worktree, and the project's checks run on that
+merged result. Only when they pass does the base branch move, and only if
+nothing else moved it meanwhile (the merge is tried once more if it did). The
+call answers with one outcome:
+
+| Outcome | What happened |
+|---|---|
+| `landed` | the checks passed and the base branch now holds the merge commit; the worker stops and its worktree and branch are removed |
+| `checks_failed` | a check failed on the merged result; its output is returned and nothing landed; the worktree is kept for another try |
+| `conflict` | the branch does not merge cleanly with the base; the conflicting files are named |
+| `needs_person` | the project has no checks; you are asked, in any window, whether to land without them |
+| `refused` | something stops the merge before it starts, such as uncommitted changes in your own working copy, said in words |
+
+The checks are the `checks` list in `.xencode/team.toml`, run in order in the
+merged tree; without one, a project with a `Cargo.toml` runs `cargo test
+--quiet`. The same file sets how many workers may run at once:
+
+```toml
+checks = ["cargo fmt --all -- --check", "cargo test --quiet"]
+limit = 4                 # workers running at once
+check_timeout_secs = 1200 # a check running longer is stopped and counts as failed
+```
+
 The base branch is checked to be a commit before any git command sees it, and
 the engine's git runs no repository hooks; it refuses to run at all while the
 repository's own git settings name a program to run (`core.fsmonitor`, a

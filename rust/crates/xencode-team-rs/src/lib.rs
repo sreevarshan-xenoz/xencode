@@ -4,6 +4,7 @@
 //! on the merged result. The engine hosts the team; this crate holds what does
 //! not need the terminal app.
 
+pub mod merge;
 pub mod worker;
 pub mod worktree;
 
@@ -45,4 +46,15 @@ pub struct WorkerSnapshot {
     pub cost_micros: Option<u64>,
     /// Signed in with the person's own plan, so not priced.
     pub on_plan: bool,
+    /// Its merge, once one was asked for (TM-3).
+    #[serde(default)]
+    pub merge: Option<MergeState>,
+}
+
+/// Where a worker's merge is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeState {
+    Running,
+    Finished(merge::MergeOutcome),
 }

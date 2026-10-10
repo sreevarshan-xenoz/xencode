@@ -259,7 +259,8 @@ pub fn handle(
         }
         ClientMsg::Team { req, request } => {
             let root = xencode_context_rs::default_root();
-            let (ok, body) = match app.team.request(&root, request) {
+            let approvals = app.approval_tx.clone();
+            let (ok, body) = match app.team.request(&root, request, &approvals) {
                 Ok(body) => (true, body),
                 Err(why) => (false, serde_json::Value::String(why)),
             };
