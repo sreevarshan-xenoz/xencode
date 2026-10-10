@@ -2115,8 +2115,8 @@ _arguments "${_arguments_options[@]}" : \
 '--tail=[How many log lines \`run --log\` prints]:TAIL:_default' \
 '--ollama-url=[Where an Ollama server is, for a model id with no prefix]:OLLAMA_URL:_default' \
 '--llamacpp-url=[Where a llama.cpp server is, for a \`llamacpp\:\` model id]:LLAMACPP_URL:_default' \
-'--child=[The detached worker itself. Forked by \`run --detach\`, never typed]:CHILD:_default' \
-'--xencode-dir=[Where the detached worker'\''s run lives. Passed by the forking parent, because the worker'\''s own working directory is the run'\''s tree rather than the project]:XENCODE_DIR:_files' \
+'--child=[The detached worker itself. Started by \`run --detach\`, never typed]:CHILD:_default' \
+'--xencode-dir=[Where the detached worker'\''s run lives. Passed by the starting parent, because the worker'\''s own working directory is the run'\''s tree rather than the project]:XENCODE_DIR:_files' \
 '--detach[Start the run in the background and print its id. The terminal may go away; the run keeps going under its caps]' \
 '--list[List detached runs and what each is doing]' \
 '--allow-shell[Pre-approve shell commands. Without this a detached run has nobody to ask, so shell calls are refused where they stand]' \
