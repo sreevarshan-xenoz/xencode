@@ -298,6 +298,18 @@ pub fn now_secs() -> u64 {
 mod tests {
     use super::*;
 
+    /// Held by every test that starts a process and by the badge lock test.
+    /// On Unix a child being started holds a copy of each open file until it
+    /// runs its program, so a lock released at that moment stays held and a
+    /// lock test running beside it fails at random.
+    static STARTING_PROCESSES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn no_process_starts() -> std::sync::MutexGuard<'static, ()> {
+        STARTING_PROCESSES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn sample(id: &str) -> LiveStatus {
         LiveStatus {
             version: VERSION,
@@ -422,6 +434,7 @@ mod tests {
     /// them, or the reader waits for the whole run.
     #[test]
     fn a_detached_process_does_not_hold_its_starters_output_open() {
+        let _turn = no_process_starts();
         let dir = tempfile::tempdir().unwrap();
         let started = std::time::Instant::now();
         let out = std::process::Command::new(std::env::current_exe().unwrap())
@@ -455,6 +468,7 @@ mod tests {
 
     #[test]
     fn a_detached_process_runs_in_its_folder_and_adds_to_its_log() {
+        let _turn = no_process_starts();
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("with space");
         std::fs::create_dir(&folder).unwrap();
@@ -497,6 +511,7 @@ mod tests {
 
     #[test]
     fn a_detached_process_starts_and_its_pid_is_returned() {
+        let _turn = no_process_starts();
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("ran");
         let (exe, args): (&str, Vec<String>) = if cfg!(windows) {
@@ -525,6 +540,7 @@ mod tests {
 
     #[test]
     fn a_held_badge_lock_means_a_badge_is_running() {
+        let _turn = no_process_starts();
         let dir = tempfile::tempdir().unwrap();
         assert!(!badge_running(dir.path()), "no badge yet");
         let lock = take_badge_lock(dir.path()).expect("the first badge takes the lock");
