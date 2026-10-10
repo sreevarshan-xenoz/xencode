@@ -173,6 +173,15 @@ message. **Next change:** in task mode (the evaluation, ByteBot, detached runs �
 turn that ends with no file changed while rounds remain gets one continuation telling the model
 it has changed nothing yet and to make the change now; then the same 24 cases on Colab.
 
+**Tenth run, 2026-10-10 — that continuation (`TASK_NO_EDIT_NOTE`, task mode only), Qwen3-4B,
+same settings, 8 rounds, Colab T4:** **4 of 24 (17%)**, inside the 3–5 of 24 spread, so it is not
+shown to help. Many answers still end announcing a step ("I will now edit the `price_cents`
+function"), and two wrote a well-formed `<tool_call>{…}</tool_call>` edit into the answer of the
+closing round, where no tools are offered. Whether the note fired in a given case cannot be read
+back: the turn trace records real tool calls only, not the note's synthetic one. It stays in
+because it costs nothing when a model does edit. **Next:** record such notes in the turn trace
+so a run shows how often they fire and what followed.
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,

@@ -307,6 +307,10 @@ fn bytebot_progress(steps: &[(String, String)]) -> f64 {
 /// Owned, because the loop runs on its own task.
 pub(crate) struct AgentRun {
     pub(crate) sink: LoopSink,
+    /// Task mode: the run exists to change files (ByteBot, the evaluation,
+    /// headless runs), so a turn that would end with no file changed is asked
+    /// once to make the change (SM-2). Chat leaves it off.
+    pub(crate) expect_edit: bool,
     /// This run's own id (QTR-5). Named once, here, so the run ledger row, the
     /// recording, and the trailer a commit carries all speak the same id — and
     /// so `xencode replay <run id>` reaches the run the ledger describes.
@@ -5215,6 +5219,7 @@ impl<'a> App<'a> {
         let (ollama_asks, ollama_setting_problem) = self.ollama_request_for_turn(&model);
         AgentRun {
             sink,
+            expect_edit: sink == LoopSink::ByteBot,
             run_id: run_id.clone(),
             model,
             context_messages,
@@ -12807,6 +12812,8 @@ pub async fn run_agent(options: AgentRunOptions) -> Result<AgentRunOutput, Agent
     run.tool_root = tool_root.clone();
     run.trace_dir = xencode_dir.clone();
     run.max_rounds = options.max_rounds.max(1);
+    // A headless run is handed a task to carry out (SM-2 task mode).
+    run.expect_edit = true;
     run.approval.mode = approval_mode;
     run.approval.headless_policy = options.headless_policy.clone();
     run.approval.session_id = Some(session_id.clone());
@@ -12933,6 +12940,35 @@ async fn until_stopped(flag: Option<Arc<AtomicBool>>) {
 /// What the model is told when it claims an edit on a turn that changed nothing.
 const NO_CHANGE_NOTE: &str = "No file was changed in this turn: no edit_file or write_file call succeeded. Your answer says the code was changed, and it was not. If a change is needed, make it now with edit_file or write_file. If none is needed, say plainly that you changed nothing.";
 
+/// What the model is told, in task mode, when it ends a turn that changed no
+/// file without claiming it did: it announced a step or wrote the fix into its
+/// answer, and stopped (SM-2, measured 2026-10-10 with Qwen3-4B and Qwen3-8B).
+pub(crate) const TASK_NO_EDIT_NOTE: &str = "No file has been changed yet. This task is done only when the files are changed: writing code in your answer does not change any file. If you know the fix, make it now with edit_file or write_file. If you need to read something first, do it with a tool call now. If no change is needed, say so plainly.";
+
+/// The note that keeps a turn going when it would end with no file changed,
+/// or `None` to let it end. A claimed edit is answered in every mode; in task
+/// mode (`expect_edit`) any ending is. Once per turn, and only with a round
+/// left to act on it.
+pub(crate) fn continuation_note(
+    expect_edit: bool,
+    turn_edited: bool,
+    already_noted: bool,
+    round: usize,
+    max_rounds: usize,
+    text: &str,
+) -> Option<&'static str> {
+    if turn_edited || already_noted || round >= max_rounds {
+        return None;
+    }
+    if claims_a_change(text) {
+        Some(NO_CHANGE_NOTE)
+    } else if expect_edit {
+        Some(TASK_NO_EDIT_NOTE)
+    } else {
+        None
+    }
+}
+
 /// Whether an answer says the code was changed: "I have fixed", "the changes
 /// have been made" and the like. Read only on a turn that changed no file, so
 /// a true report is never second-guessed.
@@ -13021,6 +13057,7 @@ pub fn tool_end_token(id: &str, outcome: &str, result: &str) -> String {
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
+        expect_edit,
         model,
         context_messages,
         mut approval,
@@ -13298,7 +13335,14 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             // no file, is not the end of the turn. The model is told so once, with a
             // round left to act on it — measured 2026-10-09, a small model often
             // reported an edit it never made.
-            if !turn_edited && !claim_checked && round < max_rounds && claims_a_change(&step.text) {
+            if let Some(note) = continuation_note(
+                expect_edit,
+                turn_edited,
+                claim_checked,
+                round,
+                max_rounds,
+                &step.text,
+            ) {
                 claim_checked = true;
                 let call = xencode_providers_rs::ToolCall {
                     id: format!("no-change-{rounds}"),
@@ -13311,13 +13355,15 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                 });
                 history.push(xencode_providers_rs::AgentTurn::ToolResult {
                     id: call.id.clone(),
-                    content: NO_CHANGE_NOTE.to_string(),
+                    content: note.to_string(),
                 });
                 if sink == LoopSink::Chat {
-                    let _ = tx.send(
+                    let line = if note == NO_CHANGE_NOTE {
                         "[TOOL]⚠ the answer says the code was changed, but no file changed this turn — asking once more"
-                            .to_string(),
-                    );
+                    } else {
+                        "[TOOL]⚠ the turn would end with no file changed — asking once to make the change"
+                    };
+                    let _ = tx.send(line.to_string());
                 }
                 ending_turn = false;
             }
@@ -17521,6 +17567,48 @@ edition = \"2021\"
             .evidence_ref
             .as_deref()
             .is_some_and(|r| r.starts_with("tools[")));
+    }
+
+    /// SM-2, 2026-10-10: small models end a turn where they announce the next
+    /// step ("Let's modify the function", "I will now…") or write the fix as
+    /// code in their answer. In task mode such an ending, on a turn that changed
+    /// nothing, gets one continuation; chat keeps answering only a claimed edit.
+    #[test]
+    fn a_task_turn_that_changed_nothing_gets_one_continuation() {
+        use super::continuation_note;
+        let announce = "Let's modify the function to handle these cases.";
+        let claim = "I have fixed the bug.";
+        // Task mode: any ending on an unedited turn, once, with a round left.
+        assert_eq!(
+            continuation_note(true, false, false, 3, 8, announce),
+            Some(super::TASK_NO_EDIT_NOTE)
+        );
+        assert_eq!(
+            continuation_note(true, false, false, 3, 8, claim),
+            Some(super::NO_CHANGE_NOTE),
+            "a claimed edit keeps its own wording"
+        );
+        assert_eq!(
+            continuation_note(true, true, false, 3, 8, announce),
+            None,
+            "it edited"
+        );
+        assert_eq!(
+            continuation_note(true, false, true, 3, 8, announce),
+            None,
+            "once only"
+        );
+        assert_eq!(
+            continuation_note(true, false, false, 8, 8, announce),
+            None,
+            "no round left"
+        );
+        // Chat: only a claimed edit is answered.
+        assert_eq!(continuation_note(false, false, false, 3, 8, announce), None);
+        assert_eq!(
+            continuation_note(false, false, false, 3, 8, claim),
+            Some(super::NO_CHANGE_NOTE)
+        );
     }
 
     /// SM-2: an answer that claims an edit on a turn that changed no file is told
