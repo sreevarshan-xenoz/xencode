@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-5`: `xencode orchestrator costs` lists each worker agent's cost, as
+  its agent reported it, when the project's engine runs; it never starts an
+  engine to read it.
 - `TM-1`: a file a worker's task names with `@path` is claimed for that
   worker, as `/spawn` does; a second worker naming it is refused, naming
   the holder, until the first lands or is cleaned.

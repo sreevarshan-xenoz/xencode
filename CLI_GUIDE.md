@@ -3813,8 +3813,8 @@ gemini       available: false  sign_in: set GEMINI_API_KEY (or `xencode config s
 antigravity  available: false  missing: `agy_acp_server` is not on PATH; install Google Antigravity, which puts `agy_acp_server` on PATH
 ```
 
-A worker's cost is what its agent reports, in US dollars, shown by `team_status`
-and the Team panel. A worker on your login is shown as `on your plan` and never
+A worker's cost is what its agent reports, in US dollars, shown by `team_status`,
+the Team panel and `xencode orchestrator costs`. A worker on your login is shown as `on your plan` and never
 priced; an agent that reports no cost shows none, never `$0`.
 
 **How `team_merge` lands a worker's work.** The worker must be `done` or
@@ -5077,7 +5077,9 @@ xencode orchestrator attach claude sess-1
   approval mode, built by the same function a launch is built with, beside the
   approvals this project's records say a person actually answered.
 - `costs` — what the model calls recorded here cost, priced only where a price is
-  known, beside what the recorded team runs drew from the wall.
+  known, beside what the recorded team runs drew from the wall, and each worker
+  agent's cost as its agent reported it when the project's engine runs (it is
+  never started just to read this; without one the line says so).
 - `inspect <target>` — one thing in full, with the file each figure came from: a
   background task by its registry id, a detached run, a recorded team run, or a
   recipe by its name. A prefix that could mean more than one thing says so rather
