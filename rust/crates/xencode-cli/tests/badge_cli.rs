@@ -40,7 +40,11 @@ fn a_badge_already_running_is_reported_instead_of_started_again() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(stdout.contains("The badge is already running."), "{stdout}");
     assert!(!stdout.contains("Started"), "{stdout}");
 }
