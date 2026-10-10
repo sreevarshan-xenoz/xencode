@@ -677,3 +677,226 @@ async fn the_command_list_names_bytebot_and_a_terminal_panel_command_is_refused(
     assert!(names.contains(&"model".to_string()), "{names:?}");
     assert!(!names.contains(&"init".to_string()), "{names:?}");
 }
+
+/// A ByteBot task run from the editor with a real model: the client
+/// approves its tools, then answers its review with `review`. Returns the
+/// updates, the permission requests' option ids, and the stop reason.
+async fn live_bytebot(
+    project: &std::path::Path,
+    review: &'static str,
+) -> (Vec<SessionUpdate>, Vec<Vec<String>>, StopReason) {
+    let config = live_settings();
+    let cwd = project.to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    let asked: Arc<Mutex<Vec<Vec<String>>>> = Default::default();
+    let noted = Arc::clone(&asked);
+    let stop = Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |req: RequestPermissionRequest, responder, _connection| {
+                let ids: Vec<String> = req
+                    .options
+                    .iter()
+                    .map(|o| o.option_id.to_string())
+                    .collect();
+                let pick = if ids.iter().any(|i| i == review) {
+                    review
+                } else {
+                    "allow"
+                };
+                noted.lock().unwrap().push(ids);
+                responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                        pick.to_string(),
+                    )),
+                ))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let turn = c.send_request(PromptRequest::new(
+                s.session_id.clone(),
+                text(&format!("/bytebot {WRITE_NOTE}")),
+            ));
+            match tokio::time::timeout(std::time::Duration::from_secs(300), turn.block_task()).await
+            {
+                Ok(r) => Ok(r?.stop_reason),
+                Err(_) => {
+                    c.send_notification(CancelNotification::new(s.session_id))?;
+                    Ok(StopReason::Refusal)
+                }
+            }
+        })
+        .await
+        .unwrap();
+    let updates = seen.lock().unwrap().clone();
+    let asked = asked.lock().unwrap().clone();
+    (updates, asked, stop)
+}
+
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_bytebot_task_shows_its_steps_and_its_review_undo_removes_the_file() {
+    let project = tempfile::tempdir().unwrap();
+    let (updates, asked, stop) = live_bytebot(project.path(), "undo").await;
+    eprintln!("asked {asked:?}; stop {stop:?}; {} updates", updates.len());
+    assert_eq!(stop, StopReason::EndTurn, "the task ended on its own");
+    assert!(
+        updates.iter().any(|u| matches!(u, SessionUpdate::Plan(_))),
+        "its steps were shown as a plan"
+    );
+    assert!(
+        asked
+            .iter()
+            .any(|ids| ids.contains(&"keep".to_string()) && ids.contains(&"undo".to_string())),
+        "its review was asked about: {asked:?}"
+    );
+    assert!(
+        !project.path().join("notes.txt").exists(),
+        "undo took the file away"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_bytebot_review_keep_leaves_the_file() {
+    let project = tempfile::tempdir().unwrap();
+    let (_updates, asked, stop) = live_bytebot(project.path(), "keep").await;
+    eprintln!("asked {asked:?}; stop {stop:?}");
+    assert_eq!(stop, StopReason::EndTurn);
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("notes.txt"))
+            .unwrap_or_default()
+            .trim(),
+        "hi"
+    );
+}
+
+#[tokio::test]
+async fn a_bytebot_task_with_an_unreachable_model_ends_and_says_why() {
+    let config = settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let r = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                c.send_request(PromptRequest::new(
+                    s.session_id,
+                    text("/bytebot write a note"),
+                ))
+                .block_task(),
+            )
+            .await
+            .expect("the task ended")?;
+            assert_eq!(r.stop_reason, StopReason::EndTurn);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let said = said(&seen);
+    assert!(said.contains("127.0.0.1:9"), "{said}");
+}
+
+#[tokio::test]
+#[ignore = "needs a real llama.cpp server: set XENCODE_LIVE_LLAMACPP_URL"]
+async fn a_bytebot_question_is_asked_in_the_chat_and_the_next_message_answers_it() {
+    let config = live_settings();
+    let project = tempfile::tempdir().unwrap();
+    let cwd = project.path().to_path_buf();
+    let seen: Seen = Default::default();
+    let record = Arc::clone(&seen);
+    let watched = Arc::clone(&seen);
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |n: SessionNotification, _c| {
+                record.lock().unwrap().push(n.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |req: RequestPermissionRequest, responder, _connection| {
+                let keep = req
+                    .options
+                    .iter()
+                    .any(|o| o.option_id.to_string() == "keep");
+                let pick = if keep { "keep" } else { "allow" };
+                responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                        pick.to_string(),
+                    )),
+                ))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent(config.path()), async move |c: ConnectionTo<Agent>| {
+            c.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let s = c
+                .send_request(NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let first = c
+                .send_request(PromptRequest::new(
+                    s.session_id.clone(),
+                    text(
+                        "/bytebot First call the ask_user tool to ask me which colour I like. \
+                         Then use write_file to create color.txt containing exactly my answer.",
+                    ),
+                ))
+                .block_task()
+                .await?;
+            assert_eq!(first.stop_reason, StopReason::EndTurn);
+            let asked = said(&watched);
+            assert!(
+                asked.contains("xencode asks:"),
+                "the question reached the chat: {asked}"
+            );
+            let second = c
+                .send_request(PromptRequest::new(s.session_id, text("blue")))
+                .block_task()
+                .await?;
+            assert_eq!(second.stop_reason, StopReason::EndTurn);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let wrote = std::fs::read_to_string(project.path().join("color.txt")).unwrap_or_default();
+    eprintln!("color.txt: {wrote:?}; said: {}", said(&seen));
+    assert!(wrote.to_lowercase().contains("blue"), "{wrote:?}");
+}

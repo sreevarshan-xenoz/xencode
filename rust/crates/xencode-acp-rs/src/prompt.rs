@@ -9,15 +9,18 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::v1::{
     Content, ContentBlock, ContentChunk, Diff, EmbeddedResourceResource, PermissionOption,
-    PermissionOptionKind, PromptRequest, PromptResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
-    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallContent, ToolCallLocation,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptRequest,
+    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionId, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall,
+    ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolKind,
 };
 use agent_client_protocol::{Client, ConnectionTo, Responder};
 use tokio::sync::Notify;
 use xencode_tui_rs::engine::link::{EngineLink, LinkEvent};
-use xencode_tui_rs::engine::proto::{ApprovalView, ClientMsg, EngineMsg, StopTarget, WireAnswer};
+use xencode_tui_rs::engine::proto::{
+    ApprovalView, ClientMsg, EngineMsg, ReviewDecision, StopTarget, WireAnswer,
+};
 
 use crate::kinds;
 use crate::session::{self, Session};
@@ -65,10 +68,17 @@ pub async fn start(
     if let Some(why) = crate::options::window_only(&text) {
         return responder.respond_with_error(error(crate::INVALID, why));
     }
+    let bytebot_task = text.strip_prefix("/bytebot").map(|t| t.trim().to_string());
+    if bytebot_task.as_deref() == Some("") {
+        return responder.respond_with_error(error(
+            crate::INVALID,
+            "say what ByteBot should do: /bytebot <task>",
+        ));
+    }
     let Some(state) = sessions.get(&id) else {
         return responder.respond_with_error(error(crate::INVALID, format!("no session {id}")));
     };
-    let (link, cancel, project) = {
+    let (link, cancel, project, msg, turn) = {
         let mut s = state.lock().await;
         if s.busy {
             return responder.respond_with_error(error(
@@ -88,12 +98,25 @@ pub async fn start(
                 }
             },
         };
+        // A waiting question takes this message as its answer, and the
+        // ByteBot task that asked is followed on from there.
+        let (msg, turn) = match (s.question.take(), bytebot_task) {
+            (Some((qid, followed)), None) => (
+                ClientMsg::AnswerQuestion { id: qid, text },
+                Turn::bytebot(&followed),
+            ),
+            (_, Some(task)) => {
+                let turn = Turn::bytebot(&task);
+                (ClientMsg::EnqueueTask { text: task }, turn)
+            }
+            (None, None) => (ClientMsg::SubmitChat { prompt: text }, Turn::new()),
+        };
         s.busy = true;
         s.cancel = Arc::new(Notify::new());
-        (link, Arc::clone(&s.cancel), s.project.clone())
+        (link, Arc::clone(&s.cancel), s.project.clone(), msg, turn)
     };
-    if !link.send(&ClientMsg::SubmitChat { prompt: text }) {
-        finish(&state, None).await;
+    if !link.send(&msg) {
+        finish(&state, None, None).await;
         return responder.respond_with_error(error(
             INTERNAL,
             "the engine was lost before the prompt reached it",
@@ -107,18 +130,34 @@ pub async fn start(
         tools: Tools::new(project),
         asking: None,
         waiting: VecDeque::new(),
+        bytebot: turn.follows().map(str::to_string),
     };
     connection.spawn(async move {
-        let (link, answer) = run.run().await;
-        finish(&state, link).await;
+        let (link, answer) = run.run(turn).await;
+        let question = match &answer {
+            Ok(Finish::Asked(qid, followed)) => Some((*qid, followed.clone())),
+            _ => None,
+        };
+        finish(&state, link, question).await;
         match answer {
-            Ok(Ending::Done) => responder.respond(PromptResponse::new(StopReason::EndTurn)),
-            Ok(Ending::Stopped) => responder.respond(PromptResponse::new(StopReason::Cancelled)),
-            Ok(Ending::Failed(why)) | Err(why) => {
+            Ok(Finish::Ended(Ending::Done)) | Ok(Finish::Asked(..)) => {
+                responder.respond(PromptResponse::new(StopReason::EndTurn))
+            }
+            Ok(Finish::Ended(Ending::Stopped)) => {
+                responder.respond(PromptResponse::new(StopReason::Cancelled))
+            }
+            Ok(Finish::Ended(Ending::Failed(why))) | Err(why) => {
                 responder.respond_with_error(error(INTERNAL, why))
             }
         }
     })
+}
+
+/// How a turn finished: it ended, or a ByteBot task asked a question and
+/// waits for the person's next message (M-7d).
+enum Finish {
+    Ended(Ending),
+    Asked(u64, String),
 }
 
 /// The editor's answer to a permission request, when it comes.
@@ -128,6 +167,15 @@ type PermissionAnswer = Pin<
     >,
 >;
 
+/// What a permission request is about.
+#[derive(Clone, Copy, PartialEq)]
+enum Asking {
+    /// An approval prompt, by id.
+    Approval(u64),
+    /// A ByteBot task's review: keep or undo its changes.
+    Review,
+}
+
 /// One running turn: reads the engine, tells the editor, and carries the
 /// editor's answers back.
 struct TurnRun {
@@ -136,17 +184,18 @@ struct TurnRun {
     link: EngineLink,
     cancel: Arc<Notify>,
     tools: Tools,
-    /// The approval being asked about, and the editor's answer to come.
-    asking: Option<(u64, PermissionAnswer)>,
-    /// Approvals that came while another was being asked about.
+    /// The request being asked about, and the editor's answer to come.
+    asking: Option<(Asking, PermissionAnswer)>,
+    /// Approvals that came while another request was open.
     waiting: VecDeque<ApprovalView>,
+    /// The words of the ByteBot task this turn follows, if it does.
+    bytebot: Option<String>,
 }
 
 impl TurnRun {
     /// Run to the turn's end. Gives back the link (`None` once the engine
-    /// was lost) and how the turn ended, or why it could not finish.
-    async fn run(mut self) -> (Option<EngineLink>, Result<Ending, String>) {
-        let mut turn = Turn::new();
+    /// was lost) and how the turn finished, or why it could not.
+    async fn run(mut self, mut turn: Turn) -> (Option<EngineLink>, Result<Finish, String>) {
         loop {
             let event = tokio::select! {
                 event = self.link.next() => event,
@@ -170,9 +219,7 @@ impl TurnRun {
             }
             for out in turn.feed(&msg) {
                 let sent = match out {
-                    Out::Text(text) => self.notify(SessionUpdate::AgentMessageChunk(
-                        ContentChunk::new(ContentBlock::Text(TextContent::new(text))),
-                    )),
+                    Out::Text(text) => self.say(text),
                     Out::ToolStart(start) => {
                         let update = self.tools.started(start);
                         self.notify(update)
@@ -185,9 +232,25 @@ impl TurnRun {
                         self.permission(approval);
                         Ok(())
                     }
-                    // Questions: M-7d.
-                    Out::Question(..) => Ok(()),
-                    Out::Ended(ending) => return (Some(self.link), Ok(ending)),
+                    Out::Plan(steps) => self.notify(SessionUpdate::Plan(plan_of(&steps))),
+                    Out::Review => {
+                        let answer = self.ask_review();
+                        self.asking = Some((Asking::Review, answer));
+                        Ok(())
+                    }
+                    Out::Question(qid, question) => {
+                        let followed = self.bytebot.clone().unwrap_or_default();
+                        if let Err(e) = self.say(format!(
+                            "xencode asks: {question}\n\nReply in your next message."
+                        )) {
+                            return (
+                                Some(self.link),
+                                Err(format!("cannot reach the editor: {e}")),
+                            );
+                        }
+                        return (Some(self.link), Ok(Finish::Asked(qid, followed)));
+                    }
+                    Out::Ended(ending) => return (Some(self.link), Ok(Finish::Ended(ending))),
                 };
                 if let Err(e) = sent {
                     return (
@@ -200,7 +263,7 @@ impl TurnRun {
     }
 
     async fn answer_of(
-        asking: &mut Option<(u64, PermissionAnswer)>,
+        asking: &mut Option<(Asking, PermissionAnswer)>,
     ) -> Result<RequestPermissionResponse, agent_client_protocol::Error> {
         match asking {
             Some((_, answer)) => answer.as_mut().await,
@@ -213,25 +276,34 @@ impl TurnRun {
             .send_notification(SessionNotification::new(self.session_id.clone(), update))
     }
 
+    fn say(&self, text: String) -> Result<(), agent_client_protocol::Error> {
+        self.notify(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new(text)),
+        )))
+    }
+
     /// The editor cancelled. An open approval is answered no first, so the
-    /// agent loop is not left waiting on it, and then the turn is stopped.
+    /// agent loop is not left waiting on it, and then the run is stopped.
     fn stop(&mut self) {
-        if let Some((id, _)) = self.asking.take() {
+        if let Some((Asking::Approval(id), _)) = self.asking.take() {
             self.link.send(&ClientMsg::AnswerApproval {
                 id,
                 answer: WireAnswer::Deny,
             });
         }
         self.waiting.clear();
-        self.link.send(&ClientMsg::Stop {
-            target: StopTarget::Chat,
-        });
+        let target = if self.bytebot.is_some() {
+            StopTarget::Bytebot
+        } else {
+            StopTarget::Chat
+        };
+        self.link.send(&ClientMsg::Stop { target });
     }
 
     fn permission(&mut self, approval: ApprovalView) {
         if self.asking.is_none() {
             let answer = self.ask(&approval);
-            self.asking = Some((approval.id, answer));
+            self.asking = Some((Asking::Approval(approval.id), answer));
         } else {
             self.waiting.push_back(approval);
         }
@@ -241,11 +313,19 @@ impl TurnRun {
         &mut self,
         answer: Result<RequestPermissionResponse, agent_client_protocol::Error>,
     ) {
-        if let Some((id, _)) = self.asking.take() {
-            self.link.send(&ClientMsg::AnswerApproval {
-                id,
-                answer: wire_answer(answer),
-            });
+        match self.asking.take() {
+            Some((Asking::Approval(id), _)) => {
+                self.link.send(&ClientMsg::AnswerApproval {
+                    id,
+                    answer: wire_answer(answer),
+                });
+            }
+            Some((Asking::Review, _)) => {
+                self.link.send(&ClientMsg::Review {
+                    decision: review_decision(answer),
+                });
+            }
+            None => {}
         }
         self.ask_next();
     }
@@ -253,7 +333,11 @@ impl TurnRun {
     /// Another window answered approval `id` first; its answer counts and
     /// the editor's, if it comes, is not used.
     fn resolved_elsewhere(&mut self, id: u64) {
-        if self.asking.as_ref().is_some_and(|(open, _)| *open == id) {
+        if self
+            .asking
+            .as_ref()
+            .is_some_and(|(open, _)| *open == Asking::Approval(id))
+        {
             self.asking = None;
             self.ask_next();
         } else {
@@ -262,10 +346,25 @@ impl TurnRun {
     }
 
     fn ask_next(&mut self) {
+        if self.asking.is_some() {
+            return;
+        }
         if let Some(next) = self.waiting.pop_front() {
             let answer = self.ask(&next);
-            self.asking = Some((next.id, answer));
+            self.asking = Some((Asking::Approval(next.id), answer));
         }
+    }
+
+    fn request(&self, call: ToolCallUpdate, options: Vec<PermissionOption>) -> PermissionAnswer {
+        Box::pin(
+            self.connection
+                .send_request(RequestPermissionRequest::new(
+                    self.session_id.clone(),
+                    call,
+                    options,
+                ))
+                .block_task(),
+        )
     }
 
     /// Ask the editor about one approval prompt.
@@ -276,24 +375,68 @@ impl TurnRun {
                 .title(approval.summary.clone())
                 .kind(kinds::kind_of(&approval.tool)),
         );
-        let options = vec![
-            PermissionOption::new("allow", "Allow once", PermissionOptionKind::AllowOnce),
-            PermissionOption::new(
-                "allow-session",
-                "Always allow this session",
-                PermissionOptionKind::AllowAlways,
-            ),
-            PermissionOption::new("deny", "Reject", PermissionOptionKind::RejectOnce),
-        ];
-        Box::pin(
-            self.connection
-                .send_request(RequestPermissionRequest::new(
-                    self.session_id.clone(),
-                    call,
-                    options,
-                ))
-                .block_task(),
+        self.request(
+            call,
+            vec![
+                PermissionOption::new("allow", "Allow once", PermissionOptionKind::AllowOnce),
+                PermissionOption::new(
+                    "allow-session",
+                    "Always allow this session",
+                    PermissionOptionKind::AllowAlways,
+                ),
+                PermissionOption::new("deny", "Reject", PermissionOptionKind::RejectOnce),
+            ],
         )
+    }
+
+    /// Ask the editor whether to keep the ByteBot task's changes.
+    fn ask_review(&self) -> PermissionAnswer {
+        let call = ToolCallUpdate::new(
+            "bytebot-review",
+            ToolCallUpdateFields::new()
+                .title(format!(
+                    "ByteBot finished: {}. Keep its changes?",
+                    self.bytebot.as_deref().unwrap_or("its task")
+                ))
+                .kind(ToolKind::Edit),
+        );
+        self.request(
+            call,
+            vec![
+                PermissionOption::new("keep", "Keep the changes", PermissionOptionKind::AllowOnce),
+                PermissionOption::new("undo", "Undo the changes", PermissionOptionKind::RejectOnce),
+            ],
+        )
+    }
+}
+
+/// ByteBot's steps as an ACP plan: a step running now is in progress, one
+/// that ended is completed, with how it ended when that was not done.
+fn plan_of(steps: &[(String, String)]) -> Plan {
+    Plan::new(
+        steps
+            .iter()
+            .map(|(call, state)| {
+                let (status, content) = match state.as_str() {
+                    "running" => (PlanEntryStatus::InProgress, call.clone()),
+                    "done" => (PlanEntryStatus::Completed, call.clone()),
+                    other => (PlanEntryStatus::Completed, format!("{call} ({other})")),
+                };
+                PlanEntry::new(content, PlanEntryPriority::Medium, status)
+            })
+            .collect(),
+    )
+}
+
+/// The editor's review answer: only a chosen "keep" keeps the changes.
+fn review_decision(
+    answer: Result<RequestPermissionResponse, agent_client_protocol::Error>,
+) -> ReviewDecision {
+    match answer.map(|r| r.outcome) {
+        Ok(RequestPermissionOutcome::Selected(chosen)) if &*chosen.option_id.0 == "keep" => {
+            ReviewDecision::Accept
+        }
+        _ => ReviewDecision::Undo,
     }
 }
 
@@ -386,10 +529,15 @@ pub async fn cancel(sessions: &session::Sessions, session_id: &str) {
     }
 }
 
-async fn finish(state: &tokio::sync::Mutex<Session>, link: Option<EngineLink>) {
+async fn finish(
+    state: &tokio::sync::Mutex<Session>,
+    link: Option<EngineLink>,
+    question: Option<(u64, String)>,
+) {
     let mut s = state.lock().await;
     s.busy = false;
     s.link = link;
+    s.question = question;
 }
 
 #[cfg(test)]

@@ -2358,7 +2358,14 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
     gathered before a switch, arriving after it, put the old model back — fixed in `app.rs`
     (a chosen model stays chosen). **Not verified:** whether Zed shows the option as its model
     picker (needs Zed).
-  - [ ] **M-7d — `ask_user` questions; ByteBot as plan updates and its review as Keep or Undo.**
+  - [x] **M-7d — `ask_user` questions; ByteBot as plan updates and its review as Keep or Undo.**
+    Done 2026-10-10: `/bytebot <task>` queues the task on the engine and the turn follows it to
+    its end; its steps are sent as an ACP plan, its review is a permission request (keep or undo),
+    and a question ends the turn with "xencode asks: …" so the next message answers it and the
+    task is followed on. **Live** (Qwen3-4B): a task wrote `notes.txt` and undo removed it; keep
+    left it; a task asked "What is your favorite color?", the next message "blue" answered it and
+    `color.txt` held `blue`. The editor's form dialog for questions (elicitation) is not used:
+    questions are chat text in every editor.
   - [ ] **M-7e — manuals; watched in real Zed.**
 
 ## Milestone N — the full option space (research appendix, drafted 2026-09-23)

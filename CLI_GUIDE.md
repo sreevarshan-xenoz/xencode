@@ -2541,6 +2541,12 @@ model, which every window on that folder then uses. While a turn runs the
 model cannot be changed. Typing `/` lists the commands that run in the engine
 (`/bytebot`, `/spawn`, `/rewind`, `/model` and the rest); commands that draw a
 terminal panel, such as `/init`, are refused with a pointer to `xencode tui`.
+
+`/bytebot <task>` queues a ByteBot task on the engine and follows it: its steps
+show as the editor's plan, its tools ask permission as above, and when it
+changed files the editor asks whether to keep or undo them. When ByteBot asks
+you something, the question appears in the chat ("xencode asks: …") and your
+next message is the answer; the task then carries on in the same turn.
 Attached files are passed to the model as text; images are not sent yet. Tool
 servers the editor passes are not used: xencode uses its own.
 
