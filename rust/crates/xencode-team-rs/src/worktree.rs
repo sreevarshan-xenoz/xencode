@@ -419,9 +419,30 @@ pub const WORK: [&str; 3] = ["--", ".", ":(exclude).xencode"];
 /// Make files the worker created but never added show in `git diff`. Only
 /// the worktree's index changes; nothing is committed.
 fn include_new_files(worktree: &Path) -> Result<(), String> {
-    let mut args = vec!["add", "-A", "-N"];
-    args.extend_from_slice(&WORK);
-    git(worktree, &args).map(|_| ())
+    stage_work(worktree, true)
+}
+
+/// Stage the worker's work (`intent_only`: only mark new files, for a diff)
+/// and leave `.xencode/` out. The folder is unstaged afterwards rather than
+/// excluded by name, because git refuses a path named on its command line
+/// that `.gitignore` lists, which is how most projects keep `.xencode/`.
+pub fn stage_work(worktree: &Path, intent_only: bool) -> Result<(), String> {
+    let add: &[&str] = if intent_only {
+        &["add", "-A", "-N", "--", "."]
+    } else {
+        &["add", "-A", "--", "."]
+    };
+    git(worktree, add)?;
+    // Nothing of `.xencode/` staged means nothing to take back; git says
+    // that as an error, which is not one here.
+    let staged = git(
+        worktree,
+        &["diff", "--cached", "--name-only", "--", ".xencode"],
+    )?;
+    if !staged.trim().is_empty() {
+        git(worktree, &["reset", "-q", "--", ".xencode"])?;
+    }
+    Ok(())
 }
 
 /// The files the worker changed against `base`, committed or not.

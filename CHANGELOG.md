@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-2`, `TM-3` (found by a real Claude Code lead): `xencode mcp serve`
+  showed no tools to clients on MCP 2026-07-28, such as current Claude Code,
+  because its tool list lacked the caching fields that version requires;
+  with `--team` its greeting now names the team tools instead of saying only
+  "read-only"; `team_status` takes `wait_secs` so a lead can wait for workers
+  instead of asking again and again; a project whose `.gitignore` lists
+  `.xencode/` can merge again; and merging a worker that changed nothing is
+  refused as nothing to merge instead of said as landed.
 - `TM-5`: `xencode orchestrator costs` lists each worker agent's cost, as
   its agent reported it, when the project's engine runs; it never starts an
   engine to read it.
