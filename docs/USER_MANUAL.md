@@ -740,7 +740,8 @@ xencode colab down
   VM reports a GPU) or Ollama, serves one GGUF from Hugging Face on
   `127.0.0.1:18080` inside the VM, and holds a forward at
   `http://127.0.0.1:18000/v1`. It reports ready only once `/v1/models`
-  actually answers.
+  actually answers and one warm-up request has run. If the server ends up on
+  the CPU instead of the GPU, `up` and `status` say so in a `warning:` line.
 - After that the VM is an ordinary provider: pick it with `m` in the TUI,
   address it as `remote:<served-model-id>` (`/v1/models` on the forward lists
   the ids), and watch the Remote row in Provider Health (Ctrl+F).

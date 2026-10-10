@@ -17,6 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `xencode run --stop` ends a detached run on Windows; it used to leave the
   worker running and say it might be ignoring SIGTERM.
 
+### Fixed — `xencode colab up` served on the CPU of a GPU machine
+
+- Colab's machines moved from CUDA 12 to CUDA 13, and the pinned llama.cpp build
+  needs CUDA 12's runtime libraries, so llama.cpp quietly ran the model on the
+  CPU: 1.7 tokens a second on a T4. The bootstrap now downloads the CUDA runtime
+  libraries the same llama.cpp release ships for that build. Measured on a real
+  T4 afterwards: 32.7 tokens a second.
+- A second `colab up` on the same machine left the first server running. It
+  kept the port, answered for the new one, and the new one never served. An
+  earlier server is now stopped first.
+- If the server ends up on the CPU anyway, `colab up` and `colab status` now say
+  so in a `warning:` line, by asking the GPU which processes it holds.
+- The first question to a fresh server took about 36 seconds while the GPU code
+  started up. The bootstrap now sends one tiny request before reporting ready;
+  the first real question then took 2 seconds.
+
 ### Fixed — `xencode colab up` could not serve its default model
 
 - The default model, `Qwen/Qwen2.5-7B-Instruct-GGUF` at `Q4_K_M`, is published

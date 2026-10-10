@@ -4611,6 +4611,13 @@ async fn run_colab_up_cli(
         "  remote:    {} (OpenAI-compatible)",
         config.remote_base_url
     );
+    // What the VM's bootstrap warned about, such as a GPU build that ended up
+    // serving on the CPU (K-6).
+    if let Ok(Some(state)) = xencode_colab_rs::ColabState::load() {
+        for warning in &state.warnings {
+            println!("  {warning}");
+        }
+    }
     println!("  The VM endpoint is live. `xencode colab status` shows the bridge.");
     Ok(())
 }

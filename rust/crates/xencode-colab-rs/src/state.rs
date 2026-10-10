@@ -41,6 +41,10 @@ pub struct ColabState {
     pub started_at: Option<String>,
     /// The URL requests flow through (what `remote_url` is set to).
     pub url: Option<String>,
+    /// What the VM's bootstrap warned about, such as a GPU build serving on
+    /// the CPU. `up` and `status` print these; empty on older files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl ColabState {
@@ -144,6 +148,7 @@ mod tests {
             model: Some("qwen3:8b".to_string()),
             started_at: Some("2026-09-23T10:00:00Z".to_string()),
             url: Some("http://127.0.0.1:18000/v1".to_string()),
+            warnings: vec!["warning: serving on the CPU".to_string()],
         };
         state.save().expect("save state");
 
