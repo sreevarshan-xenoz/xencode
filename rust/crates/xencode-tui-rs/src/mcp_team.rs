@@ -110,6 +110,18 @@ pub fn request_for(name: &str, args: &Map<String, Value>) -> Result<TeamRequest,
     })
 }
 
+/// The worker agents of the project's engine, when one runs; `None` when
+/// none does. Nothing is started to answer: a reading never starts work.
+pub async fn running_team(root: &Path) -> Option<Vec<xencode_team_rs::WorkerSnapshot>> {
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let addr = Address::for_project(&root).ok()?;
+    let (link, view) = link::open(&addr, &format!("reader {}", std::process::id()))
+        .await
+        .ok()?;
+    let _ = link.send(&crate::engine::proto::ClientMsg::Goodbye);
+    Some(view.team.unwrap_or_default())
+}
+
 /// The server's connection to the project's engine, made on first use.
 pub struct TeamClient {
     root: PathBuf,

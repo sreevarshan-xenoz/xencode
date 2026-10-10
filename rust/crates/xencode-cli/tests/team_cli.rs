@@ -1156,3 +1156,54 @@ async fn a_file_named_with_at_is_claimed_for_one_worker_at_a_time() {
     let (ok, body) = ask(&mut link, n, request).await;
     assert!(ok, "the claim ended with w1: {body}");
 }
+
+/// Spec §5: `xencode orchestrator costs` shows each worker's cost when the
+/// project's engine runs, and never starts one just to read it.
+#[tokio::test]
+async fn orchestrator_costs_reads_the_workers_of_a_running_engine_only() {
+    let (_outer, root) = repo();
+    let config = unreachable();
+    let costs = || {
+        let out = Command::new(env!("CARGO_BIN_EXE_xencode"))
+            .args(["orchestrator", "costs"])
+            .current_dir(&root)
+            .env("XCODE_CONFIG_DIR", config.path())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    let none = costs();
+    assert!(none.contains("no engine runs for this project"), "{none}");
+    let at = Address::for_project(&std::fs::canonicalize(&root).unwrap()).unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        link::open(&at, "probe").await.is_err(),
+        "reading the costs started an engine"
+    );
+
+    let (_engine, addr) = engine(&root, config.path());
+    let mut link = window(&addr).await;
+    let (ok, body) = ask(
+        &mut link,
+        1,
+        TeamRequest::Start {
+            agent: "xencode".into(),
+            task: "say hi".into(),
+            base: None,
+        },
+    )
+    .await;
+    assert!(ok, "{body}");
+    team_until(&mut link, "w1", WorkerState::Done).await;
+    let some = costs();
+    assert!(
+        some.contains("w1 (xencode)") && some.contains("no cost reported"),
+        "{some}"
+    );
+}

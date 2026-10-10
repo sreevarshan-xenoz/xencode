@@ -5938,7 +5938,7 @@ async fn run_orchestrator(action: OrchestratorAction) -> Result<(), String> {
         OrchestratorAction::Permissions { agent, format } => {
             orchestrator_permissions(agent, format)
         }
-        OrchestratorAction::Costs { format } => orchestrator_costs(format),
+        OrchestratorAction::Costs { format } => orchestrator_costs(format).await,
         OrchestratorAction::Inspect { target, format } => orchestrator_inspect(&target, format),
         OrchestratorAction::Retry {
             recipe,
@@ -7098,7 +7098,21 @@ struct PermissionRow {
 /// Money and energy, from the two places xencode measures them: the token
 /// records of what a model answered, and the power counter of what a team run
 /// drew from the wall.
-fn orchestrator_costs(format: OutputFormat) -> Result<(), String> {
+/// One worker's cost as `orchestrator costs` says it: what its agent
+/// reported, "on your plan" for a login, never a $0 nobody measured.
+fn worker_cost(w: &xencode_team_rs::WorkerSnapshot) -> String {
+    if w.on_plan {
+        "on your plan, not priced".to_string()
+    } else {
+        match w.cost_micros {
+            Some(micros) => format!("${:.4}", micros as f64 / 1_000_000.0),
+            None => "no cost reported".to_string(),
+        }
+    }
+}
+
+async fn orchestrator_costs(format: OutputFormat) -> Result<(), String> {
+    let workers = xencode_tui_rs::mcp_team::running_team(&xencode_context_rs::default_root()).await;
     let fleet = Fleet::read();
     let config = XencodeConfig::load().unwrap_or_default();
     let table =
@@ -7153,6 +7167,14 @@ fn orchestrator_costs(format: OutputFormat) -> Result<(), String> {
                     "cents_per_kwh": config.power_cents_per_kwh,
                     "cost_micros": (drawn > 0).then_some(energy_micros),
                 },
+                // `null` when no engine runs for this project.
+                "workers": workers.as_ref().map(|ws| ws.iter().map(|w| serde_json::json!({
+                    "id": w.id,
+                    "agent": w.agent,
+                    "tokens": w.tokens,
+                    "cost_micros": w.cost_micros,
+                    "on_plan": w.on_plan,
+                })).collect::<Vec<_>>()),
             }))
             .map_err(|e| e.to_string())?
         );
@@ -7221,6 +7243,22 @@ fn orchestrator_costs(format: OutputFormat) -> Result<(), String> {
     }
 
     println!();
+    match &workers {
+        None => println!(
+            "  workers:         no engine runs for this project, so no worker agent is running"
+        ),
+        Some(ws) if ws.is_empty() => {
+            println!("  workers:         the project's engine runs none")
+        }
+        Some(ws) => {
+            println!(
+                "  workers:         as each worker's agent reported, from the project's engine"
+            );
+            for w in ws {
+                println!("    {} ({}): {}", w.id, w.agent, worker_cost(w));
+            }
+        }
+    }
     match fleet.runs.iter().find(|file| file.run.is_ok()) {
         None if fleet.runs.is_empty() => println!(
             "  team energy:     nothing measured — no run is recorded in {}",
