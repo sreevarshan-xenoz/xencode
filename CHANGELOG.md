@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `xencode run --stop` ends a detached run on Windows; it used to leave the
   worker running and say it might be ignoring SIGTERM.
 
+### Fixed — `xencode colab up` could not serve its default model
+
+- The default model, `Qwen/Qwen2.5-7B-Instruct-GGUF` at `Q4_K_M`, is published
+  in two parts. The bootstrap downloaded only the first part and renamed it, so
+  llama.cpp refused to load it ("invalid split file name"). Every part is now
+  downloaded under its own name and the server is given the first. Checked on
+  a real Colab T4: both parts downloaded, the server loaded, and a chat request
+  through the bridge was answered.
+- When the server died while loading, the bootstrap still waited 15 minutes for
+  it. It now stops at once and shows the server's last log lines.
+- A failed bring-up quoted the model download's progress meter as its error.
+  The download now prints only errors, so the report shows the real message.
+- A quant that matched no file in the repo ended the bootstrap instead of
+  falling back to the repo's first model file, as it was meant to.
+
 ### Fixed — detached runs hung on Linux and macOS
 
 Since 2026-10-07 a detached run on Linux or macOS started its worker by

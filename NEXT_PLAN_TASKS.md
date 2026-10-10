@@ -1525,6 +1525,13 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
 
 #### Track R — any machine you can SSH into
 
+- [x] **K-5 — the default model could not be served.** Found 2026-10-10 by the first real
+  `colab up` in months (WSL Arch, a free T4). Most GGUF quants of 7B models are split in parts;
+  the bootstrap fetched one part and renamed it, waited 15 minutes for a server that had already
+  exited, and reported the download's progress meter as the error. Done 2026-10-10: every part
+  is fetched under its own name, a dead server is reported at once with its log, and the
+  download prints only errors. The part-picking step is tested by running it in a real `bash`
+  against the repo's real file list; the whole bring-up was watched on a real T4.
 - [x] **L-1 — extract a `Backend` trait from `xencode-colab-rs`.** Split the
       generic half of `orchestrate.rs` + `lifecycle.rs` (bootstrap,
       poll-until-serving, forward spawn/hold, state file, reconnect) behind a

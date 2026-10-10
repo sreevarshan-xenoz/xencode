@@ -69,20 +69,28 @@ test -n "$SERVER" || {{ echo "llama-server missing from ${{ASSET}}"; exit 1; }}
 LIBDIR=$(dirname "$(find "$DIR" -name 'libggml*.so' | head -n1)")
 export LD_LIBRARY_PATH="${{LIBDIR}}:${{LD_LIBRARY_PATH:-}}"
 HF_REPO={repo}
+QUANT={quant}
 FILES=$(curl -fsSL "https://huggingface.co/api/models/$HF_REPO" \
   | python3 -c 'import json,sys;[print(f["rfilename"]) for f in json.load(sys.stdin)["siblings"]]')
-GGUF_NAME=$(printf '%s\n' "$FILES" | grep -i '\.gguf$' | grep -i {quant} | head -n1)
-if [ -z "$GGUF_NAME" ]; then GGUF_NAME=$(printf '%s\n' "$FILES" | grep -i '\.gguf$' | head -n1); fi
-test -n "$GGUF_NAME" || {{ echo "no .gguf in $HF_REPO"; exit 1; }}
-echo "weights: $GGUF_NAME"
-curl -fL --retry 3 -o "$DIR/model.gguf" "https://huggingface.co/$HF_REPO/resolve/main/${{GGUF_NAME}}"
-nohup "$SERVER" -m "$DIR/model.gguf" --host 127.0.0.1 --port {port} -c 4096 $OFFLOAD \
+{pick}
+echo "weights: $(printf '%s ' $PARTS)"
+for PART in $PARTS; do
+  curl -fsSL --retry 3 -o "$DIR/$(basename "$PART")" "https://huggingface.co/$HF_REPO/resolve/main/$PART"
+done
+nohup "$SERVER" -m "$DIR/$FIRST_PART" --host 127.0.0.1 --port {port} -c 4096 $OFFLOAD \
   > "${{HOME}}/xencode-llama.log" 2>&1 &
+SERVER_PID=$!
 # READY must mean "serving", not "spawned": llama.cpp binds its socket only
 # after the weights are loaded (39 s for a 0.5B on a T4, measured live), so a
-# forward that probes too early hits an empty port.
+# forward that probes too early hits an empty port. A server that died while
+# loading is reported at once rather than waited on.
 WAITED=0
 until curl -fsS "http://127.0.0.1:{port}/v1/models" >/dev/null 2>&1; do
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "llama-server exited before serving; last log lines:"
+    tail -n 20 "${{HOME}}/xencode-llama.log"
+    exit 1
+  fi
   sleep 5; WAITED=$((WAITED + 5))
   if [ "$WAITED" -ge 900 ]; then
     echo "server did not start serving within 900s; last log lines:"
@@ -97,7 +105,31 @@ echo "READY {port}"
         port = port,
         repo = shell_quote(model),
         quant = shell_quote(quant),
+        pick = pick_gguf_parts(),
     ))
+}
+
+/// The step of the llama.cpp bootstrap that chooses what to download, from
+/// `$FILES` (the repo's file list), `$QUANT` and `$HF_REPO`. It sets `PARTS`
+/// (every file to fetch, in order) and `FIRST_PART` (the file the server is
+/// given).
+///
+/// Most quants of larger models are split into parts named
+/// `<name>-00001-of-00002.gguf`. llama.cpp loads the first part and finds the
+/// rest beside it by name, so every part is fetched under its own name. A
+/// quant that matches nothing falls back to the repo's first GGUF; `|| true`
+/// keeps `pipefail` from ending the script on that empty match.
+fn pick_gguf_parts() -> &'static str {
+    r#"GGUF_NAME=$(printf '%s\n' "$FILES" | grep -i '\.gguf$' | grep -i -F -- "$QUANT" | head -n1 || true)
+if [ -z "$GGUF_NAME" ]; then GGUF_NAME=$(printf '%s\n' "$FILES" | grep -i '\.gguf$' | head -n1 || true); fi
+test -n "$GGUF_NAME" || { echo "no .gguf in $HF_REPO"; exit 1; }
+STEM=$(printf '%s' "$GGUF_NAME" | sed -E 's/-[0-9]{5}-of-[0-9]{5}\.gguf$//')
+if [ "$STEM" != "$GGUF_NAME" ]; then
+  PARTS=$(printf '%s\n' "$FILES" | grep -F -- "$STEM-" | grep -E -- '-[0-9]{5}-of-[0-9]{5}\.gguf$' | sort)
+else
+  PARTS=$GGUF_NAME
+fi
+FIRST_PART=$(basename "$(printf '%s\n' "$PARTS" | head -n1)")"#
 }
 
 /// ollama runtime: the official install script + `ollama serve` bound to the
@@ -163,6 +195,104 @@ mod tests {
         assert!(script.contains("nvidia-smi -L"));
         assert!(script.contains("--n-gpu-layers 99"));
         assert!(script.contains("nohup \"$SERVER\""));
+    }
+
+    #[cfg(unix)]
+    /// The file list of `Qwen/Qwen2.5-7B-Instruct-GGUF` as the Hugging Face
+    /// API returned it on 2026-10-10: most quants there are split in parts.
+    const QWEN_7B_FILES: &str = ".gitattributes
+LICENSE
+README.md
+qwen2.5-7b-instruct-fp16-00001-of-00004.gguf
+qwen2.5-7b-instruct-fp16-00002-of-00004.gguf
+qwen2.5-7b-instruct-fp16-00003-of-00004.gguf
+qwen2.5-7b-instruct-fp16-00004-of-00004.gguf
+qwen2.5-7b-instruct-q2_k.gguf
+qwen2.5-7b-instruct-q3_k_m.gguf
+qwen2.5-7b-instruct-q4_0-00001-of-00002.gguf
+qwen2.5-7b-instruct-q4_0-00002-of-00002.gguf
+qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
+qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf
+qwen2.5-7b-instruct-q5_0-00001-of-00002.gguf
+qwen2.5-7b-instruct-q5_0-00002-of-00002.gguf
+qwen2.5-7b-instruct-q5_k_m-00001-of-00002.gguf
+qwen2.5-7b-instruct-q5_k_m-00002-of-00002.gguf
+qwen2.5-7b-instruct-q6_k-00001-of-00002.gguf
+qwen2.5-7b-instruct-q6_k-00002-of-00002.gguf
+qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf
+qwen2.5-7b-instruct-q8_0-00002-of-00003.gguf
+qwen2.5-7b-instruct-q8_0-00003-of-00003.gguf";
+
+    /// Run the script's file-picking step in a real bash and return the
+    /// parts it would download, one per line.
+    #[cfg(unix)]
+    fn picked_parts(files: &str, quant: &str) -> Vec<String> {
+        // Other tests point `$PATH` at an empty folder while they run.
+        let _env = crate::testutil::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let script = format!(
+            "set -euo pipefail\n{}\nprintf '%s\\n' $PARTS\n",
+            pick_gguf_parts()
+        );
+        let out = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .env("FILES", files)
+            .env("QUANT", quant)
+            .env("HF_REPO", "Qwen/Qwen2.5-7B-Instruct-GGUF")
+            .output()
+            .expect("bash runs");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_split_model_is_fetched_whole_in_part_order() {
+        assert_eq!(
+            picked_parts(QWEN_7B_FILES, "Q4_K_M"),
+            vec![
+                "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+                "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+            ]
+        );
+        assert_eq!(
+            picked_parts(QWEN_7B_FILES, "Q8_0").len(),
+            3,
+            "every part of a three-part model"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_single_file_model_is_fetched_alone() {
+        assert_eq!(
+            picked_parts(QWEN_7B_FILES, "Q2_K"),
+            vec!["qwen2.5-7b-instruct-q2_k.gguf"]
+        );
+    }
+
+    #[test]
+    fn the_server_keeps_its_file_names_and_a_dead_server_is_not_waited_for() {
+        let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q4_K_M", 18080)
+            .expect("hf supported");
+        // Parts keep their own names, or llama.cpp cannot find part two.
+        assert!(!script.contains("model.gguf"), "{script}");
+        assert!(script.contains("-m \"$DIR/$FIRST_PART\""), "{script}");
+        // A download shows its errors but not a progress meter, which would
+        // otherwise be what a failure report quotes.
+        assert!(script.contains("curl -fsSL --retry 3 -o"), "{script}");
+        // The wait stops as soon as the server process is gone.
+        assert!(script.contains("SERVER_PID=$!"), "{script}");
+        assert!(script.contains("kill -0 \"$SERVER_PID\""), "{script}");
     }
 
     #[test]
