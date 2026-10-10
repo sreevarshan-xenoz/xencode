@@ -161,6 +161,18 @@ allowed, and two `inverted-condition` runs again answered in prose with no tool.
 hardware from the earlier runs, so the comparison is with their spread (3–5 of 24), not with
 any one of them.
 
+**Ninth run, 2026-10-10 — a bigger model, Qwen3-8B Q4_K_M, same settings and 8 rounds, on the
+Colab T4:** **1 of 24 (4%)** in 9 minutes. The bigger model gave up *sooner* (most cases after 1
+to 6 tool calls, `src/lib.rs` untouched), so size is not the limit. The final answers name the
+cause: the turn ends exactly where the model announces its next step — "Let's modify the function
+… I'll update the plan", "I will now proceed to test the implementation", "Let's start by
+examining the current code" — and in `ignored-result` the model wrote the correct fixed function
+as a code block in its answer and never put it in the file. The agent loop takes any answer
+without a tool call as the end of the turn; these models narrate first and act in the next
+message. **Next change:** in task mode (the evaluation, ByteBot, detached runs — not chat), a
+turn that ends with no file changed while rounds remain gets one continuation telling the model
+it has changed nothing yet and to make the change now; then the same 24 cases on Colab.
+
 ### First-hour TUI fixes (`TX-*`, added 2026-10-08)
 
 A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs`,
