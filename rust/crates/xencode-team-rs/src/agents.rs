@@ -18,6 +18,8 @@ pub struct AgentSpec {
     pub key_vars: &'static [&'static str],
     /// The xencode setting that can hold the same key (`xencode config set`).
     pub stored_key: Option<StoredKey>,
+    /// Environment variables its own login is kept in, which only it sees.
+    pub login_vars: &'static [&'static str],
     /// How to install the program when it is missing.
     pub install: &'static str,
     /// What the vendor's terms say about using a person's own login through
@@ -39,6 +41,7 @@ pub const CLAUDE_CODE: AgentSpec = AgentSpec {
     args: &["-y", "@agentclientprotocol/claude-agent-acp@0.89.1"],
     key_vars: &["ANTHROPIC_API_KEY"],
     stored_key: None,
+    login_vars: &["CLAUDE_CODE_OAUTH_TOKEN"],
     install: "install Node.js (it brings `npx`): https://nodejs.org",
     terms_line: "Anthropic does not permit third-party developers to route requests through \
                  Free, Pro, or Max plan credentials on behalf of their users.",
@@ -51,6 +54,7 @@ pub const CODEX: AgentSpec = AgentSpec {
     args: &["-y", "@agentclientprotocol/codex-acp@2.2.2"],
     key_vars: &["CODEX_API_KEY", "OPENAI_API_KEY"],
     stored_key: Some(StoredKey::OpenAi),
+    login_vars: &[],
     install: "install Node.js (it brings `npx`): https://nodejs.org",
     terms_line: "No term found restricting a ChatGPT login used through this adapter; \
                  OpenAI's terms could not be read in full when this was written.",
@@ -63,6 +67,7 @@ pub const GEMINI: AgentSpec = AgentSpec {
     args: &["--acp"],
     key_vars: &["GEMINI_API_KEY"],
     stored_key: Some(StoredKey::Gemini),
+    login_vars: &[],
     install: "npm install -g @google/gemini-cli",
     terms_line: "Directly accessing the services powering Gemini CLI using third-party \
                  software is a violation of Google's terms.",
@@ -75,11 +80,43 @@ pub const ANTIGRAVITY: AgentSpec = AgentSpec {
     args: &[],
     key_vars: &["GEMINI_API_KEY"],
     stored_key: Some(StoredKey::Gemini),
+    login_vars: &[],
     install: "install Google Antigravity, which puts `agy_acp_server` on PATH",
     terms_line: "Using third party software to access the Service (e.g. using OpenClaw \
                  with Antigravity OAuth) can get the account suspended.",
     terms_url: "https://antigravity.google/terms",
 };
+
+/// Every environment variable a vendor's key or login is kept in. An outside
+/// worker starts with all of them removed but its own.
+pub const VENDOR_KEY_VARS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CODEX_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+];
+
+/// The variables to remove for a worker of `spec` signing in with
+/// `sign_in`: every vendor's and every one in `also`, but the one it uses.
+pub fn hidden_vars(spec: &AgentSpec, sign_in: &SignIn, also: &[&str]) -> Vec<String> {
+    let keep: Vec<&str> = match sign_in {
+        SignIn::Key { var } => vec![var.as_str()],
+        SignIn::Login => spec.login_vars.to_vec(),
+    };
+    let mut out: Vec<String> = VENDOR_KEY_VARS
+        .iter()
+        .chain(also)
+        .filter(|v| !keep.contains(v))
+        .map(|v| v.to_string())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
 
 /// Every outside agent, in the order `team_agents` lists them.
 pub const AGENTS: &[AgentSpec] = &[CLAUDE_CODE, CODEX, GEMINI, ANTIGRAVITY];
@@ -314,6 +351,39 @@ mod tests {
         opt_in(dir.path(), "gemini").unwrap();
         opt_in(dir.path(), "gemini").unwrap();
         assert_eq!(optins(dir.path()), vec!["gemini".to_string()]);
+    }
+
+    /// Security review: a worker sees its own key and no other vendor's.
+    #[test]
+    fn a_worker_keeps_only_its_own_key() {
+        let hidden = hidden_vars(
+            &GEMINI,
+            &SignIn::Key {
+                var: "GEMINI_API_KEY".into(),
+            },
+            &["API_KEY_OPENAI"],
+        );
+        assert!(
+            !hidden.contains(&"GEMINI_API_KEY".to_string()),
+            "{hidden:?}"
+        );
+        for var in [
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "API_KEY_OPENAI",
+        ] {
+            assert!(hidden.contains(&var.to_string()), "{var}: {hidden:?}");
+        }
+        let login = hidden_vars(&CLAUDE_CODE, &SignIn::Login, &[]);
+        assert!(
+            !login.contains(&"CLAUDE_CODE_OAUTH_TOKEN".to_string()),
+            "{login:?}"
+        );
+        assert!(
+            login.contains(&"ANTHROPIC_API_KEY".to_string()),
+            "{login:?}"
+        );
     }
 
     #[test]

@@ -555,19 +555,73 @@ fn launch_for(agent: &str, config: &XencodeConfig) -> Result<LaunchSpec, String>
     }
     match describe(spec, config) {
         Availability::Ready { program, sign_in } => {
-            let (env, on_plan) = match sign_in {
-                SignIn::Key { .. } => (key_for(spec, config).into_iter().collect(), false),
-                SignIn::Login => (Vec::new(), true),
+            let env: Vec<(String, String)> = match sign_in {
+                SignIn::Key { .. } => key_for(spec, config).into_iter().collect(),
+                SignIn::Login => Vec::new(),
             };
-            Ok(LaunchSpec {
-                program,
-                args: spec.args.iter().map(|a| a.to_string()).collect(),
+            let xencodes: Vec<&str> = xencode_config_rs::SecretProvider::ALL
+                .iter()
+                .flat_map(|p| p.env_vars().iter().copied())
+                .collect();
+            let hidden = agents::hidden_vars(spec, &sign_in, &xencodes);
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("cannot find the xencode program: {e}"))?;
+            let dir = launch_dir()?;
+            Ok(wrapped(
+                exe,
+                &dir,
+                &hidden,
+                &program,
+                spec.args,
                 env,
-                on_plan,
-            })
+                matches!(sign_in, SignIn::Login),
+            ))
         }
         Availability::Missing { install } => Err(format!("{agent} cannot start: {install}")),
         Availability::NoSignIn { fix } => Err(format!("{agent} cannot sign in: {fix}")),
+    }
+}
+
+/// The empty folder outside agents' programs run in: xencode's own, never a
+/// worker's tree, so a `.npmrc` or `node_modules` there cannot change which
+/// adapter `npx` runs.
+fn launch_dir() -> Result<PathBuf, String> {
+    let dir = XencodeConfig::config_dir()
+        .map_err(|e| e.to_string())?
+        .join("team-launch");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// An outside agent's program, started through `xencode team exec` so it runs
+/// in `dir` with the `hidden` variables removed.
+fn wrapped(
+    exe: PathBuf,
+    dir: &Path,
+    hidden: &[String],
+    program: &Path,
+    args: &[&str],
+    env: Vec<(String, String)>,
+    on_plan: bool,
+) -> LaunchSpec {
+    let mut all = vec![
+        "team".to_string(),
+        "exec".to_string(),
+        "--cwd".to_string(),
+        dir.to_string_lossy().to_string(),
+    ];
+    for var in hidden {
+        all.push("--unset".to_string());
+        all.push(var.clone());
+    }
+    all.push("--".to_string());
+    all.push(program.to_string_lossy().to_string());
+    all.extend(args.iter().map(|a| a.to_string()));
+    LaunchSpec {
+        program: exe,
+        args: all,
+        env,
+        on_plan,
     }
 }
 
@@ -592,6 +646,32 @@ fn launch_spec(agent: &str) -> Result<LaunchSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Security review: an outside agent runs through `xencode team exec`, in
+    /// xencode's own folder, with every other key removed.
+    #[test]
+    fn an_outside_agent_runs_outside_the_worktree_without_other_keys() {
+        let spec = wrapped(
+            PathBuf::from("/bin/xencode"),
+            Path::new("/cfg/team-launch"),
+            &[
+                "ANTHROPIC_API_KEY".to_string(),
+                "OPENAI_API_KEY".to_string(),
+            ],
+            Path::new("/usr/bin/gemini"),
+            &["--acp"],
+            vec![("GEMINI_API_KEY".into(), "FAKE-NOT-A-REAL-KEY".into())],
+            false,
+        );
+        assert_eq!(spec.program, PathBuf::from("/bin/xencode"));
+        let args = spec.args.join(" ");
+        assert!(
+            args.starts_with("team exec --cwd /cfg/team-launch --unset ANTHROPIC_API_KEY --unset OPENAI_API_KEY -- "),
+            "{args}"
+        );
+        assert!(args.ends_with(" --acp"), "{args}");
+        assert_eq!(spec.env.len(), 1);
+    }
 
     /// TM-4: the badge says a worker is waiting only for the team's own
     /// approvals, not for the person's agent's tools.

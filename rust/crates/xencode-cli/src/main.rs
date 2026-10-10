@@ -1401,6 +1401,23 @@ enum TeamAction {
     /// failed, or left by an engine that ended). A worktree with changes
     /// nobody committed is kept and named
     Clean,
+
+    /// Run an outside worker agent's program from `--cwd` with the named
+    /// environment variables removed. The engine starts outside agents this
+    /// way, so an adapter never reads the worker's tree and never sees
+    /// another vendor's key
+    #[command(hide = true)]
+    Exec {
+        /// The folder to run the program in
+        #[arg(long)]
+        cwd: PathBuf,
+        /// An environment variable to remove; repeat for each
+        #[arg(long)]
+        unset: Vec<String>,
+        /// The program and its arguments, after `--`
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 /// The control surface `OR-14` puts beside the TUI's `/orchestrator` mode.
@@ -5124,6 +5141,24 @@ fn team_login_optin(agent: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `xencode team exec` (TM-5, hidden): run an outside agent's program in
+/// `cwd` without the `unset` variables, its standard streams the agent's
+/// protocol, and end with its exit code.
+fn team_exec(cwd: &std::path::Path, unset: &[String], command: &[String]) -> Result<(), String> {
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| "no program to run".to_string())?;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args).current_dir(cwd);
+    for var in unset {
+        cmd.env_remove(var);
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| format!("could not start {program}: {e}"))?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
 /// `xencode team clean` (TM-5): asks the project's engine, which knows which
 /// workers still run, to remove the rest's worktrees.
 async fn team_clean() -> Result<(), String> {
@@ -5157,6 +5192,11 @@ async fn run_team(action: TeamAction) -> Result<(), String> {
     let action = match action {
         TeamAction::LoginOptin { agent } => return team_login_optin(&agent),
         TeamAction::Clean => return team_clean().await,
+        TeamAction::Exec {
+            cwd,
+            unset,
+            command,
+        } => return team_exec(&cwd, &unset, &command),
         other => other,
     };
     let dir = team_recipes_dir();
@@ -5165,6 +5205,11 @@ async fn run_team(action: TeamAction) -> Result<(), String> {
     match action {
         TeamAction::LoginOptin { agent } => team_login_optin(&agent),
         TeamAction::Clean => team_clean().await,
+        TeamAction::Exec {
+            cwd,
+            unset,
+            command,
+        } => team_exec(&cwd, &unset, &command),
         TeamAction::List { format } => {
             if matches!(format, OutputFormat::Json) {
                 let out = serde_json::json!({
