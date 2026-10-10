@@ -52,6 +52,9 @@ pub struct Session {
     pub cancel: Arc<Notify>,
     /// The engine's model, as last set or told.
     pub model: String,
+    /// A ByteBot question waiting for the person's next message: its id and
+    /// the words of the task that asked (M-7d).
+    pub question: Option<(u64, String)>,
 }
 
 impl Session {
@@ -65,6 +68,7 @@ impl Session {
             busy: false,
             cancel: Arc::new(Notify::new()),
             model: view.model.unwrap_or_default(),
+            question: None,
         })
     }
 }

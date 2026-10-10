@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Client Protocol, such as Zed. Each editor session works through its folder's
   engine, like the terminal app. It covers chat with streamed answers,
   stopping a turn, tool calls shown as they run with diffs for edits, and
-  permission prompts answered in the editor, a model choice and the command
-  list. ByteBot follows.
+  permission prompts answered in the editor, a model choice, the command
+  list, and ByteBot tasks with their steps, their review (keep or undo) and
+  their questions answered from the editor.
 
 ### Added — `EN-4`: detached runs work on Windows
 
