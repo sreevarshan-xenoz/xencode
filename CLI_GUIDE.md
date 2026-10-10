@@ -3844,7 +3844,8 @@ folders, locale, and `CARGO_*`, `RUSTUP_*` and `RUST*` settings. Nothing whose
 name marks it as a secret (`API_KEY`, `ACCESS_KEY`, `TOKEN`, `SECRET`,
 `PASSWORD`, `CREDENTIAL`, `AUTH`, `PRIVATE`) goes with them. A project whose
 tests need more names them in `.xencode/team.toml`, for example
-`check_env = ["DATABASE_URL"]`; only those pass, on purpose. The checks run the worker's code on your machine: `cargo test` builds and runs
+`check_env = ["DATABASE_URL"]`; only those pass, and never a name that marks a
+secret, since `team.toml` can arrive with a cloned project. The checks run the worker's code on your machine: `cargo test` builds and runs
 its `build.rs`, its tests and anything they start, as any test run of a branch
 would. The question about files that decide how checks run covers the check
 settings, not that. A check past `check_timeout_secs` is ended with every process

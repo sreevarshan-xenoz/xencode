@@ -277,8 +277,8 @@ fn is_secret_name(name: &str) -> bool {
 
 /// Whether the checks are given the variable `name`. They run the worker's
 /// code, so only what a build or test ordinarily needs goes with them, and
-/// what the project's `check_env` names on purpose; nothing whose name says
-/// it is a secret, unless named there.
+/// what the project's `check_env` names; never anything whose name says it
+/// is a secret.
 fn passes_to_checks(name: &str, check_env: &[String]) -> bool {
     const NAMES: [&str; 40] = [
         "HOME",
@@ -323,11 +323,13 @@ fn passes_to_checks(name: &str, check_env: &[String]) -> bool {
         "NO_COLOR",
     ];
     const PREFIXES: [&str; 5] = ["LC_", "XDG_", "CARGO_", "RUSTUP_", "RUST"];
-    if check_env.iter().any(|n| n.eq_ignore_ascii_case(name)) {
-        return true;
-    }
+    // A secret never goes, even when named: `.xencode/team.toml` can come
+    // with a cloned project, and a check is code from the repository.
     if is_secret_name(name) {
         return false;
+    }
+    if check_env.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+        return true;
     }
     let upper = name.to_uppercase();
     NAMES.contains(&upper.as_str()) || PREFIXES.iter().any(|p| upper.starts_with(p))
@@ -971,6 +973,11 @@ mod tests {
         assert!(
             passes_to_checks("DATABASE_URL", &named),
             "a name the project gives passes"
+        );
+        let asked = vec!["ANTHROPIC_API_KEY".to_string()];
+        assert!(
+            !passes_to_checks("ANTHROPIC_API_KEY", &asked),
+            "a project's settings cannot hand a check the person's key"
         );
         // The command a check really runs as carries nothing else.
         let cmd = check_command(Path::new("."), "git --version", &[]);
