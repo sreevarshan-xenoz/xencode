@@ -313,7 +313,10 @@ impl Team {
     /// worker's `merge`.
     fn merge(&mut self, root: &Path, id: &str, approvals: &Approvals) -> Result<Value, String> {
         let s = self.find(id)?;
-        if !matches!(s.state, WorkerState::Done | WorkerState::Stopped) {
+        if !matches!(
+            s.state,
+            WorkerState::Done | WorkerState::Failed | WorkerState::Stopped
+        ) {
             return Err(format!(
                 "{id} is {:?}; it can be merged once its turn is done or it is stopped",
                 s.state

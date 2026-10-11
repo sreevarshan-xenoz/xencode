@@ -151,6 +151,16 @@ pub async fn start(
             Ok(Finish::Ended(Ending::Done)) | Ok(Finish::Asked(..)) => {
                 responder.respond(PromptResponse::new(StopReason::EndTurn))
             }
+            // An editor has shown the error as text and sees an ordinary end;
+            // a team worker reads the failure from the reply's metadata.
+            Ok(Finish::Ended(Ending::ModelFailed(why))) => {
+                let mut meta = serde_json::Map::new();
+                meta.insert(
+                    "xencode".to_string(),
+                    serde_json::json!({ "model_failed": why }),
+                );
+                responder.respond(PromptResponse::new(StopReason::EndTurn).meta(meta))
+            }
             Ok(Finish::Ended(Ending::Stopped)) => {
                 responder.respond(PromptResponse::new(StopReason::Cancelled))
             }

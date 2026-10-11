@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --quiet` in a Rust project); with none, the person is asked. A
   failed check, a conflict or a refusal is reported in words and nothing lands;
   a landed worker's worktree and branch are removed.
+- `TM-1`: a xencode worker whose model call failed is `failed`, with the
+  reason, instead of `done`; its session stays open, so `team_message` tries
+  again once the model is back. Editors such as Zed still see the error as
+  text and an ordinary end of turn.
 - `TM-3`: a merge commit names the worker branch it came from, not the
   commit hash it was pinned to.
 - `TM-2`, `TM-3` (found by a real Claude Code lead): `xencode mcp serve`
