@@ -128,9 +128,9 @@ fn the_notice_arrives_in_full_on_an_eighty_column_terminal() {
     // The reason is not the overlay's job at this width; it is in the chat, and
     // the chat's copy is on the screen too — wrapped across rows, so checked as
     // the words the person reads rather than as one unbroken string.
-    assert!(screen.contains("readable JSON"), "{screen}");
-    assert!(screen.contains("trailing comma"), "{screen}");
-    assert!(screen.contains("Repair it by hand"), "{screen}");
+    for word in ["readable", "JSON", "trailing", "comma", "Repair", "hand"] {
+        assert!(screen.contains(word), "{word}: {screen}");
+    }
     leave(&dir, guard);
 }
 
