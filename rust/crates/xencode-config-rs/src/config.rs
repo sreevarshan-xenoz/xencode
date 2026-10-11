@@ -368,6 +368,10 @@ pub struct XencodeConfig {
     /// Draw panel borders with rounded corners.
     #[serde(default)]
     pub rounded_borders: bool,
+    /// How a tool call's output shows in the conversation: `fold` (the first
+    /// lines, Ctrl+O for the rest) or `expand` (all of it).
+    #[serde(default = "default_tool_output")]
+    pub tool_output: String,
 
     /// Show vertical scrollbars on scrollable lists (chat, explorer).
     #[serde(default = "default_true")]
@@ -1039,6 +1043,10 @@ fn default_colab_weights() -> String {
     "hf".to_string()
 }
 
+fn default_tool_output() -> String {
+    "fold".to_string()
+}
+
 fn default_disclosure_level() -> u8 {
     2
 }
@@ -1052,6 +1060,7 @@ impl Default for XencodeConfig {
             layout: default_layout(),
             hardware_profile: default_hardware_profile(),
             rounded_borders: false,
+            tool_output: default_tool_output(),
             show_scrollbars: true,
             show_line_numbers: true,
             mouse_capture: true,

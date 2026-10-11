@@ -630,6 +630,8 @@ pub struct App<'a> {
         tokio::sync::oneshot::Sender<crate::agent_tools::ApprovalAnswer>,
     )>,
     pub approval_scroll: usize,
+    /// The tool call whose whole output is shown (Ctrl+O, TD-1).
+    pub tool_expanded: Option<String>,
     /// The engine's team of worker agents (TM); empty in a window.
     pub team: crate::engine::team::Team,
     /// A window's copy of the engine's team, from its view (TM-4).
@@ -3221,6 +3223,7 @@ impl<'a> App<'a> {
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
             team: Default::default(),
+            tool_expanded: None,
             team_view: Vec::new(),
             team_req: 0,
             approval_tx,
@@ -4431,19 +4434,30 @@ impl<'a> App<'a> {
             self.refresh_git();
         } else if let Some(body) = token.strip_prefix("[TASKS]") {
             self.handle_tasks_command(body);
-        } else if token.starts_with("[TOOLCALL]") || token.starts_with("[TOOLEND]") {
-            // For windows that draw tool calls themselves (`xencode acp`,
-            // M-7); the terminal shows the `[TOOL]` lines instead.
+        } else if let Some(body) = token.strip_prefix("[TOOLCALL]") {
+            self.tool_call_started(body);
+        } else if let Some(body) = token.strip_prefix("[TOOLEND]") {
+            self.tool_call_ended(body);
         } else if let Some(body) = token.strip_prefix("[TOOL]") {
             if let Some(call) = body.strip_prefix("→ ") {
                 self.live_tool_started(call.trim());
+                // The call's own message (TD-1); `[TOOLCALL]` fills it in.
+                self.messages.push(crate::transcript::tool_message(
+                    &crate::transcript::ToolEntry {
+                        summary: call.trim().to_string(),
+                        ..Default::default()
+                    },
+                ));
+            } else if body.starts_with("← ") && self.open_tool_call().is_some() {
+                // The result arrives again, whole, with `[TOOLEND]`.
+            } else {
+                // A tool-loop note with no call of its own (a check, a
+                // refusal); the next token opens a fresh assistant bubble.
+                self.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("⚙{body}"),
+                });
             }
-            // Tool-loop lines arrive mid-stream (D1-02); the next token
-            // opens a fresh assistant bubble, so each round stays visible.
-            self.messages.push(UiMessage {
-                role: "system".to_string(),
-                content: format!("⚙{body}"),
-            });
         } else if let Some(body) = token.strip_prefix("[MCP]") {
             // `/mcp` reports (I3-01) arrive from the connect/status task.
             self.messages.push(UiMessage {
@@ -4490,6 +4504,58 @@ impl<'a> App<'a> {
 
     /// Record this session's state in its live status file (DK-1). The feed
     /// redacts and clips the headline itself.
+    /// The newest tool message still waiting for its call or its end.
+    fn open_tool_call(&self) -> Option<usize> {
+        self.messages
+            .iter()
+            .rposition(|m| crate::transcript::read_tool(m).is_some_and(|t| t.outcome.is_none()))
+    }
+
+    /// `[TOOLCALL]{id,name,arguments}`: name the waiting tool message, or
+    /// start one when the call came without a `[TOOL]→` line.
+    fn tool_call_started(&mut self, body: &str) {
+        let Ok(call) = serde_json::from_str::<serde_json::Value>(body) else {
+            return;
+        };
+        let id = call["id"].as_str().unwrap_or_default().to_string();
+        let name = call["name"].as_str().unwrap_or_default().to_string();
+        let arguments = call.get("arguments").cloned().unwrap_or_default();
+        let waiting = self.messages.iter().rposition(|m| {
+            crate::transcript::read_tool(m).is_some_and(|t| t.outcome.is_none() && t.id.is_empty())
+        });
+        let mut entry = waiting
+            .and_then(|i| crate::transcript::read_tool(&self.messages[i]))
+            .unwrap_or_default();
+        entry.id = id;
+        entry.name = name;
+        entry.arguments = arguments;
+        let message = crate::transcript::tool_message(&entry);
+        match waiting {
+            Some(i) => self.messages[i] = message,
+            None => self.messages.push(message),
+        }
+    }
+
+    /// `[TOOLEND]{id,outcome,preview}`: how the call with that id ended.
+    fn tool_call_ended(&mut self, body: &str) {
+        let Ok(end) = serde_json::from_str::<serde_json::Value>(body) else {
+            return;
+        };
+        let id = end["id"].as_str().unwrap_or_default();
+        let Some(i) = self
+            .messages
+            .iter()
+            .rposition(|m| crate::transcript::read_tool(m).is_some_and(|t| t.id == id))
+        else {
+            return;
+        };
+        if let Some(mut entry) = crate::transcript::read_tool(&self.messages[i]) {
+            entry.outcome = Some(end["outcome"].as_str().unwrap_or("done").to_string());
+            entry.preview = end["preview"].as_str().unwrap_or_default().to_string();
+            self.messages[i] = crate::transcript::tool_message(&entry);
+        }
+    }
+
     pub(crate) fn live_set(
         &mut self,
         state: xencode_live_rs::LiveState,
@@ -19919,7 +19985,7 @@ Content-Length: 0
     }
 
     #[tokio::test]
-    async fn tool_tokens_carry_the_whole_call_and_draw_nothing() {
+    async fn tool_tokens_carry_the_whole_call_and_draw_one_row() {
         let call = xencode_providers_rs::ToolCall {
             id: "call-7".to_string(),
             name: "write_file".to_string(),
@@ -19962,11 +20028,11 @@ Content-Length: 0
         let before = app.messages.len();
         app.apply_token(&start, &tx);
         app.apply_token(&end, &tx);
-        assert_eq!(
-            app.messages.len(),
-            before,
-            "the terminal draws the [TOOL] lines, not these"
-        );
+        // TD-1: the call is one tool message, ended with its outcome.
+        assert_eq!(app.messages.len(), before + 1);
+        let tool = crate::transcript::read_tool(app.messages.last().unwrap()).unwrap();
+        assert_eq!(tool.id, "call-7");
+        assert_eq!(tool.outcome.as_deref(), Some("finished"));
     }
 
     #[tokio::test]
@@ -19981,9 +20047,52 @@ Content-Length: 0
         app.apply_token("[DONE]", &tx);
         let text: Vec<String> = app.messages.iter().map(|m| m.content.clone()).collect();
         assert!(text.iter().any(|t| t == "hello world"), "{text:?}");
-        assert!(text.iter().any(|t| t == "⚙→ read_file a.rs"), "{text:?}");
+        let tool = app
+            .messages
+            .iter()
+            .find_map(crate::transcript::read_tool)
+            .expect("the tool call is one tool message");
+        assert_eq!(tool.summary, "read_file a.rs");
         assert!(text.iter().any(|t| t == "■ Turn stopped."), "{text:?}");
         assert!(!app.is_generating);
+    }
+
+    /// TD-1: a tool call is one message, filled in as its events arrive, with
+    /// no `⚙` line repeating it; a tool line with no call stays a note.
+    #[tokio::test]
+    async fn a_tool_call_becomes_one_tool_message() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.is_generating = true;
+        app.apply_token("[TOOL]→ read_file src/a.rs", &tx);
+        app.apply_token(
+            r#"[TOOLCALL]{"id":"c1","name":"read_file","arguments":{"path":"src/a.rs"}}"#,
+            &tx,
+        );
+        app.apply_token("[TOOL]← fn a() {}", &tx);
+        app.apply_token(
+            r#"[TOOLEND]{"id":"c1","outcome":"done","preview":"fn a() {}"}"#,
+            &tx,
+        );
+        app.apply_token("[TOOL]✗ checks failed", &tx);
+        let tools: Vec<_> = app
+            .messages
+            .iter()
+            .filter_map(crate::transcript::read_tool)
+            .collect();
+        assert_eq!(tools.len(), 1, "{:?}", app.messages);
+        assert_eq!(tools[0].id, "c1");
+        assert_eq!(tools[0].name, "read_file");
+        assert_eq!(tools[0].summary, "read_file src/a.rs");
+        assert_eq!(tools[0].outcome.as_deref(), Some("done"));
+        assert_eq!(tools[0].preview, "fn a() {}");
+        let notes: Vec<&str> = app
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(notes, ["⚙✗ checks failed"], "{:?}", app.messages);
     }
 
     /// A stopped chat turn and a ByteBot run each have their own stop: a chat

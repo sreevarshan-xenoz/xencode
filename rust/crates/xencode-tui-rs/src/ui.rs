@@ -892,49 +892,36 @@ pub fn welcome_lines(app: &App) -> Vec<String> {
 
 /// The chat transcript as rendered lines. Shared by `draw_messages` and the
 /// resize clamp so both agree on the content length.
-fn chat_lines(app: &App) -> Vec<Line<'static>> {
+fn chat_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let mut text = Vec::new();
 
     if app.messages.is_empty() {
-        for line in welcome_lines(app) {
-            text.push(Line::from(Span::styled(
-                line,
-                Style::default().fg(app.theme.message_system),
-            )));
-        }
-        text.push(Line::from(""));
         let shortcuts = crate::focus::first_run_shortcuts_line(app.active_disclosure_level());
-        text.push(Line::from(Span::styled(
-            format!("  Shortcuts: {}", shortcuts),
-            Style::default().fg(app.theme.message_system),
-        )));
-    }
-
-    for msg in &app.messages {
-        let (icon, role_name, color) = match msg.role.as_str() {
-            "user" => ("🧑", "You", app.theme.message_user),
-            "assistant" => ("🤖", "Xencode", app.theme.message_assistant),
-            _ => ("ℹ️", "System", app.theme.message_system),
-        };
-
-        text.push(Line::from(vec![
-            Span::styled(
-                format!(" {} {} ", icon, role_name),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("─".repeat(40), Style::default().fg(app.theme.border)),
-        ]));
-
-        if msg.role == "assistant" {
-            text.extend(crate::markdown::render_markdown(&msg.content, &app.theme));
-        } else {
-            for line in msg.content.lines() {
+        let mut welcome = welcome_lines(app);
+        welcome.push(String::new());
+        welcome.push(format!("  Shortcuts: {}", shortcuts));
+        // The transcript wraps itself now, so the welcome does too.
+        for line in welcome {
+            for row in crate::transcript::wrap_indented(line.trim_start(), width as usize, 2) {
                 text.push(Line::from(Span::styled(
-                    format!("  {}", line),
-                    Style::default().fg(app.theme.fg),
+                    row,
+                    Style::default().fg(app.theme.message_system),
                 )));
             }
         }
+    }
+
+    // TD-1: each speaker marked down its own lines, each tool call one row.
+    text.extend(crate::transcript::lines(
+        &app.messages,
+        &app.theme,
+        &crate::transcript::RenderOpts {
+            width,
+            expand_tools: app.config.tool_output == "expand",
+            expanded: app.tool_expanded.clone(),
+        },
+    ));
+    if !app.messages.is_empty() {
         text.push(Line::from(""));
     }
 
@@ -1033,8 +1020,6 @@ fn draw_plan_strip(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
-    let text = chat_lines(app);
-
     let is_focused = app.focus == FocusArea::ChatInput && app.input_mode == InputMode::Normal;
 
     // The agent's todo list sits above the transcript, outside the scroll: a
@@ -1065,11 +1050,6 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
         },
     );
 
-    let text_lines = text.len() as u16;
-    let height = area.height.saturating_sub(2);
-    let max_scroll = text_lines.saturating_sub(height);
-    let scroll = max_scroll.saturating_sub(app.chat_scroll);
-
     let show_bar = app.config.show_scrollbars && area.width >= 24;
     let (text_area, bar_area) = if show_bar {
         let c = Layout::default()
@@ -1080,11 +1060,15 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
     } else {
         (area, None)
     };
+    // The transcript wraps itself (keeping each speaker's marker on every
+    // line), so the paragraph does not.
+    let text = chat_lines(app, text_area.width.saturating_sub(2));
+    let text_lines = text.len() as u16;
+    let height = area.height.saturating_sub(2);
+    let max_scroll = text_lines.saturating_sub(height);
+    let scroll = max_scroll.saturating_sub(app.chat_scroll);
 
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
+    let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
 
     f.render_widget(paragraph, text_area);
 
@@ -3017,9 +3001,10 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         let rows = chat_area
             .height
             .saturating_sub(plan_block_height(app, chat_area));
-        app.chat_scroll = app
-            .chat_scroll
-            .min(clamp_scroll(chat_lines(app).len(), rows));
+        app.chat_scroll = app.chat_scroll.min(clamp_scroll(
+            chat_lines(app, chat_area.width.saturating_sub(3)).len(),
+            rows,
+        ));
     }
 
     // Code Review popup.

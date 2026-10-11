@@ -4919,6 +4919,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tui-textarea",
+ "unicode-width 0.2.0",
  "windows-sys 0.61.2",
  "xencode-agents-rs",
  "xencode-analysis-rs",
