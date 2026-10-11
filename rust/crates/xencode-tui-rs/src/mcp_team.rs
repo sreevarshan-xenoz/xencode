@@ -68,7 +68,7 @@ pub fn team_tool_definitions() -> Vec<ToolDefinition> {
         def("team_result", "A worker's latest answer and its diff against the base branch.", json!({"id": id}), &["id"]),
         def(
             "team_message",
-            "Send a follow-up to a worker whose turn is done; it continues in the same session.",
+            "Send a follow-up to a worker whose turn is done, or failed (for example its model could not be reached), to try again; it continues in the same session.",
             json!({"id": id, "text": {"type": "string"}}),
             &["id", "text"],
         ),

@@ -3771,7 +3771,7 @@ client) uses to direct worker agents on the workspace's project:
 | `team_start {agent, task, base?}` | starts a worker in its own git worktree (`<repo>-team/<id>` on branch `xencode/team/<id>`) off `base`, which must be a local branch (default: the checked-out branch); returns its id (`w1`, …). A file the task names with `@path` is claimed for that worker in `.xencode/leases.json`, as `/spawn` does; while another worker holds it, the start is refused, naming that worker, until it is merged or cleaned |
 | `team_status {id?, wait_secs?}` | one worker, or all: its state (`starting`, `working`, `needs_you`, `done`, `failed`, `stopped`), last message and tool calls; with `wait_secs` (up to 120) it answers once no worker in question is starting or working, or after that long |
 | `team_result {id}` | its latest answer and its diff against the base branch |
-| `team_message {id, text}` | a follow-up in the same session, once its turn is done |
+| `team_message {id, text}` | a follow-up in the same session, once its turn is done or failed; a xencode worker whose model call failed is `failed` with the reason in `error`, and a message tries again |
 | `team_stop {id}` | stops it; the worktree is kept |
 | `team_merge {id}` | merges its branch, landing it only when the project's checks pass on the merged result |
 
@@ -3817,7 +3817,7 @@ A worker's cost is what its agent reports, in US dollars, shown by `team_status`
 the Team panel and `xencode orchestrator costs`. A worker on your login is shown as `on your plan` and never
 priced; an agent that reports no cost shows none, never `$0`.
 
-**How `team_merge` lands a worker's work.** The worker must be `done` or
+**How `team_merge` lands a worker's work.** The worker must be `done`, `failed` or
 `stopped`. Its uncommitted changes are committed on its branch, the branch is
 merged with the base in a scratch worktree, and the project's checks run on that
 merged result. Only when they pass does the base branch move, and only if

@@ -123,7 +123,7 @@ async fn a_worker_runs_its_task_in_its_own_worktree() {
     let (_outer, root) = repo();
     let config = unreachable();
     let (_handle, mut events, path) = start(&root, xencode_worker(config.path()), "say hi");
-    let done = until(&mut events, WorkerState::Done, Duration::from_secs(60)).await;
+    let done = until(&mut events, WorkerState::Failed, Duration::from_secs(60)).await;
     assert!(done.answer.contains("127.0.0.1:9"), "{done:?}");
     assert_eq!(done.branch, "xencode/team/w1");
     assert_eq!(done.worktree, path);
@@ -135,10 +135,10 @@ async fn a_message_continues_the_same_session() {
     let (_outer, root) = repo();
     let config = unreachable();
     let (handle, mut events, _path) = start(&root, xencode_worker(config.path()), "say hi");
-    until(&mut events, WorkerState::Done, Duration::from_secs(60)).await;
+    until(&mut events, WorkerState::Failed, Duration::from_secs(60)).await;
     handle.message("again").unwrap();
     until(&mut events, WorkerState::Working, Duration::from_secs(10)).await;
-    let done = until(&mut events, WorkerState::Done, Duration::from_secs(60)).await;
+    let done = until(&mut events, WorkerState::Failed, Duration::from_secs(60)).await;
     assert!(done.answer.contains("127.0.0.1:9"), "{done:?}");
 }
 
@@ -301,7 +301,7 @@ async fn the_engine_starts_a_worker_and_every_window_sees_it() {
     .await;
     assert!(ok, "{body}");
     assert_eq!(body["id"], "w1");
-    let done = team_until(&mut link, "w1", WorkerState::Done).await;
+    let done = team_until(&mut link, "w1", WorkerState::Failed).await;
     assert!(done.answer.contains("127.0.0.1:9"), "{done:?}");
     assert_eq!(done.branch, "xencode/team/w1");
 
@@ -479,7 +479,7 @@ fn the_lead_lists_the_team_tools_and_runs_a_worker_through_them() {
     loop {
         let (text, error) = mcp.call("team_status", serde_json::json!({"id": "w1"}));
         assert!(!error, "{text}");
-        if text.contains("\"done\"") {
+        if text.contains("\"failed\"") {
             break;
         }
         assert!(
@@ -514,7 +514,7 @@ fn wait_done(mcp: &mut Mcp, id: &str) {
     loop {
         let (text, error) = mcp.call("team_status", serde_json::json!({ "id": id }));
         assert!(!error, "{text}");
-        if text.contains("\"done\"") {
+        if text.contains("\"failed\"") {
             return;
         }
         assert!(
@@ -663,7 +663,7 @@ async fn a_window_shows_the_team_and_s_stops_the_selected_worker() {
         &tx,
     );
     frames_until(&mut app, "w1 done", |a| {
-        worker_is(a, "w1", WorkerState::Done)
+        worker_is(a, "w1", WorkerState::Failed)
     })
     .await;
 
@@ -674,7 +674,7 @@ async fn a_window_shows_the_team_and_s_stops_the_selected_worker() {
         .position(|r| xencode_tui_rs::worker_panel::team_worker(r) == Some("w1"))
         .unwrap_or_else(|| panic!("no row for w1: {:#?}", app.workers_rows));
     assert!(
-        app.workers_rows[at].line.contains("xencode · done"),
+        app.workers_rows[at].line.contains("xencode · failed"),
         "{}",
         app.workers_rows[at].line
     );
@@ -842,7 +842,7 @@ async fn team_clean_removes_a_stopped_workers_worktree() {
     )
     .await;
     assert!(ok, "{body}");
-    team_until(&mut link, "w1", WorkerState::Done).await;
+    team_until(&mut link, "w1", WorkerState::Failed).await;
     let (ok, _) = ask(&mut link, 2, TeamRequest::Stop { id: "w1".into() }).await;
     assert!(ok);
     team_until(&mut link, "w1", WorkerState::Stopped).await;
@@ -1035,7 +1035,7 @@ async fn a_new_engine_shows_the_last_ones_workers_as_stopped_and_starts_the_next
         )
         .await;
         assert!(ok, "{body}");
-        team_until(&mut link, "w1", WorkerState::Done).await;
+        team_until(&mut link, "w1", WorkerState::Failed).await;
     }
     // The first engine is gone; a new one starts on the same project.
     let (_engine, addr) = engine(&root, config.path());
@@ -1094,10 +1094,39 @@ async fn a_worker_whose_agent_dies_between_turns_is_failed() {
     )
     .await;
     assert!(ok, "{body}");
-    team_until(&mut link, "w1", WorkerState::Done).await;
+    // The model is unreachable, so the turn ends failed with the model's
+    // error, and the session stays open between turns.
+    let first = team_until(&mut link, "w1", WorkerState::Failed).await;
+    assert!(
+        first
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("127.0.0.1:9")),
+        "{first:?}"
+    );
     kill_children_of(engine.0.id());
-    let failed = team_until(&mut link, "w1", WorkerState::Failed).await;
-    assert!(failed.error.is_some(), "{failed:?}");
+    // Its agent ending is said in its own words, not left as the old error.
+    let start = std::time::Instant::now();
+    loop {
+        let (ok, body) = ask(
+            &mut link,
+            9,
+            TeamRequest::Status {
+                id: Some("w1".into()),
+            },
+        )
+        .await;
+        assert!(ok, "{body}");
+        if body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("agent ended"))
+        {
+            assert_eq!(body["state"], "failed");
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(60), "{body}");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
     assert!(
         root.parent().unwrap().join("proj-team").join("w1").exists(),
         "worktree kept"
@@ -1138,7 +1167,7 @@ async fn a_file_named_with_at_is_claimed_for_one_worker_at_a_time() {
     let said = body.as_str().unwrap();
     assert!(said.contains("a.txt") && said.contains("team-w1"), "{said}");
 
-    team_until(&mut link, "w1", WorkerState::Done).await;
+    team_until(&mut link, "w1", WorkerState::Failed).await;
     let (ok, _) = ask(&mut link, 3, TeamRequest::Stop { id: "w1".into() }).await;
     assert!(ok);
     team_until(&mut link, "w1", WorkerState::Stopped).await;
@@ -1200,7 +1229,7 @@ async fn orchestrator_costs_reads_the_workers_of_a_running_engine_only() {
     )
     .await;
     assert!(ok, "{body}");
-    team_until(&mut link, "w1", WorkerState::Done).await;
+    team_until(&mut link, "w1", WorkerState::Failed).await;
     let some = costs();
     assert!(
         some.contains("w1 (xencode)") && some.contains("no cost reported"),
@@ -1229,7 +1258,7 @@ async fn two_xencode_workers_started_together_both_finish() {
         .await;
         assert!(ok, "{body}");
     }
-    team_until(&mut link, "w1", WorkerState::Done).await;
+    team_until(&mut link, "w1", WorkerState::Failed).await;
     let (ok, body) = ask(
         &mut link,
         3,
@@ -1239,8 +1268,8 @@ async fn two_xencode_workers_started_together_both_finish() {
     )
     .await;
     assert!(ok, "{body}");
-    if body["state"] != "done" {
-        team_until(&mut link, "w2", WorkerState::Done).await;
+    if body["state"] != "failed" {
+        team_until(&mut link, "w2", WorkerState::Failed).await;
     }
 }
 
@@ -1283,7 +1312,7 @@ fn team_status_can_wait_for_a_worker_to_settle() {
     let started = std::time::Instant::now();
     let (text, error) = fast.call("team_status", serde_json::json!({"wait_secs": 120}));
     assert!(!error, "{text}");
-    assert!(text.contains("\"done\""), "{text}");
+    assert!(text.contains("\"failed\""), "{text}");
     assert!(
         started.elapsed() < Duration::from_secs(110),
         "it returned once settled"

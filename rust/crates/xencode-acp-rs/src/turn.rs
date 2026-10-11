@@ -49,6 +49,9 @@ pub struct ToolEnd {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ending {
     Done,
+    /// The turn ended, but its model call failed: said as text, and told to
+    /// a client that reads it (a team worker) as this turn's failure.
+    ModelFailed(String),
     Stopped,
     Failed(String),
 }
@@ -57,6 +60,8 @@ pub enum Ending {
 #[derive(Debug, Default)]
 pub struct Turn {
     stopped: bool,
+    /// Why the model call failed, when it did.
+    model_failed: Option<String>,
     /// For a ByteBot turn, the task being followed.
     bytebot: Option<Followed>,
 }
@@ -134,10 +139,10 @@ impl Turn {
 
     fn token(&mut self, token: &str) -> Vec<Out> {
         if token == "[DONE]" {
-            let ending = if self.stopped {
-                Ending::Stopped
-            } else {
-                Ending::Done
+            let ending = match (&self.model_failed, self.stopped) {
+                (_, true) => Ending::Stopped,
+                (Some(why), false) => Ending::ModelFailed(why.clone()),
+                (None, false) => Ending::Done,
             };
             return vec![Out::Ended(ending)];
         }
@@ -170,7 +175,9 @@ impl Turn {
         }
         if let Some(why) = token.strip_prefix("[TURNERR]") {
             // The model call failed; the terminal shows it in the chat, and
-            // so does the editor. The turn still ends with `[DONE]`.
+            // so does the editor. The turn still ends with `[DONE]`, and its
+            // ending says the model failed.
+            self.model_failed = Some(why.to_string());
             return vec![Out::Text(why.to_string())];
         }
         if is_tagged(token) {
@@ -302,7 +309,9 @@ mod tests {
             out,
             vec![
                 Out::Text("llamacpp:none could not answer: connection refused".into()),
-                Out::Ended(Ending::Done)
+                Out::Ended(Ending::ModelFailed(
+                    "llamacpp:none could not answer: connection refused".into()
+                ))
             ]
         );
     }

@@ -123,7 +123,8 @@ impl WorkerHandle {
     /// A follow-up prompt in the same session. Refused while a turn runs.
     pub fn message(&self, text: &str) -> Result<(), String> {
         let state = self.snapshot().state;
-        if state != WorkerState::Done {
+        // A failed model call leaves the session open: a message tries again.
+        if !matches!(state, WorkerState::Done | WorkerState::Failed) {
             return Err(format!(
                 "the worker is {state:?}; a message can be sent once its turn is done"
             ));
@@ -294,12 +295,37 @@ async fn run(
                     if ended.stop_reason == StopReason::Cancelled {
                         return Ok(WorkerState::Stopped);
                     }
-                    session.update(|s| s.state = WorkerState::Done);
+                    // xencode's own agent says a failed model call in the
+                    // reply's metadata; the worker is failed, with the
+                    // reason, and stays open for a message to try again.
+                    let failed = model_failure(&ended);
+                    session.update(|s| match failed {
+                        Some(why) => {
+                            s.state = WorkerState::Failed;
+                            s.error = Some(why);
+                        }
+                        None => {
+                            s.state = WorkerState::Done;
+                            s.error = None;
+                        }
+                    });
                 }
             },
         )
         .await
         .map_err(|e| format!("the worker's agent ended: {e}"))
+}
+
+/// Why the turn's model call failed, when xencode's agent said so in the
+/// prompt reply's metadata.
+fn model_failure(reply: &agent_client_protocol::schema::v1::PromptResponse) -> Option<String> {
+    reply
+        .meta
+        .as_ref()?
+        .get("xencode")?
+        .get("model_failed")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// A tool kind as the protocol names it (`edit`, `execute`, …), or `tool`
