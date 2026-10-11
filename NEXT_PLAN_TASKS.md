@@ -17765,6 +17765,22 @@ program; the keys themselves are covered by their own tests.
     `main` through the checks; w2 (the small model) wrote the wrong file, and the lead read its
     diff and did not merge it. Two workers at once need the server's context to hold both prompts
     (`-c 32768 -np 2`); with `-c 8192` llama-server dropped both requests.
+- [ ] **TD — the TUI redesign** (designed 2026-10-11 with the owner, mockups in the session;
+  spec `docs/superpowers/specs/2026-10-11-tui-redesign-design.md`, plan
+  `docs/superpowers/plans/2026-10-11-tui-redesign.md`). A conversation-first screen in a
+  polished style, an always-ready input, a slim side panel, seven views behind Ctrl+P, eight
+  rarely used panels retired. Stages:
+  - [ ] **TD-1 — transcript model and renderer.**
+  - [ ] **TD-2 — the conversation shell and side panel.**
+  - [ ] **TD-3 — always-ready keys, the screens registry and the palette.**
+  - [ ] **TD-4 — the merged views.**
+  - [ ] **TD-5 — retire eight panels and the preset layouts.**
+  - [ ] **TD-6 — manuals and real screens.**
+- [ ] **OM — orchestrator mode as a tiling agent workspace** (designed 2026-10-11; spec
+  `docs/superpowers/specs/2026-10-11-orchestrator-mode-design.md`). Turning the mode on opens a
+  picker of installed coding agents; each runs its real interface in an embedded terminal, in
+  its own worktree, in a tile beside a rail of every agent. Built after TD. Stages OM-1 … OM-6
+  (terminal crate, engine host, the mode, attention, merge and the rest, manuals).
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
