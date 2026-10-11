@@ -17753,16 +17753,18 @@ program; the keys themselves are covered by their own tests.
     binary, `team clean` on a stopped worker. **Not yet watched:** each outside agent finishing a
     task, which needs that vendor's key and costs money — the four `live_*` tests in
     `team_cli.rs` are ignored until the owner provides keys and asks.
-  - [ ] **TM-6 — manuals and the whole flow watched.** Manuals done 2026-10-10: README, Quick
+  - [x] **TM-6 — manuals and the whole flow watched.** Manuals done 2026-10-10: README, Quick
     Start ("Lead several agents"), CLI guide, user manual, changelog; 19 crates; `cargo test --workspace` on Windows: 3,053
     passed, 35 known Windows-only failures, 35 ignored. Watched 2026-10-10 with a real lead: Claude Code (`claude -p`) given only the team
     tools started two xencode workers, waited for them with `team_status wait_secs`, read both
     results and merged one, end to end on a scratch repository. The runs found and fixed four
     real faults (tools invisible to MCP 2026-07-28 clients, a greeting that said only
-    "read-only", no way to wait, and `.gitignore`d `.xencode/` breaking merges). **Not yet
-    watched:** workers that actually edit files, because Colab refused a GPU ("allocation
-    refused") and the local GPU is not used; the workers' model was unreachable on purpose, so
-    each reported the model error and changed nothing.
+    "read-only", no way to wait, and `.gitignore`d `.xencode/` breaking merges). Watched
+    with a real model 2026-10-11: Qwen3-4B on a Colab T4 served the two xencode workers; w1
+    created `hello.txt` with the asked line, the lead read its diff and `team_merge` landed it on
+    `main` through the checks; w2 (the small model) wrote the wrong file, and the lead read its
+    diff and did not merge it. Two workers at once need the server's context to hold both prompts
+    (`-c 32768 -np 2`); with `-c 8192` llama-server dropped both requests.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.

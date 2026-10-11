@@ -488,7 +488,23 @@ fn attempt_merge(
     }
     let scratch = Scratch { root, path };
     let who = identity(root);
-    let message = format!("Merge {branch} (checked by xencode)");
+    // A pinned commit is named by the worker branch it is the tip of, so the
+    // history says whose work it was.
+    let source = git(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--points-at",
+            &branch_commit,
+            "refs/heads/xencode/team/",
+        ],
+    )
+    .ok()
+    .and_then(|refs| refs.lines().next().map(str::to_string))
+    .filter(|r| !r.trim().is_empty())
+    .unwrap_or_else(|| branch.to_string());
+    let message = format!("Merge {source} (checked by xencode)");
     if let Err(why) = git_with(
         &scratch.path,
         &who,
@@ -705,6 +721,18 @@ mod tests {
             "one\ntwo\n"
         );
         assert_eq!(git(&root, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    }
+
+    /// Found by a real lead run: a merge of a pinned commit read "Merge
+    /// 94c2e3fd…"; the message names the worker's branch it came from.
+    #[test]
+    fn the_merge_commit_names_the_workers_branch() {
+        let (_o, root, wt, branch) = project();
+        let tip = git(&wt, &["rev-parse", "HEAD"]);
+        let out = checked_merge(&root, "main", &tip, &checks(&["git --version"]), SECS);
+        assert!(matches!(out, MergeOutcome::Landed { .. }), "{out:?}");
+        let subject = git(&root, &["log", "-1", "--format=%s"]);
+        assert_eq!(subject, format!("Merge {branch} (checked by xencode)"));
     }
 
     /// Security review: a worker's change to the files that decide how checks
@@ -1078,9 +1106,9 @@ mod tests {
         let (_o, root, _wt, branch) = project();
         let before = git(&root, &["rev-parse", "main"]);
         let slow = if cfg!(windows) {
-            "ping -n 30 127.0.0.1"
+            "ping -n 120 127.0.0.1"
         } else {
-            "sleep 30"
+            "sleep 120"
         };
         let start = std::time::Instant::now();
         let out = checked_merge(
@@ -1090,8 +1118,10 @@ mod tests {
             &checks(&[slow]),
             Duration::from_secs(2),
         );
+        // The check would run two minutes; ending well inside one shows it
+        // was stopped, with room for a busy machine.
         assert!(
-            start.elapsed() < Duration::from_secs(20),
+            start.elapsed() < Duration::from_secs(60),
             "{:?}",
             start.elapsed()
         );
