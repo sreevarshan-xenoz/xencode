@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode the engine has in force. Before, a window changed only its own copy, so
   the status line could read `plan` while the engine kept writing files.
   `Shift+Tab` now changes the mode for the running session only.
+- A message queued while a turn ran is sent when the turn ends in a window
+  too (it waited for ever there), without touching the draft typed since, and
+  queued slash commands no longer hold up the lines behind them. A `!command`
+  typed in a window now runs in the engine, through its approval prompt.
 - A letter typed in the half second after an approval appears goes into the
   draft instead of answering it, so the `a` of a word being typed cannot grant a
   whole kind of tool; Esc still denies at once.

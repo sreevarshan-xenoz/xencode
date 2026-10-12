@@ -751,3 +751,59 @@ async fn a_key_typed_as_an_approval_appears_does_not_answer_it() {
         xencode_tui_rs::agent_tools::ApprovalAnswer::Denied
     );
 }
+
+/// Review I2: sending what was queued leaves the person's new draft alone.
+#[tokio::test]
+async fn a_queued_message_goes_without_touching_the_new_draft() {
+    let mut app = App::for_tests();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    app.is_generating = true;
+    type_text(&mut app, "/help");
+    key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    type_text(&mut app, "half typed");
+    app.apply_token("[DONE]", &tx);
+    assert!(app
+        .messages
+        .iter()
+        .any(|m| m.role == "user" && m.content == "/help"));
+    assert_eq!(draft(&app), "half typed");
+}
+
+/// Review I2: queued lines that start no turn (slash commands) do not hold up
+/// the ones behind them; each goes once, in order.
+#[tokio::test]
+async fn queued_commands_that_start_no_turn_all_go_in_order() {
+    let mut app = App::for_tests();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    app.is_generating = true;
+    for line in ["/help", "/cost"] {
+        type_text(&mut app, line);
+        key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    }
+    assert_eq!(app.queued.len(), 2);
+    app.apply_token("[DONE]", &tx);
+    let sent: Vec<&str> = app
+        .messages
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.content.as_str())
+        .collect();
+    assert_eq!(sent, ["/help", "/cost"]);
+    assert!(app.queued.is_empty());
+}
+
+/// Review I3: a `!command` is sent like any other line, so the engine that
+/// runs the tools runs it, and the transcript says what was typed.
+#[tokio::test]
+async fn a_bang_command_is_sent_like_a_message() {
+    let mut app = App::for_tests();
+    type_text(&mut app, "!echo hi");
+    key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert!(
+        app.messages
+            .iter()
+            .any(|m| m.role == "user" && m.content == "!echo hi"),
+        "{:?}",
+        app.messages
+    );
+}
