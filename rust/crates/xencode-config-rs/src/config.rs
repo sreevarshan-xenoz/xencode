@@ -366,12 +366,24 @@ pub struct XencodeConfig {
     pub hardware_profile: String,
 
     /// Draw panel borders with rounded corners.
-    #[serde(default)]
+    /// On by default since the conversation screen (TD-2) was drawn that way.
+    #[serde(default = "default_true")]
     pub rounded_borders: bool,
     /// How a tool call's output shows in the conversation: `fold` (the first
     /// lines, Ctrl+O for the rest) or `expand` (all of it).
     #[serde(default = "default_tool_output")]
     pub tool_output: String,
+
+    /// The conversation's side panel: `auto` (shown when the terminal is at
+    /// least 100 columns wide), `on` or `off`. Ctrl+B hides it for a session.
+    #[serde(default = "default_side_panel")]
+    pub side_panel: String,
+
+    /// What the status line under the input shows, left to right: any of
+    /// `model`, `provider`, `approval`, `context`, `cost`, `branch`. Items
+    /// that do not fit are dropped from the end.
+    #[serde(default = "default_status_line")]
+    pub status_line: Vec<String>,
 
     /// Show vertical scrollbars on scrollable lists (chat, explorer).
     #[serde(default = "default_true")]
@@ -1047,6 +1059,17 @@ fn default_tool_output() -> String {
     "fold".to_string()
 }
 
+fn default_side_panel() -> String {
+    "auto".to_string()
+}
+
+fn default_status_line() -> Vec<String> {
+    ["model", "provider", "approval", "context", "cost", "branch"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
 fn default_disclosure_level() -> u8 {
     2
 }
@@ -1059,8 +1082,10 @@ impl Default for XencodeConfig {
             active_theme: default_theme(),
             layout: default_layout(),
             hardware_profile: default_hardware_profile(),
-            rounded_borders: false,
+            rounded_borders: true,
             tool_output: default_tool_output(),
+            side_panel: default_side_panel(),
+            status_line: default_status_line(),
             show_scrollbars: true,
             show_line_numbers: true,
             mouse_capture: true,
@@ -1610,7 +1635,7 @@ mod tests {
         let config = XencodeConfig::default();
         assert_eq!(config.default_model, "qwen2.5:7b");
         assert_eq!(config.layout, "classic");
-        assert!(!config.rounded_borders);
+        assert!(config.rounded_borders);
         assert!(config.show_scrollbars);
         assert!(config.show_line_numbers);
         assert_eq!(config.agent_approval, "ask");
@@ -2152,7 +2177,7 @@ mod tests {
         assert_eq!(config.layout, "classic");
         assert!(config.show_scrollbars);
         assert!(config.show_line_numbers);
-        assert!(!config.rounded_borders);
+        assert!(config.rounded_borders);
         assert_eq!(config.agent_approval, "ask");
         assert_eq!(config.agent_max_rounds, 16);
         assert_eq!(config.agent_command_timeout, 30);

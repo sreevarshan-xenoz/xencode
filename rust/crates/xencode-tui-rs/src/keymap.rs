@@ -472,7 +472,11 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             };
         }
         KeyCode::Char('b') => {
-            if !app.bytebot_running && app.focus != FocusArea::ByteBotPanel {
+            // On the conversation it shows or hides the side panel (TD-2);
+            // ByteBot is still a Ctrl+X search away.
+            if app.focus == FocusArea::ChatInput && crate::shell::active(app) {
+                app.side_panel_open = !app.side_panel_open;
+            } else if !app.bytebot_running && app.focus != FocusArea::ByteBotPanel {
                 app.focus = FocusArea::ByteBotPanel;
             } else if app.focus == FocusArea::ByteBotPanel {
                 app.focus = FocusArea::ChatInput;
@@ -3825,7 +3829,8 @@ mod tests {
         // Toggles flip.
         app.settings_cursor = settings_row_index("Rounded Borders");
         press(&mut app, KeyCode::Right);
-        assert!(app.config.rounded_borders);
+        // Rounded is the default (TD-2), so the first press turns it off.
+        assert!(!app.config.rounded_borders);
 
         // Agent Approval cycles the five modes and wraps (I1-01, MD-1).
         app.settings_cursor = settings_row_index("Agent Approval");
@@ -3882,7 +3887,7 @@ mod tests {
         assert_eq!(app.focus, FocusArea::ChatInput);
         let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
         assert_eq!(saved.layout, "zen");
-        assert!(saved.rounded_borders);
+        assert!(!saved.rounded_borders);
         assert_eq!(saved.response_timeout, 5);
         assert_eq!(saved.agent_approval, "edit-allow");
         assert_eq!(saved.agent_command_timeout, 5);

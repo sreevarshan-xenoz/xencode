@@ -57,7 +57,7 @@ async fn a_fresh_start_is_simple_and_says_where_everything_else_is() {
 
     assert_eq!(level, 2, "a fresh start should open at the Workflow level");
     assert!(
-        first.contains("Ctrl+X"),
+        first.to_lowercase().contains("ctrl+x"),
         "the first screen must say how to reach what the level hides:\n{first}"
     );
     assert_eq!(listed.len(), app.palette_items().len());

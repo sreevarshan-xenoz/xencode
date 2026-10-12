@@ -50,19 +50,41 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
     let bg = Block::default().style(Style::default().bg(app.theme.bg).fg(app.theme.fg));
     f.render_widget(bg, f.area());
 
-    // Top-level: header (1) + body + status bar (1)
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // header
-            Constraint::Min(1),    // body
-            Constraint::Length(1), // status bar
-        ])
-        .split(f.area());
-
-    draw_header(f, app, outer[0]);
-    draw_body(f, app, outer[1]);
-    draw_status_bar(f, app, outer[2]);
+    // The conversation (TD-2) owns the whole screen; the files view keeps the
+    // header + body + status frame it has always had.
+    let shell = crate::shell::active(app);
+    let overlay_area = if shell {
+        // Toasts float over the conversation's column, down to the input, so
+        // their rule of keeping clear of the input's rows still holds.
+        // When the transcript leaves empty rows, the toast goes there rather
+        // than over the first lines of a short conversation.
+        let a = crate::shell::draw(f, app, f.area());
+        let toast_rows = crate::toast::render_lines(&app.toasts, &app.theme).len() as u16 + 2;
+        let free = a.transcript.height.saturating_sub(a.used);
+        let top = if !app.toasts.is_empty() && free >= toast_rows + 3 {
+            a.transcript.y + a.used
+        } else {
+            a.transcript.y
+        };
+        Rect {
+            y: top,
+            height: (a.input.y + a.input.height).saturating_sub(top),
+            ..a.transcript
+        }
+    } else {
+        let outer = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // header
+                Constraint::Min(1),    // body
+                Constraint::Length(1), // status bar
+            ])
+            .split(f.area());
+        draw_header(f, app, outer[0]);
+        draw_body(f, app, outer[1]);
+        draw_status_bar(f, app, outer[2]);
+        outer[1]
+    };
 
     // Overlays (rendered on top)
     match app.focus {
@@ -104,12 +126,12 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
 
     // Transient toasts (file-watch warnings) float over the body (E3-03).
     if !app.toasts.is_empty() {
-        draw_toasts(f, app, outer[1]);
+        draw_toasts(f, app, overlay_area);
     }
 
     // A model file arriving over the network, one line, over the body.
     if let Some(progress) = app.model_download.clone() {
-        draw_model_download(f, app, outer[1], &progress);
+        draw_model_download(f, app, overlay_area, &progress);
     }
 
     // Help overlay is modal; the approval prompt outranks even that.
@@ -122,7 +144,14 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
     if app.agent_stack_visible {
         draw_agent_stack_overlay(f, app, f.area());
     }
-    if app.pending_approval().is_some() {
+    // The conversation draws its approval inline; anywhere else, or under
+    // another overlay, it is modal and on top.
+    let covered = app.help_visible
+        || app.palette_visible
+        || app.agent_stack_visible
+        || app.init_visible
+        || app.focus != FocusArea::ChatInput;
+    if app.pending_approval().is_some() && (!shell || covered) {
         draw_approval_overlay(f, app, f.area());
     }
 }
@@ -861,7 +890,7 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
 
 /// The shared vertical scrollbar style for body panes (H1-07): accent
 /// thumb, no arrow heads — the arrow glyphs would dominate a 1-column bar.
-fn scrollbar_bar(app: &App) -> Scrollbar<'static> {
+pub(crate) fn scrollbar_bar(app: &App) -> Scrollbar<'static> {
     Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
@@ -940,7 +969,7 @@ fn chat_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 /// there is no plan, or when the pane is too short to give any up. Shared by
 /// `draw_messages` and the resize clamp so the transcript's scroll math sees
 /// the geometry the user does (E6-02 discipline).
-fn plan_block_height(app: &App, area: Rect) -> u16 {
+pub(crate) fn plan_block_height(app: &App, area: Rect) -> u16 {
     const MIN_TRANSCRIPT_ROWS: u16 = 6;
     let items = crate::agent_tools::plan_items(&app.agent_plan);
     if items.is_empty() {
@@ -964,7 +993,7 @@ fn plan_visible_items(app: &App, total: usize) -> usize {
     }
 }
 
-fn draw_plan_strip(f: &mut Frame, app: &App, area: Rect) {
+pub(crate) fn draw_plan_strip(f: &mut Frame, app: &App, area: Rect) {
     let items = crate::agent_tools::plan_items(&app.agent_plan);
     if items.is_empty() || area.height < 3 {
         return;
@@ -2997,7 +3026,10 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         ])
         .split(area)[1];
     let layout = app.body_layout(body);
-    if let Some(chat_area) = layout.chat {
+    if crate::shell::active(app) {
+        let transcript = crate::shell::areas(area, app).transcript;
+        crate::shell::clamp_scroll(app, transcript);
+    } else if let Some(chat_area) = layout.chat {
         let rows = chat_area
             .height
             .saturating_sub(plan_block_height(app, chat_area));

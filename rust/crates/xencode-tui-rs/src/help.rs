@@ -36,7 +36,7 @@ pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
     ("Ctrl+P", "project analyzer"),
-    ("Ctrl+B", "ByteBot agent panel"),
+    ("Ctrl+B", "side panel on the conversation; ByteBot elsewhere"),
     ("Ctrl+,", "settings"),
     ("Ctrl+W", "close panel → chat"),
     ("Ctrl+N", "agent stack overlay (Esc closes)"),

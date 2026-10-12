@@ -17770,8 +17770,14 @@ program; the keys themselves are covered by their own tests.
   `docs/superpowers/plans/2026-10-11-tui-redesign.md`). A conversation-first screen in a
   polished style, an always-ready input, a slim side panel, seven views behind Ctrl+P, eight
   rarely used panels retired. Stages:
-  - [ ] **TD-1 — transcript model and renderer.**
-  - [ ] **TD-2 — the conversation shell and side panel.**
+  - [x] **TD-1 — transcript model and renderer.** Done 2026-10-12: tool calls are stored as
+    `tool` role messages and drawn as one folded `⎿` line; speakers are marked on every wrapped
+    line; `tool_output` (`fold`/`expand`).
+  - [x] **TD-2 — the conversation shell and side panel.** Done 2026-10-12 (`shell.rs`,
+    `sidepanel.rs`): the transcript fills the screen, the approval is drawn in it, the input and
+    status line sit at the bottom, the side panel shows from 100 columns (`side_panel`,
+    `status_line`, `Ctrl+B`); the title and an OSC 9 notification call for the person; Windows
+    repaints after a resize. The status line names Ctrl+X and F1 until TD-3 moves them.
   - [ ] **TD-3 — always-ready keys, the screens registry and the palette.**
   - [ ] **TD-4 — the merged views.**
   - [ ] **TD-5 — retire eight panels and the preset layouts.**

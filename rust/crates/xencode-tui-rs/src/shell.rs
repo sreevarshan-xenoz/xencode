@@ -1,0 +1,539 @@
+//! The conversation screen (TD-2): the transcript fills the screen, an
+//! approval waiting on the person is drawn inside it, the input box is pinned
+//! to the bottom with one status line under it, and a slim side panel sits on
+//! the right when there is room.
+
+use ratatui::{
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
+    Frame,
+};
+
+use crate::app::App;
+use crate::focus::{FocusArea, InputMode};
+use crate::widgets::spinner;
+
+/// Columns the side panel takes.
+pub const SIDE_WIDTH: u16 = 32;
+/// Below this width `side_panel = "auto"` hides the panel.
+pub const SIDE_MIN_WIDTH: u16 = 100;
+/// Most rows of draft the input box grows to, not counting its frame.
+const INPUT_MAX_ROWS: usize = 6;
+/// The hints on the right of the status line, longest first; the first that
+/// fits is drawn.
+const HINTS: [&str; 3] = ["ctrl+x commands · ctrl+b panel · f1 keys", "ctrl+x · f1 keys", "f1"];
+
+/// Where each part of the conversation screen goes this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellAreas {
+    pub transcript: Rect,
+    pub approval: Option<Rect>,
+    pub input: Rect,
+    pub status: Rect,
+    pub side: Option<Rect>,
+    /// The transcript's last row with text on it, counted from its top: what
+    /// lies below is empty, which is where a toast can go without covering
+    /// anything. Known once the frame is drawn; `areas` leaves it 0.
+    pub used: u16,
+}
+
+/// Whether the conversation screen is the one on show: everywhere but the
+/// files view (the explorer and the editor), including under an overlay
+/// opened from the conversation.
+pub fn active(app: &App) -> bool {
+    let files = |f: FocusArea| matches!(f, FocusArea::FileExplorer | FocusArea::CodeEditor);
+    if files(app.focus) {
+        return false;
+    }
+    app.focus == FocusArea::ChatInput || !files(app.last_body_focus)
+}
+
+/// Whether the side panel shows at `width` columns.
+pub fn side_visible(app: &App, width: u16) -> bool {
+    match app.config.side_panel.as_str() {
+        "off" => false,
+        // "on" still gives way when the conversation would be squeezed out.
+        "on" => app.side_panel_open && width >= SIDE_WIDTH + 40,
+        _ => app.side_panel_open && width >= SIDE_MIN_WIDTH,
+    }
+}
+
+/// The approval mode in the words the status line uses.
+pub fn approval_label(app: &App) -> &'static str {
+    match app.config.agent_approval.as_str() {
+        "edit-allow" => "auto-edit",
+        "all-allow" => "allow all",
+        "plan" => "plan",
+        "autonomous" => "autonomous",
+        _ => "ask",
+    }
+}
+
+/// The model's context window, when a server has said what it is.
+pub fn context_window(app: &App) -> Option<u32> {
+    app.server_context_window
+        .or(app.ollama_window)
+        .filter(|w| *w > 0)
+}
+
+/// The share of the context window the last prompt took, when both are known.
+pub fn context_percent(app: &App) -> Option<u64> {
+    let window = u64::from(context_window(app)?);
+    if app.last_prompt_tokens == 0 {
+        return None;
+    }
+    Some((app.last_prompt_tokens * 100 / window).min(100))
+}
+
+/// Where a prompt is allowed to go (PR-2), in the words the old status bar
+/// used, read from the same policy the router enforces.
+pub fn egress_label(app: &App) -> &'static str {
+    if app.egress_policy().allow_cloud {
+        "cloud allowed"
+    } else {
+        "local only"
+    }
+}
+
+/// The notification a terminal that is not in front gets once when an
+/// approval starts waiting: OSC 9, which Windows Terminal, iTerm2, WezTerm and
+/// kitty show as a desktop notification and other terminals ignore.
+pub const NOTIFY_SEQUENCE: &str = "\x1b]9;xencode needs you\x1b\\";
+
+/// The window title: the project, or a call for the person while something
+/// waits on their answer.
+pub fn attention_title(app: &App) -> String {
+    if app.pending_approval().is_some() {
+        return "xencode · needs you".to_string();
+    }
+    let project = xencode_context_rs::default_root()
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    format!("xencode · {project}")
+}
+
+/// The approval prompt: its title, then the call, the change, and the keys.
+fn approval_lines(app: &App) -> Option<(String, Vec<Line<'static>>)> {
+    let request = app.pending_approval()?;
+    let waiting = app.approval_queue.len() + app.remote_approvals.len();
+    let more = if waiting > 1 {
+        format!(" · +{} more", waiting - 1)
+    } else {
+        String::new()
+    };
+    let title = format!(" Allow {}?{more} ", request.class_label());
+    let mut lines = vec![Line::from(Span::styled(
+        request.summary.clone(),
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::BOLD),
+    ))];
+    for line in request.preview.lines() {
+        let color = if line.starts_with("@@") {
+            app.theme.accent
+        } else if line.starts_with('+') {
+            app.theme.success
+        } else if line.starts_with('-') {
+            app.theme.danger
+        } else {
+            app.theme.message_system
+        };
+        lines.push(Line::from(Span::styled(
+            crate::transcript::clean(line),
+            Style::default().fg(color),
+        )));
+    }
+    let key = |k: &'static str| {
+        Span::styled(
+            k,
+            Style::default()
+                .fg(app.theme.warning)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+    let word = |w: &'static str| Span::styled(w, Style::default().fg(app.theme.message_system));
+    lines.push(Line::from(vec![
+        key("y"),
+        word(" allow · "),
+        key("a"),
+        word(" always for this kind · "),
+        key("n"),
+        word(" deny"),
+    ]));
+    Some((title, lines))
+}
+
+/// Where everything goes in `area`.
+pub fn areas(area: Rect, app: &App) -> ShellAreas {
+    let draft_rows = app.chat_input.lines().len().clamp(1, INPUT_MAX_ROWS) as u16;
+    // The frame always keeps one row of transcript and the status line.
+    let input_height = (draft_rows + 2).min(area.height.saturating_sub(2)).max(1);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(input_height),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    let (top, input, status) = (rows[0], rows[1], rows[2]);
+    let (top, side) = if side_visible(app, area.width) && top.height >= 3 {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(SIDE_WIDTH)])
+            .split(top);
+        (cols[0], Some(cols[1]))
+    } else {
+        (top, None)
+    };
+    let (transcript, approval) = match approval_lines(app) {
+        Some((_, lines)) if top.height >= 6 => {
+            let wanted = lines.len() as u16 + 2;
+            let height = wanted.min(top.height / 2).max(4);
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(height)])
+                .split(top);
+            (split[0], Some(split[1]))
+        }
+        Some(_) => (Rect { height: 0, ..top }, Some(top)),
+        None => (top, None),
+    };
+    ShellAreas {
+        transcript,
+        approval,
+        input,
+        status,
+        side,
+        used: 0,
+    }
+}
+
+/// Draw the conversation screen into `area`.
+pub fn draw(f: &mut Frame, app: &mut App, area: Rect) -> ShellAreas {
+    if app.focus == FocusArea::ChatInput {
+        app.last_body_focus = FocusArea::ChatInput;
+    }
+    app.last_body_area = area;
+    app.note_session_opened();
+    let mut a = areas(area, app);
+    // The mouse and the scroll clamp find the transcript and the input here.
+    app.last_layout = crate::layout::BodyLayout {
+        chat: Some(a.transcript),
+        input: Some(a.input),
+        ..Default::default()
+    };
+    a.used = draw_transcript(f, app, a.transcript, a.side.is_none());
+    if let Some(rect) = a.approval {
+        draw_approval(f, app, rect);
+    }
+    if let Some(rect) = a.side {
+        crate::sidepanel::draw(f, app, rect);
+    }
+    draw_input(f, app, a.input);
+    draw_status(f, app, a.status);
+    a
+}
+
+/// The transcript's lines at `width` columns, the welcome when empty.
+pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    if app.messages.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            " What should xencode do?",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let dim = Style::default().fg(app.theme.message_system);
+        for row in crate::transcript::wrap_indented(
+            "/ commands · @ files · ctrl+x finds anything · f1 keys",
+            width as usize,
+            1,
+        ) {
+            lines.push(Line::from(Span::styled(row, dim)));
+        }
+        let project = xencode_context_rs::default_root()
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let model = if app.config.default_model.is_empty() {
+            "no model chosen yet — esc, then m, picks one".to_string()
+        } else {
+            app.config.default_model.clone()
+        };
+        for row in crate::transcript::wrap_indented(&format!("{model} · {project}"), width as usize, 1) {
+            lines.push(Line::from(Span::styled(row, dim)));
+        }
+    } else {
+        lines = crate::transcript::lines(
+            &app.messages,
+            &app.theme,
+            &crate::transcript::RenderOpts {
+                width,
+                expand_tools: app.config.tool_output == "expand",
+                expanded: app.tool_expanded.clone(),
+            },
+        );
+    }
+    if app.is_generating {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  {} working · esc stops", spinner::frame(app.spinner_tick)),
+            Style::default().fg(app.theme.accent),
+        )));
+    }
+    lines
+}
+
+/// The transcript's text area inside its rect: one column of margin each side.
+fn text_rect(area: Rect) -> Rect {
+    Rect {
+        x: area.x + 1.min(area.width),
+        width: area.width.saturating_sub(2),
+        ..area
+    }
+}
+
+/// Keep `app.chat_scroll` inside what the transcript at `area` can scroll.
+pub fn clamp_scroll(app: &mut App, area: Rect) {
+    let text = text_rect(area);
+    let total = transcript_lines(app, text.width).len() as u16;
+    app.chat_scroll = app.chat_scroll.min(total.saturating_sub(text.height));
+}
+
+/// Returns the rows from the top of `area` down to its last line of text.
+fn draw_transcript(f: &mut Frame, app: &mut App, area: Rect, with_plan: bool) -> u16 {
+    if area.height == 0 || area.width < 3 {
+        return 0;
+    }
+    let top = area.y;
+    // Without the side panel the plan sits over the transcript, as before.
+    let area = match crate::ui::plan_block_height(app, area) {
+        rows if with_plan && rows > 0 => {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(rows), Constraint::Min(1)])
+                .split(area);
+            crate::ui::draw_plan_strip(f, app, split[0]);
+            split[1]
+        }
+        _ => area,
+    };
+    let text = text_rect(area);
+    let lines = transcript_lines(app, text.width);
+    let total = lines.len() as u16;
+    let max_scroll = total.saturating_sub(text.height);
+    app.chat_scroll = app.chat_scroll.min(max_scroll);
+    // `chat_scroll` counts up from the bottom, so 0 follows the newest line.
+    let scroll = max_scroll - app.chat_scroll;
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), text);
+    // A scrollbar in the right margin, only once there is something to
+    // scroll to, and only where `show_scrollbars` and the width allow it.
+    if app.config.show_scrollbars && area.width >= 24 && max_scroll > 0 {
+        let bar = Rect {
+            x: area.x + area.width - 1,
+            width: 1,
+            ..area
+        };
+        let mut state = ratatui::widgets::ScrollbarState::new(total as usize)
+            .position(scroll as usize);
+        f.render_stateful_widget(crate::ui::scrollbar_bar(app), bar, &mut state);
+    }
+    (text.y - top) + total.min(text.height)
+}
+
+fn draw_approval(f: &mut Frame, app: &App, area: Rect) {
+    let Some((title, lines)) = approval_lines(app) else {
+        return;
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(crate::widgets::panel_border_set(app.config.rounded_borders))
+        .border_style(Style::default().fg(app.theme.warning))
+        .title(Span::styled(title, Style::default().fg(app.theme.warning)));
+    // The keys are the last line; when the box is short, the change gives way
+    // so the keys always show.
+    let rows = area.height.saturating_sub(2) as usize;
+    let lines = if lines.len() > rows && rows >= 2 {
+        let keys = lines.last().cloned().unwrap_or_default();
+        let mut kept: Vec<Line<'static>> = lines.into_iter().take(rows - 1).collect();
+        kept.push(keys);
+        kept
+    } else {
+        lines
+    };
+    f.render_widget(
+        Paragraph::new(lines).block(block.padding(ratatui::widgets::Padding::horizontal(1))),
+        area,
+    );
+}
+
+fn draw_input(f: &mut Frame, app: &App, area: Rect) {
+    let editing = app.input_mode == InputMode::Editing;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(crate::widgets::panel_border_set(app.config.rounded_borders))
+        .border_style(Style::default().fg(if editing {
+            app.theme.accent
+        } else {
+            app.theme.border
+        }));
+    let inner = block.inner(area);
+    // One column of air between the frame and the text.
+    let inner = Rect {
+        x: inner.x + 1.min(inner.width),
+        width: inner.width.saturating_sub(2),
+        ..inner
+    };
+    f.render_widget(block, area);
+    let empty = app.chat_input.lines().iter().all(|l| l.is_empty());
+    if empty {
+        let hint = if app.is_generating {
+            "xencode is working · esc stops"
+        } else if editing {
+            "Ask xencode…   / commands   @ files"
+        } else {
+            "press i to type · / commands · ? keys"
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                hint,
+                Style::default().fg(app.theme.message_system),
+            )),
+            inner,
+        );
+    } else {
+        f.render_widget(&app.chat_input, inner);
+    }
+    if editing {
+        let (row, col) = app.chat_input.cursor();
+        let x = inner.x.saturating_add(col as u16);
+        let y = inner.y.saturating_add(row as u16);
+        if x < inner.x + inner.width && y < inner.y + inner.height {
+            f.set_cursor_position((x, y));
+        }
+    }
+}
+
+/// Every item the status line could show, in the configured order.
+fn all_status_items(app: &App) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in &app.config.status_line {
+        match item.as_str() {
+            "model" if !app.config.default_model.is_empty() => {
+                out.push(app.config.default_model.clone())
+            }
+            "provider" => out.push(egress_label(app).to_string()),
+            "approval" => out.push(approval_label(app).to_string()),
+            "context" => {
+                if let Some(pct) = context_percent(app) {
+                    out.push(format!("{pct}% context"));
+                }
+            }
+            "cost" => {
+                if let Some(micros) = app.spend.as_ref().and_then(|s| s.micros) {
+                    out.push(format!("${:.2}", micros as f64 / 1_000_000.0));
+                }
+            }
+            "branch" if !app.git_branch.is_empty() => out.push(app.git_branch.clone()),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn width_of(items: &[String]) -> usize {
+    items.iter().map(|i| i.chars().count()).sum::<usize>() + items.len().saturating_sub(1) * 3
+}
+
+/// The status line's left items that fit in `width` columns beside the
+/// shortest hint, dropped from the end.
+pub fn status_items(app: &App, width: u16) -> Vec<String> {
+    let mut items = all_status_items(app);
+    let room = (width as usize).saturating_sub(HINTS[HINTS.len() - 1].len() + 3);
+    while !items.is_empty() && width_of(&items) > room {
+        items.pop();
+    }
+    if let Some(first) = items.first_mut() {
+        if first.chars().count() > room {
+            *first = first.chars().take(room).collect();
+        }
+    }
+    items
+}
+
+fn draw_status(f: &mut Frame, app: &App, area: Rect) {
+    let width = area.width as usize;
+    let items = status_items(app, area.width);
+    let left = width_of(&items) + 1;
+    let hint = HINTS
+        .iter()
+        .find(|h| left + h.chars().count() + 2 <= width)
+        .copied()
+        .unwrap_or("");
+    let mut spans = vec![Span::raw(" ")];
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(
+                " · ",
+                Style::default().fg(app.theme.message_system),
+            ));
+        }
+        let color = if i == 0 {
+            app.theme.accent
+        } else {
+            app.theme.message_system
+        };
+        spans.push(Span::styled(item.clone(), Style::default().fg(color)));
+    }
+    if !hint.is_empty() {
+        let gap = width.saturating_sub(left + hint.chars().count() + 1);
+        spans.push(Span::raw(" ".repeat(gap)));
+        spans.push(Span::styled(
+            hint,
+            Style::default().fg(app.theme.message_system),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_status_items_drop_from_the_end_until_they_fit() {
+        let mut app = App::for_tests();
+        app.config.default_model = "ollama:qwen2.5:7b".into();
+        app.git_branch = "main".into();
+        let wide = status_items(&app, 200);
+        assert_eq!(wide, ["ollama:qwen2.5:7b", "local only", "ask", "main"]);
+        let narrow = status_items(&app, 30);
+        assert_eq!(narrow, ["ollama:qwen2.5:7b"]);
+        assert!(status_items(&app, 4).len() <= 1);
+    }
+
+    #[test]
+    fn the_title_calls_for_the_person_while_an_approval_waits() {
+        let mut app = App::for_tests();
+        assert!(attention_title(&app).starts_with("xencode · "));
+        assert_ne!(attention_title(&app), "xencode · needs you");
+        let (responder, _answer) = tokio::sync::oneshot::channel();
+        app.approval_queue.push_back((
+            crate::agent_tools::ApprovalRequest {
+                tool: "run_shell".into(),
+                class: crate::agent_tools::ToolClass::Shell,
+                summary: "run_shell cargo test".into(),
+                preview: "cargo test".into(),
+                draft: Default::default(),
+            },
+            responder,
+        ));
+        assert_eq!(attention_title(&app), "xencode · needs you");
+    }
+}

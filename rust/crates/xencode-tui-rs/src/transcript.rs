@@ -211,7 +211,7 @@ fn tool_lines(
 
 /// Text with terminal escapes and control characters removed and tabs
 /// expanded, so a command's output cannot restyle the screen.
-fn clean(text: &str) -> String {
+pub fn clean(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -297,12 +297,25 @@ fn wrap_spans(
             }
         }
     }
+    // A line that starts indented keeps that indent on the lines it wraps
+    // onto, as long as the indent leaves room for words.
+    let lead = match runs.first() {
+        Some((true, run)) if run.len() * 2 < room => run.clone(),
+        _ => Vec::new(),
+    };
     let mut lines: Vec<Vec<Cell>> = vec![Vec::new()];
     let mut used = 0usize;
+    // Whether the current line was opened by a wrap and holds only `lead`.
+    let mut fresh = false;
+    let wrap = |lines: &mut Vec<Vec<Cell>>, used: &mut usize, fresh: &mut bool| {
+        lines.push(lead.clone());
+        *used = lead.len();
+        *fresh = true;
+    };
     for (space, run) in runs {
         let run_width: usize = run.iter().map(|(c, _)| cw(*c)).sum();
         if space {
-            if used == 0 && lines.len() > 1 {
+            if fresh {
                 // Spaces where a line was broken are dropped.
                 continue;
             }
@@ -310,21 +323,20 @@ fn wrap_spans(
                 used += run_width;
                 lines.last_mut().unwrap().extend(run);
             } else {
-                lines.push(Vec::new());
-                used = 0;
+                wrap(&mut lines, &mut used, &mut fresh);
             }
             continue;
         }
         // A word that fits on a fresh line but not on this one moves down.
-        if used > 0 && used + run_width > room && run_width <= room {
-            lines.push(Vec::new());
-            used = 0;
+        if !fresh && used > 0 && used + run_width > room && run_width + lead.len() <= room {
+            wrap(&mut lines, &mut used, &mut fresh);
         }
+        fresh = false;
         for cell in run {
             let w = cw(cell.0);
-            if used + w > room && used > 0 {
-                lines.push(Vec::new());
-                used = 0;
+            if used + w > room && used > lead.len() {
+                wrap(&mut lines, &mut used, &mut fresh);
+                fresh = false;
             }
             used += w;
             lines.last_mut().unwrap().push(cell);
@@ -382,6 +394,20 @@ mod tests {
         assert!(out.len() > 1, "{out:?}");
         assert!(out.iter().all(|l| l.starts_with("  ")), "{out:?}");
         assert!(out.iter().all(|l| l.width() <= 12), "{out:?}");
+    }
+
+    /// A reply's paragraph that starts indented keeps that indent on the lines
+    /// it wraps onto, so the text lines up under its first word.
+    #[test]
+    fn an_indented_line_wraps_under_its_first_word() {
+        let spans = vec![Span::raw("  one two three four five six")];
+        let out: Vec<String> = wrap_spans(spans, 14, &[Span::raw("▍ ")])
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect();
+        assert!(out.len() > 1, "{out:?}");
+        assert!(out.iter().all(|l| l.starts_with("▍   ")), "{out:?}");
+        assert!(out.iter().all(|l| !l.starts_with("▍    ")), "{out:?}");
     }
 
     /// Review focus 1: a word wider than the line is cut inside the indent.
