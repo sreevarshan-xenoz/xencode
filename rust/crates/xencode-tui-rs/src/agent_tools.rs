@@ -55,6 +55,17 @@ impl ApprovalMode {
             _ => Self::Ask,
         }
     }
+
+    /// The word `agent_approval` holds for this mode; `parse` reads it back.
+    pub fn config_name(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::EditAllow => "edit-allow",
+            Self::AllAllow => "all-allow",
+            Self::Plan => "plan",
+            Self::Autonomous => "autonomous",
+        }
+    }
 }
 
 /// What a tool touches; drives both the mode decision and session grants.

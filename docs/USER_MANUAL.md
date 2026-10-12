@@ -156,7 +156,7 @@ In the conversation (the input is always ready — letters are text):
 | `Ctrl+O` | Unfold the newest tool call's output · again folds it |
 | `Ctrl+L` | The Models view |
 | `Ctrl+E` | The Files view (on an empty input; with text, end of line) |
-| `Shift+Tab` | Approval mode: ask → auto-edit → plan (saved like the Settings row) |
+| `Shift+Tab` | Approval mode: ask → auto-edit → plan, for this session (the Settings row saves one) |
 | `PageUp` / `PageDown` | Scroll the transcript |
 | `?` | This help, on an empty input |
 | `@path` | Mention a file; `Tab` puts the best match in |

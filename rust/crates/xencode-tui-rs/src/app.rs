@@ -3822,17 +3822,18 @@ impl<'a> App<'a> {
         self.chat_scroll = 0;
     }
 
-    /// Shift+Tab (TD-3): ask → auto-edit → plan → ask. Saved like the
-    /// Settings row, so the mode in force is always the one in the file; any
-    /// other mode set there steps back to `ask`.
-    pub(crate) fn cycle_approval_mode(&mut self) {
+    /// Shift+Tab (TD-3): ask → auto-edit → plan → ask, for this session (the
+    /// Settings row is what saves a mode). Any other mode steps back to `ask`.
+    /// The engine that runs the tools is told, so the mode on screen is the
+    /// mode in force.
+    pub(crate) fn cycle_approval_mode(&mut self, tx: &mpsc::UnboundedSender<String>) {
         let next = match self.config.agent_approval.as_str() {
             "ask" => "edit-allow",
             "edit-allow" => "plan",
             _ => "ask",
         };
         self.config.agent_approval = next.to_string();
-        self.save_config();
+        self.push_policy(tx);
         self.push_toast(
             crate::toast::ToastKind::Info,
             format!("approval: {}", crate::shell::approval_label(self)),
@@ -3856,6 +3857,18 @@ impl<'a> App<'a> {
             self.input_history.push(draft);
         }
         self.set_chat_text(&last);
+    }
+
+    /// Tell the engine the approval mode, cloud access and external workers
+    /// set here, so the one running the tools enforces what the person chose
+    /// (in-process, this is the same app and changes nothing).
+    pub(crate) fn push_policy(&mut self, tx: &mpsc::UnboundedSender<String>) {
+        let msg = crate::engine::proto::ClientMsg::SetPolicy {
+            approval: self.config.agent_approval.clone(),
+            cloud_models: self.config.allow_cloud_models,
+            external_workers: self.config.allow_external_workers,
+        };
+        crate::engine::act(self, msg, tx);
     }
 
     /// The next queued message, sent now that the turn it waited for is over.

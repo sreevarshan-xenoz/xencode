@@ -53,6 +53,10 @@ pub struct View {
     pub plan: Option<Vec<PlanItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The approval mode, cloud access and external workers in force in the
+    /// engine (C1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<(String, bool, bool)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm_calls: Option<u64>,
     /// The team of worker agents (TM).
@@ -88,6 +92,7 @@ struct Agent {
     question: Option<(u64, String)>,
     plan: Vec<PlanItem>,
     model: String,
+    policy: (String, bool, bool),
     llm_calls: u64,
     timings: Option<LlamaCppTimings>,
     team: Vec<xencode_team_rs::WorkerSnapshot>,
@@ -125,6 +130,11 @@ impl Agent {
             },
             plan: crate::agent_tools::plan_items(&app.agent_plan),
             model: app.config.default_model.clone(),
+            policy: (
+                app.config.agent_approval.clone(),
+                app.config.allow_cloud_models,
+                app.config.allow_external_workers,
+            ),
             llm_calls: app.total_llm_calls,
             timings: app.last_llamacpp_timings.clone(),
             team: app.team.snapshots(),
@@ -158,6 +168,7 @@ impl Watcher {
             question: Some(agent.question.clone()),
             plan: Some(agent.plan.clone()),
             model: Some(agent.model.clone()),
+            policy: Some(agent.policy.clone()),
             llm_calls: Some(agent.llm_calls),
             timings: Some(agent.timings.clone()),
             team: Some(agent.team.clone()),
@@ -209,6 +220,7 @@ impl Watcher {
         field!(question);
         field!(plan);
         field!(model);
+        field!(policy);
         field!(llm_calls);
         field!(timings);
         field!(team);
@@ -285,11 +297,41 @@ pub fn apply(app: &mut App, view: View) {
     if let Some(model) = view.model {
         app.config.default_model = model;
     }
+    if let Some((approval, cloud, external)) = view.policy {
+        app.config.agent_approval = approval;
+        app.config.allow_cloud_models = cloud;
+        app.config.allow_external_workers = external;
+    }
     if let Some(value) = view.llm_calls {
         app.total_llm_calls = value;
     }
     if let Some(value) = view.timings {
         app.last_llamacpp_timings = value;
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    use crate::app::App;
+
+    /// Review C1: a window shows the policy the engine has in force, read
+    /// from the engine's view, not the one it last asked for.
+    #[test]
+    fn a_window_shows_the_engines_policy() {
+        let mut engine = App::for_tests();
+        engine.config.agent_approval = "edit-allow".into();
+        engine.config.allow_cloud_models = true;
+        let mut watcher = Watcher::default();
+        let view = watcher.full(&engine);
+        let mut window = App::for_tests();
+        apply(&mut window, view);
+        assert_eq!(window.config.agent_approval, "edit-allow");
+        assert!(window.config.allow_cloud_models);
+        engine.config.agent_approval = "plan".into();
+        let change = watcher.changes(&engine).expect("the mode changed");
+        apply(&mut window, change);
+        assert_eq!(window.config.agent_approval, "plan");
     }
 }
 
