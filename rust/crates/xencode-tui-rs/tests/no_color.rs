@@ -34,14 +34,13 @@ fn no_color_leaves_no_colour_and_keeps_marks_as_reverse_video() {
         assert_eq!(cell.fg, Color::Reset, "a coloured foreground: {cell:?}");
         assert_eq!(cell.bg, Color::Reset, "a coloured background: {cell:?}");
     }
-    // The files view's status bar has its own background; it is still told
-    // apart. (The conversation's status line is plain text under the input.)
+    // A view's active tab is told apart by underline, not colour (TD-4),
+    // so it keeps its mark with the colour gone.
     app.focus = FocusArea::FileExplorer;
     let buffer = frame(&mut app);
-    let last = buffer.area().height - 1;
     assert!(
-        buffer[(2, last)].modifier.contains(Modifier::REVERSED),
-        "the status bar lost its mark"
+        (0..buffer.area().width).any(|x| buffer[(x, 0)].modifier.contains(Modifier::UNDERLINED)),
+        "the active tab lost its mark"
     );
 }
 

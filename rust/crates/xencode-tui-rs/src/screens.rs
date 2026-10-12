@@ -108,6 +108,43 @@ impl Screen {
     }
 }
 
+/// What a panel is called on its view's tab bar (TD-4).
+pub fn tab_name(area: FocusArea) -> &'static str {
+    match area {
+        FocusArea::ChatInput => "Chat",
+        FocusArea::ByteBotPanel => "ByteBot",
+        FocusArea::FileExplorer => "Tree",
+        FocusArea::CodeEditor => "Editor",
+        FocusArea::ReviewDashboard => "Diff",
+        FocusArea::CodeReview => "AI review",
+        FocusArea::GitCommit => "Commit",
+        FocusArea::WorkerPanel => "Workers",
+        FocusArea::WorktreePanel => "Worktrees",
+        FocusArea::TaskManager => "Tasks",
+        FocusArea::ModelSelector => "Pick",
+        FocusArea::CustomModels => "Your models",
+        FocusArea::ProviderHealth => "Health",
+        FocusArea::AdvisePanel => "Insights",
+        FocusArea::ImpactPanel => "Impact",
+        FocusArea::ProjectAnalyzer => "Analysis",
+        FocusArea::SecurityAuditor => "Security",
+        FocusArea::MultiLanguage => "Languages",
+        FocusArea::Settings => "All settings",
+        _ => "",
+    }
+}
+
+impl Screen {
+    /// The tab after (`step` 1) or before (`step` -1) `focus` in this view,
+    /// wrapping round.
+    pub fn step_tab(self, focus: FocusArea, step: isize) -> FocusArea {
+        let panels = self.panels();
+        let at = panels.iter().position(|p| *p == focus).unwrap_or(0) as isize;
+        let len = panels.len() as isize;
+        panels[(at + step).rem_euclid(len) as usize]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

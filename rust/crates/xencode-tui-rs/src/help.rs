@@ -183,6 +183,11 @@ pub(crate) const COMMANDS: &[Binding] = &[
         "rank files by churn, size, and bus factor",
     ),
     ("/agents", "inventory installed coding-agent CLIs on PATH"),
+    ("/files", "the Files view: the tree and the editor"),
+    ("/changes", "the Changes view: the diff, AI review, commit"),
+    ("/models", "the Models view: pick a model, your models, health"),
+    ("/project", "the Project view: insights, impact, analysis, security"),
+    ("/settings", "the Settings view"),
     (
         "/trust [status|forget] [path]",
         "trust an AGENTS.md's exact bytes as instructions — this workspace's, or a \

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — `TD-1` … `TD-3`: the TUI opens on a conversation, not a grid of panes
+### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
 
 - `TD-1`: each message in the transcript starts with a `▍You` or `▍xencode`
   marker that is kept on every wrapped line, and each tool call is one
@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   src/a.rs`) instead of their arguments as JSON. Ctrl+O, Ctrl+L and Ctrl+P no
   longer open the worktree, insights and analyzer panels; those are in the
   Agents and Project views.
+- `TD-4`: each view fills the screen instead of opening as a box in the
+  middle. A tab bar on the top row names the view and its tabs (Changes ▸ Diff
+  · AI review · Commit; Agents ▸ Workers · Worktrees · Tasks; Models ▸ Pick ·
+  Your models · Health; Project ▸ Insights · Impact · Analysis · Security ·
+  Languages), `Tab` and `Shift+Tab` move between them, and the status line sits
+  on the bottom row. `/files`, `/changes`, `/models`, `/project` and
+  `/settings` open their views (`/agents` still lists the coding-agent CLIs on
+  this machine). The old header row and status bar are gone.
 
 ### Added — `TM-1`: the engine can run worker agents
 

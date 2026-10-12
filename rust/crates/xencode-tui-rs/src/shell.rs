@@ -28,6 +28,8 @@ const HINTS: [&str; 3] = [
     "ctrl+p · ? keys",
     "?",
 ];
+/// The same in a view (TD-4).
+const VIEW_HINTS: [&str; 3] = ["tab next tab · esc back · ctrl+p", "tab · esc back", "esc"];
 
 /// Where each part of the conversation screen goes this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,15 +45,10 @@ pub struct ShellAreas {
     pub used: u16,
 }
 
-/// Whether the conversation screen is the one on show: everywhere but the
-/// files view (the explorer and the editor), including under an overlay
-/// opened from the conversation.
+/// Whether the conversation screen is the one on show: the Conversation
+/// view, including under a panel that belongs to no view (TD-4).
 pub fn active(app: &App) -> bool {
-    let files = |f: FocusArea| matches!(f, FocusArea::FileExplorer | FocusArea::CodeEditor);
-    if files(app.focus) {
-        return false;
-    }
-    app.focus == FocusArea::ChatInput || !files(app.last_body_focus)
+    app.screen() == crate::screens::Screen::Conversation
 }
 
 /// Whether the side panel shows at `width` columns.
@@ -261,7 +258,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) -> ShellAreas {
     }
     draw_mentions(f, app, a.transcript);
     draw_input(f, app, a.input);
-    draw_status(f, app, a.status);
+    draw_status(f, app, a.status, &HINTS);
     a
 }
 
@@ -571,11 +568,16 @@ pub fn status_items(app: &App, width: u16) -> Vec<String> {
     items
 }
 
-fn draw_status(f: &mut Frame, app: &App, area: Rect) {
+/// The status line under a view (TD-4): the same items, the view's keys.
+pub fn draw_view_status(f: &mut Frame, app: &App, area: Rect) {
+    draw_status(f, app, area, &VIEW_HINTS);
+}
+
+fn draw_status(f: &mut Frame, app: &App, area: Rect, hints: &[&str]) {
     let width = area.width as usize;
     let items = status_items(app, area.width);
     let left = width_of(&items) + 1;
-    let hint = HINTS
+    let hint = hints
         .iter()
         .find(|h| left + h.chars().count() + 2 <= width)
         .copied()

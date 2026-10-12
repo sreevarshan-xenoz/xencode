@@ -183,7 +183,7 @@ In the conversation (the input is always ready — letters are text):
 | `!command` | Run a shell command through the agent's own approval prompt, sandbox and time limit |
 | `Ctrl+A` / `Ctrl+K` / `Ctrl+U` / `Ctrl+W` | Start of line · delete to end / to start / the word before |
 
-The views, from `Ctrl+P` by name: `conversation`, `files`, `changes`, `agents`, `models`, `project`, `settings`. `Esc` in a view comes back to the conversation.
+The views, from `Ctrl+P` by name: `conversation`, `files`, `changes`, `agents`, `models`, `project`, `settings`. Each fills the screen with a tab bar on the top row and the status line on the bottom; `Tab` / `Shift+Tab` move between its tabs and `Esc` comes back to the conversation. `/files`, `/changes`, `/models`, `/project` and `/settings` open them from the input as well.
 
 In the panels:
 

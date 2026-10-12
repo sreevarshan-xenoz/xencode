@@ -17783,7 +17783,11 @@ program; the keys themselves are covered by their own tests.
     Ctrl+E, Shift+Tab, PageUp/PageDown, `?`, Esc Esc and Ctrl+C as designed; queued messages,
     `!command` through the approval prompt and `@path` completion. The tab bars inside a view
     are built with the merged views in TD-4; the older panel shortcuts stay until TD-5.
-  - [ ] **TD-4 — the merged views.**
+  - [x] **TD-4 — the merged views.** Done 2026-10-12: every view but the conversation fills the
+    screen under a tab bar, with Tab / Shift+Tab between tabs and the status line below;
+    `/files`, `/changes`, `/models`, `/project`, `/settings` open them; the old header and status
+    bar are gone. Files still uses the layout presets until TD-5. Not built: Enter on a side-panel
+    change (the panel takes no focus; `Ctrl+P changes` opens the view).
   - [ ] **TD-5 — retire eight panels and the preset layouts.**
   - [ ] **TD-6 — manuals and real screens.**
 - [ ] **OM — orchestrator mode as a tiling agent workspace** (designed 2026-10-11; spec

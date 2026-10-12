@@ -95,6 +95,11 @@ const INPUT_HISTORY_LIMIT: usize = 200;
 /// Slash commands intercepted by `submit_message`, in handler order.
 pub const SLASH_COMMANDS: &[&str] = &[
     "/init",
+    "/files",
+    "/changes",
+    "/models",
+    "/project",
+    "/settings",
     "/ctx",
     "/advise",
     "/impact",
@@ -1038,6 +1043,23 @@ pub struct App<'a> {
     /// worth saying once when a cap keeps being crossed and there is nothing
     /// further to give up; repeating it every turn would be noise.
     daily_budget_bottom_said: bool,
+}
+
+/// The view a `/files`, `/changes`, `/models`, `/project` or `/settings`
+/// line opens. `/agents` keeps its own meaning (the coding-agent CLIs on this
+/// machine); the Agents view is reached from Ctrl+P.
+pub fn view_command(prompt: &str) -> Option<crate::screens::Screen> {
+    use crate::screens::Screen;
+    let word = prompt.trim().strip_prefix('/')?;
+    [
+        Screen::Files,
+        Screen::Changes,
+        Screen::Models,
+        Screen::Project,
+        Screen::Settings,
+    ]
+    .into_iter()
+    .find(|s| s.command() == word)
 }
 
 /// The spend line the status bar shows, kept as text plus the figure it came
@@ -4969,6 +4991,12 @@ impl<'a> App<'a> {
     /// calls this for the slash commands typed into it (BT-4), so they behave
     /// exactly as in chat without touching the chat composer.
     pub fn dispatch_prompt(&mut self, prompt: String, tx: mpsc::UnboundedSender<String>) {
+        // A view's own command opens it (TD-4); it is a move, not a message,
+        // so nothing is added to the transcript.
+        if let Some(screen) = view_command(&prompt) {
+            self.open_screen_with(screen, Some(&tx));
+            return;
+        }
         self.messages.push(UiMessage {
             role: "user".to_string(),
             content: prompt.clone(),
