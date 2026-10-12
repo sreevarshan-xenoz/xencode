@@ -104,7 +104,7 @@ pub fn lines(messages: &[UiMessage], theme: &ThemeColors, opts: &RenderOpts) -> 
                 &mut out,
                 "xencode",
                 theme.accent,
-                crate::markdown::render_markdown(&msg.content, theme),
+                crate::markdown::render_markdown(&clean(&msg.content), theme),
                 width,
             ),
             "system" => {
@@ -233,6 +233,29 @@ fn tool_lines(
 
 /// Text with terminal escapes and control characters removed and tabs
 /// expanded, so a command's output cannot restyle the screen.
+/// `text` for an approval: every character kept and shown. A control
+/// character is drawn as its picture (ESC as `␛`, BEL as `␇`, a carriage
+/// return as `␍`), and a character that reorders text on screen (the bidi
+/// overrides) as its code, so an escape sequence cannot hide part of what is
+/// being approved and cannot reach the terminal. Tabs become four spaces.
+pub fn visible(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\t' => out.push_str("    "),
+            '\u{0}'..='\u{1f}' => out.push(char::from_u32(0x2400 + c as u32).unwrap_or('?')),
+            '\u{7f}' => out.push('␡'),
+            '\u{80}'..='\u{9f}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}' => out.push_str(&format!("⟨U+{:04X}⟩", c as u32)),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 pub fn clean(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();

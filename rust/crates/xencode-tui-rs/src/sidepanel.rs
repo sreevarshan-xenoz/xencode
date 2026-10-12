@@ -70,7 +70,10 @@ fn changes(app: &App, width: u16) -> Section {
                 Line::from(vec![
                     Span::styled(format!("{code:<2} "), Style::default().fg(color)),
                     Span::styled(
-                        path_tail(path, (width as usize).saturating_sub(4)),
+                        path_tail(
+                            &crate::transcript::clean(path),
+                            (width as usize).saturating_sub(4),
+                        ),
                         Style::default().fg(app.theme.fg),
                     ),
                 ])
@@ -102,7 +105,11 @@ fn plan(app: &App) -> Section {
                     crate::agent_tools::PlanStatus::Pending => Style::default().fg(app.theme.fg),
                 };
                 Line::from(Span::styled(
-                    format!("{} {}", item.status.glyph(), item.text),
+                    format!(
+                        "{} {}",
+                        item.status.glyph(),
+                        crate::transcript::clean(&item.text)
+                    ),
                     style,
                 ))
             })
@@ -166,7 +173,7 @@ fn context(app: &App, width: u16) -> Section {
         Style::default().fg(app.theme.accent),
     )));
     if let Some(spend) = &app.spend {
-        rows.push(dim(app, spend.line.clone()));
+        rows.push(dim(app, crate::transcript::clean(&spend.line)));
     }
     rows.push(dim(
         app,
@@ -209,7 +216,7 @@ fn agents(app: &App) -> Section {
                     Style::default().fg(color),
                 ),
                 Span::styled(
-                    format!("{} {}", w.agent, w.task),
+                    crate::transcript::clean(&format!("{} {}", w.agent, w.task)),
                     Style::default().fg(app.theme.fg),
                 ),
             ])
@@ -219,7 +226,7 @@ fn agents(app: &App) -> Section {
         rows.push(Line::from(vec![
             Span::styled("● ", Style::default().fg(app.theme.accent)),
             Span::styled(
-                format!("spawn {} {}", spawn.id, spawn.task),
+                crate::transcript::clean(&format!("spawn {} {}", spawn.id, spawn.task)),
                 Style::default().fg(app.theme.fg),
             ),
         ]));

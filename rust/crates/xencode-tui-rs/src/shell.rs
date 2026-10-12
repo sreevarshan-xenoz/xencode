@@ -150,7 +150,7 @@ fn approval_lines(app: &App, width: usize) -> Option<(String, Vec<Line<'static>>
         .fg(app.theme.fg)
         .add_modifier(Modifier::BOLD);
     let mut body: Vec<Line<'static>> =
-        hard_wrap(&crate::transcript::clean(&request.summary), width)
+        hard_wrap(&crate::transcript::visible(&request.summary), width)
             .into_iter()
             .map(|row| Line::from(Span::styled(row, bold)))
             .collect();
@@ -164,7 +164,7 @@ fn approval_lines(app: &App, width: usize) -> Option<(String, Vec<Line<'static>>
         } else {
             app.theme.message_system
         };
-        for row in hard_wrap(&crate::transcript::clean(line), width) {
+        for row in hard_wrap(&crate::transcript::visible(line), width) {
             body.push(Line::from(Span::styled(row, Style::default().fg(color))));
         }
     }
@@ -304,6 +304,7 @@ pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     }
     // Messages typed during the turn, waiting for it to end (TD-3).
     for queued in &app.queued {
+        let queued = crate::transcript::clean(queued);
         let first = queued.lines().next().unwrap_or_default();
         for row in crate::transcript::wrap_indented(&format!("queued: {first}"), width as usize, 2)
         {
@@ -386,7 +387,7 @@ fn approval_text_width(width: u16) -> usize {
     width.saturating_sub(4).max(1) as usize
 }
 
-fn draw_approval(f: &mut Frame, app: &App, area: Rect) {
+pub(crate) fn draw_approval(f: &mut Frame, app: &App, area: Rect) {
     let Some((title, body, keys)) = approval_lines(app, approval_text_width(area.width)) else {
         return;
     };
@@ -454,7 +455,7 @@ fn draw_mentions(f: &mut Frame, app: &App, transcript: Rect) {
             } else {
                 Style::default().fg(app.theme.fg)
             };
-            Line::from(Span::styled(path, style))
+            Line::from(Span::styled(crate::transcript::clean(&path), style))
         })
         .collect();
     let block = Block::default()
