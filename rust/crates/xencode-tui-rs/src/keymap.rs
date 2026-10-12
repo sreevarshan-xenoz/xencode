@@ -900,8 +900,8 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             }
         }
         KeyCode::Enter => settings_enter(app, tx),
-        KeyCode::Left => settings_step(app, -1),
-        KeyCode::Right => settings_step(app, 1),
+        KeyCode::Left => settings_step(app, -1, tx),
+        KeyCode::Right => settings_step(app, 1, tx),
         _ => return false,
     }
     true
@@ -1102,9 +1102,15 @@ fn settings_toggle(app: &mut App, label: &str) -> bool {
 
 /// ←/→ on the row under the cursor. Every behavior derives from the row's
 /// `SettingKind` in `focus::SETTINGS_ITEMS` — never from the row number.
-fn settings_step(app: &mut App, dir: i32) {
+fn settings_step(app: &mut App, dir: i32, tx: &Tx) {
     use crate::focus::SettingKind;
     let label = settings_current(app).label;
+    // These three decide what the agent may do; the engine that runs the
+    // tools is told after the change below (C1).
+    let policy = matches!(
+        label,
+        "Agent Approval" | "Cloud Models" | "External Workers"
+    );
     match settings_current(app).kind {
         SettingKind::Cycle(options) => {
             settings_cycle(app, label, options, dir);
@@ -1173,6 +1179,9 @@ fn settings_step(app: &mut App, dir: i32) {
             app.save_config();
         }
         _ => {}
+    }
+    if policy {
+        app.push_policy(tx);
     }
 }
 
@@ -1859,7 +1868,7 @@ fn editing_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
             app.chat_scroll = app.chat_scroll.saturating_sub(step);
         }
         // Shift+Tab steps the approval mode: ask, auto-edit, plan (TD-3).
-        KeyCode::BackTab if app.focus == FocusArea::ChatInput => app.cycle_approval_mode(),
+        KeyCode::BackTab if app.focus == FocusArea::ChatInput => app.cycle_approval_mode(tx),
         // F1 types nothing, so it opens help even while typing a prompt.
         KeyCode::F(1) => {
             app.help_visible = true;

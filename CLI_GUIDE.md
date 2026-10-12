@@ -95,8 +95,8 @@ then quits · `Ctrl+P` opens the palette: the seven views, every panel, command
 and setting (`Ctrl+X` does the same) · `Ctrl+B` the side panel · `Ctrl+O`
 unfolds the newest tool call's output, and folds it again · `Ctrl+L` the Models
 view · `Ctrl+E` the Files view (on an empty input; with text it is end of line)
-· `Shift+Tab` steps the approval mode ask → auto-edit → plan, saved like the
-Settings row · `PageUp`/`PageDown` scroll the transcript · `Ctrl+Space` switches
+· `Shift+Tab` steps the approval mode ask → auto-edit → plan for this
+session (the Settings row saves one) · `PageUp`/`PageDown` scroll the transcript · `Ctrl+Space` switches
 mode (`CODING` ⇄ `ORCHESTRATOR`; both read the same tasks, agents and git state,
 so nothing is lost in the switch) · `@path` mentions a file, and `Tab` puts the
 best match in · `!command` runs a shell command through the same approval

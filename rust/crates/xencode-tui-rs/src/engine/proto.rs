@@ -40,6 +40,15 @@ pub enum ClientMsg {
     SetModel {
         name: String,
     },
+    /// The settings that decide what the agent may do, set in a window and
+    /// enforced by the engine that runs the tools: the approval mode, whether
+    /// prompts may reach a cloud model, and whether work may go to another
+    /// vendor's agent.
+    SetPolicy {
+        approval: String,
+        cloud_models: bool,
+        external_workers: bool,
+    },
     /// Carry on with ByteBot's queue after a stop paused it.
     ResumeTasks,
     /// A request to the team of worker agents (TM), answered with a

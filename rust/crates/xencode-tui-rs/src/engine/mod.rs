@@ -268,6 +268,19 @@ pub fn handle(
             app.set_model(&name, tx.clone());
             Vec::new()
         }
+        ClientMsg::SetPolicy {
+            approval,
+            cloud_models,
+            external_workers,
+        } => {
+            // Read back through the parser, so an unknown word becomes `ask`.
+            app.config.agent_approval = crate::agent_tools::ApprovalMode::parse(&approval)
+                .config_name()
+                .to_string();
+            app.config.allow_cloud_models = cloud_models;
+            app.config.allow_external_workers = external_workers;
+            Vec::new()
+        }
         ClientMsg::ResumeTasks => {
             app.bytebot_start_next(tx.clone());
             Vec::new()
@@ -709,6 +722,41 @@ mod tests {
             "t",
         );
         assert_eq!(app.config.default_model, "qwen3:4b");
+    }
+
+    /// Review C1: the approval mode, cloud access and external workers a
+    /// window sets are the ones the engine, which runs the tools, enforces.
+    #[tokio::test]
+    async fn the_policy_a_window_sets_is_the_one_the_engine_enforces() {
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        assert_eq!(app.config.agent_approval, "ask");
+        handle(
+            &mut app,
+            ClientMsg::SetPolicy {
+                approval: "plan".into(),
+                cloud_models: true,
+                external_workers: true,
+            },
+            &tx,
+            "t",
+        );
+        assert_eq!(app.config.agent_approval, "plan");
+        assert!(app.config.allow_cloud_models && app.config.allow_external_workers);
+        // A word the engine does not know is the most guarded mode, not a typo
+        // that stays in force.
+        handle(
+            &mut app,
+            ClientMsg::SetPolicy {
+                approval: "yolo".into(),
+                cloud_models: false,
+                external_workers: false,
+            },
+            &tx,
+            "t",
+        );
+        assert_eq!(app.config.agent_approval, "ask");
+        assert!(!app.config.allow_cloud_models);
     }
 
     #[tokio::test]
