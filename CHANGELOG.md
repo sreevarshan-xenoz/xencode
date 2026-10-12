@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — `TD-1`, `TD-2`: the TUI opens on a conversation, not a grid of panes
+### Changed — `TD-1` … `TD-3`: the TUI opens on a conversation, not a grid of panes
 
 - `TD-1`: each message in the transcript starts with a `▍You` or `▍xencode`
   marker that is kept on every wrapped line, and each tool call is one
@@ -35,6 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and refuses words it does not know.
 - Rounded corners (`rounded_borders`) are now on by default; `false` still draws
   square ones everywhere.
+- `TD-3`: the conversation's input is always ready — letters are text, there is
+  no `i` to press first. `Ctrl+P` opens the palette with seven views first
+  (conversation, files, changes, agents, models, project, settings), then every
+  panel, command and setting; `Esc` in a view comes back. New keys in the
+  conversation: `Ctrl+O` unfolds the newest tool output, `Ctrl+L` the Models
+  view, `Ctrl+E` the Files view from an empty input, `Shift+Tab` steps the
+  approval mode (ask, auto-edit, plan), `PageUp`/`PageDown` scroll, `?` on an
+  empty input is the help, `Esc` twice puts your last message back to edit, and
+  `Ctrl+C` clears the input before it asks to quit. A message sent while a turn
+  runs waits and goes after it. `!command` runs a shell command through the
+  agent's own approval prompt; `@path` lists matching files and `Tab` inserts
+  the best one. Tool calls are named by what they act on (`read_file
+  src/a.rs`) instead of their arguments as JSON. Ctrl+O, Ctrl+L and Ctrl+P no
+  longer open the worktree, insights and analyzer panels; those are in the
+  Agents and Project views.
 
 ### Added — `TM-1`: the engine can run worker agents
 

@@ -401,7 +401,8 @@ fn queue_prompt(app: &mut App<'static>, tool: &str, class: xencode_tui_rs::agent
 /// a screen that existed.
 fn app_with_layout_history(rows: usize) -> App<'static> {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let mut app = populated(FocusArea::ChatInput);
+    // From the files view: in the conversation Ctrl+U edits the line (TD-3).
+    let mut app = populated(FocusArea::FileExplorer);
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     for _ in 0..rows {

@@ -17778,7 +17778,11 @@ program; the keys themselves are covered by their own tests.
     status line sit at the bottom, the side panel shows from 100 columns (`side_panel`,
     `status_line`, `Ctrl+B`); the title and an OSC 9 notification call for the person; Windows
     repaints after a resize. The status line names Ctrl+X and F1 until TD-3 moves them.
-  - [ ] **TD-3 — always-ready keys, the screens registry and the palette.**
+  - [x] **TD-3 — always-ready keys, the screens registry and the palette.** Done 2026-10-12
+    (`screens.rs`): the input is always ready; Ctrl+P lists the seven views first; Ctrl+O, Ctrl+L,
+    Ctrl+E, Shift+Tab, PageUp/PageDown, `?`, Esc Esc and Ctrl+C as designed; queued messages,
+    `!command` through the approval prompt and `@path` completion. The tab bars inside a view
+    are built with the merged views in TD-4; the older panel shortcuts stay until TD-5.
   - [ ] **TD-4 — the merged views.**
   - [ ] **TD-5 — retire eight panels and the preset layouts.**
   - [ ] **TD-6 — manuals and real screens.**

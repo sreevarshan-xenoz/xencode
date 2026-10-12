@@ -124,7 +124,9 @@ fn ctrl_a_opens_the_panel_over_the_current_state_and_closes_again() {
         "the panel reads only when it is opened"
     );
 
-    press_ctrl(&mut app, 'a');
+    // In the conversation Ctrl+A is the start of the line (TD-3); the panel
+    // opens with the Agents view.
+    app.open_screen(xencode_tui_rs::screens::Screen::Agents);
     assert_eq!(app.focus, FocusArea::WorkerPanel);
     assert!(
         !app.workers_rows.is_empty(),
@@ -136,7 +138,7 @@ fn ctrl_a_opens_the_panel_over_the_current_state_and_closes_again() {
     );
 
     press_ctrl(&mut app, 'a');
-    assert_eq!(app.focus, FocusArea::ChatInput);
+    assert_eq!(app.focus, FocusArea::ChatInput, "Ctrl+A closes it again");
 }
 
 #[test]

@@ -35,6 +35,7 @@ pub mod task_profiles;
 pub mod templates;
 pub mod theme;
 pub mod toast;
+pub mod screens;
 pub mod shell;
 pub mod sidepanel;
 pub mod transcript;

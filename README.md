@@ -342,7 +342,7 @@ These twenty-four are the only strings the chat input intercepts (`SLASH_COMMAND
 /ctx [status|track|compact|eval|kv|archive|fold|promote|drop|prompts]
                             Context bundle: state, tracking, compaction, retrieval eval,
                             the durable task summary and the prompt files this build sends
-/advise [filter]            Live refactor insights (same report as Ctrl+L)
+/advise [filter]            Live refactor insights (the Project view's report)
 /impact <file>              Blast radius of one file — crates, files, churn (fan-out panel)
 /workers                    The fleet, your recipes' roles, a lead agent's worker agents (s stops,
                             m merges), tasks, recorded runs, newest events and waiting approvals (Ctrl+A). Every figure names the row it was read from,
