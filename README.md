@@ -607,8 +607,8 @@ flowchart TD
   **Cloud Models** row of the Settings panel, or the key in config.json. While
   it is off, a `qwen:…`, `google_gemini:…`, `vendor/model` or
   `remote:…`-at-a-remote-host model is refused before a connection is opened,
-  and the refusal names the setting to change. The status bar reports which rule
-  is in force — `🔒 local only` or `🌐 cloud allowed` — and the model list's
+  and the refusal names the setting to change. The status line under the input
+  reports which rule is in force — `local only` or `cloud allowed` — and the model list's
   `[cloud]` label is the same calculation as the router's, so neither can
   describe a destination the other disagrees with. One boundary is worth stating
   exactly: the rule classifies the server this binary talks to, and a
@@ -793,7 +793,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (about 3,100 tests)
+cargo test                          # Full workspace suite (about 3,000 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
