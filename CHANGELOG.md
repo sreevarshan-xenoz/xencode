@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `TD-1`, `TD-2`: the TUI opens on a conversation, not a grid of panes
+
+- `TD-1`: each message in the transcript starts with a `▍You` or `▍xencode`
+  marker that is kept on every wrapped line, and each tool call is one
+  `⎿ read_file src/a.rs ✓` line with its outcome instead of several `⚙` lines.
+  Its output is folded to four lines with a `+N lines` note; the new
+  `tool_output` setting (`fold` or `expand`) shows all of it. Terminal escape
+  codes and control characters in tool output are removed before drawing.
+- `TD-2`: the conversation fills the screen. The input box is pinned to the
+  bottom with one status line under it — model, `local only` or `cloud allowed` (where
+  prompts may go), approval mode, context used, cost and branch, dropped from the end when the terminal is
+  narrow (`status_line` setting). An approval the agent waits on is drawn
+  inside the conversation with its diff, instead of a box over everything. At
+  100 columns or wider a side panel shows the changed files, the plan, a
+  context gauge, the agents at work and the project's branch (`side_panel`:
+  `auto`, `on`, `off`; `Ctrl+B` hides it for the session). The files view keeps
+  the old header and status bar.
+- When an approval is waiting, the terminal window's title becomes
+  `xencode · needs you`, and a terminal that is not in front gets one desktop
+  notification (OSC 9). On Windows the whole screen is repainted after a resize
+  so no stale characters are left behind.
+- `xencode config set` accepts `tool_output`, `side_panel` and `status_line`,
+  and refuses words it does not know.
+- Rounded corners (`rounded_borders`) are now on by default; `false` still draws
+  square ones everywhere.
+
 ### Added — `TM-1`: the engine can run worker agents
 
 - Groundwork for one lead agent directing several worker agents on a project

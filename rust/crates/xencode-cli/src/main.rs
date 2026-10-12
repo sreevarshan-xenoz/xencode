@@ -3031,6 +3031,42 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // The mouse is a trade and the Settings row is the way out of it,
                 // so the trade has to be settlable from the shell as well.
                 "mouse_capture" => config.mouse_capture = parse_bool(&value)?,
+                // The conversation screen (TD-1, TD-2). Each takes a short
+                // list of words, so a typo is refused rather than stored.
+                "tool_output" => {
+                    let word = value.trim().to_ascii_lowercase();
+                    if !matches!(word.as_str(), "fold" | "expand") {
+                        return Err(format!(
+                            "tool_output must be \"fold\" or \"expand\", not \"{value}\""
+                        ));
+                    }
+                    config.tool_output = word;
+                }
+                "side_panel" => {
+                    let word = value.trim().to_ascii_lowercase();
+                    if !matches!(word.as_str(), "auto" | "on" | "off") {
+                        return Err(format!(
+                            "side_panel must be \"auto\", \"on\" or \"off\", not \"{value}\""
+                        ));
+                    }
+                    config.side_panel = word;
+                }
+                "status_line" => {
+                    const ITEMS: [&str; 6] =
+                        ["model", "provider", "approval", "context", "cost", "branch"];
+                    let items: Vec<String> = value
+                        .split(',')
+                        .map(|item| item.trim().to_ascii_lowercase())
+                        .filter(|item| !item.is_empty())
+                        .collect();
+                    if let Some(bad) = items.iter().find(|item| !ITEMS.contains(&item.as_str())) {
+                        return Err(format!(
+                            "status_line items are {}; \"{bad}\" is not one",
+                            ITEMS.join(", ")
+                        ));
+                    }
+                    config.status_line = items;
+                }
                 "agent_approval" => config.agent_approval = value.clone(),
                 "agent_max_rounds" => {
                     let rounds: usize = value
@@ -15266,7 +15302,8 @@ async fn run_tui(in_process: bool) -> Result<(), String> {
     crossterm::execute!(
         terminal.backend_mut(),
         crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange,
     )
     .map_err(|e| e.to_string())?;
     terminal.show_cursor().map_err(|e| e.to_string())?;

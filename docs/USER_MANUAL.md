@@ -180,7 +180,7 @@ Global (work in every panel, any mode):
 | `Ctrl+F` | Feature Navigator (17 panels) |
 | `Ctrl+D` | Performance dashboard |
 | `Ctrl+P` | Project analyzer |
-| `Ctrl+B` | ByteBot agent panel |
+| `Ctrl+B` | On the conversation, show or hide the side panel; from any other panel, the ByteBot agent panel |
 | `Ctrl+H` | Run provider health check |
 | `Ctrl+T` | Toggle embedded terminal strip |
 | `Ctrl+U` | Cycle the body layout: classic → chat-first → zen → any template you declared in config |
@@ -341,7 +341,10 @@ Display settings (Settings panel rows, same keys as `xencode config set`):
 | Row / config key | Default | Effect |
 |------------------|---------|--------|
 | `Layout` / `layout` | `classic` | preset or declared template above; unknown values fall back to classic |
-| `Rounded Borders` / `rounded_borders` | off | rounded panel corners |
+| `Rounded Borders` / `rounded_borders` | on | rounded panel corners; off draws square ones |
+| `tool_output` | `fold` | `fold` shows a tool call's first four lines and `+N lines`; `expand` shows all of it (JSON or `config set` only) |
+| `side_panel` | `auto` | the conversation's side panel: `auto` at 100 columns or wider, `on`, or `off`; `Ctrl+B` toggles it for the session (JSON or `config set` only) |
+| `status_line` | all six | the items under the input, in order: `model`, `provider`, `approval`, `context`, `cost`, `branch` (JSON or `config set` only) |
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
 | `Mouse Capture` / `mouse_capture` | on | xencode reads the wheel, pane clicks and divider drags; off hands the mouse back to the terminal, which is how a terminal's own drag-select comes back (see the note above the chat table) |

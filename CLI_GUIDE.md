@@ -71,12 +71,22 @@ whole CLI works headless, and `xencode run --detach` is built for the case where
 the terminal may disappear mid-task (directly invoking the worker via `run_agent` without re-executing binaries).
 Programs can also drive the agent loop directly as a library call through `xencode_tui_rs::run_agent`.
 
+The TUI opens on the conversation: the transcript fills the screen, each
+message marked `▍You` or `▍xencode` and each tool call one folded `⎿` line
+with its outcome. An approval the agent is waiting on is drawn inside the
+conversation with its diff and `y` allow · `a` always for this kind · `n` deny.
+The input box sits at the bottom with one status line under it (model, `local only` or
+`cloud allowed`, approval mode, context used, cost, branch — whatever fits), and at 100
+columns or wider a side panel on the right shows the changed files, the plan,
+the context gauge, the agents at work and the project's branch. The files view
+(explorer and editor, `Tab`) keeps the older header and status bar.
+
 TUI keys — press `?` (or `F1`) in the TUI for the live, panel-aware
 keybinding overlay; the authoritative list lives there. Essentials:
 `Tab` cycles explorer/editor/chat · `i` edits chat (`Enter` sends,
 `Alt+Enter`/`Ctrl+J` newline, `Ctrl+A`/`Ctrl+E`/`Ctrl+K`/`Ctrl+U`/`Ctrl+W` edit the line as in a shell, `Alt+↑/↓` history, `Tab` completes `/`
 commands) · `m` model selector · `s` settings · `e` edit focused file ·
-`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+A` the worker panel (fleet · recipe roles · tasks · graph · costs · logs · approvals, each figure traced) · `Ctrl+B` ByteBot ·
+`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+A` the worker panel (fleet · recipe roles · tasks · graph · costs · logs · approvals, each figure traced) · `Ctrl+B` shows or hides the side panel on the conversation (ByteBot from any other panel) ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
 `Ctrl+U` cycle the layout · `Ctrl+0` why the screen is arranged as it is
 (session layout history; `Enter` shows the pane widths a change moved between) ·
@@ -2817,7 +2827,10 @@ in it was unchanged by the session that opened on it.
 | `layout_views` | object | saved arrangements, `"slot" → tree`, for the `Ctrl+1`…`Ctrl+9` view chords — the same tree shape `layout_templates` takes, under one of the nine slot names (`Code`, `Chat`, `Terminal`, `Focus`, `Review`, `Split` for the first six, then `7`, `8`, `9`). Six of the nine are seeded in the program, so an empty map still switches screens; `Ctrl+Shift+<digit>` writes a slot into this map, and a stored entry replaces its seed. Not settable with `config set` (as with `layout_templates`, it is a nested structure) — edit the JSON, or `config show` to read it back. An entry that cannot be read is refused by name with the reason and the rest of the config still loads |
 | `active_theme` | string | UI theme: `ocean`, `midnight`, `forest`, `terminal`, `dracula`, `solarized`, `nord`, `light` (default `ocean`); cycled live in the TUI. **Not a `config set` key** — `xencode config set` has no arm for it, so edit it in the JSON. An unrecognised name is *not* rejected: `ThemeColors::get` falls through to the `ocean` palette, so a typo renders as ocean and reads back as the typo. Check the spelling against the eight above. |
 | `hardware_profile` | string | How much project context a run may spend: `auto` (default — chosen from this machine's memory), `low`, `balanced`, `high`; anything else is rejected by `config set` and reported by a run if it is already in the file. See [Which hardware profile the budget spends against](#which-hardware-profile-the-budget-spends-against) |
-| `rounded_borders` | bool | rounded panel corners |
+| `rounded_borders` | bool | rounded panel corners, on by default; `false` draws square ones everywhere, the conversation included |
+| `tool_output` | string | how a tool call's output shows in the conversation: `fold` (default — the first four lines, then `+N lines`) or `expand` (all of it); anything else is refused by `config set` |
+| `side_panel` | string | the conversation's side panel: `auto` (default — shown at 100 columns or wider), `on` (shown whenever the conversation keeps 40 columns), `off`; `Ctrl+B` hides or shows it for the session. Anything else is refused by `config set` |
+| `status_line` | list | what the line under the input shows, left to right, comma-separated: any of `model`, `provider` (`local only` or `cloud allowed` — where prompts may go), `approval`, `context`, `cost`, `branch` (default: all six). Items that do not fit the terminal are dropped from the end; `context` and `cost` show only once they are known. An unknown item is refused by `config set` |
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
 | `mouse_capture` | bool | whether xencode asks the terminal for the mouse at all: on (default) reads the wheel, pane clicks and divider drags; off hands them back, which is how a terminal's own drag-select of text comes to work again. Takes effect mid-session from the TUI's `Mouse Capture` row, and next start from here |

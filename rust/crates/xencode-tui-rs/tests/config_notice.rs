@@ -99,9 +99,9 @@ fn a_session_on_an_unreadable_config_says_so_on_the_first_frame() {
         "the full path is what lets them go fix it: {}",
         said.content
     );
-    // It is a notice, not a block: the session opened with its panels.
+    // It is a notice, not a block: the session opened on the conversation.
     assert!(
-        screen.contains("Chat"),
+        screen.contains("ctrl+x commands"),
         "the screen did not open:\n{screen}"
     );
     // And their bytes are still the bytes they wrote.
@@ -120,11 +120,12 @@ fn the_notice_arrives_in_full_on_an_eighty_column_terminal() {
     let (dir, guard) = with_config(BROKEN);
     let mut app = App::new();
     let screen = first_frame(&mut app, 80);
-    let line = screen
-        .lines()
-        .find(|l| l.contains("settings not read"))
-        .unwrap_or_else(|| panic!("no notice at eighty columns:\n{screen}"));
-    assert!(line.contains("this session starts on defaults"), "{line}");
+    // The chat's own copy starts with the same words, so the check is that
+    // some row carries the whole notice.
+    assert!(
+        screen.lines().any(|l| l.contains(NOTICE)),
+        "no whole notice at eighty columns:\n{screen}"
+    );
     // The reason is not the overlay's job at this width; it is in the chat, and
     // the chat's copy is on the screen too — wrapped across rows, so checked as
     // the words the person reads rather than as one unbroken string.

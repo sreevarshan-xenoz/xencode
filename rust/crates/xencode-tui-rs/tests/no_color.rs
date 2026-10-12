@@ -34,7 +34,10 @@ fn no_color_leaves_no_colour_and_keeps_marks_as_reverse_video() {
         assert_eq!(cell.fg, Color::Reset, "a coloured foreground: {cell:?}");
         assert_eq!(cell.bg, Color::Reset, "a coloured background: {cell:?}");
     }
-    // The status bar had its own background; it is still told apart.
+    // The files view's status bar has its own background; it is still told
+    // apart. (The conversation's status line is plain text under the input.)
+    app.focus = FocusArea::FileExplorer;
+    let buffer = frame(&mut app);
     let last = buffer.area().height - 1;
     assert!(
         buffer[(2, last)].modifier.contains(Modifier::REVERSED),

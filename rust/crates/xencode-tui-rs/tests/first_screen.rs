@@ -26,7 +26,8 @@ fn help_is_on_the_status_bar_at_80_columns() {
     let mut app = App::for_tests();
     app.input_mode = InputMode::Normal;
     let screen = rendered(&mut app, 80, 24);
-    assert!(screen.contains("?:help"), "got {screen}");
+    // The conversation's status line names the help key (TD-2).
+    assert!(screen.contains("f1 keys"), "got {screen}");
 }
 
 #[test]
@@ -35,7 +36,10 @@ fn an_empty_session_says_how_to_start_and_where_everything_is() {
     app.messages.clear();
     app.config.default_model = "llamacpp:qwen3-4b".to_string();
     let screen = rendered(&mut app, 120, 40);
-    assert!(screen.contains("Welcome to Xencode"), "got {screen}");
+    // The conversation opens on one line saying what to do, then the model.
+    assert!(screen.contains("What should xencode do?"), "got {screen}");
+    assert!(screen.contains("llamacpp:qwen3-4b"), "got {screen}");
+    // The files view still opens on the longer welcome below.
     // The chat pane wraps these, so their words are checked line by line.
     let lines = xencode_tui_rs::ui::welcome_lines(&app).join(
         "

@@ -496,7 +496,7 @@ fn approval_overlay_shows_the_call_class_diff_and_queue() {
     assert!(text.contains("Allow file change?"), "{text}");
     assert!(text.contains("write_file src/lib.rs"), "{text}");
     assert!(text.contains("fn hello"), "{text}");
-    assert!(text.contains("y:allow"), "{text}");
+    assert!(text.contains("y allow"), "{text}");
 
     queue_prompt(&mut app, "run_command", ToolClass::Shell);
     let text = render_text(&mut app, 100, 30);
@@ -563,6 +563,8 @@ fn plan_strip_shows_progress_and_points_at_the_hidden_steps() {
     // The strip lives at the top of a pane; `populated`'s pinned toast is a
     // top-right overlay, so drop it to read the strip's own cells.
     app.toasts.clear();
+    // The strip is how the plan shows when the side panel does not (TD-2).
+    app.side_panel_open = false;
     let items: Vec<serde_json::Value> = (1..=8)
         .map(|i| {
             serde_json::json!({
@@ -1259,7 +1261,8 @@ fn header_ladder_drops_chips_as_width_shrinks() {
             .collect()
     };
 
-    let mut app = populated(FocusArea::ChatInput);
+    // The header belongs to the files view; the conversation has none (TD-2).
+    let mut app = populated(FocusArea::FileExplorer);
     app.config.layout = "zen".into();
     app.config.default_model = "testmodel:1".into();
     app.git_branch = "testbranch".into();
@@ -1269,7 +1272,7 @@ fn header_ladder_drops_chips_as_width_shrinks() {
     assert!(text.contains("[zen]"), "{text}");
     assert!(text.contains("⎇ testbranch"), "{text}");
     assert!(text.contains("testmodel:1"), "{text}");
-    assert!(text.contains("Chat"), "{text}");
+    assert!(text.contains("Explorer"), "{text}");
 
     let text = header(&mut app, 70);
     assert!(
@@ -1287,7 +1290,7 @@ fn header_ladder_drops_chips_as_width_shrinks() {
 
     let text = header(&mut app, 30);
     assert!(text.contains("✦"), "brand vanished at 30: {text}");
-    assert!(!text.contains("Chat"), "focus badge survived at 30: {text}");
+    assert!(!text.contains("Explorer"), "focus badge survived at 30: {text}");
 }
 
 /// H1-09: the toast overlay must never sit on top of the input strip. On

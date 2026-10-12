@@ -632,6 +632,17 @@ pub struct App<'a> {
     pub approval_scroll: usize,
     /// The tool call whose whole output is shown (Ctrl+O, TD-1).
     pub tool_expanded: Option<String>,
+    /// Whether the conversation's side panel is shown (Ctrl+B); the
+    /// `side_panel` setting decides whether it can show at all.
+    pub side_panel_open: bool,
+    /// The prompt size, in the server's own tokens, of the last turn — what
+    /// the context gauge in the side panel and status line is measured from.
+    pub last_prompt_tokens: u64,
+    /// The window title last written, so it is only written when it changes.
+    pub last_title: String,
+    /// Whether the terminal window has the person's focus, from crossterm's
+    /// focus events; `true` until a terminal says otherwise.
+    pub terminal_focused: bool,
     /// The engine's team of worker agents (TM); empty in a window.
     pub team: crate::engine::team::Team,
     /// A window's copy of the engine's team, from its view (TM-4).
@@ -3224,6 +3235,10 @@ impl<'a> App<'a> {
             approval_scroll: 0,
             team: Default::default(),
             tool_expanded: None,
+            side_panel_open: true,
+            last_prompt_tokens: 0,
+            last_title: String::new(),
+            terminal_focused: true,
             team_view: Vec::new(),
             team_req: 0,
             approval_tx,
@@ -4385,6 +4400,7 @@ impl<'a> App<'a> {
                 } else {
                     self.last_ctx_total_tokens
                 };
+                self.last_prompt_tokens = prompt_tokens;
                 let mut m = xencode_context_rs::RequestMetrics::from_timings(
                     profile.name(),
                     profile.ctx_tokens() as u32,
@@ -14099,6 +14115,16 @@ pub async fn run_app<B: Backend + io::Write>(
     // Whether the terminal has been asked for mouse events, `None` until it
     // has been asked either way (`V-7`).
     let mut capture: Option<bool> = None;
+    // Whether the notification for the approval now waiting was already sent.
+    let mut notified = false;
+    // Whether the next frame repaints every cell rather than the changes.
+    let mut repaint = false;
+    // Focus events tell the loop whether the person is looking (TD-2); a
+    // terminal that cannot report them simply never says it lost focus.
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::event::EnableFocusChange
+    );
     loop {
         // The mouse belongs to xencode only while the config says it does.
         // Applied here rather than at process start because the row is on the
@@ -14334,8 +14360,15 @@ pub async fn run_app<B: Backend + io::Write>(
                     }
                     _ => {}
                 },
+                // Whether the person is looking at this window decides whether a
+                // question waiting on them is also sent as a notification.
+                Event::FocusLost => app.terminal_focused = false,
+                Event::FocusGained => app.terminal_focused = true,
                 Event::Resize(width, height) => {
                     ui::clamp_scrolls_on_resize(&mut app, width, height);
+                    // Windows consoles can leave stale cells behind after a
+                    // resize; a full repaint is the one sure way to clear them.
+                    repaint = cfg!(windows);
                 }
                 _ => {}
             }
@@ -14365,9 +14398,31 @@ pub async fn run_app<B: Backend + io::Write>(
             feed.heartbeat();
         }
 
+        // The window title says when something waits on the person, and a
+        // terminal that is not in front also gets one notification for it
+        // (TD-2). Both are written only when they change.
+        let title = crate::shell::attention_title(&app);
+        if title != app.last_title {
+            let _ = crossterm::execute!(
+                terminal.backend_mut(),
+                crossterm::terminal::SetTitle(&title)
+            );
+            app.last_title = title;
+        }
+        if app.pending_approval().is_none() {
+            notified = false;
+        } else if !app.terminal_focused && !notified {
+            let _ = write!(terminal.backend_mut(), "{}", crate::shell::NOTIFY_SEQUENCE);
+            let _ = std::io::Write::flush(terminal.backend_mut());
+            notified = true;
+        }
+
         signals.toasts_after = app.toasts.len();
         signals.activity = app.activity_animating();
         if first_frame || should_draw(&signals) {
+            if std::mem::take(&mut repaint) {
+                let _ = terminal.clear();
+            }
             terminal.draw(|f| ui::draw(f, &mut app))?;
         }
         first_frame = false;
