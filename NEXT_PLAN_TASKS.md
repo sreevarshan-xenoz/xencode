@@ -17765,7 +17765,7 @@ program; the keys themselves are covered by their own tests.
     `main` through the checks; w2 (the small model) wrote the wrong file, and the lead read its
     diff and did not merge it. Two workers at once need the server's context to hold both prompts
     (`-c 32768 -np 2`); with `-c 8192` llama-server dropped both requests.
-- [ ] **TD — the TUI redesign** (designed 2026-10-11 with the owner, mockups in the session;
+- [x] **TD — the TUI redesign** (designed 2026-10-11 with the owner, mockups in the session;
   spec `docs/superpowers/specs/2026-10-11-tui-redesign-design.md`, plan
   `docs/superpowers/plans/2026-10-11-tui-redesign.md`). A conversation-first screen in a
   polished style, an always-ready input, a slim side panel, seven views behind Ctrl+P, eight
@@ -17794,7 +17794,10 @@ program; the keys themselves are covered by their own tests.
     areas; so are the layout presets and declared layouts, saved views (`Ctrl+1`…`Ctrl+9`),
     `Alt+Left`/`Alt+Right` resizing, divider dragging and `layout.json`. The Files view is the
     tree beside the editor; old configs with the layout keys still load.
-  - [ ] **TD-6 — manuals and real screens.**
+  - [x] **TD-6 — manuals and real screens.** Done 2026-10-12: QUICK_START shows the real
+    conversation screen with an approval at 80 columns, captured from the renderer; the keys, the
+    seven views and the settings are in CLI_GUIDE, USER_MANUAL and the CHANGELOG. Workspace
+    suite at the docs commit: about 3,000 tests.
 - [ ] **OM — orchestrator mode as a tiling agent workspace** (designed 2026-10-11; spec
   `docs/superpowers/specs/2026-10-11-orchestrator-mode-design.md`). Turning the mode on opens a
   picker of installed coding agents; each runs its real interface in an embedded terminal, in

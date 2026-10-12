@@ -185,7 +185,7 @@ In the panels:
 The worktrees are in the Agents view and the insights and project analyzer in the Project view (`Ctrl+P`). In the conversation, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` edit the line as in a shell (start, end, delete to end, delete to start, delete the word before the cursor) instead of the panel actions above.
 | `Ctrl+,` | Settings |
 
-Panel-independent (Normal mode):
+In a panel (outside the conversation's input):
 
 | Key | Action |
 |-----|--------|
@@ -503,7 +503,8 @@ reads priced separately are set with `cached_input_usd_per_mtok`; leave it out a
 they are billed at the input price, which the report states.
 
 Set `cost_budget_usd_micros` in `~/.xencode/config.json` (micro-dollars, so
-`5000000` is $5.00) and the status bar carries this session's spend, refreshed
+`5000000` is $5.00) and the side panel's Context section carries this session's
+spend (the status line shows the dollar figure once it is known), refreshed
 when each turn finishes — `💸 $0.42/$5.00` once every model it used has a price,
 or `💸 13120 tok` while one does not — and crossing the budget prints one warning
 in the transcript. The budget is a warning, not a stop: nothing refuses a request
@@ -959,10 +960,10 @@ Routes: `/`, `/sessions/create`, `/sessions/{id}`, `/ws/{session_id}`,
 ```bash
 $ xencode tui
 
-# The TUI opens with 3 panels: File Explorer | Code Editor | Chat
+# The TUI opens on the conversation, ready to type: Enter sends
 # Press Ctrl+P to open the palette, type a view or panel name, then Enter
-# Press Esc to close an overlay
-# Press Tab to cycle focus between main panels
+# Press Esc in a view to come back to the conversation
+# Press ? on an empty input for every key
 ```
 
 ### Example 4: Plugin Management

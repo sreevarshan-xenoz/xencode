@@ -65,6 +65,43 @@ for the accepted model prefixes.
 ```bash
 xencode
 ```
+It opens on the conversation, ready to type. An edit the agent wants to make
+waits in the conversation with its diff until you answer, and the status line
+under the input says the model, where prompts may go, the approval mode and the
+branch. This is the real screen at 80 columns, drawn by xencode's own renderer:
+
+```text
+ ▍   I read src/parser.rs. The nested branch never pops the indent stack, so   ║
+ ▍   the second level is parsed as the first.                                  ║
+ ▍                                                                             █
+ ▍   ┌─ rust                                                                   █
+ ▍     fn close_level(&mut self) {                                             █
+ ▍         self.indents.pop();                                                 █
+ ▍     }                                                                       █
+ ▍   └─                                                                        ║
+ ▍                                                                             ║
+ ▍   I changed parse_item to call close_level when the indent shrinks. The test║
+ ▍   passes now.                                                               ║
+╭ Allow file change? ──────────────────────────────────────────────────────────╮
+│ edit_file src/parser.rs                                                      │
+│ @@ -40,3 +40,4 @@                                                            │
+│  fn parse_item(&mut self) {                                                  │
+│ -    let level = self.indent();                                              │
+│ +    let level = self.indent();                                              │
+│ +    self.close_level();                                                     │
+│ y allow · a always for this kind · n deny                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Ask xencode…   / commands   @ files   ! shell                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ qwen2.5:7b · local only · ask · main   ctrl+p commands · ctrl+b panel · ? keys
+```
+
+`Ctrl+P` opens any view (files, changes, agents, models, project, settings),
+panel, command or setting; `?` on an empty input lists every key. At 100
+columns or wider a side panel on the right shows the changed files, the plan,
+the context gauge and the agents at work.
+
 Full-screen terminal UI: chat, file explorer (Space attaches files —
 images ride as message parts the model actually sees, shrunk first to a
 1568-pixel long edge and recompressed to JPEG when they have no transparency,
@@ -324,8 +361,8 @@ xencode remote show
 /ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/fold/promote/drop/prompts)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
 /impact <file>        - Blast radius of one file (crates · files · churn, in a fan-out panel)
-/workers              - Worker panel: fleet, recipe roles, team (a lead's worker agents: `s` stops, `m` merges), tasks, graph, costs, logs, approvals — every figure traces to a real row, and a worker xencode cannot observe reads as unknown, not idle (`Ctrl+A`)
-/orchestrator <verb>  - The same state as a mode: `on`/`off` (`Ctrl+Space` flips the badge), `status`, `agents`, `tasks`, `graph`, `logs`, `costs`, `permissions`, `inspect`, `retry`, `stop`, `attach`. Leaving the mode leaves the session as it was found; `attach` hands this real terminal to a vendor's own running session and comes back with the exit status that process returned
+/workers              - Worker panel: fleet, recipe roles, team (a lead's worker agents: `s` stops, `m` merges), tasks, graph, costs, logs, approvals — every figure traces to a real row, and a worker xencode cannot observe reads as unknown, not idle (also `Ctrl+P agents`)
+/orchestrator <verb>  - The same state as a mode: `on`/`off` (`Ctrl+Space` flips it, and the status line starts with `orchestrator` while it is on), `status`, `agents`, `tasks`, `graph`, `logs`, `costs`, `permissions`, `inspect`, `retry`, `stop`, `attach`. Leaving the mode leaves the session as it was found; `attach` hands this real terminal to a vendor's own running session and comes back with the exit status that process returned
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
 /rewind [turns] [--force] - Undo the agent's file changes for this session (refuses files you edited by hand, unless --force)
