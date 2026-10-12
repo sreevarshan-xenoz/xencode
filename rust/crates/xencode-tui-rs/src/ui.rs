@@ -54,9 +54,15 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
     // The conversation (TD-2) owns the whole screen; every other view (TD-4)
     // is its tab bar, the active tab's panel across the screen, and the
     // status line.
-    let shell = crate::shell::active(app);
+    // Orchestrator mode (OM-3) puts the rail and the agents' tiles where the
+    // conversation was; the conversation is tile 0.
+    let orchestrating = app.mode == crate::focus::Mode::Orchestrator && crate::shell::active(app);
+    let shell = crate::shell::active(app) && !orchestrating;
     let mut panel_area = f.area();
-    let overlay_area = if shell {
+    let overlay_area = if orchestrating {
+        crate::orchestrator_view::draw(f, app, f.area());
+        f.area()
+    } else if shell {
         // Toasts float over the conversation's column, down to the input, so
         // their rule of keeping clear of the input's rows still holds.
         // When the transcript leaves empty rows, the toast goes there rather

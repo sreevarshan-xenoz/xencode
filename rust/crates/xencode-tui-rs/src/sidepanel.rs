@@ -222,6 +222,24 @@ fn agents(app: &App) -> Section {
             ])
         })
         .collect();
+    // Orchestrator mode's terminal agents, which keep running when the mode
+    // is left (OM-3); the ones waiting on the person go first.
+    let mut terms: Vec<&crate::engine::term::TileInfo> = app.term_tiles.iter().collect();
+    terms.sort_by_key(|t| t.state != "needs_you");
+    for t in terms.into_iter().filter(|t| t.exit.is_none()) {
+        let (glyph, color) = match t.state.as_str() {
+            "needs_you" => ("! ", app.theme.warning),
+            "working" => ("● ", app.theme.accent),
+            _ => ("○ ", app.theme.message_system),
+        };
+        rows.push(Line::from(vec![
+            Span::styled(glyph, Style::default().fg(color)),
+            Span::styled(
+                crate::transcript::clean(&format!("{} {}", t.agent, t.id)),
+                Style::default().fg(app.theme.fg),
+            ),
+        ]));
+    }
     for spawn in app.spawns.iter().filter(|s| s.running) {
         rows.push(Line::from(vec![
             Span::styled("● ", Style::default().fg(app.theme.accent)),

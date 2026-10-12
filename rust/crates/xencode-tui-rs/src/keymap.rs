@@ -61,6 +61,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         }
         return done();
     }
+    // Orchestrator mode (OM-3): keys go to the focused tile, Ctrl+A is the
+    // prefix for the mode's own commands.
+    if let Some(flow) = orchestrator_key(app, key, tx) {
+        return flow;
+    }
     // Esc stops a running turn before it does anything else (UX-14). The
     // screen has promised this for a while ("Esc to stop it first"); the
     // text already streamed stays, and the loop ends at its next boundary.
@@ -91,6 +96,118 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         InputMode::Editing => editing_key(app, key, tx),
         InputMode::Normal => normal_key(app, key, tx),
     }
+}
+
+/// A key in orchestrator mode. `None` lets the ordinary handling have it:
+/// outside the mode, on the conversation's tile, and for Ctrl+Space.
+fn orchestrator_key(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
+    use crate::focus::Mode;
+    if app.mode != Mode::Orchestrator || app.screen() != crate::screens::Screen::Conversation {
+        return None;
+    }
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    // The picker takes every key while it is open.
+    if let Some(picker) = app.orch.picker.as_mut() {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => picker.cursor = picker.cursor.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                picker.cursor = (picker.cursor + 1).min(picker.agents.len().saturating_sub(1))
+            }
+            KeyCode::Char(' ') => {
+                if let Some(agent) = picker.agents.get(picker.cursor) {
+                    if agent.installed && !picker.chosen.remove(&agent.name) {
+                        picker.chosen.insert(agent.name.clone());
+                    }
+                }
+            }
+            KeyCode::Enter => app.open_orch_chosen(tx),
+            KeyCode::Esc => app.orch.picker = None,
+            _ => {}
+        }
+        return Some(done());
+    }
+    let tiles = app.term_tiles.len() + 1;
+    if app.orch.prefix {
+        app.orch.prefix = false;
+        let focused_id = app
+            .orch
+            .focus
+            .checked_sub(1)
+            .and_then(|i| app.term_tiles.get(i))
+            .map(|t| (t.id.clone(), t.agent.clone()));
+        if !matches!(key.code, KeyCode::Char('x')) {
+            app.orch.stop_armed = None;
+        }
+        match key.code {
+            KeyCode::Char(d) if d.is_ascii_digit() => {
+                let n = d as usize - '0' as usize;
+                if n < tiles {
+                    app.orch.focus = n;
+                }
+            }
+            KeyCode::Char('a') if ctrl => {
+                if let Some((id, _)) = focused_id {
+                    app.term_type(&id, &[1], tx);
+                }
+            }
+            KeyCode::Char('z') => app.orch.zoom = !app.orch.zoom,
+            KeyCode::Char('t') => {
+                app.orch.all = !app.orch.all;
+                app.orch.zoom = false;
+            }
+            KeyCode::Char('n') => app.open_orch_picker(),
+            KeyCode::Char('x') => {
+                if let Some((id, agent)) = focused_id {
+                    if app.orch.stop_armed.as_deref() == Some(id.as_str()) {
+                        app.orch.stop_armed = None;
+                        crate::engine::act(
+                            app,
+                            crate::engine::proto::ClientMsg::Term {
+                                req: 0,
+                                request: crate::engine::proto::TermRequest::Stop { id },
+                            },
+                            tx,
+                        );
+                    } else {
+                        app.orch.stop_armed = Some(id);
+                        app.push_toast(
+                            crate::toast::ToastKind::Info,
+                            format!("ctrl+a x again stops {agent}; its worktree stays"),
+                        );
+                    }
+                }
+            }
+            KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                app.orch.focus = (app.orch.focus + tiles - 1) % tiles;
+            }
+            KeyCode::Right | KeyCode::Down | KeyCode::Char('l') | KeyCode::Char('j') => {
+                app.orch.focus = (app.orch.focus + 1) % tiles;
+            }
+            KeyCode::Char('?') => {
+                app.help_visible = true;
+                app.help_scroll = 0;
+            }
+            _ => {}
+        }
+        return Some(done());
+    }
+    if ctrl && key.code == KeyCode::Char('a') {
+        app.orch.prefix = true;
+        return Some(done());
+    }
+    // Ctrl+Space leaves the mode; the conversation's tile is the ordinary
+    // conversation.
+    if (ctrl && key.code == KeyCode::Char(' ')) || app.orch.focus == 0 {
+        return None;
+    }
+    let tile = app
+        .term_tiles
+        .get(app.orch.focus - 1)
+        .map(|t| t.id.clone())?;
+    if let Some(bytes) = crate::orchestrator_view::key_bytes(key) {
+        app.term_type(&tile, &bytes, tx);
+    }
+    Some(done())
 }
 
 fn quit() -> KeyFlow {

@@ -578,6 +578,8 @@ pub struct App<'a> {
     /// Each watched tile's screen, drawn from the engine's replay and then
     /// its live output.
     pub term_screens: std::collections::BTreeMap<String, xencode_term_rs::Screen>,
+    /// Orchestrator mode's rail, tiles, focus and picker (OM-3).
+    pub orch: crate::orchestrator_view::OrchState,
     /// The transcript's length in rows at the last frame, so reading further
     /// up holds still while new lines arrive.
     pub(crate) transcript_rows: u16,
@@ -2395,6 +2397,7 @@ impl<'a> App<'a> {
             term_host: Default::default(),
             term_tiles: Vec::new(),
             term_screens: Default::default(),
+            orch: Default::default(),
             transcript_rows: 0,
             approval_shown: None,
             last_esc_at: None,
@@ -2770,6 +2773,101 @@ impl<'a> App<'a> {
         self.push_toast(
             crate::toast::ToastKind::Info,
             format!("Mode: {}", self.mode.label()),
+        );
+        // Entering the mode with no terminal agents running opens the picker,
+        // with last time's choice already chosen (OM-3).
+        if mode == Mode::Orchestrator && self.term_tiles.is_empty() {
+            self.open_orch_picker();
+        }
+    }
+
+    /// Open orchestrator mode's picker of agents.
+    pub(crate) fn open_orch_picker(&mut self) {
+        self.orch.picker = Some(crate::orchestrator_view::Picker {
+            agents: crate::engine::term::picker(),
+            cursor: 0,
+            chosen: self.config.orchestrator_agents.iter().cloned().collect(),
+        });
+    }
+
+    /// Start every agent the picker chose, each in a worktree of its own, and
+    /// remember the choice for next time.
+    pub(crate) fn open_orch_chosen(&mut self, tx: &mpsc::UnboundedSender<String>) {
+        let Some(picker) = self.orch.picker.take() else {
+            return;
+        };
+        let chosen: Vec<String> = picker
+            .agents
+            .iter()
+            .filter(|a| picker.chosen.contains(&a.name))
+            .map(|a| a.name.clone())
+            .collect();
+        for agent in &chosen {
+            crate::engine::act(
+                self,
+                crate::engine::proto::ClientMsg::Term {
+                    req: 0,
+                    request: crate::engine::proto::TermRequest::Open {
+                        agent: agent.clone(),
+                        cols: 80,
+                        rows: 24,
+                    },
+                },
+                tx,
+            );
+        }
+        if !chosen.is_empty() {
+            self.config.orchestrator_agents = chosen;
+            self.save_config();
+        }
+    }
+
+    /// Send the engine what orchestrator mode's tiles need from it: the size
+    /// each tile was drawn at, and a watch on every tile not watched yet.
+    pub fn orch_flush(&mut self, tx: &mpsc::UnboundedSender<String>) {
+        use crate::engine::proto::{ClientMsg, TermRequest};
+        let resizes = std::mem::take(&mut self.orch.pending_resize);
+        for (id, cols, rows) in resizes {
+            crate::engine::act(
+                self,
+                ClientMsg::Term {
+                    req: 0,
+                    request: TermRequest::Resize { id, cols, rows },
+                },
+                tx,
+            );
+        }
+        let unwatched: Vec<String> = self
+            .term_tiles
+            .iter()
+            .map(|t| t.id.clone())
+            .filter(|id| !self.orch.watched.contains(id))
+            .collect();
+        if !unwatched.is_empty() {
+            self.orch.watched.extend(unwatched.iter().cloned());
+            crate::engine::act(
+                self,
+                ClientMsg::Term {
+                    req: 0,
+                    request: TermRequest::Watch { ids: unwatched },
+                },
+                tx,
+            );
+        }
+    }
+
+    /// Type `bytes` into terminal agent `id`.
+    pub(crate) fn term_type(&mut self, id: &str, bytes: &[u8], tx: &mpsc::UnboundedSender<String>) {
+        crate::engine::act(
+            self,
+            crate::engine::proto::ClientMsg::Term {
+                req: 0,
+                request: crate::engine::proto::TermRequest::Input {
+                    id: id.to_string(),
+                    data: crate::engine::proto::b64(bytes),
+                },
+            },
+            tx,
         );
     }
 
@@ -12787,6 +12885,9 @@ pub async fn run_app<B: Backend + io::Write>(
         // window as well as in process (TD-3): the engine's view is what says
         // the turn ended there.
         app.send_next_queued(&tx);
+        if app.mode == crate::focus::Mode::Orchestrator {
+            app.orch_flush(&tx);
+        }
         signals.messages += pumped.messages;
         signals.approvals += pumped.approvals;
         // In a window, what the engine sent since the last frame (EN-2). An

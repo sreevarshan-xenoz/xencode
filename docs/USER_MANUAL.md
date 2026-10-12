@@ -185,6 +185,20 @@ In the panels:
 The worktrees are in the Agents view and the insights and project analyzer in the Project view (`Ctrl+P`). In the conversation, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` edit the line as in a shell (start, end, delete to end, delete to start, delete the word before the cursor) instead of the panel actions above.
 | `Ctrl+,` | Settings |
 
+In orchestrator mode (`Ctrl+Space`), everything typed goes to the focused tile; these follow the prefix `Ctrl+A`:
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+A` `0`–`9` | Focus that tile (0 is xencode's conversation) |
+| `Ctrl+A` arrows / `h j k l` | Focus the previous or next tile |
+| `Ctrl+A` `z` | Zoom the focused tile; again to go back |
+| `Ctrl+A` `t` | Draw every agent as a tile |
+| `Ctrl+A` `n` | The picker: open more agents |
+| `Ctrl+A` `x` `x` | Stop the focused agent and everything it started; its worktree stays |
+| `Ctrl+A` `Ctrl+A` | Send Ctrl+A to the agent |
+
+Each agent runs its vendor's own CLI with your sign-in, in a git worktree of its own, kept running by the project's engine when you leave the mode.
+
 In a panel (outside the conversation's input):
 
 | Key | Action |

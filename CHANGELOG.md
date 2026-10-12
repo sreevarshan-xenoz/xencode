@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can open, type into, watch or stop one, never the reader a lead agent's MCP
   tools connect through. Nothing on screen uses
   this yet; the tiles come with OM-3.
+- `OM-3`: orchestrator mode is a workspace of agents. `Ctrl+Space` with no agent
+  running opens a picker of a shell and every agent on the roster, installed or
+  missing; each one opened runs its vendor's own CLI with the person's sign-in,
+  in a worktree of its own. A rail lists every agent by state and tiles show
+  their live screens, with xencode's conversation as tile 0; keys go to the
+  focused tile, and after `Ctrl+A` a digit focuses a tile, `z` zooms, `t` draws
+  every agent, `n` opens the picker, `x` twice stops one and `Ctrl+A` sends a
+  Ctrl+A. An agent that rings or notifies gets a yellow frame and moves to
+  Needs you. Leaving the mode leaves the agents running, and the conversation's
+  side panel lists them.
 
 ### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
 

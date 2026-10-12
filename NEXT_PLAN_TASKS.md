@@ -17813,6 +17813,11 @@ program; the keys themselves are covered by their own tests.
     repository and a real shell on Windows and Linux — open in a worktree, type, disconnect,
     reconnect and see the screen again, stop with the worktree kept. Ruling: tiles live in their
     own host, not yet in the Team; joining them for merge and clean is OM-5.
+  - [x] **OM-3 — the mode: picker, rail and tiles.** Done 2026-10-12 (`orchestrator_view.rs`):
+    picker of the roster with installed or missing, rail by state, a grid of up to four tiles (all
+    with `t`), zoom, Ctrl+A prefix keys, stop with the worktree kept, the conversation as tile 0;
+    tested with real shell tiles in a scratch repository. Ruling: the prefix is fixed at Ctrl+A
+    (no `orchestrator.prefix` setting yet); the picker's list comes from the window's own PATH.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.

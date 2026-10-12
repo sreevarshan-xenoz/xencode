@@ -21,6 +21,7 @@ pub mod markdown;
 pub mod mcp;
 pub mod mcp_serve;
 pub mod mcp_team;
+pub mod orchestrator_view;
 pub mod palette;
 pub mod panic;
 pub mod permission_broker;

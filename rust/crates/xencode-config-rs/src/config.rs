@@ -379,6 +379,11 @@ pub struct XencodeConfig {
     #[serde(default = "default_status_line")]
     pub status_line: Vec<String>,
 
+    /// The agents orchestrator mode's picker chose last time, chosen again
+    /// when it next opens (OM-3).
+    #[serde(default)]
+    pub orchestrator_agents: Vec<String>,
+
     /// Show vertical scrollbars on scrollable lists (chat, explorer).
     #[serde(default = "default_true")]
     pub show_scrollbars: bool,
@@ -1041,6 +1046,7 @@ impl Default for XencodeConfig {
             tool_output: default_tool_output(),
             side_panel: default_side_panel(),
             status_line: default_status_line(),
+            orchestrator_agents: Vec::new(),
             show_scrollbars: true,
             show_line_numbers: true,
             mouse_capture: true,

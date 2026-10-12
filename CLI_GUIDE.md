@@ -2857,6 +2857,7 @@ in it was unchanged by the session that opened on it.
 | `rounded_borders` | bool | rounded panel corners, on by default; `false` draws square ones everywhere, the conversation included |
 | `tool_output` | string | how a tool call's output shows in the conversation: `fold` (default — the first four lines, then `+N lines`) or `expand` (all of it); anything else is refused by `config set` |
 | `side_panel` | string | the conversation's side panel: `auto` (default — shown at 100 columns or wider), `on` (shown whenever the conversation keeps 40 columns), `off`; `Ctrl+B` hides or shows it for the session. Anything else is refused by `config set` |
+| `orchestrator_agents` | list | the agents orchestrator mode's picker chose last time, chosen again when it next opens (written by the picker; JSON only) |
 | `status_line` | list | what the line under the input shows, left to right, comma-separated: any of `model`, `provider` (`local only` or `cloud allowed` — where prompts may go), `approval`, `context`, `cost`, `branch` (default: all six). Items that do not fit the terminal are dropped from the end; `context` and `cost` show only once they are known. An unknown item is refused by `config set` |
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
@@ -4612,7 +4613,30 @@ The same state `/workers` shows, seen as a way of working rather than a screen t
 look at. `Ctrl+Space` flips between coding and orchestrator mode (the status
 line under the input starts with `orchestrator` while it is on), and `/orchestrator on` and `/orchestrator off` are the same switch by name. The
 mode is one field on the app: nothing is copied, no second task list, no second
-session, and the badge is the only thing that moves.
+session.
+
+In the TUI the mode is a workspace of agents. Entering it with no agent
+running opens a picker: a plain shell and every agent on the roster (claude,
+codex, opencode, kilo, agy, gemini, crush, cline, kiro-cli, cursor-agent), each
+marked installed or missing; `Space` chooses, `Enter` opens, and the choice is
+remembered for next time (`orchestrator_agents` in config.json). Each agent you
+open runs its vendor's own interactive CLI, with your own sign-in and
+environment, as if you had typed its name in a terminal — in a git worktree on a
+branch of its own (`<repo>-team/t<n>`, `xencode/team/t<n>`). The project's
+engine runs them, so leaving the mode or closing the window leaves them running,
+and coming back shows each one's screen as it stands.
+
+The screen is a rail on the left (every agent, grouped as Needs you, Working,
+Idle and Done, each with its number) and tiles with the agents' live screens;
+xencode's own conversation is tile 0. Up to four tiles are drawn; under 100
+columns only the focused one is. Everything typed goes to the focused tile,
+except after the prefix `Ctrl+A`: a digit focuses that tile, the arrows or
+`h j k l` move between tiles, `z` zooms the focused tile (again to go back),
+`t` draws every agent, `n` opens the picker for more, `x` twice stops the
+focused agent and everything it started (its worktree stays), and `Ctrl+A`
+sends a Ctrl+A to the agent. A tile whose agent rang the bell or sent a
+notification has a yellow frame and moves to Needs you on the rail until you
+type into it. The conversation's side panel lists the agents still running.
 
 The verbs are the surface, and the four that report answer from either side — a
 mode that would not say which mode you are in, or let you leave, only locks you
