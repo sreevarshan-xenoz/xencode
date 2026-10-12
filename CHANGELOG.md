@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `OM-1`: a terminal crate for orchestrator mode's tiles
+
+- A new crate, `xencode-term-rs`, runs a real program in a pseudo-terminal
+  (ConPTY on Windows, a Unix PTY elsewhere), keeps its screen and 5,000 lines
+  of scrollback, answers the cursor, status and device questions a terminal
+  owes the program (Windows' ConPTY waits for the cursor answer before it
+  passes any output on), marks a program as needing the person when it rings
+  the bell or sends an OSC 9 or OSC 777 notification, and draws its screen into
+  the TUI's buffer. Stopping a program ends everything it started: its process
+  tree on Windows, its whole session on Unix, background jobs included. It is
+  the groundwork for orchestrator mode's tiles and changes nothing on screen
+  yet. Tested against a real shell on Windows and Linux.
+
 ### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
 
 - `TD-1`: each message in the transcript starts with a `▍You` or `▍xencode`

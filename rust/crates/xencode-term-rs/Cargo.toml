@@ -1,0 +1,12 @@
+[package]
+name = "xencode-term-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Real programs in pseudo-terminals for xencode's orchestrator tiles: a session, its screen, attention signals and drawing into a ratatui buffer (OM-1)"
+publish = false
+
+[dependencies]
+portable-pty = "0.9"
+vt100 = "0.15"
+ratatui = "0.29"
