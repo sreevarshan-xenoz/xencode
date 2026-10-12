@@ -76,10 +76,7 @@ pub(crate) const GLOBAL: &[Binding] = &[
 ];
 
 const UNIVERSAL: &[Binding] = &[
-    (
-        "Tab",
-        "in Files, tree ↔ editor; from another panel, back to chat",
-    ),
+    ("Tab", "in Files, tree ↔ editor; in a view, the next tab"),
     ("i or /", "edit chat input"),
     ("e", "edit code editor"),
     ("m", "model selector (r refresh, l load, u unload)"),
@@ -193,7 +190,7 @@ pub(crate) const COMMANDS: &[Binding] = &[
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
     use FocusArea::*;
     match focus {
-        ChatInput => &[("↑ ↓ / j k", "scroll chat")],
+        ChatInput => &[("PageUp / PageDown", "scroll the conversation")],
         FileExplorer => &[
             ("↑ ↓ / j k", "move selection"),
             ("Enter", "open file in editor"),
@@ -406,6 +403,6 @@ mod tests {
             assert!(text.contains(section), "missing {section}");
         }
         assert!(text.contains("Ctrl+Y"));
-        assert!(text.contains("scroll chat"));
+        assert!(text.contains("scroll the conversation"));
     }
 }

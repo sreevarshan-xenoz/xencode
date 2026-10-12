@@ -630,6 +630,11 @@ fn on_esc(app: &mut App) {
         return;
     }
     match app.focus {
+        // The Files view, like every other view, gives way to the
+        // conversation on Esc (the editor's first Esc leaves editing mode).
+        FocusArea::FileExplorer | FocusArea::CodeEditor => {
+            app.open_screen(crate::screens::Screen::Conversation);
+        }
         FocusArea::Settings => {
             if app.settings_url_editing {
                 forget_secret(app);

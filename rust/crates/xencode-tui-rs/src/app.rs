@@ -570,6 +570,9 @@ pub struct App<'a> {
     /// Messages typed while a turn was running, sent in order once it ends
     /// (TD-3).
     pub queued: Vec<String>,
+    /// The transcript's length in rows at the last frame, so reading further
+    /// up holds still while new lines arrive.
+    pub(crate) transcript_rows: u16,
     /// The approval on screen and when it was first drawn, so a key typed in
     /// the moment it appears is not taken as its answer.
     pub(crate) approval_shown: Option<(u64, std::time::Instant)>,
@@ -2381,6 +2384,7 @@ impl<'a> App<'a> {
             last_title: String::new(),
             terminal_focused: true,
             queued: Vec::new(),
+            transcript_rows: 0,
             approval_shown: None,
             last_esc_at: None,
             ctrl_c_armed: false,

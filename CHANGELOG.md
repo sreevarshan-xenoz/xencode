@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too (it waited for ever there), without touching the draft typed since, and
   queued slash commands no longer hold up the lines behind them. A `!command`
   typed in a window now runs in the engine, through its approval prompt.
+- Reading further up the conversation while new text arrives, the lines being
+  read stay where they are. Esc in the Files view comes back to the
+  conversation, and the hints that named keys which do something else in the
+  always-ready input now name the right ones (`ctrl+l` for the model picker,
+  PageUp and PageDown to scroll).
 - A letter typed in the half second after an approval appears goes into the
   draft instead of answering it, so the `a` of a word being typed cannot grant a
   whole kind of tool; Esc still denies at once.
