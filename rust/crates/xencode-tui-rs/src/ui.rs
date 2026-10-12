@@ -146,58 +146,15 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
 /// The agent approval prompt (I1-03): topmost and modal, showing the call,
 /// its class, and the exact bytes at stake (diff or command line).
 fn draw_approval_overlay(f: &mut Frame, app: &App, area: Rect) {
-    let Some(request) = app.pending_approval() else {
+    // The same box the conversation draws (TD-2): every character shown,
+    // escapes as their pictures, long lines wrapped, and a note with {2191}{2193}
+    // scrolling when the change is longer than the box.
+    if app.pending_approval().is_none() {
         return;
-    };
+    }
     let popup_area = centered_rect(66, 74, area);
     f.render_widget(Clear, popup_area);
-
-    let queue_note = if app.approval_queue.len() > 1 {
-        format!(" · +{} more", app.approval_queue.len() - 1)
-    } else {
-        String::new()
-    };
-    let title = format!(" ⚙ Allow {}?{} ", request.class_label(), queue_note);
-    let block = Block::default()
-        .border_set(panel_border_set(app.config.rounded_borders))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.warning))
-        .title(title);
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        request.summary.clone(),
-        Style::default()
-            .fg(app.theme.fg)
-            .add_modifier(Modifier::BOLD),
-    )));
-    if !request.preview.is_empty() {
-        lines.push(Line::from(""));
-        for line in request.preview.lines() {
-            let style = if line.starts_with('+') {
-                Style::default().fg(app.theme.success)
-            } else if line.starts_with('-') {
-                Style::default().fg(app.theme.danger)
-            } else if line.starts_with("@@") {
-                Style::default().fg(app.theme.accent)
-            } else {
-                Style::default().fg(app.theme.message_system)
-            };
-            lines.push(Line::from(Span::styled(line.to_string(), style)));
-        }
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "y:allow · a:allow all like this · n/Esc:deny",
-        Style::default().fg(app.theme.warning),
-    )));
-
-    let max_scroll = clamp_scroll(lines.len(), popup_area.height);
-    let para = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll(((app.approval_scroll as u16).min(max_scroll), 0));
-    f.render_widget(para, popup_area);
+    crate::shell::draw_approval(f, app, popup_area);
 }
 
 fn draw_toasts(f: &mut Frame, app: &App, area: Rect) {
