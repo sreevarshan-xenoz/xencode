@@ -273,12 +273,40 @@ pub fn handle(
             cloud_models,
             external_workers,
         } => {
+            // Only a person's terminal window decides what the agent may do;
+            // the reader a lead agent's MCP tools connect through, or any
+            // other client, is refused.
+            if !by.starts_with("terminal") {
+                return vec![EngineMsg::Error {
+                    message: format!(
+                        "{by} cannot change the approval mode or cloud access; \
+                         only a terminal window can"
+                    ),
+                }];
+            }
             // Read back through the parser, so an unknown word becomes `ask`.
-            app.config.agent_approval = crate::agent_tools::ApprovalMode::parse(&approval)
+            let approval = crate::agent_tools::ApprovalMode::parse(&approval)
                 .config_name()
                 .to_string();
+            let changed = app.config.agent_approval != approval
+                || app.config.allow_cloud_models != cloud_models
+                || app.config.allow_external_workers != external_workers;
+            app.config.agent_approval = approval;
             app.config.allow_cloud_models = cloud_models;
             app.config.allow_external_workers = external_workers;
+            if changed {
+                // Said in the conversation, so every window sees who changed it.
+                let onoff = |on: bool| if on { "on" } else { "off" };
+                app.messages.push(crate::app::UiMessage {
+                    role: "system".into(),
+                    content: format!(
+                        "⚙ approval mode {}, cloud models {}, external workers {} — set by {by}",
+                        app.config.agent_approval,
+                        onoff(cloud_models),
+                        onoff(external_workers)
+                    ),
+                });
+            }
             Vec::new()
         }
         ClientMsg::ResumeTasks => {
@@ -739,7 +767,7 @@ mod tests {
                 external_workers: true,
             },
             &tx,
-            "t",
+            "terminal 1",
         );
         assert_eq!(app.config.agent_approval, "plan");
         assert!(app.config.allow_cloud_models && app.config.allow_external_workers);
@@ -753,10 +781,47 @@ mod tests {
                 external_workers: false,
             },
             &tx,
-            "t",
+            "terminal 1",
         );
         assert_eq!(app.config.agent_approval, "ask");
         assert!(!app.config.allow_cloud_models);
+    }
+
+    /// The security review of the policy message: only a person's terminal
+    /// window may change what the agent may do — not the reader a lead agent's
+    /// MCP tools connect through — and every change is said in the
+    /// conversation, naming the window, so all windows see it.
+    #[tokio::test]
+    async fn only_a_terminal_window_changes_the_policy_and_the_change_is_said() {
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let loosen = || ClientMsg::SetPolicy {
+            approval: "autonomous".into(),
+            cloud_models: true,
+            external_workers: true,
+        };
+        let replies = handle(&mut app, loosen(), &tx, "reader 4242");
+        assert!(
+            matches!(replies.as_slice(), [EngineMsg::Error { .. }]),
+            "{replies:?}"
+        );
+        assert_eq!(app.config.agent_approval, "ask");
+        assert!(!app.config.allow_cloud_models && !app.config.allow_external_workers);
+        handle(&mut app, loosen(), &tx, "terminal 77");
+        assert_eq!(app.config.agent_approval, "autonomous");
+        let said = app
+            .messages
+            .last()
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        assert!(
+            said.contains("autonomous") && said.contains("terminal 77"),
+            "{said}"
+        );
+        // Sending what is already in force says nothing again.
+        let before = app.messages.len();
+        handle(&mut app, loosen(), &tx, "terminal 77");
+        assert_eq!(app.messages.len(), before);
     }
 
     #[tokio::test]

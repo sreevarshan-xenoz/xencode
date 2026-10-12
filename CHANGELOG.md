@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode the engine has in force. Before, a window changed only its own copy, so
   the status line could read `plan` while the engine kept writing files.
   `Shift+Tab` now changes the mode for the running session only.
+  Only a terminal window can make that change (the reader a lead agent's MCP
+  tools connect through is refused), and every change is written into the
+  conversation with the window that made it.
 - A message queued while a turn ran is sent when the turn ends in a window
   too (it waited for ever there), without touching the draft typed since, and
   queued slash commands no longer hold up the lines behind them. A `!command`
