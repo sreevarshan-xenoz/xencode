@@ -807,3 +807,57 @@ async fn a_bang_command_is_sent_like_a_message() {
         app.messages
     );
 }
+
+/// Review I6: Esc in the Files view comes back to the conversation, as the
+/// status line under it says.
+#[test]
+fn esc_in_the_files_view_comes_back_to_the_conversation() {
+    use xencode_tui_rs::app::FocusArea;
+    let mut app = App::for_tests();
+    app.open_screen(Screen::Files);
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.screen(), Screen::Conversation);
+    let mut app = App::for_tests();
+    app.open_screen(Screen::Files);
+    app.focus = FocusArea::CodeEditor;
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.screen(), Screen::Conversation);
+}
+
+/// Review I6: with no model chosen, the empty conversation names the key that
+/// opens the model picker from the always-ready input.
+#[test]
+fn the_empty_conversation_names_the_key_for_the_model_picker() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    app.config.default_model.clear();
+    let text = screen(&mut app, 120, 30).join("\n");
+    assert!(text.contains("ctrl+l"), "{text}");
+    assert!(!text.contains("then m"), "{text}");
+}
+
+/// Review I6 (spec §4.3): reading further up while new text arrives, the
+/// lines being read stay where they are.
+#[test]
+fn reading_above_holds_still_while_new_text_arrives() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    for i in 0..80 {
+        app.messages.push(xencode_tui_rs::app::UiMessage {
+            role: "assistant".into(),
+            content: format!("old line {i:02}"),
+        });
+    }
+    screen(&mut app, 100, 30);
+    key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
+    key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
+    let before = screen(&mut app, 100, 30);
+    for i in 0..5 {
+        app.messages.push(xencode_tui_rs::app::UiMessage {
+            role: "assistant".into(),
+            content: format!("new line {i}"),
+        });
+    }
+    let after = screen(&mut app, 100, 30);
+    assert_eq!(before[..10], after[..10], "the text being read moved");
+}

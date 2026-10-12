@@ -282,7 +282,7 @@ pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         let model = if app.config.default_model.is_empty() {
-            "no model chosen yet — esc, then m, picks one".to_string()
+            "no model chosen yet — ctrl+l picks one".to_string()
         } else {
             app.config.default_model.clone()
         };
@@ -360,7 +360,13 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: Rect, with_plan: bool) ->
     };
     let text = text_rect(area);
     let lines = transcript_lines(app, text.width);
-    let total = lines.len() as u16;
+    let total = lines.len().min(u16::MAX as usize) as u16;
+    // Reading further up (`chat_scroll` above 0) while new lines arrive: the
+    // view moves up with them, so the lines being read stay put (spec §4.3).
+    if app.chat_scroll > 0 && total > app.transcript_rows {
+        app.chat_scroll = app.chat_scroll.saturating_add(total - app.transcript_rows);
+    }
+    app.transcript_rows = total;
     let max_scroll = total.saturating_sub(text.height);
     app.chat_scroll = app.chat_scroll.min(max_scroll);
     // `chat_scroll` counts up from the bottom, so 0 follows the newest line.
