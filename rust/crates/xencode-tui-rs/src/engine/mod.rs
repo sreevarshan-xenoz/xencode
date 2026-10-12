@@ -359,6 +359,19 @@ pub fn handle(
             Vec::new()
         }
         ClientMsg::Term { req, request } => {
+            // A terminal agent runs whatever is typed into it, with no
+            // approval: only a person's terminal window may open, type into,
+            // watch, resize or stop one, never the reader a lead agent's MCP
+            // tools connect through, or any other client.
+            if !by.starts_with("terminal") {
+                return vec![EngineMsg::TermReply {
+                    req,
+                    ok: false,
+                    body: serde_json::Value::String(format!(
+                        "{by} cannot use the terminal agents; only a terminal window can"
+                    )),
+                }];
+            }
             let (ok, body) = match term_request(app, request) {
                 Ok(body) => (true, body),
                 Err(why) => (false, serde_json::Value::String(why)),
@@ -878,6 +891,44 @@ mod tests {
         let before = app.messages.len();
         handle(&mut app, loosen(), &tx, "terminal 77");
         assert_eq!(app.messages.len(), before);
+    }
+
+    /// The security review of OM-2: a terminal agent runs whatever is typed
+    /// into it with no approval, so only a person's terminal window may open,
+    /// type into, watch, resize or stop one — not the reader a lead agent's
+    /// MCP tools connect through, which a model drives.
+    #[tokio::test]
+    async fn only_a_terminal_window_can_use_the_terminal_agents() {
+        use crate::engine::proto::TermRequest;
+        let mut app = engine_app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        for request in [
+            TermRequest::Open {
+                agent: "shell".into(),
+                cols: 80,
+                rows: 24,
+            },
+            TermRequest::Input {
+                id: "t1".into(),
+                data: proto::b64(b"echo hi\r"),
+            },
+            TermRequest::Watch {
+                ids: vec!["t1".into()],
+            },
+            TermRequest::Stop { id: "t1".into() },
+        ] {
+            let replies = handle(
+                &mut app,
+                ClientMsg::Term { req: 7, request },
+                &tx,
+                "reader 4242",
+            );
+            assert!(
+                matches!(replies.as_slice(), [EngineMsg::TermReply { ok: false, .. }]),
+                "{replies:?}"
+            );
+        }
+        assert!(app.term_host.tiles().is_empty(), "nothing was started");
     }
 
     #[tokio::test]

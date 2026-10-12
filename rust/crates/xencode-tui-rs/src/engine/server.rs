@@ -372,7 +372,10 @@ fn on_line(
                 ..
             } = &msg
             {
-                window.watching.extend(ids.iter().cloned());
+                // The same rule `handle` applies: only a terminal window.
+                if window.name.starts_with("terminal") {
+                    window.watching.extend(ids.iter().cloned());
+                }
             }
             for reply in super::handle(app, msg, tx, &name) {
                 let for_everyone = matches!(

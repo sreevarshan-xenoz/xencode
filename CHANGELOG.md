@@ -24,7 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branch of its own, type into it, resize it, watch it and stop it; the engine
   keeps its screen, so a window that connects later is shown the screen as it
   stands and then the live output, and the engine stays running while any
-  terminal agent does. Stopping one keeps its worktree. Nothing on screen uses
+  terminal agent does. Stopping one keeps its worktree. Only a terminal window
+  can open, type into, watch or stop one, never the reader a lead agent's MCP
+  tools connect through. Nothing on screen uses
   this yet; the tiles come with OM-3.
 
 ### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
