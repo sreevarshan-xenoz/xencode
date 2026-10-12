@@ -49,6 +49,21 @@ const CONVERSATION: &[Binding] = &[
     ),
 ];
 
+/// Orchestrator mode (OM-3): keys go to the focused tile; these follow Ctrl+A.
+const ORCHESTRATOR: &[Binding] = &[
+    (
+        "Ctrl+Space",
+        "enter or leave the mode (the agents keep running)",
+    ),
+    ("Ctrl+A 0-9", "focus that tile (0 is the conversation)"),
+    ("Ctrl+A arrows / h j k l", "focus the previous or next tile"),
+    ("Ctrl+A z", "zoom the focused tile, again to go back"),
+    ("Ctrl+A t", "draw every agent as a tile"),
+    ("Ctrl+A n", "the picker: open more agents"),
+    ("Ctrl+A x x", "stop the focused agent (its worktree stays)"),
+    ("Ctrl+A Ctrl+A", "send Ctrl+A to the agent"),
+];
+
 pub(crate) const GLOBAL: &[Binding] = &[
     (
         "Ctrl+C / q q",
@@ -307,6 +322,7 @@ pub fn help_lines(focus: FocusArea, theme: &ThemeColors) -> Vec<Line<'static>> {
     section(&mut lines, "This panel", panel_bindings(focus), theme);
     section(&mut lines, "The conversation", CONVERSATION, theme);
     views(&mut lines, theme);
+    section(&mut lines, "Orchestrator mode", ORCHESTRATOR, theme);
     section(&mut lines, "Agent approval prompt", APPROVAL, theme);
     section(&mut lines, "Slash commands", COMMANDS, theme);
     section(&mut lines, "In a panel", UNIVERSAL, theme);
