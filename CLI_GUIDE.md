@@ -4633,8 +4633,11 @@ columns only the focused one is. Everything typed goes to the focused tile,
 except after the prefix `Ctrl+A`: a digit focuses that tile, the arrows or
 `h j k l` move between tiles, `z` zooms the focused tile (again to go back),
 `t` draws every agent, `n` opens the picker for more, `x` twice stops the
-focused agent and everything it started (its worktree stays), and `Ctrl+A`
-sends a Ctrl+A to the agent. A tile whose agent rang the bell or sent a
+focused agent and everything it started (its worktree stays), `m` twice stops
+it and lands its work on the branch it started from through the team's checked
+merge (the checks in `.xencode/team.toml` must pass; with none set you are
+asked), `a` takes one line and sends it to every working or idle agent, and
+`Ctrl+A` sends a Ctrl+A to the agent. A tile whose agent rang the bell or sent a
 notification has a yellow frame and moves to Needs you on the rail until you
 type into it. The conversation's side panel lists the agents still running.
 The Inbox at the bottom of the rail lists what waits on you (approvals, and agents

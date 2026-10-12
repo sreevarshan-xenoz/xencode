@@ -31,6 +31,7 @@ pub struct TileInfo {
 
 struct Tile {
     agent: String,
+    base: String,
     branch: String,
     worktree: String,
     session: Session,
@@ -150,6 +151,7 @@ impl TermHost {
         .map_err(|e| e.to_string())?;
         let tile = Tile {
             agent: agent.to_string(),
+            base: base.clone(),
             branch,
             worktree: path.display().to_string(),
             session,
@@ -206,6 +208,31 @@ impl TermHost {
     pub fn stop(&mut self, id: &str) -> Result<(), String> {
         self.tile(id)?.session.kill();
         Ok(())
+    }
+
+    /// Tile `id` as a team worker, stopped, for the checked merge, with the
+    /// branch it started from.
+    pub fn worker(&self, id: &str) -> Option<(xencode_team_rs::WorkerSnapshot, String)> {
+        let t = self.tiles.get(id)?;
+        Some((
+            xencode_team_rs::WorkerSnapshot {
+                id: id.to_string(),
+                agent: t.agent.clone(),
+                task: format!("terminal agent {}", t.agent),
+                state: xencode_team_rs::WorkerState::Stopped,
+                branch: t.branch.clone(),
+                worktree: std::path::PathBuf::from(&t.worktree),
+                last_message: String::new(),
+                answer: String::new(),
+                error: None,
+                tool_calls: 0,
+                tokens: None,
+                cost_micros: None,
+                on_plan: true,
+                merge: None,
+            },
+            t.base.clone(),
+        ))
     }
 
     /// The bytes that redraw tile `id`'s screen as it stands.

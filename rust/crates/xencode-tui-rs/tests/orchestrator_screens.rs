@@ -266,3 +266,117 @@ async fn a_tile_that_rings_needs_you_until_it_is_typed_into() {
         "xencode · needs you"
     );
 }
+
+fn type_line(app: &mut App<'static>, text: &str) {
+    for c in text.chars() {
+        key(app, KeyCode::Char(c), KeyModifiers::NONE);
+    }
+    key(app, KeyCode::Enter, KeyModifiers::NONE);
+}
+
+fn open_shell(app: &mut App<'static>) {
+    // The picker opens on entering the mode, or with Ctrl+A n; the shell is
+    // its first row and stays chosen once chosen.
+    if app.orch.picker.is_none() {
+        ctrl_a(app, KeyCode::Char('n'));
+    }
+    if !app.config.orchestrator_agents.iter().any(|a| a == "shell") {
+        key(app, KeyCode::Char(' '), KeyModifiers::NONE);
+    }
+    key(app, KeyCode::Enter, KeyModifiers::NONE);
+    frames_until(app, "the tile", |_| true);
+}
+
+/// OM-5: a tile's work lands on the base branch from the rail, through the
+/// checked merge: the first Ctrl+A m says what will happen, the second stops
+/// the agent and merges; with no checks set, the person is asked first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tiles_work_is_merged_from_the_rail_through_the_checked_merge() {
+    let here = scratch();
+    let root = std::env::current_dir().unwrap();
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    enter_mode(&mut app);
+    open_shell(&mut app);
+    ctrl_a(&mut app, KeyCode::Char('1'));
+    let worktree = std::path::PathBuf::from(&app.term_tiles[0].worktree);
+    type_line(&mut app, "echo made by the tile> tile.txt");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !worktree.join("tile.txt").exists() {
+        assert!(Instant::now() < deadline, "the tile never wrote its file");
+        frame(&mut app);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    ctrl_a(&mut app, KeyCode::Char('m'));
+    assert!(
+        app.toasts
+            .iter()
+            .any(|t| t.message.contains("ctrl+a m again")),
+        "the first press says what will happen"
+    );
+    ctrl_a(&mut app, KeyCode::Char('m'));
+    // No checks are set in this repository, so the merge asks the person.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while app.pending_approval().is_none() {
+        assert!(Instant::now() < deadline, "the merge never asked");
+        frame(&mut app);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    frame(&mut app);
+    std::thread::sleep(Duration::from_millis(600));
+    frame(&mut app);
+    key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
+    let landed = |root: &std::path::Path| {
+        std::process::Command::new("git")
+            .args(["show", "main:tile.txt"])
+            .current_dir(root)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while !landed(&root) {
+        assert!(
+            Instant::now() < deadline,
+            "the tile's work never landed on main"
+        );
+        frame(&mut app);
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    drop(app);
+    drop(here);
+}
+
+/// OM-5: Ctrl+A a sends one line to every working or idle agent.
+#[tokio::test]
+async fn ask_all_sends_one_line_to_every_agent() {
+    let _here = scratch();
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    enter_mode(&mut app);
+    open_shell(&mut app);
+    open_shell(&mut app);
+    assert_eq!(app.term_tiles.len(), 2);
+    ctrl_a(&mut app, KeyCode::Char('a'));
+    let line = if cfg!(windows) {
+        "echo XEN%COMSPEC:~0,0%CODE_ALL"
+    } else {
+        "echo XEN''CODE_ALL"
+    };
+    type_line(&mut app, line);
+    let ids: Vec<String> = app.term_tiles.iter().map(|t| t.id.clone()).collect();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        frame(&mut app);
+        let both = ids.iter().all(|id| {
+            app.term_screens
+                .get(id)
+                .is_some_and(|s| s.text().contains("XENCODE_ALL"))
+        });
+        if both {
+            break;
+        }
+        assert!(Instant::now() < deadline, "not every agent got the line");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}

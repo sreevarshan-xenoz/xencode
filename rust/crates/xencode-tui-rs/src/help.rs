@@ -61,6 +61,11 @@ const ORCHESTRATOR: &[Binding] = &[
     ("Ctrl+A t", "draw every agent as a tile"),
     ("Ctrl+A n", "the picker: open more agents"),
     ("Ctrl+A x x", "stop the focused agent (its worktree stays)"),
+    (
+        "Ctrl+A m m",
+        "stop it and land its work through the checked merge",
+    ),
+    ("Ctrl+A a", "type one line and send it to every agent"),
     ("Ctrl+A Ctrl+A", "send Ctrl+A to the agent"),
 ];
 

@@ -126,6 +126,31 @@ fn orchestrator_key(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         }
         return Some(done());
     }
+    // Ask all: the line being typed, then every working or idle agent.
+    if let Some(text) = app.orch.ask.as_mut() {
+        match key.code {
+            KeyCode::Char(c) if !ctrl => text.push(c),
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Esc => app.orch.ask = None,
+            KeyCode::Enter => {
+                let line = format!("{text}\r");
+                app.orch.ask = None;
+                let targets: Vec<String> = app
+                    .term_tiles
+                    .iter()
+                    .filter(|t| t.exit.is_none() && matches!(t.state.as_str(), "working" | "idle"))
+                    .map(|t| t.id.clone())
+                    .collect();
+                for id in targets {
+                    app.term_type(&id, line.as_bytes(), tx);
+                }
+            }
+            _ => {}
+        }
+        return Some(done());
+    }
     let tiles = app.term_tiles.len() + 1;
     if app.orch.prefix {
         app.orch.prefix = false;
@@ -137,6 +162,9 @@ fn orchestrator_key(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             .map(|t| (t.id.clone(), t.agent.clone()));
         if !matches!(key.code, KeyCode::Char('x')) {
             app.orch.stop_armed = None;
+        }
+        if !matches!(key.code, KeyCode::Char('m')) {
+            app.orch.merge_armed = None;
         }
         match key.code {
             KeyCode::Char(d) if d.is_ascii_digit() => {
@@ -151,6 +179,31 @@ fn orchestrator_key(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 }
             }
             KeyCode::Char('z') => app.orch.zoom = !app.orch.zoom,
+            KeyCode::Char('a') => app.orch.ask = Some(String::new()),
+            KeyCode::Char('m') => {
+                if let Some((id, agent)) = focused_id {
+                    if app.orch.merge_armed.as_deref() == Some(id.as_str()) {
+                        app.orch.merge_armed = None;
+                        crate::engine::act(
+                            app,
+                            crate::engine::proto::ClientMsg::Term {
+                                req: 0,
+                                request: crate::engine::proto::TermRequest::Merge { id },
+                            },
+                            tx,
+                        );
+                    } else {
+                        app.orch.merge_armed = Some(id);
+                        app.push_toast(
+                            crate::toast::ToastKind::Info,
+                            format!(
+                                "ctrl+a m again stops {agent} and lands its work on the base \
+                                 branch through the checks"
+                            ),
+                        );
+                    }
+                }
+            }
             KeyCode::Char('t') => {
                 app.orch.all = !app.orch.all;
                 app.orch.zoom = false;

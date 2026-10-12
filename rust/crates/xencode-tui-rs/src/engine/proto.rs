@@ -90,6 +90,9 @@ pub enum TermRequest {
     Watch { ids: Vec<String> },
     /// End a tile's program and everything it started; its worktree stays.
     Stop { id: String },
+    /// Stop a tile's program and land its work on the branch it started
+    /// from, through the team's checked merge.
+    Merge { id: String },
 }
 
 /// `bytes` as base64, the way terminal bytes travel in a JSON line.

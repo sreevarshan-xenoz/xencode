@@ -17821,6 +17821,10 @@ program; the keys themselves are covered by their own tests.
   - [x] **OM-4 — attention, inbox, title and notification.** Done 2026-10-12: a real shell that
     rings the bell moves to Needs you and the Inbox and the title counts it, until it is typed
     into; one OSC 9 notification per new waiting item while the terminal is not in front.
+  - [x] **OM-5 — merge, stop, ask all, tile 0, small terminals.** Done 2026-10-12: a real shell
+    tile's file lands on main through the checked merge from the rail (Windows and Linux);
+    ask all reaches every agent; stop, tile 0 and the narrow layout came with OM-3. Ruling: merging
+    stops the agent first, so nothing writes into the worktree mid-merge.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.

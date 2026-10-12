@@ -34,6 +34,9 @@ pub struct Team {
     merges: BTreeMap<String, MergeState>,
     /// Whether the worktrees an earlier engine left were looked for yet.
     adopted: bool,
+    /// Workers this engine made the worktree of itself without a process
+    /// of its own here: orchestrator mode's terminal agents (OM-5).
+    made_here: std::collections::BTreeSet<String>,
 }
 
 /// The approvals channel: a request and where its answer goes.
@@ -52,6 +55,7 @@ impl Default for Team {
             bases: BTreeMap::new(),
             merges: BTreeMap::new(),
             adopted: false,
+            made_here: Default::default(),
         }
     }
 }
@@ -116,6 +120,19 @@ impl Team {
                 }
             }
         }
+    }
+
+    /// Take in a terminal agent this engine started, so the checked merge
+    /// can land its work (OM-5). Its worktree was made here, so the merge
+    /// does not treat it as one an earlier engine left.
+    pub fn adopt_terminal(&mut self, root: &Path, snapshot: WorkerSnapshot, base: String) {
+        if !self.adopted {
+            self.adopted = true;
+            self.adopt(root);
+        }
+        self.made_here.insert(snapshot.id.clone());
+        self.bases.insert(snapshot.id.clone(), base);
+        self.shown.insert(snapshot.id.clone(), snapshot);
     }
 
     /// Carry out one team request for the project at `root`.
@@ -338,7 +355,7 @@ impl Team {
         // A worker an earlier engine left has no process to stop, and
         // nothing says who made its worktree.
         let stop = self.workers.get(id).map(|h| h.stopper());
-        let unverified = stop.is_none();
+        let unverified = stop.is_none() && !self.made_here.contains(id);
         let (root, id_owned, approvals, events) = (
             root.to_path_buf(),
             id.to_string(),

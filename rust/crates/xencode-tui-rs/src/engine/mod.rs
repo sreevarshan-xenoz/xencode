@@ -152,6 +152,24 @@ fn term_request(app: &mut App, request: proto::TermRequest) -> Result<serde_json
             app.term_host.stop(&id)?;
             Ok(serde_json::Value::Null)
         }
+        TermRequest::Merge { id } => {
+            // The program is stopped first, so nothing writes into the
+            // worktree while it is merged and the folder can go afterwards.
+            app.term_host.stop(&id)?;
+            let (worker, base) = app
+                .term_host
+                .worker(&id)
+                .ok_or_else(|| format!("there is no terminal agent `{id}`"))?;
+            let root = xencode_context_rs::default_root();
+            app.team.adopt_terminal(&root, worker, base);
+            let approvals = app.approval_tx.clone();
+            app.team.request(
+                &root,
+                proto::TeamRequest::Merge { id },
+                &approvals,
+                &app.config,
+            )
+        }
     }
 }
 

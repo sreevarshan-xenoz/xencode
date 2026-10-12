@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agents that rang or notified), the window title counts them, and a terminal
   not in front gets one desktop notification for each new one rather than for
   the first only.
+- `OM-5`: from the rail, `Ctrl+A m` twice stops an agent and lands its work on
+  the branch it started from through the team's checked merge, with its audit
+  line; `Ctrl+A a` sends one line to every working or idle agent.
 
 ### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
 
