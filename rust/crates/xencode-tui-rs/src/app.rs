@@ -23,9 +23,7 @@ use xencode_providers_rs::{
     MessageContent, OllamaRequest, ProviderManager, RoutingFacts,
 };
 
-pub use crate::focus::{
-    navigate_feature, DisclosureLevel, FocusArea, InputMode, Mode, DESTINATIONS, FEATURE_LIST,
-};
+pub use crate::focus::{DisclosureLevel, FocusArea, InputMode, Mode, DESTINATIONS};
 pub use crate::theme::ThemeColors;
 use crate::ui;
 
@@ -237,14 +235,6 @@ pub(crate) fn turn_error_line(model: &str, error: &str) -> String {
 /// totals it reports stay true — the cap only limits lines on screen.
 const FINDINGS_CAP: usize = 200;
 
-/// How long the profiler watches this process to turn two `/proc` reads into a
-/// CPU rate. Long enough to be measurable, short enough to not feel like a
-/// frozen UI.
-const PROFILER_SAMPLE_MS: u64 = 250;
-
-/// Persisted metric rows the profiler lists, newest first.
-const PROFILER_METRIC_ROWS: usize = 6;
-
 // How a spawn's task is framed for the model lives in the prompt registry
 // (`prompts::worktree_brief`): the worktree is the whole deal, so the brief says
 // plainly that everything it touches is inside it.
@@ -399,34 +389,6 @@ pub(crate) struct AgentRun {
     pub(crate) computer: Option<String>,
 }
 
-/// A pane-boundary divider the mouse is holding (`V-7`).
-///
-/// The anchor is the column the button went down on, and travel is measured
-/// from it rather than from the last motion event — a column too thin to be
-/// worth a whole percentage point carries into the next one instead of being
-/// thrown away. `paid` is what the arrangement has actually accepted, so a
-/// divider the clamp pinned keeps being asked, and comes back under the hand
-/// the moment the hand returns inside the range.
-#[derive(Debug, Clone)]
-pub struct Drag {
-    /// Which pair of panes the grabbed line separates.
-    pub boundary: crate::view::Boundary,
-    /// Column the button went down on.
-    pub anchor: i16,
-    /// Points the arrangement has actually accepted, for this drag.
-    pub paid: i16,
-    /// How far the pointer travelled from `anchor`, whether or not the
-    /// arrangement took it. Kept beside `paid` because the difference between
-    /// the two is the pull the user felt the line refuse, and `V-9` records
-    /// both rather than only the half that moved.
-    pub cells: i16,
-    /// The two panes the line separates, named when the button went down —
-    /// the arrangement has moved by the time the hand lets go, and the row
-    /// should say what the hand was between. `None` when the pair has no name
-    /// a reader would use, which the row says rather than invents.
-    pub divider: Option<String>,
-}
-
 pub struct App<'a> {
     pub focus: FocusArea,
     /// Chat input box (multiline-capable; Enter submits, Alt+Enter/Ctrl+J
@@ -512,55 +474,12 @@ pub struct App<'a> {
     /// keystroke in a test never rewrites the developer's `config.json`.
     pub(crate) persist_config: bool,
     pub show_terminal: bool,
-    /// Last focus that pointed at a body pane (explorer/editor/chat). Zen
-    /// layout uses it as its focus-follows target; overlay focus never
-    /// touches it, so zen doesn't flicker when a popup closes.
-    pub last_body_focus: FocusArea,
     /// The body geometry `draw_body` rendered last frame. The Tab focus-ring
     /// reads it so it can only Tab to panes the user can actually see.
     pub last_layout: crate::layout::BodyLayout,
-    /// A resized tree, when the user resized one. `None` means presets decide;
-    /// `Some` means the tree does, until a preset cycle clears it. Pane state
-    /// lives outside both, so swapping between them loses nothing.
-    pub custom_view: Option<crate::view::ViewState>,
-    /// Which named view `custom_view` is, when it is one (`V-4`). `None`
-    /// means the tree on screen was produced by a resize chord or restored
-    /// without a name — the arrangement is real, it just belongs to no view.
-    /// `Ctrl+U` clears this along with the tree, because cycling layouts is
-    /// leaving the view, not renaming it.
-    pub active_view: Option<String>,
-    /// The arrangement on screen differs from `<config dir>/layout.json`, so
-    /// the frame loop writes it once through `V-6`'s choke point. Set by the
-    /// resize chord and by a layout cycle that clears the tree.
-    pub arrangement_dirty: bool,
-    /// Body area of the last draw, so a resize chord can promote the current
-    /// preset to a tree without guessing dimensions.
+    /// Body area of the last draw, so a mouse click is tested against the
+    /// same rectangles the frame drew.
     pub last_body_area: ratatui::layout::Rect,
-    /// The divider the left button is holding (`V-7`). Set when a press lands
-    /// on one, cleared when the button comes up or the pointer moves without
-    /// it — never by a resize, so a drag that the clamp refuses still ends.
-    pub drag: Option<Drag>,
-    /// The divider under the pointer with no button held, which is what makes
-    /// the line worth looking at before it is grabbed (`V-7`).
-    pub boundary_hover: Option<crate::view::Boundary>,
-    /// Every arrangement change this session, oldest first, each with the ask
-    /// that caused it (`V-9`). Session memory: it answers "why is this pane
-    /// here" about the screen in front of the user, and a list about a screen
-    /// that no longer exists is not worth a file. See
-    /// [`crate::transitions`] for why this is not a fourth thing on disk.
-    pub layout_log: Vec<crate::transitions::Transition>,
-    /// When the session opened, so the log is stamped in elapsed time rather
-    /// than wall-clock time — two runs of the same keystrokes then produce the
-    /// same rows, which a clock would prevent.
-    pub session_opened_at: f64,
-    /// Whether the arrangement on screen came back from last session's file
-    /// (`V-6`). The opening row of the log says so, and the app knows it from
-    /// the restore it performed rather than from guessing off the disk.
-    pub layout_restored: bool,
-    /// The row and the scroll of the layout history panel.
-    pub layout_selected: usize,
-    pub layout_detail: bool,
-    pub layout_scroll: usize,
     /// The worker panel's rows (`OR-12`), rebuilt when it opens and when `r` asks
     /// for it. Each one carries the record, event or file its figures came from,
     /// which is the whole point of the panel: a number on this list can be
@@ -703,10 +622,8 @@ pub struct App<'a> {
     pub event_bus: crate::event_bus::EventBus,
     pub event_rx: tokio::sync::broadcast::Receiver<xencode_agents_rs::protocol::AgentEvent>,
     pub last_permission_denied: Option<String>,
-    pub feature_nav_selected: usize,
 
-    // Performance & health tracking
-    pub session_start_time: f64,
+    // Health tracking
     pub ollama_health_entries: HashMap<String, (String, f64, Option<String>)>,
     pub last_health_check: f64,
     pub health_check_in_progress: bool,
@@ -719,7 +636,6 @@ pub struct App<'a> {
     /// D2 task panel/CLI later).
     pub task_runtime: crate::agent_tools::TaskRuntime,
     pub total_llm_calls: u64,
-    pub average_latency: f64,
 
     // ByteBot state
     pub bytebot_command: String,
@@ -764,62 +680,6 @@ pub struct App<'a> {
     pub toasts: Vec<crate::toast::Toast>,
     pub init_cancel: Arc<AtomicBool>,
 
-    // Collaboration Hub state
-    pub collab_session_active: bool,
-    pub collab_session_id: String,
-    pub collab_members: Vec<(String, String, String)>, // (name, role, connection)
-    pub collab_sync_status: String,                    // "disconnected", "connecting", "connected"
-    pub collab_last_sync: f64,
-    pub collab_activity_log: Vec<String>,
-    pub collab_server_url: String,
-    pub collab_username: String,
-    /// The live client task, if any. Aborted when the hub disconnects.
-    pub collab_worker: Option<tokio::task::JoinHandle<()>>,
-    /// The server's most recent `error` frame, for the hub to surface.
-    pub collab_error: String,
-    /// Hub form mode: while set, typed characters edit `collab_field`.
-    pub collab_editing: bool,
-    pub collab_field: crate::focus::CollabField,
-
-    // Voice Interface state
-    pub voice_active: bool,
-    /// "idle", "listening" or "processing" — nothing else, because nothing
-    /// else happens: there is no text-to-speech in this product (J-07).
-    pub voice_status: String,
-    /// RMS of the last PCM chunk the recorder produced, after the display gain.
-    pub voice_level: f64,
-    pub voice_peak: f64,
-    pub voice_pcm_bytes: usize,
-    /// Speech text from a transcriber, and nothing else.
-    pub voice_transcript: Vec<String>,
-    /// What the session is about: the clip path, or why there is no text.
-    pub voice_note: String,
-    pub voice_clip: Option<std::path::PathBuf>,
-    /// Which recorder answered this session, by file name.
-    pub voice_recorder: String,
-    pub voice_muted: bool,
-    pub voice_busy: bool,
-    /// Set by the app to end the capture loop in the blocking task.
-    pub voice_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Read and written across the capture task so `m` takes effect mid-clip.
-    pub voice_mute_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub voice_root: std::path::PathBuf,
-
-    // Terminal Assistant state
-    /// A suggestion request is with the provider right now.
-    pub term_asst_busy: bool,
-    pub term_asst_query: String,
-    /// The query field owns the keyboard: letters type instead of selecting.
-    pub term_asst_typing: bool,
-    /// (command, risk label, why the model suggested it)
-    pub term_asst_suggestions: Vec<(String, String, String)>,
-    pub term_asst_selected: usize,
-    pub term_asst_output: String,
-    pub term_asst_history: Vec<(String, String, String)>, // (command, risk, outcome)
-    /// "All", "safe" or "destructive" — matches the labels `parse_term_suggestions`
-    /// emits, so the filter can only ever show rows that exist.
-    pub term_risk_filter: String,
-
     // Security Auditor state
     pub sec_scan_active: bool,
     pub sec_scan_path: String,
@@ -829,18 +689,6 @@ pub struct App<'a> {
     pub sec_scan_log: Vec<String>,
     pub sec_filter_severity: String, // "All", "Critical", "High", "Medium", "Low"
     pub sec_sort_mode: String,       // "severity" or "category"
-
-    // Performance Profiler state. Everything here is measured, not simulated:
-    /// `None` means the number does not exist yet (no turn has run, `/proc`
-    /// unreadable), which the panel renders as `n/a` rather than as zero.
-    pub profiler_active: bool,
-    pub profiler_running: bool,
-    pub profiler_rows: Vec<(String, String, String)>, // (source, metric, value)
-    pub profiler_notes: Vec<String>,
-    pub profiler_gauge_cpu: Option<f64>, // % of one core, this process
-    pub profiler_gauge_mem: Option<f64>, // resident set size, MB
-    pub profiler_gauge_mem_total: Option<f64>, // system memory, MB (bar scale)
-    pub profiler_gauge_latency: Option<f64>, // average turn latency, ms
 
     // Custom Models state
     /// The profiles as the panel holds them: read from `config.json` at
@@ -856,42 +704,6 @@ pub struct App<'a> {
     pub models_status: String,
     /// A test request is with the provider right now.
     pub models_busy: bool,
-
-    // Learning Mode state: lessons are files the project index says exist, so
-    // the queue, the source on screen and the answer key all come from outside
-    // this panel. See `start_learning`.
-    pub learn_active: bool,
-    /// The workspace the queue was built from, so `p`/`n` cannot drift onto a
-    /// different checkout mid-session.
-    pub learn_root: std::path::PathBuf,
-    /// The queue: `(repo-relative path, what it declares)`, from `.xencode`.
-    pub learn_lessons: Vec<(String, Vec<String>)>,
-    /// Index into `learn_lessons` for the lesson on screen.
-    pub learn_current_lesson: usize,
-    pub learn_total_lessons: usize,
-    /// The file this lesson is about — a path, not a invented title.
-    pub learn_lesson_title: String,
-    /// Facts read off the index: what the file declares, and what was sent.
-    pub learn_content: Vec<String>,
-    /// The file's own text, capped, and what the model was given.
-    pub learn_code_example: String,
-    /// The panel's own report: a refusal, a provider error, the model's why.
-    pub learn_status: String,
-    /// An explanation request is with the provider right now.
-    pub learn_busy: bool,
-    pub learn_quiz_active: bool,
-    pub learn_quiz_question: String,
-    pub learn_quiz_options: Vec<String>,
-    pub learn_quiz_selected: usize,
-    pub learn_quiz_answered: bool,
-    pub learn_quiz_correct: bool,
-    /// Which option the model called correct. `None` until it says so.
-    pub learn_quiz_answer: Option<usize>,
-    /// The model's own sentences about this file, kept apart from the facts the
-    /// index produced so the panel can say which is which.
-    pub learn_explain: Vec<String>,
-    /// The model's reason for its answer key, shown once graded.
-    pub learn_quiz_why: String,
 
     // Multi-Language state
     /// A walk or a translation request is in flight; the panel does one thing
@@ -1577,160 +1389,6 @@ async fn run_security_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
     ));
 }
 
-fn format_uptime(secs: f64) -> String {
-    let s = secs.max(0.0) as u64;
-    match (s / 3600, (s % 3600) / 60) {
-        (h, m) if h > 0 => format!("{}h {}m", h, m),
-        (0, m) if m > 0 => format!("{}m {}s", m, s % 60),
-        _ => format!("{}s", s),
-    }
-}
-
-/// Jiffies in `/proc/self/stat` are clock ticks; 100/s is the kernel's fixed
-/// USER_HZ for that file, so it is a divisor, not a guess about this machine.
-const CLOCK_TICKS_PER_SEC: f64 = 100.0;
-
-/// Read `utime + stime` (field 14 + 15) for this process, in seconds. The
-/// command name (field 2) can contain spaces and parentheses, so the fields
-/// are taken after the closing paren rather than by naive splitting.
-fn process_cpu_secs() -> Option<f64> {
-    let text = std::fs::read_to_string("/proc/self/stat").ok()?;
-    let tail = text.rsplit_once(')')?.1;
-    let mut fields = tail.split_whitespace();
-    // tail starts at field 3 (state); utime is field 14 → 12th token, stime 13th.
-    let utime: f64 = fields.nth(11)?.parse().ok()?;
-    let stime: f64 = fields.next()?.parse().ok()?;
-    Some((utime + stime) / CLOCK_TICKS_PER_SEC)
-}
-
-/// Resident set of this process in MB (`/proc/self/statm` field 2, in 4 KiB
-/// pages) and total system memory in MB from `/proc/meminfo`.
-fn process_memory_mb() -> (Option<f64>, Option<f64>) {
-    let rss = std::fs::read_to_string("/proc/self/statm")
-        .ok()
-        .and_then(|text| {
-            text.split_whitespace()
-                .nth(1)?
-                .parse::<f64>()
-                .ok()
-                .map(|pages| pages * 4096.0 / 1048576.0)
-        });
-    let total = std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|text| {
-            text.lines()
-                .find(|l| l.starts_with("MemTotal:"))?
-                .split_whitespace()
-                .nth(1)?
-                .parse::<f64>()
-                .ok()
-                .map(|kib| kib / 1024.0)
-        });
-    (rss, total)
-}
-
-/// Sample this process and the persisted per-request metrics, streaming the
-/// same `[PROFILER]` protocol the panel already speaks. CPU is a rate, so it
-/// needs two reads of `/proc` with a real interval between them.
-async fn run_profiler(xencode: std::path::PathBuf, tx: mpsc::UnboundedSender<String>) {
-    let sampled = tokio::task::spawn_blocking(move || {
-        let before = process_cpu_secs();
-        std::thread::sleep(std::time::Duration::from_millis(PROFILER_SAMPLE_MS));
-        let after = process_cpu_secs();
-        let cpu = match (before, after) {
-            (Some(b), Some(a)) if b <= a => {
-                Some((a - b) / (PROFILER_SAMPLE_MS as f64 / 1000.0) * 100.0)
-            }
-            _ => None,
-        };
-        let (rss, total) = process_memory_mb();
-        // The rollup sidecar carries the totals; only the handful of lines the
-        // panel prints are read from the file itself.
-        let rollup = xencode_context_rs::refresh_rollup(&xencode).ok();
-        let tail = xencode_context_rs::read_metrics_tail(&xencode, PROFILER_METRIC_ROWS);
-        (cpu, rss, total, rollup, tail)
-    })
-    .await;
-
-    let (cpu, rss, total, rollup, tail) = match sampled {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = tx.send(format!("[PROFILER]failed:sample thread died: {}", e));
-            return;
-        }
-    };
-
-    match cpu {
-        Some(v) => {
-            let _ = tx.send(format!("[PROFILER]gauge:cpu|{:.1}", v));
-            let _ = tx.send(format!(
-                "[PROFILER]row:process|cpu over {} ms|{:.1}%",
-                PROFILER_SAMPLE_MS, v
-            ));
-        }
-        None => {
-            let _ = tx.send(
-                "[PROFILER]note:cpu unavailable — /proc/self/stat could not be read".to_string(),
-            );
-        }
-    }
-    match rss {
-        Some(v) => {
-            let _ = tx.send(format!("[PROFILER]gauge:mem|{:.1}", v));
-            if let Some(t) = total {
-                let _ = tx.send(format!("[PROFILER]gauge:memtotal|{:.0}", t));
-            }
-            let _ = tx.send(format!(
-                "[PROFILER]row:process|resident set|{:.1} MB{}",
-                v,
-                match total {
-                    Some(t) => format!(" of {:.0} MB", t),
-                    None => String::new(),
-                }
-            ));
-        }
-        None => {
-            let _ = tx.send(
-                "[PROFILER]note:memory unavailable — /proc/self/statm could not be read"
-                    .to_string(),
-            );
-        }
-    }
-
-    let recorded = rollup.as_ref().map(|r| r.rows).unwrap_or(tail.len() as u64);
-    if recorded == 0 {
-        let _ = tx
-            .send("[PROFILER]note:no metrics.jsonl yet — a llama.cpp turn records one".to_string());
-    } else {
-        let _ = tx.send(format!("[PROFILER]row:metrics|recorded turns|{}", recorded));
-        if let Some(kv) = rollup.as_ref().and_then(|r| r.kv_reuse_ratio()) {
-            let _ = tx.send(format!(
-                "[PROFILER]row:metrics|KV cache reuse|{}% of {} prompt tokens",
-                (kv * 100.0) as u64,
-                rollup.as_ref().map(|r| r.totals.prompt_tokens).unwrap_or(0)
-            ));
-        }
-        if let Some(speed) = rollup.as_ref().and_then(|r| r.generation_percentiles()) {
-            let _ = tx.send(format!(
-                "[PROFILER]row:metrics|generation speed|p50 {:.1} · p95 {:.1} tok/s over {} turns",
-                speed.p50, speed.p95, speed.samples
-            ));
-        }
-        for r in tail.iter().rev() {
-            let _ = tx.send(format!(
-                "[PROFILER]row:{}|turn {}|{}% kv · {} prompt · {:.0} tok/s · {} files",
-                r.profile,
-                format_row_time(r.ts_unix_ms),
-                (r.kv_reuse_ratio() * 100.0) as u64,
-                r.prompt_tokens,
-                r.generation_tok_s,
-                r.retrieved_files
-            ));
-        }
-    }
-    let _ = tx.send("[PROFILER]done".to_string());
-}
-
 /// Walk the workspace and send a row per language the walker actually saw:
 /// files, lines, and the share of the project's lines that language holds.
 /// Nothing is estimated here — a file the walk refused to read counts as a file
@@ -1815,274 +1473,9 @@ async fn run_language_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
     let _ = tx.send("[LANG]done".to_string());
 }
 
-/// One capture session, start to finish, on a blocking thread: read the
-/// recorder, report a level per chunk, save the WAV, then transcribe it only if
-/// an engine is installed. Every token it sends describes something that
-/// happened; the failure paths are the interesting ones.
-fn run_voice_capture(
-    recorder: &std::path::Path,
-    args: &[std::ffi::OsString],
-    clip_dir: &std::path::Path,
-    stop: &std::sync::atomic::AtomicBool,
-    muted: &std::sync::atomic::AtomicBool,
-    tx: &mpsc::UnboundedSender<String>,
-) -> std::io::Result<()> {
-    let cap = crate::voice::capture(recorder, args, stop, muted, |level, bytes| {
-        let _ = tx.send(format!("[VOICE]level:{level:.4}|{bytes}"));
-    });
-
-    if let Some(err) = &cap.error {
-        let _ = tx.send(format!("[VOICE]err:{err}"));
-        return Ok(());
-    }
-    if cap.pcm.is_empty() {
-        let _ = tx.send(
-            "[VOICE]note:The recorder sent no audio. Check the input device, or unmute with m."
-                .to_string(),
-        );
-        return Ok(());
-    }
-
-    let ms = cap.ms();
-    let name = format!(
-        "clip-{}.wav",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    );
-    let clip = clip_dir.join(&name);
-    std::fs::write(
-        &clip,
-        crate::voice::wav_bytes(&cap.pcm, crate::voice::SAMPLE_RATE),
-    )?;
-    let _ = tx.send(format!(
-        "[VOICE]peak:{:.4}",
-        cap.levels.iter().cloned().fold(0.0f64, f64::max)
-    ));
-    let _ = tx.send(format!("[VOICE]clip:{}|{ms}", clip.display()));
-
-    match crate::voice::find_transcriber() {
-        Some(bin) => {
-            let _ = tx.send("[VOICE]status:processing".to_string());
-            match crate::voice::transcribe(&bin, &clip) {
-                Ok(text) => {
-                    let _ = tx.send(format!(
-                        "[VOICE]transcript:{}",
-                        crate::agent_tools::truncate_one_line(&text, 500)
-                    ));
-                }
-                Err(e) => {
-                    let _ = tx.send(format!("[VOICE]err:{e}"));
-                }
-            }
-        }
-        None => {
-            let _ = tx.send(format!(
-                "[VOICE]note:{}",
-                crate::voice::missing_transcriber_note(&clip)
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// `level:<rms>|<bytes>` from the capture thread. `None` on anything else, so a
-/// malformed reading cannot zero the meter.
-fn parse_voice_level(body: &str) -> Option<(f64, usize)> {
-    let (level, bytes) = body.split_once('|')?;
-    Some((level.parse().ok()?, bytes.parse().ok()?))
-}
-
 /// The token budgets `←`/`→` step a custom-model profile through. A ladder
 /// rather than free-form entry because these are the numbers worth sending.
 const MODEL_TOKEN_STEPS: [u32; 8] = [64, 128, 256, 512, 1024, 2048, 4096, 8192];
-/// Lessons the Learning panel queues from the project index, and how much of a
-/// file it puts on screen and into the prompt. Both caps exist because the
-/// panel is a popup, not a pager.
-const LEARN_LESSON_CAP: usize = 5;
-const LEARN_SOURCE_CAP: usize = 4_000;
-
-/// What the model sent back for one lesson. `answer` is the model's own key,
-/// which is the only reason the panel can call anything correct.
-struct LearnedLesson {
-    explain: Vec<String>,
-    question: String,
-    options: Vec<String>,
-    answer: usize,
-    why: String,
-}
-
-/// The lesson queue: files `.xencode/index/symbols.json` says declare
-/// something, most declarations first and ties by path so the order is the same
-/// every run. `Err` carries the reason there is nothing to teach from, which is
-/// what the panel shows instead of a lesson.
-fn learning_lessons(root: &std::path::Path) -> Result<Vec<(String, Vec<String>)>, String> {
-    let xencode = root.join(".xencode");
-    if !xencode_context_rs::file_index_path(&xencode).is_file() {
-        return Err("No project index — run /init first, then Enter again.".to_string());
-    }
-    let symbols: std::collections::BTreeMap<String, xencode_context_rs::PerFileSymbols> =
-        xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
-            .unwrap_or_default();
-    let mut lessons: Vec<(String, Vec<String>)> = symbols
-        .iter()
-        .filter_map(|(path, syms)| {
-            let mut declared: Vec<String> = syms
-                .structs
-                .iter()
-                .map(|name| format!("struct {name}"))
-                .collect();
-            declared.extend(syms.enums.iter().map(|name| format!("enum {name}")));
-            declared.extend(syms.traits.iter().map(|name| format!("trait {name}")));
-            declared.extend(syms.types.iter().map(|name| format!("type {name}")));
-            declared.extend(syms.functions.iter().map(|name| format!("fn {name}")));
-            (!declared.is_empty()).then(|| (path.clone(), declared))
-        })
-        .collect();
-    lessons.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
-    lessons.truncate(LEARN_LESSON_CAP);
-    if lessons.is_empty() {
-        return Err(
-            "The index lists no file that declares a type or function — nothing real to teach."
-                .to_string(),
-        );
-    }
-    Ok(lessons)
-}
-
-/// Cut `text` to at most `max` bytes, at a line boundary.
-fn cap_at_line(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_string();
-    }
-    let window = &text[..max];
-    match window.rfind('\n') {
-        Some(keep) => text[..keep].to_string(),
-        None => window.to_string(),
-    }
-}
-
-/// Read the model's lesson out of its reply. Fences and surrounding prose are
-/// tolerated; a reply that carries no complete quiz — fewer than two options,
-/// an answer index past the end, no explanation — is `None`, so the panel can
-/// report it instead of guessing.
-fn parse_lesson_quiz(text: &str) -> Option<LearnedLesson> {
-    let cleaned = text.replace("```json", "").replace("```", "");
-    let start = cleaned.find('{')?;
-    let end = cleaned.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    let value: serde_json::Value = serde_json::from_str(&cleaned[start..=end]).ok()?;
-    let strings = |key: &str| -> Vec<String> {
-        let Some(items) = value[key].as_array() else {
-            return Vec::new();
-        };
-        items
-            .iter()
-            .map(|item| match item {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            })
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
-    let explain = strings("explain");
-    let options = strings("options");
-    let question = value["question"].as_str().unwrap_or_default().trim();
-    // Weak models quote the index; accept "1" as readily as 1.
-    let answer = value["answer"].as_u64().or_else(|| {
-        value["answer"]
-            .as_str()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-    })? as usize;
-    if question.is_empty()
-        || explain.is_empty()
-        || options.len() < 2
-        || options.len() > 4
-        || answer >= options.len()
-    {
-        return None;
-    }
-    Some(LearnedLesson {
-        explain,
-        question: question.to_string(),
-        options,
-        answer,
-        why: value["why"].as_str().unwrap_or_default().trim().to_string(),
-    })
-}
-
-/// Commands the terminal panel will offer at once. More than a screenful is
-/// noise, so this is both what the model is asked for and what it gets.
-const TERM_SUGGESTION_CAP: usize = 8;
-
-/// Commands the panel will never label safe, whatever the model claimed. The
-/// model's risk label is a hint; this list can only raise the warning, never
-/// lower one.
-const DESTRUCTIVE_PATTERNS: &[&str] = &[
-    "rm -rf",
-    "rm -fr",
-    "sudo ",
-    "mkfs",
-    "dd if=",
-    "> /dev/sd",
-    "chmod -R",
-    "chown -R",
-    "--force",
-    "docker system prune",
-    "DROP TABLE",
-    "shutdown",
-    "reboot",
-    "killall",
-];
-
-/// Parse the model's reply into commands. Fences, prose and a bare object
-/// (instead of an array) are all tolerated; a reply with no commands in it
-/// yields an empty list, which the panel reports rather than papers over.
-fn parse_term_suggestions(text: &str) -> Vec<(String, String, String)> {
-    let cleaned = text.replace("```json", "").replace("```", "");
-    let parsed: Option<serde_json::Value> = match (cleaned.find('['), cleaned.rfind(']')) {
-        (Some(start), Some(end)) if end > start => serde_json::from_str(&cleaned[start..=end]).ok(),
-        _ => None,
-    };
-    let values = match parsed {
-        Some(serde_json::Value::Array(values)) => values,
-        Some(object @ serde_json::Value::Object(_)) => vec![object],
-        _ => return Vec::new(),
-    };
-    let mut out = Vec::new();
-    for value in values {
-        let command = value["command"].as_str().unwrap_or_default().trim();
-        if command.is_empty() {
-            continue;
-        }
-        let claimed = value["risk"]
-            .as_str()
-            .unwrap_or("safe")
-            .to_ascii_lowercase();
-        let destructive = claimed.contains("destruct")
-            || claimed.contains("danger")
-            || DESTRUCTIVE_PATTERNS.iter().any(|p| command.contains(p));
-        let why = value["why"]
-            .as_str()
-            .or_else(|| value["explanation"].as_str())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        out.push((
-            command.to_string(),
-            if destructive { "destructive" } else { "safe" }.to_string(),
-            why,
-        ));
-        if out.len() == TERM_SUGGESTION_CAP {
-            break;
-        }
-    }
-    out
-}
 
 /// Metrics rows are stamped in epoch millis; rendered as UTC wall time without
 /// pulling in a date library. A row that never got a timestamp says so rather
@@ -2102,7 +1495,7 @@ fn format_row_time(ts_unix_ms: u64) -> String {
 
 /// One non-streaming provider request, built from the session config: the same
 /// clients, keys and llama.cpp options a chat turn uses. A panel that needs a
-/// single answer (terminal assistant, translation) asks through this instead of
+/// single answer (translation, a custom-model test) asks through this instead of
 /// carrying its own copy of the plumbing.
 #[derive(Clone)]
 struct SingleShot {
@@ -2304,23 +1697,11 @@ impl<'a> App<'a> {
     pub fn set_disclosure_level(&mut self, level: crate::focus::DisclosureLevel) {
         self.config.disclosure_level = level.rank();
         self.save_config();
-        let max_idx = self.palette_items().len().saturating_sub(1);
-        if self.feature_nav_selected > max_idx {
-            self.feature_nav_selected = max_idx;
-        }
     }
 
-    /// Palette / feature navigator items filtered by active disclosure level (AE-5).
+    /// Destinations filtered by active disclosure level (AE-5).
     pub fn palette_items(&self) -> Vec<(&'static str, &'static str, FocusArea)> {
         crate::focus::feature_items_for_level(self.active_disclosure_level())
-    }
-
-    /// FocusArea for the currently highlighted palette row (AE-5).
-    pub fn selected_palette_area(&self) -> Option<FocusArea> {
-        let items = self.palette_items();
-        items
-            .get(self.feature_nav_selected)
-            .map(|(_, _, area)| *area)
     }
 
     /// Switch focus to a destination by name, label, or slash command (AE-5).
@@ -2384,10 +1765,7 @@ impl<'a> App<'a> {
             || self.is_reviewing
             || self.health_check_in_progress
             || self.bytebot_running
-            || self.voice_busy
-            || self.collab_sync_status == "connecting"
             || self.sec_scan_active
-            || self.profiler_running
     }
 
     pub fn new() -> Self {
@@ -2485,34 +1863,6 @@ impl<'a> App<'a> {
         }
         app.load_plugins();
         app.load_skills();
-        // V-6: the window arrangement comes back with the app. A file this
-        // build cannot read is said out loud — a toast on the first frame —
-        // rather than silently leaving the user on the preset they did not
-        // ask for.
-        let restored = match crate::arrangement::load_into(&mut app) {
-            crate::arrangement::Restored::Skipped(why) => {
-                app.push_toast(crate::toast::ToastKind::Warning, why);
-                false
-            }
-            crate::arrangement::Restored::Stale => {
-                app.push_toast(
-                    crate::toast::ToastKind::Info,
-                    format!(
-                        "saved layout dropped: {} is not the configured layout",
-                        crate::arrangement::ARRANGEMENT_FILE
-                    ),
-                );
-                false
-            }
-            crate::arrangement::Restored::Applied => true,
-            crate::arrangement::Restored::Nothing => false,
-        };
-        // V-9: the list of changes will start with the arrangement the session
-        // found, so "why is this pane here" has an answer that predates the
-        // user's own keystrokes — a restored tree says so, and a configured
-        // preset says that instead. The row itself waits for the first frame,
-        // which is the first moment the screen has a size to describe.
-        app.layout_restored = restored;
         // DF-6: the same treatment for the settings file. The session is not
         // refused — defaults are a usable session, and a broken file is one the
         // person may want to open the interface to go and fix — but saying
@@ -2530,281 +1880,56 @@ impl<'a> App<'a> {
         app
     }
 
-    /// The body tree for one frame: the resized arrangement when the user has
-    /// one, otherwise the configured layout — a preset through its proven
-    /// builder, a template declared in config through the data constructor, and
-    /// classic for a name that is neither. One branch point, so draw, hit-test
-    /// and the Tab ring cannot disagree about what is on screen.
-    pub fn body_tree(&self, area: ratatui::layout::Rect) -> crate::view::LayoutNode {
-        match &self.custom_view {
-            Some(view) => view.root.clone(),
-            None => crate::templates::tree(
-                &self.config.layout_templates,
-                &self.config.layout,
-                area,
-                self.show_terminal,
-                self.last_body_focus,
-            ),
+    /// The Files view body for one frame (TD-5): the file tree on the left at 30%
+    /// and the editor on the right, with the terminal strip under the editor
+    /// while `Ctrl+T` has it on. One fixed tree, so draw, hit-test and the Tab
+    /// ring cannot disagree about what is on screen. A body too short for the
+    /// strip drops it in `view::render`, and the editor keeps those rows.
+    pub fn body_tree(&self) -> crate::view::LayoutNode {
+        use crate::view::{leaf, BodySlot, LayoutNode};
+        use ratatui::layout::Constraint;
+        let editor = leaf(BodySlot::Editor, FocusArea::CodeEditor);
+        let right = if self.show_terminal {
+            LayoutNode::Split {
+                horizontal: false,
+                parts: vec![
+                    (editor, Constraint::Min(6)),
+                    (
+                        leaf(BodySlot::Terminal, FocusArea::CodeEditor),
+                        Constraint::Length(8),
+                    ),
+                ],
+            }
+        } else {
+            editor
+        };
+        LayoutNode::Split {
+            horizontal: true,
+            parts: vec![
+                (
+                    leaf(BodySlot::Explorer, FocusArea::FileExplorer),
+                    Constraint::Percentage(30),
+                ),
+                (right, Constraint::Percentage(70)),
+            ],
         }
     }
 
     /// Body geometry for one frame, folded from [`App::body_tree`] so the many
     /// callers that want named rectangles keep working.
     pub fn body_layout(&self, area: ratatui::layout::Rect) -> crate::layout::BodyLayout {
-        crate::view::to_body_layout(&crate::view::render(&self.body_tree(area), area))
+        crate::view::to_body_layout(&crate::view::render(&self.body_tree(), area))
     }
 
-    /// Which body pane owns one mouse cell. The tree answers, and it answers by
-    /// point rather than by column: a template may stack a pane above another,
-    /// where a column alone cannot tell them apart. Cells that land on no pane
-    /// (the input strip, the terminal) fall to the column rule, which is what
-    /// the shipped presets have always done.
+    /// Which body pane owns one mouse cell. The tree answers by point; a cell
+    /// that lands on no pane (the terminal strip) falls to the column rule.
     pub fn body_hit_test(
         &self,
         area: ratatui::layout::Rect,
         row: u16,
         column: u16,
     ) -> Option<crate::focus::FocusArea> {
-        crate::view::hit_test_tree_point(&self.body_tree(area), area, row, column)
-    }
-
-    /// Put a resizable tree on screen without moving a pixel (`V-3`, and the
-    /// same promotion a boundary drag needs before it can resize anything).
-    ///
-    /// A preset or a config template is replayed through the tree builder at
-    /// the geometry the frame last drew, so the first resize only takes over
-    /// future geometry. An arrangement that is already a tree is left alone.
-    pub(crate) fn promote_layout_tree(&mut self) {
-        if self.custom_view.is_some() {
-            return;
-        }
-        let tree = crate::templates::tree(
-            &self.config.layout_templates,
-            &self.config.layout,
-            self.last_body_area,
-            self.show_terminal,
-            self.last_body_focus,
-        );
-        self.custom_view = Some(crate::view::ViewState::new(tree));
-    }
-
-    /// Take the divider under (`row`, `column`), and say whether that cell is
-    /// one at all (`V-7`).
-    ///
-    /// A grab is deliberately not a click-to-focus: the two cells of a divider
-    /// are border, not content, and neither pane beside the line is what a hand
-    /// aimed at it was pointing at.
-    pub(crate) fn grab_boundary(&mut self, row: u16, column: u16) -> bool {
-        let area = self.last_body_area;
-        let tree = self.body_tree(area);
-        let Some(boundary) = crate::view::boundary_at(&tree, area, row, column) else {
-            return false;
-        };
-        // Named now, at the press, because the panes either side of the line
-        // are what the hand is between at that moment — by the release the
-        // arrangement has moved (`V-9`).
-        let divider = crate::view::divider_pair(&tree, &boundary, area);
-        self.boundary_hover = Some(boundary.clone());
-        self.drag = Some(Drag {
-            boundary,
-            anchor: column as i16,
-            paid: 0,
-            cells: 0,
-            divider,
-        });
-        true
-    }
-
-    /// Follow the pointer to `column` with the grabbed divider, and report
-    /// whether the layout moved (`V-7`).
-    ///
-    /// Nothing is committed until the hand has left the divider's own two
-    /// cells, which is what keeps a press that juddered from resizing the
-    /// window. After that, travel counts from where the button went down, so a
-    /// column too thin for a whole percentage point carries into the next.
-    pub(crate) fn drag_to(&mut self, column: u16) -> bool {
-        let Some(grab) = self.drag.clone() else {
-            return false;
-        };
-        let total = column as i16 - grab.anchor;
-        if total.abs() < crate::view::DRAG_THRESHOLD_CELLS {
-            return false;
-        }
-        // The furthest the hand has gone, kept whether or not this event moved
-        // anything: a divider pinned at its minimum travels under a pointer
-        // that is still moving, and `V-9` reports both numbers because the gap
-        // between them is what the user felt.
-        if let Some(drag) = self.drag.as_mut() {
-            drag.cells = total;
-        }
-        self.promote_layout_tree();
-        let area = self.last_body_area;
-        let Some(view) = self.custom_view.as_ref() else {
-            return false;
-        };
-        let step = crate::view::drag_points(&view.root, &grab.boundary, total, area) - grab.paid;
-        let Some(view) = self.custom_view.as_mut() else {
-            return false;
-        };
-        let moved = crate::view::move_boundary(&mut view.root, &grab.boundary, step);
-        if moved == 0 {
-            return false;
-        }
-        if let Some(drag) = self.drag.as_mut() {
-            drag.paid += moved;
-        }
-        self.arrangement_dirty = true;
-        true
-    }
-
-    /// Let go of a divider, and say whether there was one to let go of.
-    ///
-    /// The arrangement is not written here: the caller saves on release,
-    /// because that is the last event of a drag and the only sane moment to
-    /// spend a disk write on one.
-    pub(crate) fn release_drag(&mut self) -> bool {
-        self.end_drag()
-    }
-
-    /// End the held divider, by whatever route, and write down what it did
-    /// (`V-9`).
-    ///
-    /// Both endings come through here: the release the terminal reported, and
-    /// the motion with no button held that stands in for one when an emulator
-    /// never sent the release (`V-7`). Either way a change that happened and
-    /// was not recorded is the one failure a list of changes exists to avoid.
-    /// A drag the clamps refused outright wrote nothing down, because it
-    /// changed nothing.
-    pub(crate) fn end_drag(&mut self) -> bool {
-        let Some(grab) = self.drag.take() else {
-            return false;
-        };
-        if grab.paid != 0 {
-            self.note_layout_change(crate::transitions::Trigger::DividerDrag {
-                divider: grab.divider,
-                cells: grab.cells,
-                points: grab.paid,
-            });
-        }
-        true
-    }
-
-    /// Move the hover marker to the divider under the pointer, if any (`V-7`).
-    ///
-    /// Motion with no button held also ends a drag: a release the emulator
-    /// never reported would otherwise leave a line highlighted on a screen
-    /// nobody is holding.
-    pub(crate) fn hover_boundary(&mut self, row: u16, column: u16) {
-        self.end_drag();
-        let area = self.last_body_area;
-        let tree = self.body_tree(area);
-        self.boundary_hover = crate::view::boundary_at(&tree, area, row, column);
-    }
-
-    /// The divider to draw as grabbable — the one being dragged, else the one
-    /// under the pointer — and whether a hand is on it (`V-7`).
-    pub(crate) fn active_boundary(&self) -> Option<(&crate::view::Boundary, bool)> {
-        match (&self.drag, &self.boundary_hover) {
-            (Some(drag), _) => Some((&drag.boundary, true)),
-            (None, Some(hover)) => Some((hover, false)),
-            (None, None) => None,
-        }
-    }
-
-    /// The arrangement on screen, in one line — what [`crate::transitions`]
-    /// records as the result of an ask, and the answer to "why is this pane
-    /// here".
-    ///
-    /// Name, then every pane the tree actually shows with the box it was drawn
-    /// into, then the focused one. The tree is the one the frame draws, read at
-    /// the last body area, so a terminal strip the screen is too short to hold
-    /// is missing from the line for the same reason it is missing from the
-    /// screen: one geometry, the `E4-02` rule, read here rather than described
-    /// separately. The sizes are in it because the line is what the detail view
-    /// shows a change against. The focused pane is the body's (`last_body_focus`),
-    /// not `focus`: opening this very panel moves `focus` to the overlay, and an
-    /// inspection that changed what it inspects would be a joke. An overlay open
-    /// on top of the body is otherwise not in the line either — it is not the
-    /// arrangement, and it leaves when it is closed.
-    pub fn arrangement_line(&self) -> String {
-        let area = self.last_body_area;
-        let tree = self.body_tree(area);
-        let panes: Vec<String> = crate::view::render(&tree, area)
-            .iter()
-            .map(|(pane, rect)| format!("{} {}x{}", pane.slot.word(), rect.width, rect.height))
-            .collect();
-        let name = self
-            .active_view
-            .clone()
-            .unwrap_or_else(|| self.config.layout.clone());
-        format!(
-            "{name} · {} → {}",
-            panes.join(", "),
-            self.last_body_focus.display_name()
-        )
-    }
-
-    /// The same arrangement in a form for comparing rather than reading
-    /// (`V-9`): the name, the tree's own encoding, the focused pane. See
-    /// [`crate::transitions::Transition::signature`] for why the drawn boxes
-    /// are the wrong thing to compare.
-    pub fn arrangement_signature(&self) -> String {
-        let tree = self.body_tree(self.last_body_area);
-        let name = self
-            .active_view
-            .clone()
-            .unwrap_or_else(|| self.config.layout.clone());
-        format!(
-            "{name} {} → {}",
-            serde_json::to_string(&tree).unwrap_or_default(),
-            self.last_body_focus.display_name()
-        )
-    }
-
-    /// Write down that the arrangement changed and what asked for it (`V-9`).
-    ///
-    /// Every layout mutation calls this after it has finished, so the row
-    /// describes the screen as it now is rather than the intention that
-    /// preceded it. A change that left the arrangement exactly as the previous
-    /// row described it is dropped: a resize the clamps refused, or a strip the
-    /// window is too short to hold, is not a thing that happened to the
-    /// arrangement, and a list full of those would hide the ones that were.
-    pub fn note_layout_change(&mut self, trigger: crate::transitions::Trigger) {
-        let after = self.arrangement_line();
-        let signature = self.arrangement_signature();
-        let previous = self
-            .layout_log
-            .last()
-            .map(|row| (row.after.clone(), row.signature.clone()));
-        crate::transitions::record(
-            &mut self.layout_log,
-            crate::transitions::Transition {
-                at: current_timestamp() - self.session_opened_at,
-                trigger,
-                before: match &previous {
-                    Some((line, _)) => line.clone(),
-                    None => after.clone(),
-                },
-                after,
-                signature,
-            },
-            previous.as_ref().map(|(_, key)| key.as_str()),
-        );
-    }
-
-    /// The log's opening row: the arrangement the session found (`V-9`).
-    ///
-    /// Written by the first frame, because that is the first moment the body
-    /// has a size to describe — a first row recorded at construction would say
-    /// the screen held no panes in no space, which is the one row in the list a
-    /// reader most wants to be true. Once only: the log is appended to and
-    /// never emptied, so an empty list means nothing has been drawn yet.
-    pub fn note_session_opened(&mut self) {
-        if !self.layout_log.is_empty() {
-            return;
-        }
-        let restored = self.layout_restored;
-        self.note_layout_change(crate::transitions::Trigger::SessionOpened { restored });
+        crate::view::hit_test_tree_point(&self.body_tree(), area, row, column)
     }
 
     /// How a `/spawn` run is identified to the projections. It is xencode's own
@@ -3033,11 +2158,6 @@ impl<'a> App<'a> {
             std::path::PathBuf::new(),
         );
         app.persist_config = false;
-        // The opening row of the layout log is deliberately not written here:
-        // a real session writes it on its first frame, once the body has a
-        // size. A test that wants it gives the app a body area and calls
-        // [`App::note_session_opened`], which is the same order events happen
-        // in on a real terminal.
         app
     }
 
@@ -3162,8 +2282,6 @@ impl<'a> App<'a> {
             ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
         );
 
-        let now = current_timestamp();
-
         let mut app = Self {
             focus: FocusArea::ChatInput,
             chat_input: TextArea::default(),
@@ -3219,20 +2337,8 @@ impl<'a> App<'a> {
             secret_problems: std::sync::Mutex::new(Vec::new()),
             config,
             show_terminal: false,
-            last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
-            custom_view: None,
-            active_view: None,
-            arrangement_dirty: false,
             last_body_area: ratatui::layout::Rect::default(),
-            drag: None,
-            boundary_hover: None,
-            layout_log: Vec::new(),
-            session_opened_at: now,
-            layout_restored: false,
-            layout_selected: 0,
-            layout_detail: false,
-            layout_scroll: 0,
             workers_rows: Vec::new(),
             // Never what the panel shows: opening it reads the config and
             // replaces this (`refresh_worker_panel`), and a panel with no rows
@@ -3293,13 +2399,10 @@ impl<'a> App<'a> {
             event_bus,
             event_rx,
             last_permission_denied: None,
-            feature_nav_selected: 0,
-            session_start_time: now,
             ollama_health_entries: HashMap::new(),
             last_health_check: 0.0,
             health_check_in_progress: false,
             total_llm_calls: 0,
-            average_latency: 0.0,
             bytebot_command: String::new(),
             bytebot_cursor: 0,
             bytebot_steps: Vec::new(),
@@ -3325,45 +2428,6 @@ impl<'a> App<'a> {
             help_scroll: 0,
             toasts: Vec::new(),
             init_cancel: Arc::new(AtomicBool::new(false)),
-            collab_session_active: false,
-            collab_session_id: String::new(),
-            collab_members: Vec::new(),
-            collab_sync_status: "disconnected".to_string(),
-            collab_last_sync: 0.0,
-            collab_activity_log: Vec::new(),
-            collab_server_url: "http://127.0.0.1:8765".to_string(),
-            collab_username: std::env::var("USER").unwrap_or_else(|_| "you".to_string()),
-            collab_worker: None,
-            collab_error: String::new(),
-            collab_editing: false,
-            collab_field: crate::focus::CollabField::Server,
-
-            voice_active: false,
-            voice_status: "idle".to_string(),
-            voice_level: 0.0,
-            voice_peak: 0.0,
-            voice_pcm_bytes: 0,
-            voice_transcript: Vec::new(),
-            voice_note: String::new(),
-            voice_clip: None,
-            voice_recorder: String::new(),
-            voice_muted: false,
-            voice_busy: false,
-            voice_stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            voice_mute_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            voice_root: std::path::PathBuf::new(),
-
-            term_asst_busy: false,
-            term_asst_query: String::new(),
-            // The panel opens ready to be typed into: it has nothing to show
-            // until a query is asked.
-            term_asst_typing: true,
-            term_asst_suggestions: Vec::new(),
-            term_asst_selected: 0,
-            term_asst_output: String::new(),
-            term_asst_history: Vec::new(),
-            term_risk_filter: "All".to_string(),
-
             sec_scan_active: false,
             sec_scan_path: String::new(),
             sec_scan_results: Vec::new(),
@@ -3373,40 +2437,11 @@ impl<'a> App<'a> {
             sec_filter_severity: "All".to_string(),
             sec_sort_mode: "severity".to_string(),
 
-            profiler_active: false,
-            profiler_running: false,
-            profiler_rows: Vec::new(),
-            profiler_notes: Vec::new(),
-            profiler_gauge_cpu: None,
-            profiler_gauge_mem: None,
-            profiler_gauge_mem_total: None,
-            profiler_gauge_latency: None,
-
             model_profiles,
             models_selected: 0,
             models_dirty: false,
             models_status: String::new(),
             models_busy: false,
-
-            learn_active: false,
-            learn_root: std::path::PathBuf::new(),
-            learn_lessons: Vec::new(),
-            learn_current_lesson: 0,
-            learn_total_lessons: 0,
-            learn_lesson_title: String::new(),
-            learn_content: Vec::new(),
-            learn_code_example: String::new(),
-            learn_status: String::new(),
-            learn_busy: false,
-            learn_quiz_active: false,
-            learn_quiz_question: String::new(),
-            learn_quiz_options: Vec::new(),
-            learn_quiz_selected: 0,
-            learn_quiz_answered: false,
-            learn_quiz_correct: false,
-            learn_quiz_answer: None,
-            learn_explain: Vec::new(),
-            learn_quiz_why: String::new(),
 
             lang_busy: false,
             lang_scan_path: String::new(),
@@ -3563,14 +2598,6 @@ impl<'a> App<'a> {
                 content: msg.content.clone(),
             });
         }
-        // A configured layout that will not render as written says so once, at
-        // startup, instead of leaving the user to wonder why the body looks
-        // like classic (V-5).
-        if let Some(problem) =
-            crate::templates::problem(&app.config.layout_templates, &app.config.layout)
-        {
-            app.push_toast(crate::toast::ToastKind::Warning, problem);
-        }
         app
     }
 
@@ -3617,7 +2644,6 @@ impl<'a> App<'a> {
     pub fn text_entry_active(&self) -> bool {
         matches!(self.focus, FocusArea::GitCommit | FocusArea::ByteBotPanel)
             || (self.focus == FocusArea::Settings && self.settings_url_editing)
-            || (self.focus == FocusArea::CollaborationHub && self.collab_editing)
     }
 
     pub fn refresh_git(&mut self) {
@@ -3695,24 +2721,6 @@ impl<'a> App<'a> {
         for note in held {
             self.system_line(&format!("configuration: {note}"));
         }
-    }
-
-    /// The one choke point that writes the window arrangement (`V-6`). Gated
-    /// by the same `persist_config` switch as config, because a test keystroke
-    /// must not rewrite the developer's real `<config dir>/layout.json` any
-    /// more than it may rewrite their config. A write failure on a background
-    /// save is swallowed — the file is a convenience restored at start, and
-    /// geometry still works on screen — but on quit it is reported, because
-    /// that is the last chance the arrangement has.
-    pub fn save_arrangement(&mut self) -> Result<(), crate::arrangement::ReadError> {
-        self.arrangement_dirty = false;
-        if !self.persist_config {
-            return Ok(());
-        }
-        let Some(path) = crate::arrangement::path() else {
-            return Ok(());
-        };
-        crate::arrangement::write_to(&path, &crate::arrangement::capture(self))
     }
 
     /// The agent tool-loop's approval mode, parsed from config with the
@@ -4179,8 +3187,6 @@ impl<'a> App<'a> {
                     last.content.push_str(body);
                 }
             }
-        } else if let Some(body) = token.strip_prefix("[COLLAB]") {
-            self.apply_collab_token(body);
         } else if let Some(body) = token.strip_prefix("[HEALTH]") {
             let parts: Vec<&str> = body.splitn(4, '|').collect();
             if parts.len() >= 3 {
@@ -4194,20 +3200,6 @@ impl<'a> App<'a> {
                 };
                 self.ollama_health_entries
                     .insert(provider, (status.clone(), latency, error));
-                // Update average latency across all providers
-                if status == "healthy" {
-                    let total: f64 = self
-                        .ollama_health_entries
-                        .values()
-                        .map(|(s, l, _)| if s == "healthy" { *l } else { 0.0 })
-                        .sum();
-                    let count = self
-                        .ollama_health_entries
-                        .values()
-                        .filter(|(s, _, _)| s == "healthy")
-                        .count() as f64;
-                    self.average_latency = if count > 0.0 { total / count } else { 0.0 };
-                }
             }
         } else if token == "[REFRESH_MODELS]" {
             self.refresh_models(tx.clone());
@@ -4226,61 +3218,6 @@ impl<'a> App<'a> {
             } else {
                 Some(body.to_string())
             };
-        } else if let Some(body) = token.strip_prefix("[VOICE]") {
-            if let Some(s) = body.strip_prefix("status:") {
-                let new_status = s.to_string();
-                if new_status == "idle" {
-                    self.voice_finish();
-                } else {
-                    self.voice_status = new_status;
-                }
-            } else if let Some(l) = body.strip_prefix("level:") {
-                self.voice_apply_level(l);
-            } else if let Some(p) = body.strip_prefix("peak:") {
-                self.voice_peak = p.trim().parse::<f64>().unwrap_or(self.voice_peak);
-            } else if let Some(c) = body.strip_prefix("clip:") {
-                self.voice_apply_clip(c);
-            } else if let Some(t) = body.strip_prefix("transcript:") {
-                self.voice_apply_transcript(t);
-            } else if let Some(n) = body.strip_prefix("note:") {
-                self.voice_apply_note(n);
-            } else if let Some(e) = body.strip_prefix("err:") {
-                self.voice_apply_error(e);
-            }
-        } else if let Some(body) = token.strip_prefix("[TERM]") {
-            if let Some(json) = body.strip_prefix("suggestion:") {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-                    self.term_asst_typing = false;
-                    self.term_asst_suggestions.push((
-                        v["command"].as_str().unwrap_or_default().to_string(),
-                        v["risk"].as_str().unwrap_or_default().to_string(),
-                        v["why"].as_str().unwrap_or_default().to_string(),
-                    ));
-                }
-            } else if let Some(json) = body.strip_prefix("ran:") {
-                self.term_asst_busy = false;
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-                    let command = v["command"].as_str().unwrap_or_default().to_string();
-                    let risk = v["risk"].as_str().unwrap_or_default().to_string();
-                    let result = v["result"].as_str().unwrap_or_default().to_string();
-                    self.term_asst_history
-                        .push((command.clone(), risk, result.clone()));
-                    self.term_asst_output = format!("{} — {}", command, result);
-                }
-            } else if let Some(msg) = body.strip_prefix("raw:") {
-                self.term_asst_typing = true;
-                self.term_asst_output =
-                    format!("The model did not answer with commands. It said: {}", msg);
-            } else if let Some(msg) = body.strip_prefix("error:") {
-                self.term_asst_typing = true;
-                // One line, because the status box is one line tall.
-                self.term_asst_output = crate::agent_tools::truncate_one_line(msg, 300);
-            } else if body == "ready" {
-                self.term_asst_busy = false;
-                if self.term_asst_suggestions.is_empty() {
-                    self.term_asst_typing = true;
-                }
-            }
         } else if let Some(body) = token.strip_prefix("[LANG]") {
             if let Some(json) = body.strip_prefix("row:") {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
@@ -4310,16 +3247,6 @@ impl<'a> App<'a> {
             } else if let Some(err) = body.strip_prefix("error:") {
                 self.lang_translate_error = true;
                 self.lang_translate_output = err.to_string();
-            }
-        } else if let Some(body) = token.strip_prefix("[LEARN]") {
-            if let Some(reply) = body.strip_prefix("quiz:") {
-                self.learn_apply_quiz(reply);
-            } else if let Some(err) = body.strip_prefix("err:") {
-                self.learn_busy = false;
-                self.learn_status = format!(
-                    "provider said: {}",
-                    crate::agent_tools::truncate_one_line(err, 200)
-                );
             }
         } else if let Some(body) = token.strip_prefix("[PROFILE]") {
             self.models_busy = false;
@@ -4387,39 +3314,6 @@ impl<'a> App<'a> {
                 self.sec_scan_summary = summary;
                 self.sec_scan_log.push(text.to_string());
                 self.sec_scan_active = false;
-            }
-        } else if let Some(body) = token.strip_prefix("[PROFILER]") {
-            if body.starts_with("gauge:") {
-                if let Some(g) = body.strip_prefix("gauge:") {
-                    let parts: Vec<&str> = g.splitn(2, '|').collect();
-                    if parts.len() >= 2 {
-                        let val = parts[1].parse::<f64>().ok();
-                        match parts[0] {
-                            "cpu" => self.profiler_gauge_cpu = val,
-                            "mem" => self.profiler_gauge_mem = val,
-                            "memtotal" => self.profiler_gauge_mem_total = val,
-                            "latency" => self.profiler_gauge_latency = val,
-                            _ => {}
-                        }
-                    }
-                }
-            } else if let Some(r) = body.strip_prefix("row:") {
-                let parts: Vec<&str> = r.splitn(3, '|').collect();
-                if parts.len() == 3 {
-                    self.profiler_rows.push((
-                        parts[0].to_string(),
-                        parts[1].to_string(),
-                        parts[2].to_string(),
-                    ));
-                }
-            } else if let Some(msg) = body.strip_prefix("note:") {
-                self.profiler_notes.push(msg.to_string());
-            } else if let Some(msg) = body.strip_prefix("failed:") {
-                self.profiler_notes
-                    .push(format!("profiling failed: {}", msg));
-                self.profiler_running = false;
-            } else if body == "done" {
-                self.profiler_running = false;
             }
         } else if let Some(body) = token.strip_prefix("[MODELS]") {
             if let Ok(models) = serde_json::from_str::<Vec<String>>(body) {
@@ -5174,7 +4068,7 @@ impl<'a> App<'a> {
                 ));
             } else {
                 self.push_system_message(format!(
-                    "Unknown destination: '{}'. Use Ctrl+F or Settings.",
+                    "Unknown destination: '{}'. Ctrl+P lists every destination.",
                     target
                 ));
             }
@@ -5400,7 +4294,7 @@ impl<'a> App<'a> {
 
     /// This session's permission state: mode, shared grants, the overlay's
     /// channel, checkpoints and budgets. Every caller that runs a tool — the
-    /// chat loop, ByteBot, a spawn, the terminal panel — goes through this, so
+    /// chat loop, ByteBot, a spawn — goes through this, so
     /// there is exactly one policy in the app.
     fn approval_ctx(&self) -> crate::agent_tools::ApprovalCtx {
         crate::agent_tools::ApprovalCtx {
@@ -6058,113 +4952,6 @@ impl<'a> App<'a> {
                 crate::toast::ToastKind::Warning,
                 current_timestamp(),
             );
-        }
-    }
-
-    /// Connect the Collaboration Hub to a real server: the worker logs in,
-    /// joins (or creates) the session, and feeds this event loop `[COLLAB]`
-    /// tokens. Nothing here is simulated — if the server is unreachable the
-    /// hub says so and goes back to disconnected.
-    pub fn start_collab_session(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.collab_session_active {
-            return;
-        }
-        self.collab_session_active = true;
-        self.collab_sync_status = "connecting".to_string();
-        self.collab_error.clear();
-        self.collab_members.clear();
-        self.collab_activity_log.clear();
-        self.collab_activity_log
-            .push(format!("🔌 Connecting to {}...", self.collab_server_url));
-        self.collab_worker = Some(crate::collab_client::spawn_collab_worker(
-            self.collab_server_url.clone(),
-            self.collab_session_id.clone(),
-            self.collab_username.clone(),
-            tx,
-        ));
-    }
-
-    /// Stop the client task and mark the hub idle. Safe to call twice; an
-    /// already-finished worker's handle aborts cheaply.
-    pub fn collab_disconnect(&mut self) {
-        if let Some(worker) = self.collab_worker.take() {
-            worker.abort();
-        }
-        if self.collab_session_active {
-            self.collab_activity_log.push("🔌 Disconnected".to_string());
-        }
-        self.collab_session_active = false;
-        self.collab_sync_status = "disconnected".to_string();
-    }
-
-    /// Hang up (if connected) and dial the same server/session again. The
-    /// only reconnect there is — the client never retries by itself.
-    pub fn collab_retry(&mut self, tx: mpsc::UnboundedSender<String>) {
-        self.collab_disconnect();
-        self.start_collab_session(tx);
-    }
-
-    /// Tab in the hub: cycle the edited field, entering edit mode with it.
-    pub fn collab_cycle_field(&mut self) {
-        self.collab_field = self.collab_field.next();
-        self.collab_editing = true;
-    }
-
-    /// One typed character for the hub form.
-    pub fn collab_edit_char(&mut self, c: char) {
-        match self.collab_field {
-            crate::focus::CollabField::Server => self.collab_server_url.push(c),
-            crate::focus::CollabField::Username => self.collab_username.push(c),
-            crate::focus::CollabField::Session => self.collab_session_id.push(c),
-        }
-    }
-
-    pub fn collab_edit_backspace(&mut self) {
-        match self.collab_field {
-            crate::focus::CollabField::Server => {
-                self.collab_server_url.pop();
-            }
-            crate::focus::CollabField::Username => {
-                self.collab_username.pop();
-            }
-            crate::focus::CollabField::Session => {
-                self.collab_session_id.pop();
-            }
-        }
-    }
-
-    /// Apply one `[COLLAB]` token from the client worker (the prefix is
-    /// already stripped). Grammar lives in `collab_client::frame_to_tokens`.
-    pub fn apply_collab_token(&mut self, body: &str) {
-        if let Some(s) = body.strip_prefix("status:") {
-            self.collab_sync_status = s.to_string();
-            if s == "disconnected" {
-                // The worker is finished by definition — it just reported
-                // its own end. Drop the handle.
-                self.collab_session_active = false;
-                self.collab_worker = None;
-            }
-        } else if let Some(id) = body.strip_prefix("session:") {
-            self.collab_session_id = id.to_string();
-        } else if let Some(json) = body.strip_prefix("members:") {
-            // Complete snapshot from the server; swap the list whole.
-            match serde_json::from_str::<Vec<xencode_collaboration_rs::wire::MemberInfo>>(json) {
-                Ok(members) => {
-                    self.collab_members = members
-                        .iter()
-                        .map(|m| (m.username.clone(), m.role.clone(), "connected".to_string()))
-                        .collect();
-                }
-                Err(_) => {
-                    self.collab_error = "malformed members list from server".to_string();
-                }
-            }
-        } else if let Some(msg) = body.strip_prefix("log:") {
-            self.collab_activity_log.push(msg.to_string());
-        } else if let Some(msg) = body.strip_prefix("error:") {
-            self.collab_error = msg.to_string();
-        } else if body == "ready" {
-            self.collab_last_sync = current_timestamp();
         }
     }
 
@@ -10559,286 +9346,6 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Record a clip from the microphone (J-07). Enter starts a capture; Enter
-    /// again ends it early. Levels come from RMS of the bytes the recorder
-    /// actually sent, and text appears only if a whisper CLI is installed —
-    /// otherwise the panel keeps the clip and says why there is no text.
-    pub fn start_voice_session(
-        &mut self,
-        root: std::path::PathBuf,
-        tx: mpsc::UnboundedSender<String>,
-    ) {
-        if self.voice_busy {
-            return;
-        }
-        self.voice_active = true;
-        self.voice_busy = true;
-        self.voice_status = "listening".to_string();
-        self.voice_level = 0.0;
-        self.voice_peak = 0.0;
-        self.voice_pcm_bytes = 0;
-        self.voice_note.clear();
-        self.voice_clip = None;
-        self.voice_recorder.clear();
-        self.voice_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.voice_mute_flag
-            .store(self.voice_muted, std::sync::atomic::Ordering::Relaxed);
-
-        let Some(recorder) = crate::voice::find_recorder() else {
-            self.voice_note =
-                "No recorder on PATH — looked for arecord, pw-record, parec. Nothing was captured."
-                    .to_string();
-            self.voice_status = "idle".to_string();
-            self.voice_busy = false;
-            return;
-        };
-        self.voice_recorder = recorder
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| recorder.display().to_string());
-        let clip_dir = root.join(".xencode").join("voice");
-        if let Err(e) = std::fs::create_dir_all(&clip_dir) {
-            self.voice_note = format!("Cannot write clips to {}: {e}", clip_dir.display());
-            self.voice_status = "idle".to_string();
-            self.voice_busy = false;
-            return;
-        }
-
-        let stop = self.voice_stop.clone();
-        let muted = self.voice_mute_flag.clone();
-        let args = crate::voice::recorder_args_for(&recorder);
-        tokio::spawn(async move {
-            let recorder_tx = tx.clone();
-            let outcome = tokio::task::spawn_blocking(move || {
-                run_voice_capture(&recorder, &args, &clip_dir, &stop, &muted, &recorder_tx)
-            })
-            .await;
-            match outcome {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    let _ = tx.send(format!("[VOICE]err:clip could not be saved: {e}"));
-                }
-                Err(e) => {
-                    let _ = tx.send(format!("[VOICE]err:capture thread died: {e}"));
-                }
-            }
-            let _ = tx.send("[VOICE]status:idle".to_string());
-        });
-    }
-
-    /// End the current capture early; the clip recorded so far is kept.
-    pub fn stop_voice_session(&self) {
-        if self.voice_busy {
-            self.voice_stop
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-
-    pub fn toggle_voice_session(
-        &mut self,
-        root: std::path::PathBuf,
-        tx: mpsc::UnboundedSender<String>,
-    ) {
-        if self.voice_busy {
-            self.stop_voice_session();
-        } else {
-            self.start_voice_session(root, tx);
-        }
-    }
-
-    /// Mute is a real switch: the capture thread reads it and discards audio
-    /// instead of keeping it, so muting does not produce a silent clip later.
-    pub fn set_voice_muted(&mut self, muted: bool) {
-        self.voice_muted = muted;
-        self.voice_mute_flag
-            .store(muted, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    pub fn voice_apply_level(&mut self, body: &str) {
-        let Some((level, bytes)) = parse_voice_level(body) else {
-            return;
-        };
-        self.voice_level = level;
-        self.voice_pcm_bytes = bytes;
-        if level > self.voice_peak {
-            self.voice_peak = level;
-        }
-    }
-
-    pub fn voice_apply_clip(&mut self, body: &str) {
-        let Some((path, ms)) = body.split_once('|') else {
-            self.voice_note = format!("Malformed clip report: {body}");
-            return;
-        };
-        let Ok(ms) = ms.trim().parse::<u64>() else {
-            self.voice_note = format!("Malformed clip length in: {body}");
-            return;
-        };
-        self.voice_clip = Some(std::path::PathBuf::from(path));
-        self.voice_note = format!("Kept {} of audio at {}.", crate::voice::format_ms(ms), path);
-    }
-
-    pub fn voice_apply_transcript(&mut self, text: &str) {
-        self.voice_transcript.push(text.to_string());
-        self.voice_note.clear();
-    }
-
-    pub fn voice_apply_note(&mut self, note: &str) {
-        self.voice_note = note.to_string();
-        self.voice_level = 0.0;
-    }
-
-    pub fn voice_apply_error(&mut self, err: &str) {
-        self.voice_note = err.to_string();
-        self.voice_status = "idle".to_string();
-        self.voice_busy = false;
-        self.voice_level = 0.0;
-    }
-
-    /// A capture has ended. The panel keeps showing the clip and whatever the
-    /// transcriber (or its absence) reported; only the meter goes quiet.
-    pub fn voice_finish(&mut self) {
-        self.voice_busy = false;
-        self.voice_status = "idle".to_string();
-        self.voice_level = 0.0;
-    }
-
-    pub fn term_asst_char(&mut self, c: char) {
-        self.term_asst_query.push(c);
-    }
-
-    pub fn term_asst_backspace(&mut self) {
-        self.term_asst_query.pop();
-    }
-
-    /// Indices into `term_asst_suggestions` that the risk filter lets through,
-    /// so selection and rendering agree about what is on screen.
-    pub fn term_visible_rows(&self) -> Vec<usize> {
-        (0..self.term_asst_suggestions.len())
-            .filter(|&i| {
-                self.term_risk_filter == "All"
-                    || self.term_asst_suggestions[i]
-                        .1
-                        .eq_ignore_ascii_case(&self.term_risk_filter)
-            })
-            .collect()
-    }
-
-    /// Ask the model once for commands that do what the query says. A reply
-    /// that is not a command list is shown as the reply, not converted into
-    /// invented suggestions.
-    pub fn ask_terminal(&mut self, tx: mpsc::UnboundedSender<String>) {
-        let query = self.term_asst_query.trim().to_string();
-        if query.is_empty() {
-            self.term_asst_output =
-                "Nothing asked — type what you want to do, then Enter.".to_string();
-            return;
-        }
-        if self.term_asst_busy {
-            return;
-        }
-        self.term_asst_busy = true;
-        // Letters stop meaning "type" while the request is in flight; they mean
-        // nothing at all until the reply lands (see the `[TERM]ready` handler).
-        self.term_asst_typing = false;
-        self.term_asst_suggestions.clear();
-        self.term_asst_selected = 0;
-        self.term_asst_output = format!("Asking {} — {}", self.config.default_model, query);
-
-        // Give the model something real to aim at: the workspace's own layout.
-        let root = xencode_context_rs::default_root();
-        let mut tops: Vec<String> = self
-            .file_tree
-            .iter()
-            .filter_map(|p| p.split('/').next().map(str::to_string))
-            .collect();
-        tops.sort();
-        tops.dedup();
-        tops.truncate(30);
-        let prompt = format!(
-            "The user wants to do this in a shell, in the workspace at {}:\n\
-             {}\n\n\
-             Top-level entries in that directory: {}\n\
-             git: {}\n\n\
-             Reply with a JSON array of at most {} objects and nothing else, each:\n\
-             {{\"command\": \"shell command\", \"risk\": \"safe\" or \"destructive\", \"why\": \"one line\"}}",
-            root.display(),
-            query,
-            if tops.is_empty() {
-                "(nothing indexed yet)".to_string()
-            } else {
-                tops.join(", ")
-            },
-            if self.git_branch.is_empty() {
-                "not a git repo".to_string()
-            } else {
-                format!("branch {}", self.git_branch)
-            },
-            TERM_SUGGESTION_CAP,
-        );
-        // Same frozen system head as chat turns, so the instruction that shapes
-        // the reply rides in the user message and the cache stays warm.
-        let messages = one_shot_messages(&root, prompt);
-        let call = self.single_shot();
-
-        tokio::spawn(async move {
-            match call.ask(&messages).await {
-                Err(msg) => {
-                    let _ = tx.send(format!("[TERM]error:{msg}"));
-                }
-                Ok(text) => {
-                    let suggestions = parse_term_suggestions(&text);
-                    if suggestions.is_empty() {
-                        let _ = tx.send(format!(
-                            "[TERM]raw:{}",
-                            crate::agent_tools::truncate_one_line(&text, 300)
-                        ));
-                    }
-                    for (command, risk, why) in suggestions {
-                        let line =
-                            serde_json::json!({"command": command, "risk": risk, "why": why});
-                        let _ = tx.send(format!("[TERM]suggestion:{}", line));
-                    }
-                }
-            }
-            let _ = tx.send("[TERM]ready".to_string());
-        });
-    }
-
-    /// Run the selected command through the agent's own gate — same policy,
-    /// same modal, same hooks and checkpoints. The panel never has a shell of
-    /// its own.
-    pub fn run_terminal_suggestion(&mut self, tx: mpsc::UnboundedSender<String>) {
-        let rows = self.term_visible_rows();
-        let Some(&idx) = rows.get(self.term_asst_selected) else {
-            self.term_asst_output = "Nothing selected — ask a question first.".to_string();
-            return;
-        };
-        let (command, risk, _) = self.term_asst_suggestions[idx].clone();
-        if self.term_asst_busy {
-            return;
-        }
-        self.term_asst_busy = true;
-        self.term_asst_output = format!("Waiting for approval: {}", command);
-        let ctx = self.approval_ctx();
-        let rt = self.task_runtime.clone();
-        let root = xencode_context_rs::default_root();
-        let call = xencode_providers_rs::ToolCall {
-            id: "terminal-panel".to_string(),
-            name: "run_command".to_string(),
-            arguments: serde_json::json!({ "command": command }),
-        };
-        tokio::spawn(async move {
-            let result =
-                crate::agent_tools::execute_tool_call_approved(&rt, &root, &call, &ctx, None).await;
-            let line = serde_json::json!({
-                "command": command, "risk": risk,
-                "result": crate::agent_tools::truncate_one_line(&result, 200),
-            });
-            let _ = tx.send(format!("[TERM]ran:{}", line));
-        });
-    }
-
     /// Start Security Auditor scan simulation.
     /// Scan the workspace with the real pattern scanner over the file list the
     /// context engine's walker produces, so this panel and `xencode analyze`
@@ -10856,88 +9363,6 @@ impl<'a> App<'a> {
         self.sec_scan_path = root.display().to_string();
         let _ = tx.send(format!("[SECURITY]note:Scanning {}", self.sec_scan_path));
         tokio::spawn(run_security_scan(root, tx));
-    }
-
-    /// Measure what this session actually did. Numbers the app already holds
-    /// (turn latency, provider health, llama.cpp timings) are read here; the
-    /// process's own CPU/memory and the persisted per-request metrics are
-    /// sampled in the background, because CPU needs two reads of `/proc` a
-    /// moment apart.
-    pub fn start_profiler(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.profiler_running {
-            return;
-        }
-        self.profiler_active = true;
-        self.profiler_running = true;
-        self.profiler_rows.clear();
-        self.profiler_notes.clear();
-        self.profiler_gauge_cpu = None;
-        self.profiler_gauge_mem = None;
-        self.profiler_gauge_mem_total = None;
-        self.profiler_gauge_latency = None;
-
-        let uptime = (current_timestamp() - self.session_start_time).max(0.0);
-        self.profiler_rows.push((
-            "session".to_string(),
-            "uptime".to_string(),
-            format_uptime(uptime),
-        ));
-        self.profiler_rows.push((
-            "session".to_string(),
-            "chat lines".to_string(),
-            format!("{}", self.messages.len()),
-        ));
-        if self.average_latency > 0.0 {
-            self.profiler_gauge_latency = Some(self.average_latency);
-            self.profiler_rows.push((
-                "turn".to_string(),
-                "average latency".to_string(),
-                format!("{:.0} ms", self.average_latency),
-            ));
-        } else {
-            self.profiler_notes
-                .push("no completed turn yet — latency is n/a".to_string());
-        }
-        if let Some(ts) = &self.last_llamacpp_timings {
-            self.profiler_rows.push((
-                "llama.cpp".to_string(),
-                "generation".to_string(),
-                format!("{:.1} tok/s", ts.predicted_per_second),
-            ));
-            self.profiler_rows.push((
-                "llama.cpp".to_string(),
-                "prompt eval".to_string(),
-                format!("{:.1} tok/s", ts.prompt_per_second),
-            ));
-            self.profiler_rows.push((
-                "llama.cpp".to_string(),
-                "tokens in / out".to_string(),
-                format!("{} / {}", ts.tokens_evaluated, ts.tokens_generated),
-            ));
-        }
-        let mut health: Vec<(String, String, f64, Option<String>)> = self
-            .ollama_health_entries
-            .iter()
-            .map(|(provider, (status, latency, error))| {
-                (provider.clone(), status.clone(), *latency, error.clone())
-            })
-            .collect();
-        health.sort_by(|a, b| a.0.cmp(&b.0));
-        for (provider, status, latency, error) in health {
-            let value = match error {
-                Some(e) if !e.is_empty() => format!("{} — {}", status, e),
-                _ => format!("{:.0} ms ({})", latency, status),
-            };
-            self.profiler_rows
-                .push((provider, "last health check".to_string(), value));
-        }
-        if self.ollama_health_entries.is_empty() {
-            self.profiler_notes
-                .push("no provider health check this session".to_string());
-        }
-
-        let xencode = xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
-        tokio::spawn(run_profiler(xencode, tx));
     }
 
     /// The cursor, clamped to a row that exists. An empty list has no row,
@@ -11152,190 +9577,6 @@ impl<'a> App<'a> {
             };
             let _ = tx.send(token);
         });
-    }
-
-    /// `Enter` in the Learning panel: queue this workspace's own files as
-    /// lessons. What this replaced was one hardcoded Rust ownership lesson —
-    /// five sentences, a `calculate_length` snippet, and a quiz whose correct
-    /// option was always the first — about code that is not in this repo.
-    pub fn start_learning(&mut self, root: std::path::PathBuf, tx: mpsc::UnboundedSender<String>) {
-        if self.learn_busy {
-            return;
-        }
-        self.learn_active = true;
-        self.learn_root = root;
-        match learning_lessons(&self.learn_root) {
-            Err(reason) => {
-                self.learn_lessons.clear();
-                self.learn_current_lesson = 0;
-                self.learn_total_lessons = 0;
-                self.learn_lesson_title.clear();
-                self.learn_code_example.clear();
-                self.learn_reset_lesson();
-                self.learn_status = reason;
-            }
-            Ok(lessons) => {
-                self.learn_lessons = lessons;
-                self.learn_go(1, tx);
-            }
-        }
-    }
-
-    /// Put lesson `n` (1-based, as the panel counts it) on screen and ask the
-    /// model about it. Out of range, or a file that cannot be read: the panel
-    /// says so and spends no request.
-    pub fn learn_go(&mut self, n: usize, tx: mpsc::UnboundedSender<String>) {
-        if !self.learn_show(n) {
-            return;
-        }
-        self.learn_ask_current(tx);
-    }
-
-    /// The file work, with no provider involved: what the index says this file
-    /// declares, and the file's own text. Returns false when there is no lesson
-    /// `n` to show, having said why.
-    pub fn learn_show(&mut self, n: usize) -> bool {
-        let Some((path, declared)) = self.learn_lessons.get(n.wrapping_sub(1)).cloned() else {
-            if self.learn_lessons.is_empty() {
-                self.learn_status =
-                    "Nothing queued — press Enter to build the lessons.".to_string();
-            }
-            return false;
-        };
-        self.learn_current_lesson = n;
-        self.learn_total_lessons = self.learn_lessons.len();
-        self.learn_lesson_title = path.clone();
-        self.learn_reset_lesson();
-
-        let source = match std::fs::read_to_string(self.learn_root.join(&path)) {
-            Ok(text) => text,
-            Err(e) => {
-                self.learn_status = format!("The index names {path}, but reading it failed: {e}");
-                return false;
-            }
-        };
-        let shown = cap_at_line(&source, LEARN_SOURCE_CAP);
-        self.learn_code_example = shown.clone();
-        self.learn_content = vec![
-            format!(
-                "{} declaration(s) the index found in {}.",
-                declared.len(),
-                path
-            ),
-            crate::agent_tools::truncate_one_line(&declared.join(" · "), 400),
-            if shown.len() == source.len() {
-                format!("Whole file sent: {} lines.", source.lines().count())
-            } else {
-                format!(
-                    "First {} of {} bytes sent — the file is longer than the panel shows.",
-                    shown.len(),
-                    source.len()
-                )
-            },
-        ];
-        true
-    }
-
-    /// One request per lesson: explain this file, and set a quiz about it with
-    /// the answer key the panel grades against. What gets sent is what the
-    /// panel is showing — same path, same capped text.
-    fn learn_ask_current(&mut self, tx: mpsc::UnboundedSender<String>) {
-        let path = self.learn_lesson_title.clone();
-        let source = self.learn_code_example.clone();
-        if path.is_empty() || source.is_empty() {
-            return;
-        }
-        self.learn_busy = true;
-        self.learn_status = format!("asking {} about {path}…", self.config.default_model);
-        let prompt = format!(
-            "The file `{path}` in this workspace contains:\n\n```rust\n{source}\n```\n\n\
-             Teach this file. Reply with ONLY a JSON object shaped like\n\
-             {{\"explain\": [\"…\", \"…\"], \"question\": \"…\", \"options\": [\"…\", \"…\", \"…\"], \
-             \"answer\": 0, \"why\": \"…\"}}\n\
-             where `explain` is 2–4 sentences about code that is actually in the file, `question` asks \
-             about this file specifically, `options` is 3–4 choices, `answer` is the 0-based index of \
-             the correct choice, and `why` is one sentence on why it is correct.",
-        );
-        let messages = one_shot_messages(&self.learn_root, prompt);
-        let call = self.single_shot();
-        tokio::spawn(async move {
-            let token = match call.ask(&messages).await {
-                Ok(reply) => format!("[LEARN]quiz:{reply}"),
-                Err(e) => format!("[LEARN]err:{e}"),
-            };
-            let _ = tx.send(token);
-        });
-    }
-
-    /// Drop the previous lesson's quiz and explanation; the new file has to
-    /// earn both.
-    fn learn_reset_lesson(&mut self) {
-        self.learn_content.clear();
-        self.learn_explain.clear();
-        self.learn_quiz_active = false;
-        self.learn_quiz_question.clear();
-        self.learn_quiz_options.clear();
-        self.learn_quiz_selected = 0;
-        self.learn_quiz_answered = false;
-        self.learn_quiz_correct = false;
-        self.learn_quiz_answer = None;
-        self.learn_quiz_why.clear();
-    }
-
-    /// The model's reply becomes the quiz. A reply with no quiz in it is
-    /// reported as that reply rather than filled in with a canned question.
-    pub fn learn_apply_quiz(&mut self, reply: &str) {
-        self.learn_busy = false;
-        match parse_lesson_quiz(reply) {
-            Some(lesson) => {
-                self.learn_explain = lesson.explain;
-                self.learn_quiz_active = true;
-                self.learn_quiz_question = lesson.question;
-                self.learn_quiz_options = lesson.options;
-                self.learn_quiz_answer = Some(lesson.answer);
-                self.learn_quiz_why = lesson.why;
-                self.learn_status.clear();
-            }
-            None => {
-                self.learn_status = format!(
-                    "The model did not answer with a quiz. It said: {}",
-                    crate::agent_tools::truncate_one_line(reply.trim(), 200)
-                );
-            }
-        }
-    }
-
-    /// Enter on an unanswered quiz: grade against the key the model sent. The
-    /// panel has no answer of its own to fall back on.
-    pub fn learn_answer_quiz(&mut self) {
-        if !self.learn_quiz_active || self.learn_quiz_answered {
-            return;
-        }
-        // A quiz only becomes active together with its key, so one exists here.
-        let answer = self.learn_quiz_answer.unwrap_or(usize::MAX);
-        self.learn_quiz_answered = true;
-        self.learn_quiz_correct = self.learn_quiz_selected == answer;
-    }
-
-    /// `p` / `n`: walk the queue the index built.
-    pub fn learn_step(&mut self, forward: bool, tx: mpsc::UnboundedSender<String>) {
-        if self.learn_busy || self.learn_lessons.is_empty() {
-            return;
-        }
-        let total = self.learn_lessons.len();
-        let next = if forward {
-            let last = self.learn_current_lesson + 1 > total;
-            if last {
-                return;
-            }
-            self.learn_current_lesson + 1
-        } else {
-            if self.learn_current_lesson <= 1 {
-                return;
-            }
-            self.learn_current_lesson - 1
-        };
-        self.learn_go(next, tx);
     }
 
     /// Walk the workspace with the context engine and report what it actually
@@ -14428,10 +12669,6 @@ pub async fn run_app<B: Backend + io::Write>(
                     crossterm::event::DisableMouseCapture
                 )
             };
-            // Whatever the pointer was doing is over: no further motion or
-            // release events can arrive to say otherwise.
-            app.drag = None;
-            app.boundary_hover = None;
             capture = Some(want);
         }
         // Event-driven frames (V-8): the loop used to draw unconditionally at
@@ -14472,25 +12709,7 @@ pub async fn run_app<B: Backend + io::Write>(
                     // global Ctrl chords, then per-focus handlers.
                     if crate::keymap::handle_key(&mut app, key, &tx) == crate::keymap::KeyFlow::Quit
                     {
-                        // The arrangement is written on the way out, and a
-                        // failure is said: this is the last chance the resized
-                        // panes have of surviving the restart.
-                        if let Err(why) = app.save_arrangement() {
-                            let message = match why {
-                                crate::arrangement::ReadError::Refused(w)
-                                | crate::arrangement::ReadError::Io(w) => w,
-                            };
-                            crate::toast::push(
-                                &mut app.toasts,
-                                message,
-                                crate::toast::ToastKind::Warning,
-                                current_timestamp(),
-                            );
-                        }
                         return Ok(());
-                    }
-                    if app.arrangement_dirty {
-                        let _ = app.save_arrangement();
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {
@@ -14506,13 +12725,6 @@ pub async fn run_app<B: Backend + io::Write>(
                                 app.selected_file -= 3;
                             } else {
                                 app.selected_file = 0;
-                            }
-                        }
-                        FocusArea::FeatureNavigator => {
-                            if app.feature_nav_selected >= 3 {
-                                app.feature_nav_selected -= 3;
-                            } else {
-                                app.feature_nav_selected = 0;
                             }
                         }
                         FocusArea::ProviderHealth => {
@@ -14573,10 +12785,6 @@ pub async fn run_app<B: Backend + io::Write>(
                             app.selected_file =
                                 (app.selected_file + 3).min(app.file_tree.len().saturating_sub(1));
                         }
-                        FocusArea::FeatureNavigator => {
-                            app.feature_nav_selected = (app.feature_nav_selected + 3)
-                                .min(app.palette_items().len().saturating_sub(1));
-                        }
                         FocusArea::ProviderHealth => {
                             app.provider_health_scroll += 3;
                         }
@@ -14614,37 +12822,24 @@ pub async fn run_app<B: Backend + io::Write>(
                         }
                         _ => {}
                     },
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        // One geometry: the divider check and the focus check
-                        // both ask the tree the frame just drew.
+                    MouseEventKind::Down(MouseButton::Left)
+                        if app.screen() == crate::screens::Screen::Files =>
+                    {
+                        // A click focuses the Files view pane under it, asking the
+                        // same tree the frame just drew. The conversation has no
+                        // panes to pick between, so a click there changes nothing.
                         let body_area = app.last_body_area;
-                        if !app.grab_boundary(mouse.row, mouse.column) {
-                            match app.body_hit_test(body_area, mouse.row, mouse.column) {
-                                Some(FocusArea::FileExplorer) => {
-                                    app.focus = FocusArea::FileExplorer;
-                                    let row = mouse.row.saturating_sub(2) as usize;
-                                    if row < app.file_tree.len() {
-                                        app.selected_file = row;
-                                    }
+                        match app.body_hit_test(body_area, mouse.row, mouse.column) {
+                            Some(FocusArea::FileExplorer) => {
+                                app.focus = FocusArea::FileExplorer;
+                                let row = mouse.row.saturating_sub(2) as usize;
+                                if row < app.file_tree.len() {
+                                    app.selected_file = row;
                                 }
-                                Some(target) => app.focus = target,
-                                None => {}
                             }
+                            Some(target) => app.focus = target,
+                            None => {}
                         }
-                    }
-                    MouseEventKind::Drag(MouseButton::Left) => {
-                        // Only a press that landed on a divider gets this far:
-                        // `drag_to` does nothing while `drag` is empty, so a
-                        // drag that started inside a pane changes no geometry.
-                        app.drag_to(mouse.column);
-                    }
-                    MouseEventKind::Up(MouseButton::Left) => {
-                        if app.release_drag() && app.arrangement_dirty {
-                            let _ = app.save_arrangement();
-                        }
-                    }
-                    MouseEventKind::Moved => {
-                        app.hover_boundary(mouse.row, mouse.column);
                     }
                     _ => {}
                 },
@@ -14872,9 +13067,8 @@ pub(crate) fn with_openrouter_env<T>(value: Option<&str>, body: impl FnOnce() ->
 #[cfg(test)]
 mod tests {
     use super::{
-        cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
-        learning_lessons, live_refresh_snapshot, offered_tools, parse_lesson_quiz,
-        parse_llama_port, parse_porcelain_z, parse_term_suggestions, parse_voice_level,
+        count_report, first_output_line, format_advise_report, format_watch_warning,
+        live_refresh_snapshot, offered_tools, parse_llama_port, parse_porcelain_z,
         preview_repo_map, repo_map_tier_line, should_draw, split_prompt_arguments, trace_age,
         trace_report, watch_warning_for, with_openrouter_env, App, ConversationMemory, Egress,
         FocusArea, FrameSignals, InputMode, LoopSink, Mode, SpawnRecord, UiMessage, XencodeConfig,
@@ -14882,73 +13076,7 @@ mod tests {
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
-    use xencode_context_rs::init_project;
     use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
-
-    /// V-5: a layout named in config renders with no code change, and a
-    /// template that cannot build says so at startup instead of looking like a
-    /// preference that was quietly ignored.
-    #[test]
-    fn a_layout_named_in_config_is_rendered_and_a_broken_one_is_reported() {
-        let area = ratatui::layout::Rect::new(0, 1, 100, 22);
-
-        let editable = XencodeConfig {
-            layout: "editor-first".to_string(),
-            layout_templates: [(
-                "editor-first".to_string(),
-                serde_json::json!({"split": {"horizontal": true, "parts": [
-                    [{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}],
-                    [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]
-                ]}}),
-            )]
-            .into_iter()
-            .collect(),
-            ..XencodeConfig::default()
-        };
-        let app = App::with_config_and_memory(
-            editable,
-            ConversationMemory::new(10),
-            std::path::PathBuf::new(),
-        );
-        let layout = app.body_layout(area);
-        assert_eq!(layout.explorer, None, "this shape has no explorer");
-        assert_eq!(layout.editor.map(|r| r.width), Some(70));
-        assert_eq!(layout.chat.map(|r| r.width), Some(30));
-        // The mouse follows the same tree, and by cell rather than by column.
-        assert_eq!(app.body_hit_test(area, 5, 90), Some(FocusArea::ChatInput));
-        assert_eq!(app.body_hit_test(area, 5, 10), Some(FocusArea::CodeEditor));
-        assert!(
-            app.toasts.is_empty(),
-            "a template that builds is not a problem"
-        );
-
-        // The same name with a typo in it: classic renders, and the reason is
-        // said out loud rather than left to be discovered.
-        let broken = XencodeConfig {
-            layout: "editor-first".to_string(),
-            layout_templates: [(
-                "editor-first".to_string(),
-                serde_json::json!({"leaf": {"slot": "sidebar", "focus": "editor"}}),
-            )]
-            .into_iter()
-            .collect(),
-            ..XencodeConfig::default()
-        };
-        let app = App::with_config_and_memory(
-            broken,
-            ConversationMemory::new(10),
-            std::path::PathBuf::new(),
-        );
-        assert_eq!(
-            app.body_layout(area),
-            crate::layout::compute_layout(area, "classic", false, FocusArea::ChatInput)
-        );
-        let said: Vec<&str> = app.toasts.iter().map(|t| t.message.as_str()).collect();
-        assert!(
-            said.iter().any(|m| m.contains("unknown slot")),
-            "the refusal must be said: {said:?}"
-        );
-    }
 
     /// QA-1: which runs can be written down, and which are left alone.
     #[test]
@@ -16656,47 +14784,6 @@ mod tests {
         assert!(!app.text_entry_active());
         app.settings_url_editing = true;
         assert!(app.text_entry_active());
-        app.focus = FocusArea::CollaborationHub;
-        app.collab_editing = false;
-        assert!(!app.text_entry_active());
-        app.collab_editing = true;
-        assert!(app.text_entry_active());
-    }
-
-    #[test]
-    fn collab_member_snapshots_replace_the_list_wholesale() {
-        let mut app = super::App::for_tests();
-        app.collab_members = vec![("ghost".into(), "editor".into(), "connected".into())];
-        app.apply_collab_token(
-            r#"members:[{"username":"alice","role":"admin"},{"username":"bob","role":"viewer"}]"#,
-        );
-        assert_eq!(app.collab_members.len(), 2);
-        assert_eq!(
-            app.collab_members[0],
-            (
-                "alice".to_string(),
-                "admin".to_string(),
-                "connected".to_string()
-            )
-        );
-        assert_eq!(app.collab_members[1].1, "viewer");
-
-        app.apply_collab_token("session:xencode-77");
-        assert_eq!(app.collab_session_id, "xencode-77");
-
-        app.apply_collab_token("status:connected");
-        assert_eq!(app.collab_sync_status, "connected");
-        app.apply_collab_token("status:disconnected");
-        assert!(!app.collab_session_active);
-        assert_eq!(app.collab_sync_status, "disconnected");
-
-        app.apply_collab_token("error:bad_token: invalid or expired token");
-        assert_eq!(app.collab_error, "bad_token: invalid or expired token");
-
-        // Garbage must not clobber the current list — it reports honestly.
-        app.apply_collab_token("members:not-json");
-        assert_eq!(app.collab_members.len(), 2);
-        assert_eq!(app.collab_error, "malformed members list from server");
     }
 
     #[test]
@@ -19460,446 +17547,6 @@ Content-Length: 0
         dir
     }
 
-    /// Run the real indexer over a temp workspace with three Rust files:
-    /// `two.rs` declares three things, `one.rs` one, `quiet.rs` nothing.
-    fn indexed_root(tag: &str) -> std::path::PathBuf {
-        let root = temp_dir(tag);
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(
-            root.join("src/two.rs"),
-            "pub struct Two {}\npub struct Dos {}\npub fn two() {}\n",
-        )
-        .unwrap();
-        std::fs::write(root.join("src/one.rs"), "pub fn one() {}\n").unwrap();
-        std::fs::write(root.join("src/quiet.rs"), "pub const MODE: u32 = 3;\n").unwrap();
-        init_project(
-            &root,
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            |_| {},
-        )
-        .expect("init");
-        root
-    }
-
-    /// The queue is the index's own list: files that declare something, most
-    /// declarations first, ties by path. A file the extractor found nothing in
-    /// is not a lesson.
-    #[test]
-    fn learning_lessons_come_from_the_index_in_a_stable_order() {
-        let root = indexed_root("learn-queue");
-        let lessons = learning_lessons(&root).expect("a queue");
-        assert_eq!(
-            lessons
-                .iter()
-                .map(|(path, _)| path.as_str())
-                .collect::<Vec<_>>(),
-            vec!["src/two.rs", "src/one.rs"],
-        );
-        assert!(lessons[0].1.contains(&"struct Two".to_string()));
-        assert!(lessons[0].1.contains(&"fn two".to_string()));
-
-        // No index: the panel gets a reason to show, not a lesson to fake.
-        let empty = temp_dir("learn-none");
-        assert_eq!(
-            learning_lessons(&empty),
-            Err("No project index — run /init first, then Enter again.".to_string())
-        );
-        std::fs::remove_dir_all(&root).unwrap();
-        std::fs::remove_dir_all(&empty).unwrap();
-    }
-
-    /// What the panel prints for a lesson is the file's own text and the
-    /// declarations the index recorded — including what it had to leave out.
-    #[test]
-    fn learn_show_prints_the_real_file_and_what_it_declares() {
-        let root = temp_dir("learn-show");
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        let long = format!("pub struct Big {{}}\n{}", "fn filler() {{}}\n".repeat(400));
-        std::fs::write(root.join("src/big.rs"), &long).unwrap();
-        init_project(
-            &root,
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            |_| {},
-        )
-        .expect("init");
-
-        let mut app = App::for_tests();
-        app.learn_root = root.clone();
-        app.learn_lessons = learning_lessons(&root).unwrap();
-        assert!(app.learn_show(1));
-        assert_eq!(app.learn_lesson_title, "src/big.rs");
-        assert!(app.learn_code_example.contains("pub struct Big"));
-        assert!(app.learn_content[0].contains("declaration(s) the index found in src/big.rs"));
-        // The file is bigger than the cap, and the panel says how much it sent.
-        let cap_note = &app.learn_content[2];
-        assert!(cap_note.starts_with("First "), "{cap_note}");
-        assert!(
-            cap_note.contains("bytes sent — the file is longer"),
-            "{cap_note}"
-        );
-        assert!(!app.learn_busy, "showing a file asks nothing of a provider");
-
-        // A lesson past the end of the queue changes nothing.
-        app.learn_status.clear();
-        assert!(!app.learn_show(9));
-        assert!(app.learn_status.is_empty());
-
-        // The index names a file that has since gone: said out loud, and the
-        // previous lesson's text is not left standing as if it were this one.
-        std::fs::remove_file(root.join("src/big.rs")).unwrap();
-        assert!(!app.learn_show(1));
-        assert!(
-            app.learn_status.starts_with("The index names src/big.rs"),
-            "{}",
-            app.learn_status
-        );
-        assert!(app.learn_content.is_empty());
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    /// The answer key is the model's, and grading is against it — not against
-    /// whichever option happens to be first, as it used to be.
-    #[test]
-    fn learn_quiz_grades_against_the_models_key() {
-        let mut app = App::for_tests();
-        app.learn_apply_quiz(
-            "```json\n{\"explain\":[\"App owns the panel state.\"],\"question\":\"Which type owns the plan?\",\"options\":[\"App\",\"Plan\",\"Frame\"],\"answer\":1,\"why\":\"The plan field is a Plan.\"}\n```",
-        );
-        assert!(app.learn_quiz_active);
-        assert_eq!(app.learn_quiz_answer, Some(1));
-        assert_eq!(app.learn_explain, vec!["App owns the panel state."]);
-        assert!(!app.learn_busy, "the reply ended the request");
-        app.learn_quiz_selected = 0;
-        app.learn_answer_quiz();
-        assert!(app.learn_quiz_answered);
-        assert!(!app.learn_quiz_correct);
-        app.learn_quiz_selected = 1;
-        app.learn_quiz_answered = false;
-        app.learn_answer_quiz();
-        assert!(app.learn_quiz_correct);
-        assert_eq!(app.learn_quiz_why, "The plan field is a Plan.");
-    }
-
-    #[test]
-    fn a_reply_without_a_quiz_is_reported_not_invented() {
-        let mut app = App::for_tests();
-        app.learn_apply_quiz("Sure! Ownership means each value has one owner.");
-        assert!(!app.learn_quiz_active, "no quiz in it, so no quiz shown");
-        assert!(
-            app.learn_status
-                .starts_with("The model did not answer with a quiz"),
-            "{}",
-            app.learn_status
-        );
-        assert!(
-            app.learn_status.contains("Ownership means"),
-            "the reply verbatim"
-        );
-    }
-
-    #[test]
-    fn lesson_quiz_parsing_needs_a_usable_answer_key() {
-        let with_answer = |answer: &str| {
-            format!("{{\"explain\":[\"a\"],\"question\":\"q\",\"options\":[\"x\",\"y\"],\"answer\":{answer}}}")
-        };
-        assert_eq!(parse_lesson_quiz(&with_answer("1")).unwrap().answer, 1);
-        assert_eq!(
-            parse_lesson_quiz(&with_answer("\"0\"")).unwrap().answer,
-            0,
-            "a quoted index is still an index"
-        );
-        assert!(
-            parse_lesson_quiz(&with_answer("2")).is_none(),
-            "past the end"
-        );
-        assert!(parse_lesson_quiz(
-            "{\"explain\":[],\"question\":\"q\",\"options\":[\"x\",\"y\"],\"answer\":0}"
-        )
-        .is_none());
-        assert!(parse_lesson_quiz(
-            "{\"explain\":[\"a\"],\"question\":\"q\",\"options\":[\"x\"],\"answer\":0}"
-        )
-        .is_none());
-        assert!(parse_lesson_quiz("prose, no json").is_none());
-
-        assert_eq!(cap_at_line("aaaa\nbbbb\n", 6), "aaaa");
-        assert_eq!(cap_at_line("short", 6), "short");
-        assert_eq!(cap_at_line("no-newline-at-all", 10), "no-newline");
-    }
-
-    /// The other half of J-06's done-when rule: an un-indexed workspace gets
-    /// the reason, and nothing is sent to a provider.
-    #[test]
-    fn learning_without_an_index_says_why_and_asks_nothing() {
-        let (tx, _rx) = mpsc::unbounded_channel::<String>();
-        let mut app = App::for_tests();
-        let root = temp_dir("learn-noindex");
-        app.start_learning(root.clone(), tx.clone());
-        assert!(app.learn_active, "the panel still opened");
-        assert!(app.learn_lessons.is_empty());
-        assert_eq!(
-            app.learn_status,
-            "No project index — run /init first, then Enter again."
-        );
-        assert!(!app.learn_busy, "nothing was sent to a provider");
-        // And walking an empty queue cannot conjure a lesson either.
-        app.learn_step(true, tx);
-        assert_eq!(app.learn_current_lesson, 0);
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    /// The meter token carries the reading and the running byte count. A
-    /// malformed one must not be allowed to blank the meter mid-sentence.
-    #[test]
-    fn a_level_reading_needs_both_its_number_and_its_count() {
-        assert_eq!(parse_voice_level("0.4210|3200"), Some((0.421, 3200)));
-        assert_eq!(parse_voice_level("0.4"), None);
-        assert_eq!(parse_voice_level("loud|3200"), None);
-        assert_eq!(parse_voice_level("0.4|many"), None);
-
-        let mut app = App::for_tests();
-        app.voice_apply_level("0.4210|3200");
-        assert_eq!(app.voice_level, 0.421);
-        assert_eq!(app.voice_pcm_bytes, 3200);
-        app.voice_apply_level("garbage");
-        assert_eq!(app.voice_level, 0.421, "a bad reading changes nothing");
-    }
-
-    /// The peak is the loudest chunk of the session, so a bar that has since
-    /// fallen is still visible as what the clip reached.
-    #[test]
-    fn the_voice_peak_holds_the_loudest_chunk() {
-        let mut app = App::for_tests();
-        app.voice_apply_level("0.6000|3200");
-        app.voice_apply_level("0.2000|6400");
-        assert_eq!(app.voice_level, 0.2);
-        assert_eq!(app.voice_peak, 0.6);
-        assert_eq!(app.voice_pcm_bytes, 6400);
-    }
-
-    /// A clip report is the honest end of a session with no speech engine: the
-    /// panel keeps the file it wrote and says it cannot transcribe. The
-    /// transcript list stays empty because nobody transcribed anything.
-    #[test]
-    fn a_clip_without_a_transcriber_reports_the_file_not_a_sentence() {
-        let mut app = App::for_tests();
-        app.voice_active = true;
-        app.voice_apply_clip("/tmp/.xencode/voice/clip-1.wav|1500");
-        assert_eq!(
-            app.voice_clip.as_ref().unwrap().display().to_string(),
-            "/tmp/.xencode/voice/clip-1.wav"
-        );
-        assert!(app.voice_note.contains("1.5 s"), "{}", app.voice_note);
-        assert!(app.voice_transcript.is_empty());
-
-        app.voice_apply_note(&crate::voice::missing_transcriber_note(
-            std::path::Path::new("/tmp/.xencode/voice/clip-1.wav"),
-        ));
-        assert!(
-            app.voice_note.contains("No speech-to-text engine"),
-            "{}",
-            app.voice_note
-        );
-        assert!(
-            app.voice_transcript.is_empty(),
-            "nothing was ever transcribed"
-        );
-
-        // A clip report the panel cannot parse is said out loud, not dropped.
-        app.voice_apply_clip("/tmp/clip-2.wav|soon");
-        assert!(app.voice_note.contains("Malformed"), "{}", app.voice_note);
-        assert_eq!(
-            app.voice_clip.as_ref().unwrap().display().to_string(),
-            "/tmp/.xencode/voice/clip-1.wav"
-        );
-    }
-
-    #[test]
-    fn a_failed_capture_stops_the_meter_and_says_why() {
-        let mut app = App::for_tests();
-        app.voice_busy = true;
-        app.voice_status = "listening".into();
-        app.voice_apply_level("0.5000|3200");
-        app.voice_apply_error("arecord failed to start: No such device");
-        assert!(!app.voice_busy);
-        assert_eq!(app.voice_status, "idle");
-        assert_eq!(app.voice_level, 0.0);
-        assert!(
-            app.voice_note.contains("No such device"),
-            "{}",
-            app.voice_note
-        );
-    }
-
-    /// Mute has to reach the thread that is reading the microphone, otherwise
-    /// `m` is a label and the clip still gets written.
-    #[test]
-    fn muting_switches_the_flag_the_capture_thread_reads() {
-        use std::sync::atomic::Ordering;
-        let mut app = App::for_tests();
-        assert!(!app.voice_mute_flag.load(Ordering::Relaxed));
-        app.set_voice_muted(true);
-        assert!(app.voice_muted);
-        assert!(app.voice_mute_flag.load(Ordering::Relaxed));
-        app.set_voice_muted(false);
-        assert!(!app.voice_mute_flag.load(Ordering::Relaxed));
-    }
-
-    /// A recorder that is not a recorder — the empty PCM case — produces no
-    /// clip at all, so there is nothing for the panel to claim it kept.
-    #[test]
-    fn a_capture_of_nothing_keeps_no_clip() {
-        let dir = temp_dir("voice-empty");
-        let pcm_file = dir.join("nothing.pcm");
-        std::fs::write(&pcm_file, []).unwrap();
-        let cat = crate::voice::which("cat").expect("cat is on PATH for this test");
-        let args = vec![pcm_file.into_os_string()];
-        let cap = crate::voice::capture(
-            &cat,
-            &args,
-            &std::sync::atomic::AtomicBool::new(false),
-            &std::sync::atomic::AtomicBool::new(false),
-            |_, _| {},
-        );
-        assert!(cap.error.is_none(), "{:?}", cap.error);
-        assert!(cap.pcm.is_empty());
-        assert!(cap.levels.is_empty());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    /// Every number the profiler panel shows has to be measured or explained.
-    /// CPU is a rate so it may legitimately fail to read; what it may not do
-    /// is fall back to the scripted table this replaced.
-    #[tokio::test]
-    async fn profiler_measures_the_process_and_its_metrics() {
-        let dir = temp_dir("profiler");
-        let row = xencode_context_rs::RequestMetrics::from_timings(
-            "BALANCED", 8192, 4000, 400, 120, 31.5, 900.0, 5,
-        );
-        xencode_context_rs::append_metrics(&dir, &row).unwrap();
-
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        super::run_profiler(dir.clone(), tx).await;
-        let mut messages = Vec::new();
-        while let Ok(m) = rx.try_recv() {
-            messages.push(m);
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-
-        // CPU and memory: a measured row, or an honest note about why not.
-        for what in ["cpu", "resident"] {
-            let measured = messages.iter().any(|m| m.contains(what));
-            let admitted = messages
-                .iter()
-                .any(|m| m.starts_with("[PROFILER]note:") && m.contains("could not be read"));
-            assert!(
-                measured || admitted,
-                "neither {} nor a note: {:?}",
-                what,
-                messages
-            );
-        }
-        // The rate is read from `/proc`, which only Linux has. Elsewhere the
-        // panel must say why the gauge is missing rather than draw one.
-        if std::path::Path::new("/proc/self/stat").exists() {
-            assert!(messages
-                .iter()
-                .any(|m| m.starts_with("[PROFILER]gauge:cpu|")));
-        } else {
-            assert!(
-                messages
-                    .iter()
-                    .any(|m| m.starts_with("[PROFILER]note:cpu unavailable")),
-                "{messages:?}"
-            );
-        }
-        // The recorded turn, straight out of metrics.jsonl.
-        assert!(
-            messages.iter().any(|m| {
-                m.starts_with("[PROFILER]row:BALANCED|")
-                    && m.contains("90% kv")
-                    && m.contains("4000 prompt")
-                    && m.contains("32 tok/s")
-                    && m.contains("5 files")
-            }),
-            "no metrics row in {messages:?}"
-        );
-        assert!(messages.iter().any(|m| m == "[PROFILER]done"));
-        // The two figures the rollup contributes: reuse over every record, and a
-        // speed over the window. 3600 of 4000 prompt tokens were cached.
-        assert!(
-            messages
-                .iter()
-                .any(|m| m.contains("KV cache reuse|90% of 4000 prompt tokens")),
-            "no reuse line in {messages:?}"
-        );
-        assert!(
-            messages
-                .iter()
-                .any(|m| m.contains("generation speed|p50 31.5 · p95 31.5 tok/s over 1 turns")),
-            "no speed line in {messages:?}"
-        );
-        for scripted in ["process_data", "render_template", "generate_report"] {
-            assert!(
-                !messages.iter().any(|m| m.contains(scripted)),
-                "profiler still lists {scripted}"
-            );
-        }
-    }
-
-    /// The panel that reads the metrics file is also what keeps that file from
-    /// growing forever. It may bound the file without losing the figures: the
-    /// rollup has folded every row before the oldest ones are cut.
-    #[tokio::test]
-    async fn the_profiler_bounds_the_metrics_file_it_reads() {
-        let dir = temp_dir("profiler-trim");
-        let xencode = dir.join(".xencode");
-        let row = xencode_context_rs::RequestMetrics::from_timings(
-            "BALANCED", 8192, 1000, 400, 50, 30.0, 900.0, 5,
-        );
-        // Rows until the file is past the point where a trim is owed, written
-        // one append at a time exactly as a turn writes one.
-        let mut written = 0usize;
-        loop {
-            xencode_context_rs::append_metrics(&xencode, &row).unwrap();
-            written += 1;
-            let length = std::fs::metadata(xencode.join("cache").join("metrics.jsonl"))
-                .unwrap()
-                .len();
-            if length > xencode_context_rs::METRICS_KEEP_BYTES * 2 {
-                break;
-            }
-            assert!(
-                written < 50_000,
-                "the file stopped growing at {written} rows"
-            );
-        }
-
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        super::run_profiler(xencode.clone(), tx).await;
-        let mut messages = Vec::new();
-        while let Ok(m) = rx.try_recv() {
-            messages.push(m);
-        }
-
-        let length_after = std::fs::metadata(xencode.join("cache").join("metrics.jsonl"))
-            .unwrap()
-            .len();
-        assert!(
-            length_after <= xencode_context_rs::METRICS_KEEP_BYTES,
-            "{written} rows were cut to {length_after} bytes, still over the window"
-        );
-        // The panel counts every turn ever recorded, not the rows left on disk.
-        assert!(
-            messages
-                .iter()
-                .any(|m| m == &format!("[PROFILER]row:metrics|recorded turns|{written}")),
-            "the panel lost the older turns: {messages:?}"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     /// A scratch project for the cost work: a real `.xencode` directory, real
     /// records appended to `metrics.jsonl`, and optionally a real price table
     /// beside it. Named uniquely so two tests never share one.
@@ -20654,19 +18301,12 @@ Content-Length: 0
             |a: &mut App| a.is_reviewing = true,
             |a: &mut App| a.health_check_in_progress = true,
             |a: &mut App| a.bytebot_running = true,
-            |a: &mut App| a.voice_busy = true,
             |a: &mut App| a.sec_scan_active = true,
-            |a: &mut App| a.profiler_running = true,
         ] {
             let mut app = App::for_tests();
             set(&mut app);
             assert!(app.activity_animating());
         }
-        let mut app = App::for_tests();
-        app.collab_sync_status = "connecting".to_string();
-        assert!(app.activity_animating());
-        app.collab_sync_status = "idle".to_string();
-        assert!(!app.activity_animating());
     }
 
     #[test]
@@ -20964,219 +18604,6 @@ Content-Length: 0
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[tokio::test]
-    async fn profiler_says_so_without_recorded_metrics() {
-        let dir = temp_dir("profiler-empty");
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        super::run_profiler(dir.clone(), tx).await;
-        let mut messages = Vec::new();
-        while let Ok(m) = rx.try_recv() {
-            messages.push(m);
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-
-        assert!(messages
-            .iter()
-            .any(|m| m.starts_with("[PROFILER]note:no metrics.jsonl")));
-        assert!(!messages
-            .iter()
-            .any(|m| m.starts_with("[PROFILER]row:metrics|")));
-    }
-
-    /// The app-side half of the panel: session numbers exist, and latency
-    /// without a completed turn reads as `n/a` rather than 0 ms.
-    #[tokio::test]
-    async fn profiler_rows_come_from_app_state() {
-        let mut app = App::for_tests();
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let lines = app.messages.len();
-        app.messages.push(super::UiMessage {
-            role: "user".to_string(),
-            content: "hi".to_string(),
-        });
-        app.start_profiler(tx);
-
-        assert!(app
-            .profiler_rows
-            .iter()
-            .any(|(s, m, _)| s == "session" && m == "uptime"));
-        let counted = app
-            .profiler_rows
-            .iter()
-            .find(|(s, m, _)| s == "session" && m == "chat lines")
-            .expect("no chat-lines row");
-        assert_eq!(counted.2, format!("{}", lines + 1));
-        assert_eq!(
-            app.profiler_gauge_latency, None,
-            "latency must stay unknown before the first turn"
-        );
-        assert!(app
-            .profiler_notes
-            .iter()
-            .any(|n| n.contains("no completed turn yet")));
-    }
-
-    /// J-03: the model's reply is the only source of a suggestion — this parser
-    /// is where the scripted five-command list used to be built. It accepts what
-    /// models actually send (fences, prose, a bare object) and a flattering risk
-    /// label can only ever be raised, never lowered.
-    #[test]
-    fn term_suggestions_come_from_the_reply_and_risk_only_escalates() {
-        let fenced = parse_term_suggestions(
-            "Sure:\n```json\n[{\"command\":\"du -sh *\",\"risk\":\"safe\",\"why\":\"sizes\"}]\n```",
-        );
-        assert_eq!(
-            fenced,
-            vec![(
-                "du -sh *".to_string(),
-                "safe".to_string(),
-                "sizes".to_string()
-            )]
-        );
-
-        let escalated =
-            parse_term_suggestions("[{\"command\":\"rm -rf node_modules\",\"risk\":\"safe\"}]");
-        assert_eq!(
-            escalated[0].1, "destructive",
-            "a command on the dangerous list is never shown as safe"
-        );
-
-        let kept = parse_term_suggestions(
-            "[{\"command\":\"git push --force\",\"explanation\":\"own warning, other key\"}]",
-        );
-        assert_eq!(kept[0].1, "destructive");
-        assert_eq!(kept[0].2, "own warning, other key");
-
-        assert!(parse_term_suggestions("I would not run anything for that.").is_empty());
-        assert!(parse_term_suggestions("[{\"why\":\"no command in this object\"}]").is_empty());
-
-        let items: Vec<String> = (0..12)
-            .map(|i| format!("{{\"command\":\"echo {i}\",\"risk\":\"safe\"}}"))
-            .collect();
-        assert_eq!(
-            parse_term_suggestions(&format!("[{}]", items.join(","))).len(),
-            super::TERM_SUGGESTION_CAP,
-            "a wall of suggestions is not a list anyone can read"
-        );
-    }
-
-    /// The panel starts empty (nothing canned is on screen before the model has
-    /// answered) and its filter can only ever narrow to rows that exist.
-    #[test]
-    fn terminal_panel_opens_asked_for_and_filters_by_risk() {
-        let app = App::for_tests();
-        assert!(
-            app.term_asst_suggestions.is_empty(),
-            "the panel no longer ships a scripted list"
-        );
-        assert!(app.term_asst_typing, "it opens ready to be typed into");
-        assert!(app.term_visible_rows().is_empty());
-
-        let mut app = App::for_tests();
-        app.term_asst_suggestions = vec![
-            ("df -h".to_string(), "safe".to_string(), String::new()),
-            (
-                "rm -rf ./build".to_string(),
-                "destructive".to_string(),
-                String::new(),
-            ),
-        ];
-        app.term_risk_filter = "destructive".to_string();
-        assert_eq!(app.term_visible_rows(), vec![1]);
-        app.term_risk_filter = "safe".to_string();
-        assert_eq!(app.term_visible_rows(), vec![0]);
-        app.term_risk_filter = "All".to_string();
-        assert_eq!(app.term_visible_rows(), vec![0, 1]);
-    }
-
-    /// An empty question must not spend a provider call — the panel asks when
-    /// the user asks, and never on its own.
-    #[test]
-    fn asking_nothing_sends_nothing() {
-        let mut app = App::for_tests();
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        app.ask_terminal(tx);
-        assert!(!app.term_asst_busy);
-        assert!(app.term_asst_output.contains("Nothing asked"));
-        assert!(
-            rx.try_recv().is_err(),
-            "a question that was never asked must not reach a provider"
-        );
-    }
-
-    /// The panel's only route to a shell is the agent's own gate: an unapproved
-    /// command comes back as a denial and never executes (J-03).
-    #[tokio::test]
-    async fn terminal_panel_runs_commands_through_the_approval_gate() {
-        let mut app = App::for_tests();
-        app.config.agent_approval = "ask".to_string();
-        let marker = std::env::temp_dir().join(format!(
-            "xencode-term-gate-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        app.term_asst_suggestions = vec![(
-            format!("touch {}", marker.display()),
-            "safe".to_string(),
-            String::new(),
-        )];
-
-        let (tx, mut done_rx) = mpsc::unbounded_channel();
-        app.run_terminal_suggestion(tx);
-
-        let (request, responder) = app
-            .approval_rx
-            .as_mut()
-            .expect("no approval channel")
-            .recv()
-            .await
-            .expect("the panel ran a command without asking");
-        assert_eq!(request.tool, "run_command");
-        let _ = responder.send(crate::agent_tools::ApprovalAnswer::Denied);
-
-        let token = done_rx.recv().await.expect("no [TERM] result");
-        let json = token
-            .strip_prefix("[TERM]ran:")
-            .unwrap_or_default()
-            .to_string();
-        let body: serde_json::Value = serde_json::from_str(&json).expect("result is not JSON");
-        assert!(
-            body["result"]
-                .as_str()
-                .unwrap_or_default()
-                .starts_with("error: the user denied"),
-            "a denial has to read as a denial: {body}"
-        );
-        assert!(!marker.exists(), "a denied command must never run");
-    }
-
-    /// Same gate, no listener: with nothing to answer the prompt, the strictest
-    /// possible answer is the one the panel gets.
-    #[tokio::test]
-    async fn a_vanished_prompter_denies_instead_of_running() {
-        let mut app = App::for_tests();
-        app.config.agent_approval = "ask".to_string();
-        app.term_asst_suggestions = vec![(
-            "touch /tmp/xencode-panel-must-not-run".to_string(),
-            "safe".to_string(),
-            String::new(),
-        )];
-        app.approval_rx = None;
-
-        let (tx, mut done_rx) = mpsc::unbounded_channel();
-        app.run_terminal_suggestion(tx);
-        let token = done_rx.recv().await.expect("no [TERM] result");
-        let body: serde_json::Value =
-            serde_json::from_str(token.trim_start_matches("[TERM]ran:")).unwrap();
-        assert!(body["result"]
-            .as_str()
-            .unwrap_or_default()
-            .starts_with("error: this call needs approval and nobody is here"));
-        assert!(!std::path::Path::new("/tmp/xencode-panel-must-not-run").exists());
-    }
-
     /// A file the panel is about to hand to a running server is hashed first,
     /// against the checksum it was pinned to. The server is never told about a
     /// file that failed: a model answering from the wrong bytes reads like a bad
@@ -21278,216 +18705,6 @@ Content-Length: 0
             "git {args:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-    }
-
-    /// An app with a body already drawn, which is the only geometry a drag can
-    /// be measured against (`V-7`).
-    fn app_with_body(focus: FocusArea) -> App<'static> {
-        let mut app = App::for_tests();
-        app.focus = focus;
-        app.last_body_area = ratatui::layout::Rect::new(0, 1, 100, 22);
-        app.note_session_opened();
-        app
-    }
-
-    /// The column of the divider between the editor and the chat column in the
-    /// layout actually on screen, asked of the geometry rather than hardcoded —
-    /// a test that named the column itself would still pass if the line moved.
-    fn editor_seam(app: &App) -> u16 {
-        app.body_layout(app.last_body_area)
-            .chat
-            .expect("a chat pane")
-            .left()
-    }
-
-    #[test]
-    fn a_press_on_a_divider_grabs_it_without_moving_focus() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let seam = editor_seam(&app);
-        let before = app.focus;
-        assert!(
-            app.grab_boundary(app.last_body_area.y + 3, seam),
-            "the seam between two panes is a divider"
-        );
-        assert_eq!(app.focus, before, "a grab is not a click on a pane");
-        assert!(app.drag.is_some());
-        assert_eq!(
-            app.boundary_hover,
-            app.drag.as_ref().map(|drag| drag.boundary.clone()),
-            "and the line is marked as soon as it is held"
-        );
-    }
-
-    #[test]
-    fn a_press_in_a_pane_grabs_nothing() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let seam = editor_seam(&app);
-        assert!(
-            !app.grab_boundary(app.last_body_area.y + 3, seam + 12),
-            "twelve columns inside a pane is content"
-        );
-        assert!(app.drag.is_none());
-        assert!(app.boundary_hover.is_none());
-    }
-
-    #[test]
-    fn a_drag_commits_only_once_the_hand_has_left_the_line() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let area = app.last_body_area;
-        let seam = editor_seam(&app);
-        let before = app.body_layout(area).editor.unwrap().width;
-        app.grab_boundary(area.y + 3, seam);
-        // One cell of judder, inside the divider's own two columns: nothing.
-        assert!(!app.drag_to(seam + 1));
-        assert_eq!(app.body_layout(area).editor.unwrap().width, before);
-        assert!(!app.arrangement_dirty, "and nothing to save");
-        // Two cells is a resize, and the pane on the pointer's side grows.
-        assert!(app.drag_to(seam + 2));
-        assert!(
-            app.body_layout(area).editor.unwrap().width > before,
-            "the editor widened"
-        );
-        assert!(app.arrangement_dirty, "the arrangement is worth keeping");
-    }
-
-    #[test]
-    fn a_drag_from_a_preset_resizes_the_tree_it_promoted() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let area = app.last_body_area;
-        let seam = editor_seam(&app);
-        assert!(app.custom_view.is_none(), "a preset is on screen");
-        app.grab_boundary(area.y + 3, seam);
-        assert!(app.drag_to(seam + 10));
-        assert!(
-            app.custom_view.is_some(),
-            "the drag promoted the preset to an arrangement first"
-        );
-        let preset =
-            crate::layout::compute_layout(area, "classic", app.show_terminal, app.last_body_focus);
-        assert!(
-            app.body_layout(area).editor.unwrap().width > preset.editor.unwrap().width,
-            "and the ten cells came off the chat column, not the editor"
-        );
-    }
-
-    /// The root split's shares, read off the arrangement itself. Pixel widths
-    /// round; the numbers the tree stores are what a drag is really about.
-    fn root_shares(app: &App) -> Vec<ratatui::layout::Constraint> {
-        use crate::view::LayoutNode;
-        let LayoutNode::Split { parts, .. } =
-            &app.custom_view.as_ref().expect("an arrangement").root
-        else {
-            panic!("the root of an arrangement is a split");
-        };
-        parts.iter().map(|(_, share)| *share).collect()
-    }
-
-    #[test]
-    fn a_pinned_divider_comes_back_under_the_pointer_rather_than_short_of_it() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let area = app.last_body_area;
-        let seam = editor_seam(&app);
-        app.grab_boundary(area.y + 3, seam);
-        // The chat column can give up twenty points before the minimum stops
-        // it, and no more, however far past the edge of the screen the hand goes.
-        assert!(app.drag_to(seam + 40));
-        assert_eq!(
-            root_shares(&app),
-            [
-                ratatui::layout::Constraint::Percentage(20),
-                ratatui::layout::Constraint::Percentage(70),
-                ratatui::layout::Constraint::Percentage(10),
-            ]
-        );
-        // Back to ten columns of travel: the divider is ten points wider than
-        // the preset, not twenty and not nothing. Travel the clamp refused was
-        // never credited, so it cannot come due on the way home.
-        assert!(app.drag_to(seam + 10));
-        assert_eq!(
-            root_shares(&app),
-            [
-                ratatui::layout::Constraint::Percentage(20),
-                ratatui::layout::Constraint::Percentage(60),
-                ratatui::layout::Constraint::Percentage(20),
-            ]
-        );
-    }
-
-    #[test]
-    fn letting_go_ends_the_drag_and_motion_without_it_ends_the_drag() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let area = app.last_body_area;
-        let seam = editor_seam(&app);
-        app.grab_boundary(area.y + 3, seam);
-        assert!(app.release_drag());
-        assert!(app.drag.is_none());
-        assert!(!app.drag_to(seam + 20), "nothing is held any more");
-
-        app.grab_boundary(area.y + 3, seam);
-        // Motion with no button down means the release was never reported.
-        app.hover_boundary(area.y + 3, seam + 30);
-        assert!(app.drag.is_none());
-        assert!(
-            app.boundary_hover.is_none(),
-            "and the pointer is over content, not a line"
-        );
-    }
-
-    /// `V-9`: a drag by hand is written down once, at the release, with the
-    /// divider named by the panes it separates and both numbers the hand
-    /// knows about — how far it went and how much the line gave.
-    #[test]
-    fn a_dragged_divider_is_written_down_once_with_both_numbers() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let area = app.last_body_area;
-        let seam = editor_seam(&app);
-        let rows = app.layout_log.len();
-        app.grab_boundary(area.y + 3, seam);
-        // Ten cells, all of them allowed: the chat column has room to give.
-        assert!(app.drag_to(seam + 10));
-        assert!(app.release_drag());
-        assert_eq!(app.layout_log.len(), rows + 1, "one gesture, one row");
-        let newest = app.layout_log.last().unwrap();
-        assert_eq!(
-            newest.trigger.words(),
-            "dragged the Code / Chat divider 10 cells, took 10"
-        );
-        assert_eq!(newest.after, app.arrangement_line());
-        let first_drag = newest.after.clone();
-
-        // Further than the clamps allow: the row says the travel it was refused
-        // as well as what it took, because the gap is the thing that was felt.
-        app.grab_boundary(area.y + 3, editor_seam(&app));
-        assert!(app.drag_to(area.x + area.width));
-        assert!(app.release_drag());
-        let clamped = app.layout_log.last().unwrap();
-        assert_ne!(clamped.after, first_drag, "and the screen did move");
-        match &clamped.trigger {
-            crate::transitions::Trigger::DividerDrag { cells, points, .. } => {
-                assert!(
-                    *cells > *points,
-                    "the line stopped short of the hand: {} cells, {} points",
-                    cells,
-                    points
-                );
-                assert!(*points > 0, "and it still gave what it could");
-            }
-            other => panic!("the row should name a drag, not {}", other.words()),
-        }
-    }
-
-    #[test]
-    fn a_press_that_juddered_on_the_line_is_not_a_change() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let area = app.last_body_area;
-        let seam = editor_seam(&app);
-        let rows = app.layout_log.len();
-        let line = app.arrangement_line();
-        app.grab_boundary(area.y + 3, seam);
-        assert!(!app.drag_to(seam + 1), "one cell is inside the divider");
-        assert!(app.release_drag());
-        assert_eq!(app.layout_log.len(), rows, "nothing was written");
-        assert_eq!(app.arrangement_line(), line, "nothing moved");
     }
 
     /// A day whose records pass a cap buys the next turn down one rung, and says

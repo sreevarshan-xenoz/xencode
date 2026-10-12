@@ -17788,7 +17788,12 @@ program; the keys themselves are covered by their own tests.
     `/files`, `/changes`, `/models`, `/project`, `/settings` open them; the old header and status
     bar are gone. Files still uses the layout presets until TD-5. Not built: Enter on a side-panel
     change (the panel takes no focus; `Ctrl+P changes` opens the view).
-  - [ ] **TD-5 — retire eight panels and the preset layouts.**
+  - [x] **TD-5 — retire eight panels and the preset layouts.** Done 2026-10-12: the eight
+    panels (voice, learning, terminal assistant, profiler, dashboard, collaboration hub, layout
+    history, feature navigator) and `Ctrl+D`, `Ctrl+F`, `Ctrl+0` are gone, leaving 19 focus
+    areas; so are the layout presets and declared layouts, saved views (`Ctrl+1`…`Ctrl+9`),
+    `Alt+Left`/`Alt+Right` resizing, divider dragging and `layout.json`. The Files view is the
+    tree beside the editor; old configs with the layout keys still load.
   - [ ] **TD-6 — manuals and real screens.**
 - [ ] **OM — orchestrator mode as a tiling agent workspace** (designed 2026-10-11; spec
   `docs/superpowers/specs/2026-10-11-orchestrator-mode-design.md`). Turning the mode on opens a

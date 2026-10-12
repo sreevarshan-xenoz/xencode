@@ -348,12 +348,6 @@ pub struct XencodeConfig {
     #[serde(default = "default_theme")]
     pub active_theme: String,
 
-    /// Body layout: "classic", "chat-first", "zen", or the name of a template
-    /// in [`XencodeConfig::layout_templates`]. Unknown values fall back to
-    /// "classic" at render time.
-    #[serde(default = "default_layout")]
-    pub layout: String,
-
     /// How much project context a run is allowed to spend: "low", "balanced" or
     /// "high". "auto" (the default) picks one from the memory this machine
     /// reports, and says which it picked and why — on the command line, and in
@@ -800,40 +794,6 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub model_routing: bool,
 
-    /// Body layouts the user authored, keyed by the name they are chosen by
-    /// (V-5), alongside the three shipped presets `classic`, `chat-first` and
-    /// `zen`. Each value is a layout tree: a `{"leaf": {"slot": …, "focus": …}}`
-    /// or a `{"split": {"horizontal": …, "parts": [[child, share], …]}}` with
-    /// shares `{"percent": n}`, `{"min": n}` or `{"length": n}`. Slots are
-    /// `explorer`, `editor`, `chat`, `input` and `terminal`; foci are
-    /// `explorer`, `editor` and `chat`.
-    ///
-    /// The value is left as raw JSON on purpose. This file is hand-edited, and
-    /// a template that does not parse has to be refused *by name at the moment
-    /// it is chosen* — not by failing the whole config, which would silently
-    /// reset every other setting to its default. It also means a config
-    /// written for a newer xencode (a node kind this build has never heard of)
-    /// still opens here, the same promise `model_profiles` makes about an
-    /// unknown task word. The tree is parsed and validated where it is used:
-    /// `xencode_tui_rs::templates`.
-    #[serde(default)]
-    pub layout_templates: std::collections::BTreeMap<String, serde_json::Value>,
-
-    /// Named views the user stored or hand-wrote (V-4), keyed by slot name:
-    /// `Code`, `Chat`, `Terminal`, `Focus`, `Review`, `Split` — the six seeded
-    /// names — and `7`, `8`, `9` for the unseeded chord slots. A value is the
-    /// same layout tree a `layout_templates` entry holds, in the same
-    /// vocabulary; `xencode_tui_rs::views` reads this map.
-    ///
-    /// Raw JSON for the same reason as templates, and one more: the map is
-    /// written back out by `Ctrl+Shift+<digit>`, so a hand-added entry —
-    /// or one from a future build that knows a node kind this one does not —
-    /// must survive the round trip rather than fail the load. An empty map
-    /// changes nothing: the seeded views live in code, and a view never
-    /// becomes the only way to reach a pane.
-    #[serde(default)]
-    pub layout_views: std::collections::BTreeMap<String, serde_json::Value>,
-
     /// Google Colab bridge settings. Opt-in: every field has a safe default,
     /// so a config that predates the block still loads with the bridge off.
     #[serde(default)]
@@ -971,10 +931,6 @@ fn default_search_provider() -> String {
     "none".to_string()
 }
 
-fn default_layout() -> String {
-    "classic".to_string()
-}
-
 fn default_hardware_profile() -> String {
     "auto".to_string()
 }
@@ -1080,7 +1036,6 @@ impl Default for XencodeConfig {
             config_version: CURRENT_CONFIG_VERSION,
             default_model: default_model(),
             active_theme: default_theme(),
-            layout: default_layout(),
             hardware_profile: default_hardware_profile(),
             rounded_borders: true,
             tool_output: default_tool_output(),
@@ -1141,8 +1096,6 @@ impl Default for XencodeConfig {
             session_recording: false,
             model_profiles: Vec::new(),
             model_routing: false,
-            layout_templates: std::collections::BTreeMap::new(),
-            layout_views: std::collections::BTreeMap::new(),
             colab: ColabConfig::default(),
         }
     }
@@ -1634,7 +1587,6 @@ mod tests {
     fn default_config_has_expected_values() {
         let config = XencodeConfig::default();
         assert_eq!(config.default_model, "qwen2.5:7b");
-        assert_eq!(config.layout, "classic");
         assert!(config.rounded_borders);
         assert!(config.show_scrollbars);
         assert!(config.show_line_numbers);
@@ -2062,7 +2014,6 @@ mod tests {
 
         let mut config = XencodeConfig {
             default_model: "llama3.1:8b".to_string(),
-            layout: "zen".to_string(),
             rounded_borders: true,
             show_scrollbars: false,
             show_line_numbers: false,
@@ -2174,7 +2125,6 @@ mod tests {
         // Other fields should have defaults
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.max_cache_size, 100);
-        assert_eq!(config.layout, "classic");
         assert!(config.show_scrollbars);
         assert!(config.show_line_numbers);
         assert!(config.rounded_borders);
@@ -2197,85 +2147,46 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// The body layout settings were retired with the layout presets. A config
+    /// file written while they existed still loads, keeps every other setting,
+    /// and drops the three keys the next time it is saved.
     #[test]
-    fn a_config_can_declare_layout_templates_and_a_broken_one_still_loads() {
+    fn an_old_config_with_layout_keys_still_loads_and_keeps_its_settings() {
         let dir = temp_dir();
         let path = dir.join("config.json");
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             &path,
             r#"{
-                "layout": "side",
-                "model": "unused",
+                "default_model": "mistral:7b",
+                "active_theme": "forest",
+                "show_line_numbers": false,
+                "layout": "zen",
                 "layout_templates": {
                     "side": {"split": {"horizontal": true, "parts": [
                         [{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}],
                         [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]
-                    ]}},
-                    "future": {"zones": [{"kind": "editor"}]}
+                    ]}}
+                },
+                "layout_views": {
+                    "Code": {"leaf": {"slot": "editor", "focus": "editor"}}
                 }
             }"#,
         )
         .unwrap();
 
         let config = XencodeConfig::load_from(&path).unwrap();
-        assert_eq!(config.layout, "side");
-        assert_eq!(config.layout_templates.len(), 2);
-        // A template this build cannot read stays exactly as written, and costs
-        // nothing else in the file: every other setting is still loaded. That is
-        // the whole reason these are raw JSON rather than a typed map.
-        assert_eq!(
-            config.layout_templates["future"]["zones"][0]["kind"],
-            "editor"
-        );
+        assert_eq!(config.default_model, "mistral:7b");
+        assert_eq!(config.active_theme, "forest");
+        assert!(!config.show_line_numbers);
         assert_eq!(config.ollama_url, "http://localhost:11434");
 
-        // And it round-trips: saving keeps both templates, future shape and all.
         config.save_to(&path).unwrap();
-        let again = XencodeConfig::load_from(&path).unwrap();
-        assert_eq!(again, config);
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn a_config_written_before_templates_existed_has_none() {
-        let dir = temp_dir();
-        let path = dir.join("config.json");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(&path, r#"{"default_model": "mistral:7b"}"#).unwrap();
-        let config = XencodeConfig::load_from(&path).unwrap();
-        assert!(config.layout_templates.is_empty());
-        // An empty map is not written out as an empty block on the way back
-        // either: nothing is invented for a config that declared nothing.
-        let json = config.to_json().unwrap();
-        assert!(json.contains("\"layout_templates\": {}"), "{json}");
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn a_config_can_declare_named_views_and_an_unknown_shape_still_loads() {
-        let dir = temp_dir();
-        let path = dir.join("config.json");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(
-            &path,
-            r#"{
-                "layout_views": {
-                    "Code": {"leaf": {"slot": "editor", "focus": "editor"}},
-                    "9": {"zones": [{"kind": "editor"}]}
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let config = XencodeConfig::load_from(&path).unwrap();
-        assert_eq!(config.layout_views.len(), 2);
-        // A view this build cannot read is carried as written and costs
-        // nothing else — the same promise templates make.
-        assert_eq!(config.layout_views["9"]["zones"][0]["kind"], "editor");
-        config.save_to(&path).unwrap();
-        let again = XencodeConfig::load_from(&path).unwrap();
-        assert_eq!(again, config);
+        let written = fs::read_to_string(&path).unwrap();
+        for key in ["\"layout\"", "\"layout_templates\"", "\"layout_views\""] {
+            assert!(!written.contains(key), "{key} was written back: {written}");
+        }
+        assert_eq!(XencodeConfig::load_from(&path).unwrap(), config);
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -2287,12 +2198,13 @@ mod tests {
     fn xcode_config_dir_env_overrides_the_default_location() {
         let _guard = crate::paths::env_lock();
         let dir = temp_dir();
+        let before = std::env::var_os("XCODE_CONFIG_DIR");
         std::env::set_var("XCODE_CONFIG_DIR", &dir);
         let result = (|| {
             let path = XencodeConfig::config_path()?;
             assert_eq!(path, dir.join("config.json"));
             let config = XencodeConfig {
-                layout: "chat-first".to_string(),
+                active_theme: "forest".to_string(),
                 ..XencodeConfig::default()
             };
             config.save()?;
@@ -2304,7 +2216,10 @@ mod tests {
             assert_ne!(XencodeConfig::config_dir()?, dir);
             Ok::<(), ConfigError>(())
         })();
-        std::env::remove_var("XCODE_CONFIG_DIR");
+        match before {
+            Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+            None => std::env::remove_var("XCODE_CONFIG_DIR"),
+        }
         result.unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

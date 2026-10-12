@@ -85,7 +85,7 @@ does not yet:
 - **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Google Colab GPU you bring up when you need one, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind` — and a git-backed record of those turns that stops the rewind from overwriting a file you edited yourself. A bug fix can be *earned*: `/gate bugfix` supervises one, and until a reproduction test has been run and actually seen failing against code nobody has touched yet, every write to a production file is refused — not asked about, refused — and the test that reproduced it is frozen once its failure is on record so it cannot be edited into proving the fix. A call whose arguments do not match the description that tool was offered with is answered back to the model instead of being run — including one whose arguments arrived as text that stopped halfway, which used to look like a call that asked for nothing. When a turn edited files, the model's claim of completion is not the gate: the workspace's own `cargo test` and `cargo clippy` run over the same approval gate and only exit `0` finishes the turn; failures come back to the model for up to `agent_repair_max_iters` repair rounds and past that the turn reports the task incomplete. A non-Rust workspace is not left unchecked: when there is no `Cargo.toml` but the turn edited files a language server covers, real diagnostics are pulled from that server (`clangd` for C and C++) and gate the turn the same way — an error feeds back for a repair round, a clean answer verifies it, and a workspace with no supported server is left untouched rather than given an unearned pass.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists. A candidate that would send the conversation somewhere the primary would not — a cloud API standing in for a local model, or the other way round — is skipped by design and named in the transcript.
-- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 27 panels (body layouts via `Ctrl+U` — the three shipped presets plus any you declare in `layout_templates`; the `Ctrl+F` feature navigator lists 10 panels at the default disclosure level 2 and 26 at `/level 4`, and the `Ctrl+X` command palette reaches every panel, command and setting at any level): agent, collaboration, git, models, and more.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 19 panels in seven views (the `Ctrl+P` command palette, also on `Ctrl+X`, reaches every view, panel, command and setting at any level): agent, git, models, and more.
 - **⚙️ Work that outlives the terminal** — the agent work for a project runs in a background engine (`xencode engine`) that the terminal app starts by itself and connects to over a local socket open only to your own account. Closing the terminal no longer stops a running chat turn or ByteBot task; opening `xencode` again in the same folder shows it, and the engine exits on its own once no window is open and nothing is running. Several terminals on one project share the engine and its prompts — the first answer counts and the others are told who answered — and a prompt left with no window open ends after 30 minutes (`--wait-limit`) by the safe answer: a question withdrawn, an approval denied, a review completed with its changes kept. `xencode tui --in-process` keeps the old single-process way (watched on Windows 11). `xencode run --detach` and `--stop` work on Windows too.
 - **🔵 Floating badge** — `xencode badge` starts a small always-on-top logo that shows whether any running session is working, needs you, finished or failed, with a card on hover; built separately from `rust/badge` (watched on Windows 11, macOS built in CI only).
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
@@ -165,15 +165,11 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 27 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more.
-- **The seven panels that used to play recordings are real** (Milestone J):
+- **Rust ratatui TUI** (primary) — 19 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, background tasks, worktrees, insights, impact, worker panel, provider health, project analyzer, security auditor, custom models and multi-language.
+- **The panels that used to play recordings are real** (Milestone J):
   - *Security auditor* — `Enter` walks the workspace with the same file list `xencode analyze` uses and runs the pattern scanner per file, streaming findings and finishing with real totals; unreadable files and a failed walk surface as their own log lines. It also reads credential *content*, not just file names: a bare `sk-…`/`AKIA…` token or a pasted private key in ordinary source is flagged by line, using the same pattern list the trace scrubber and the secrets-taint gate share. A credential-shaped string under `examples/`, `testdata/`, `fixtures/`, `samples/` or a `*.example`/`*.sample`/`*.template` file is documentation rather than a leak and is skipped, as is any path named in `.xencode/cache/secrets-allowlist` (one per line, `#` for comments).
-  - *Performance profiler* — this process's CPU (two `/proc/self/stat` reads 250 ms apart) and resident memory, the session's own average turn latency and tokens/s, per-provider health latency, and the last rows of `.xencode/cache/metrics.jsonl` (a row cut off by a crash is skipped, the rows before it still count). A gauge with no data renders `n/a`.
-  - *Terminal assistant* — asks the configured model for commands and runs the one you pick **through the agent's approval gate**, never around it.
   - *Multi-language* — tabulates a real `scan_tree` walk (files, lines, share per language; secret and binary files counted, never read) and translates your text with one model call.
   - *Custom models* — edits real `model_profiles` in `config.json`: `Enter` applies to the next turn, `s` saves, `t` shows the provider's real reply or its real error, `f` marks the profile for a kind of turn (`bugfix`, `general`, or by hand only). With `model_routing` set to `true`, a marked profile takes matching turns on its own model — Ollama models only, since a running llama.cpp server holds one model at a time and such a swap is refused and said out loud instead. `xencode query` follows the same rule unless `-m` names a model.
-  - *Learning mode* — queues the files the project index says declare something and asks the model to teach that file and quiz you on it.
-  - *Voice* — opens the microphone through the first of `arecord`/`pw-record`/`parec` on `PATH`. `Enter` records, `Enter` again stops; the level bar, peak and clip length are RMS over the PCM the recorder actually sent, and the clip lands in `.xencode/voice/clip-<unix>.wav`. Text appears only from a whisper CLI's stdout — with none installed the panel names the clip and says there is no speech engine.
 - **Approval-gated agent tool loop** — the chat model can call 25 tools (`read_file`, `list_dir`, `search_files`, `read_docs`, `lookup_advisory`, `web_fetch`, `web_search`, `write_file`, `edit_file`, `edit_symbol`, `ast_edit`, `codemod`, `rename`, `what_breaks`, `find_refs`, `callers`, `run_command`, `debug_test`, `reproduce_bug`, `update_plan`, `write_note`, `background_start/poll/stop`, `repo_advise`) — a 26th, `load_skill`, is offered with them exactly when at least one skill is installed, so a machine with no skills sends the model the same tool list it sent before; file changes and shell commands stop at a modal prompt showing the exact diff or command line (`y` allow · `a` allow for the session · `n`/`Esc` deny), and that shown diff is what the `y` agrees to: the file is re-checked before the approval is spent, so a file that moved while the prompt was open raises the prompt again over its current contents instead of landing an edit nobody read — twice, then the call is refused with the reason — and a multi-file `ast_edit`, `rename` or `codemod` re-checks every file its per-file diff was worked out from. A `n` writes nothing of yours: no byte outside `.xencode/` moves and no undo record is made for a change that never happened — the one thing a refusal still writes is the lesson draft under `.xencode/` that `n` has always left for `/lesson`. Paths outside the workspace are refused in every mode, the three read tools (`read_file`, `list_dir`, `search_files`) can additionally reach a dependency's own upstream source — the exact version `Cargo.lock` pins, already unpacked by cargo — by addressing it as `crate:<name>[/<path>]`, which is read-only in every mode, resolved through the lock file rather than "whatever version is on disk", and labels every answer with the version it came from, `read_docs` answers how a crate documents itself — its own readme, chosen by its manifest, with the other documents in it named so the next call can ask for one — and stays on cargo's local copy unless `allow_online_docs` is on, `lookup_advisory` answers what the security advisories downloaded onto this machine say about a crate and judges the version this project's lock file pins when the model does not name one — saying that the advisory state is unknown rather than that a crate is safe on a machine that has never synced, and making no request of its own, `web_fetch` reads one page or API response whose address the model names — it is offered only when `allow_web_fetch` is on, it asks every time it is used because a yes about one address is not a yes about the next, and no approval at all lets it reach a private network or the cloud metadata service: the address is resolved and refused before the connection is made, and again at every redirect, so a page cannot point the fetch inward, a page the server says is missing is
 answered with that site's own `/llms.txt` index when it publishes one and is
 labelled as the index rather than the page, `web_search` puts the model's question
@@ -311,14 +307,13 @@ xencode analyze src/
 
 # 6) Collaborate with your team
 xencode server           # local-first: http://127.0.0.1:8765, ws://
-# then in the TUI: Ctrl+F → Collaboration Hub → c to create, j to join
 
 # 7) Install a plugin from a git repository, then see what it contributes
 xencode plugin install <git-url>   # shows what it declares, and the commit it pinned
 xencode plugin list                # the TUI's /plugin reports the same load
 ```
 
-**TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+X` opens the command palette (every panel, slash command and setting, by typing a few words) · `Ctrl+F` opens the Feature Navigator.
+**TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+P` (or `Ctrl+X`) opens the command palette (every view, panel, slash command and setting, by typing a few words).
 
 ---
 
@@ -545,72 +540,17 @@ flowchart TD
 - Manage it with `xencode config show | set <KEY> <VALUE> | reset`, or the
   TUI Settings panel. Only the keys in the struct are read; unknown keys are
   ignored.
-- **The body layout is a tree you can write yourself.** `layout` names the
-  arrangement: the shipped `classic`, `chat-first` or `zen`, or a name declared
-  in `layout_templates`, which holds the shape as data — a leaf naming a slot
-  (`explorer`, `editor`, `chat`, `input`, `terminal`) and the focus it carries,
-  or a split naming each child's share as `{"percent": 70}`, `{"min": 6}` or
-  `{"length": 8}`. Adding one takes no code: an `editor-first` arrangement is a
-  handful of lines of JSON under `layout_templates`, then `"layout":
-  "editor-first"`. `Ctrl+U` and the Settings Layout row cycle the shipped
-  presets and your names together, the header chip names whichever is in force,
-  and a name that is neither — or a template that cannot be built, such as one
-  naming a mistyped slot or giving a child a zero share — renders `classic` and
-  says why in a toast rather than quietly behaving like a preference that was
-  ignored. `xencode config set layout <name>` prints the same sentence instead
-  of leaving you to wonder. Templates live in the config file and inherit its
-  versioning; a `layouts/` directory beside the config would be a file format, and
-  this project has no reason to promise one yet.
-- **A layout you resized comes back.** `Alt+Left`/`Alt+Right` grows or shrinks
-  the focused pane, and that arrangement — tree, ratios, focused pane — is
-  written to `layout.json` in the settings directory (owner-only, atomic,
-  versioned) when you
-  resize and when you quit, and restored at the next start. `Ctrl+U` clears it
-  along with the tree on screen, a layout name you changed in the config wins
-  over a stored tree, and a file written by a newer xencode is refused by
-  version with the reason shown on the first frame. The file records the
-  arrangement only — never the transcript, model state, or anything a worker
-  owns — and is written in the same words as `layout_templates`, so there is
-  one layout vocabulary, not a hidden second one.
-- **A screen you arranged has a key on it.** `Ctrl+1`…`Ctrl+9` recall a *view* —
-  a saved arrangement with its focused pane — and `Ctrl+Shift+<digit>` stores
-  whatever is on screen into that slot. Six of the nine slots ship filled:
-  **Code** (files, code, conversation), **Chat** (code squeezed to the side),
-  **Terminal** (the same with the terminal strip in it), **Focus** (the
-  conversation across the whole body), **Review** (files and code up top, the
-  transcript along the bottom) and **Split** (half code, half conversation);
-  slots 7–9 are yours. A stored view is a `name → tree` entry under
-  `layout_views` in `config.json`, written in the same vocabulary as
-  `layout_templates`, so one bad entry is refused by name with its reason and
-  the rest of your config still loads — and no new file format. Views are a
-  shortcut, never a gate: `Ctrl+T`, `Ctrl+U` and `Alt+Left`/`Alt+Right` keep
-  working on top of one, and every panel a view shows is reachable without
-  naming the view at all.
-- **A divider you can see is a divider you can drag.** Pressing the line between
-  two side-by-side panes takes it — the line lights under the pointer, and the
-  press does not steal focus from either pane — and dragging it resizes that
-  pair by the same ratios and the same minimum-pane clamp the `Alt+Left` and
-  `Alt+Right` chords use. Nothing moves until the pointer has left the line's
-  own two cells, so a click that juddered resizes nothing, and a line already at
-  its minimum stops while the pointer keeps going rather than running away from
-  it. Stacked panes are not handles: the row under a horizontal border is the
-  chat input or the terminal, and a drag has no business squeezing those.
-  Reading the mouse is a trade — while xencode asks for it, the terminal stops
-  selecting text on a plain drag — so **Settings → `Mouse Capture`**
-  (`mouse_capture`, on by default) hands it back on the next frame and keeps the
-  refusal for next time; `xencode config set mouse_capture off` says the same
-  thing from the shell.
-- **Why the screen is arranged this way, on one chord.** `Ctrl+0` lists every
-  change the arrangement has been through since this session opened, oldest
-  first, each named by the ask behind it — `Ctrl+U cycled to chat-first`,
-  `dragged the Code / Chat divider 6 cells, took 5`, `Ctrl+T put the terminal
-  strip on the screen`. `Enter` opens a row into the pane widths before and
-  after it, and the newest row is the screen in front of you. Two things are
-  not on it: a keystroke that moved nothing (`Alt+Left` past a pane's minimum
-  adds no row), and an overlay — the agent stack, a permission prompt — which
-  covers the arrangement instead of changing it. The list is session memory;
-  nothing of it reaches the disk, because `layout.json` records geometry and
-  focus only.
+- **The Files view is the file tree beside the editor.** The tree takes the left
+  30 % and the editor the rest, and `Ctrl+T` puts the terminal strip under the
+  editor. There are no layout presets, saved views, pane resizing or divider
+  dragging any more. A config file that still holds `layout`,
+  `layout_templates` or `layout_views` loads as before with those keys ignored,
+  and they are left out the next time the config is saved; an old `layout.json`
+  in the settings directory is not read and not deleted. The wheel scrolls and a
+  click picks a pane. Reading the mouse is a trade — while xencode asks for it,
+  the terminal stops selecting text on a plain drag — so **Settings → `Mouse
+  Capture`** (`mouse_capture`, on by default) hands it back on the next frame;
+  `xencode config set mouse_capture off` says the same thing from the shell.
 - **What a local server can afford is read off the machine, not guessed.**
   `xencode hw probe` prints the memory and cores, the compute devices as
   `llama-server` itself reports them (PCI config space cannot see video memory:
@@ -937,7 +877,7 @@ ollama pull qwen3:4b               # small, fast starter model
 
 ### Slow responses
 - `xencode config set default_model phi3:mini` — switch to a faster local model (restart the TUI to pick it up).
-- `xencode models health <name>` — check one model answers; in the TUI, `Ctrl+H` runs a health check and `Ctrl+F` → *Provider Health* opens the panel.
+- `xencode models health <name>` — check one model answers; in the TUI, `Ctrl+H` runs a health check and `Ctrl+P` → *Provider Health* opens the panel.
 
 ### Rust build errors
 ```bash
@@ -1013,7 +953,6 @@ manual's own habit of overstating the security scanner and error handling.
 
 Under consideration, in [`docs/ROADMAP.md`](docs/ROADMAP.md):
 
-- **Text-to-speech output** for the voice panel (input has been real since J-07)
 - **Multi-model arena mode** — the same prompt to several models side by side.
   Nothing fuses or votes across models today: the fallback chain is strictly
   sequential, and calling it "ensemble reasoning" would be a lie

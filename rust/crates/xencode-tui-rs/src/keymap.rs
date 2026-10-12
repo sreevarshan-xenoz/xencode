@@ -87,21 +87,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
             return flow;
         }
     }
-    // Pane resize chords (V-3): Alt+Left/Right grows or shrinks the focused
-    // pane by five points, promoting the preset to a tree on first press.
-    // Skipped while editing code — the textarea owns modified arrows there.
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        match key.code {
-            KeyCode::Left | KeyCode::Right
-                if app.input_mode != InputMode::Editing || app.focus != FocusArea::CodeEditor =>
-            {
-                let delta = if key.code == KeyCode::Right { 5 } else { -5 };
-                resize_focused_pane(app, delta);
-                return done();
-            }
-            _ => {}
-        }
-    }
     match app.input_mode {
         InputMode::Editing => editing_key(app, key, tx),
         InputMode::Normal => normal_key(app, key, tx),
@@ -243,156 +228,14 @@ fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
 /// The global Ctrl chord table. `Some` = consumed, `None` = fall through to
 /// the input-mode handlers (e.g. Ctrl+J reaches the chat textarea as a
 /// newline).
-/// Grow or shrink the focused pane, promoting the preset to a custom tree
-/// on first press. Promotion replays the current layout through the tree
-/// builder at the last drawn body size, so the first resize changes nothing
-/// visible — it only takes over future geometry. A layout named in config
-/// promotes the same way, from its own shape.
-fn resize_focused_pane(app: &mut App, delta: i16) {
-    app.promote_layout_tree();
-    let Some(view) = app.custom_view.as_mut() else {
-        return;
-    };
-    let focus = app.focus;
-    let moved = crate::view::nudge_focused(&mut view.root, focus, delta);
-    // V-6: the arrangement on screen is now worth restoring. The frame
-    // loop writes it once, through the same choke point every save uses.
-    app.arrangement_dirty = true;
-    // V-9: the same change, written down with the chord that asked for it.
-    // Only a move that landed is a row — a resize the clamps refused changed
-    // nothing on screen, and a log of changes should not claim one.
-    if moved {
-        app.note_layout_change(crate::transitions::Trigger::ResizeChord {
-            words: if delta > 0 {
-                "Alt+Right".to_string()
-            } else {
-                "Alt+Left".to_string()
-            },
-            grew: delta > 0,
-        });
-    }
-}
-
-/// Move one step through the layout names — the three shipped presets and the
-/// templates declared in config — in the direction `dir` names, and say which
-/// one is on screen now. A template that refuses to build is reported here, at
-/// the keystroke, rather than discovered a frame later: the name is stored
-/// either way, and the frame renders classic, so the two toasts together tell
-/// the whole truth.
-fn cycle_layout(app: &mut App, dir: i32) {
-    let next =
-        crate::templates::cycle_name(&app.config.layout_templates, &app.config.layout, dir >= 0);
-    app.config.layout = next.clone();
-    app.custom_view = None;
-    // Cycling layouts is leaving a view, not renaming it (`V-4`): the name
-    // goes with the tree, or the header would keep advertising a view that is
-    // no longer on screen.
-    app.active_view = None;
-    // The stored arrangement must change with the name, or next start would
-    // resurrect the tree this keystroke threw away (`V-6`).
-    app.arrangement_dirty = true;
-    app.note_layout_change(crate::transitions::Trigger::LayoutCycle { name: next.clone() });
-    app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
-    if let Some(problem) = crate::templates::problem(&app.config.layout_templates, &next) {
-        app.push_toast(crate::toast::ToastKind::Warning, problem);
-    }
-}
-
-/// Advance the agent stack overlay, wrapping over the live pane count.
-/// Wrapping here rather than clamping at render keeps the state bounded: an
-/// index that grows forever is a leak wearing a counter's clothes.
 fn advance_agent_stack(app: &mut App) {
     let count = app.agent_stack_panes().len().max(1);
     app.agent_stack_index = (app.agent_stack_index + 1) % count;
 }
 
-/// Put a named view on screen (`V-4`): its tree becomes the arrangement and
-/// its pane takes focus, so one chord restores both. A view that cannot be
-/// shown says why and changes nothing — the alternative is a screen whose
-/// geometry the user did not ask for, with a name on it that they did.
-///
-/// Switching is pure geometry. Open files, scrolls and messages live in
-/// `App`, not in the tree, so they ride through untouched, exactly as they do
-/// under `Ctrl+U`.
-fn switch_view(app: &mut App, slot: usize) {
-    let Some((tree, focus)) = crate::views::shape(
-        &app.config.layout_views,
-        slot,
-        app.last_body_area,
-        app.show_terminal,
-    ) else {
-        return;
-    };
-    let name = crate::views::slot_name(slot);
-    app.custom_view = Some(crate::view::ViewState::new(tree));
-    app.active_view = Some(name.clone());
-    app.last_body_focus = focus;
-    // Only a body pane is retargeted: closing a panel is not part of changing
-    // a view, and stealing focus from Settings mid-keystroke would be.
-    if matches!(
-        app.focus,
-        FocusArea::FileExplorer | FocusArea::CodeEditor | FocusArea::ChatInput
-    ) {
-        app.focus = focus;
-    }
-    // V-6: the view on screen is now the arrangement worth restoring.
-    app.arrangement_dirty = true;
-    // V-9: and the reason this screen looks like it does is now on record —
-    // the slot and its name, since a view is the one arrangement a user asks
-    // for by number.
-    app.note_layout_change(crate::transitions::Trigger::ViewRecalled {
-        name: name.clone(),
-        slot,
-    });
-    app.push_toast(crate::toast::ToastKind::Info, format!("View: {name}"));
-}
-
-/// Save the arrangement on screen as a named view (`V-4`). If the user resized
-/// a preset and stores that, they get back what they were looking at, not what
-/// the preset was — so a plain preset is promoted to a tree first, the same
-/// promotion the resize chord performs.
-fn store_view(app: &mut App, slot: usize) {
-    if app.custom_view.is_none() {
-        let tree = crate::templates::tree(
-            &app.config.layout_templates,
-            &app.config.layout,
-            app.last_body_area,
-            app.show_terminal,
-            app.last_body_focus,
-        );
-        app.custom_view = Some(crate::view::ViewState::new(tree));
-    }
-    let Some(view) = app.custom_view.as_ref() else {
-        return;
-    };
-    let name = crate::views::slot_name(slot);
-    let encoded = match serde_json::to_value(&view.root) {
-        Ok(value) => value,
-        Err(why) => {
-            app.push_toast(
-                crate::toast::ToastKind::Warning,
-                format!("view {name:?} not stored: {why}"),
-            );
-            return;
-        }
-    };
-    app.active_view = Some(name.clone());
-    app.config.layout_views.insert(name.clone(), encoded);
-    app.save_config();
-    app.arrangement_dirty = true;
-    app.note_layout_change(crate::transitions::Trigger::ViewStored {
-        name: name.clone(),
-        slot,
-    });
-    app.push_toast(
-        crate::toast::ToastKind::Info,
-        format!("Stored view {name} — Ctrl+{slot} recalls it"),
-    );
-}
-
 fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
     // While a prompt is being typed, the readline keys belong to the
-    // composer: Ctrl+A/E/K/U/W used to open panels or cycle the layout.
+    // composer: Ctrl+A/E/K/U/W used to open panels.
     if app.input_mode == InputMode::Editing
         && app.focus == FocusArea::ChatInput
         && matches!(key.code, KeyCode::Char('a' | 'k' | 'u' | 'w'))
@@ -412,7 +255,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         KeyCode::Char(' ') => {
             // The product-mode toggle (`X-2`). Claimed here, on the pre-focus
             // global stage that runs before focus routing, precisely so it cannot
-            // steal the bare `Space` the File Explorer, Security and Voice panels
+            // steal the bare `Space` the File Explorer and Security panels
             // each bind to their own action: a `Ctrl+Space` never reaches those
             // handlers, and a plain `Space` (no CONTROL) still does. Flipping the
             // mode reads and writes one `App.mode` field — every task, agent,
@@ -433,38 +276,6 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 app.agent_stack_index = 0;
             } else {
                 advance_agent_stack(app);
-            }
-            return Some(done());
-        }
-        KeyCode::Char('0') => {
-            // The layout history panel (`V-9`), on the digit no view occupies:
-            // `Ctrl+1`…`Ctrl+9` are the arrangements a user keeps, and `0` is
-            // the record of why the screen is what it is. Opening it moves no
-            // pane and touches no arrangement — reading the log costs nothing.
-            if app.focus == FocusArea::LayoutPanel {
-                app.focus = FocusArea::ChatInput;
-            } else {
-                app.layout_selected = app.layout_log.len().saturating_sub(1);
-                app.layout_detail = false;
-                app.layout_scroll = 0;
-                app.focus = FocusArea::LayoutPanel;
-            }
-        }
-        KeyCode::Char(digit) if digit.is_ascii_digit() => {
-            // Named views (`V-4`): one chord recalls one arrangement, with the
-            // pane it was focused on; Shift stores what is on screen. `0` is
-            // not a slot and is claimed above, by the layout history panel, so
-            // nothing here ever sees it.
-            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-            match crate::views::chord(digit, shift) {
-                None => return None,
-                Some(crate::views::ViewChord::Store(slot)) => store_view(app, slot),
-                Some(crate::views::ViewChord::Switch(slot)) => {
-                    match crate::views::problem(&app.config.layout_views, slot) {
-                        Some(why) => app.push_toast(crate::toast::ToastKind::Warning, why),
-                        None => switch_view(app, slot),
-                    }
-                }
             }
             return Some(done());
         }
@@ -516,13 +327,6 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 app.focus = FocusArea::ChatInput;
             }
         }
-        KeyCode::Char('d') => {
-            app.focus = if app.focus == FocusArea::PerformanceDashboard {
-                FocusArea::ChatInput
-            } else {
-                FocusArea::PerformanceDashboard
-            };
-        }
         KeyCode::Char('p') => {
             // The palette (TD-3): the seven views, every panel, command and
             // setting. The project analyzer moved into the Project view.
@@ -538,25 +342,13 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
         }
         KeyCode::Char('w') => {
-            // Closing the hub with a live socket must not orphan the worker —
-            // Esc is the documented hang-up, Ctrl+W does the same first.
-            if app.focus == FocusArea::CollaborationHub {
-                app.collab_editing = false;
-                app.collab_disconnect();
-            }
             // Close current panel and return to ChatInput
             match app.focus {
                 FocusArea::ByteBotPanel
-                | FocusArea::CollaborationHub
-                | FocusArea::VoiceInterface
-                | FocusArea::TerminalAssistant
                 | FocusArea::SecurityAuditor
-                | FocusArea::PerformanceProfiler
                 | FocusArea::CustomModels
-                | FocusArea::LearningMode
                 | FocusArea::MultiLanguage
                 | FocusArea::ProviderHealth
-                | FocusArea::PerformanceDashboard
                 | FocusArea::ProjectAnalyzer
                 | FocusArea::GitCommit
                 | FocusArea::CodeReview
@@ -565,9 +357,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::WorktreePanel
                 | FocusArea::AdvisePanel
                 | FocusArea::ImpactPanel
-                | FocusArea::LayoutPanel
                 | FocusArea::WorkerPanel
-                | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
                 | FocusArea::Settings => {
                     app.focus = FocusArea::ChatInput;
@@ -632,21 +422,8 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
         }
         KeyCode::Char('t') => {
-            // V-9: the strip is a pane the screen gains or loses, asked for by
-            // one chord, so it is a change worth the same kind of row.
+            // The terminal strip under the editor in the Files view.
             app.show_terminal = !app.show_terminal;
-            app.note_layout_change(crate::transitions::Trigger::TerminalStrip {
-                shown: app.show_terminal,
-            });
-        }
-        KeyCode::Char('u') => {
-            // Live layout cycling (H1-05, V-5): every name on offer, presets and
-            // the templates config declares. Pure geometry, so this never
-            // touches pane state — open file, scrolls and messages all survive
-            // the switch. Cycling drops any resized tree: the name is the
-            // source of truth again until the next resize.
-            cycle_layout(app, 1);
-            app.save_config();
         }
         KeyCode::Char('h') => {
             if !app.health_check_in_progress {
@@ -659,17 +436,6 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             // the end of the line in the composer, so the palette takes the
             // unbound Ctrl+X, Emacs' "run a command" key, and nothing moved.
             app.open_palette();
-        }
-        KeyCode::Char('f') => {
-            app.focus = if app.focus == FocusArea::FeatureNavigator {
-                FocusArea::ChatInput
-            } else {
-                let max_idx = app.palette_items().len().saturating_sub(1);
-                if app.feature_nav_selected > max_idx {
-                    app.feature_nav_selected = max_idx;
-                }
-                FocusArea::FeatureNavigator
-            };
         }
         KeyCode::Char('s') => {
             if app.focus == FocusArea::CodeEditor {
@@ -710,12 +476,6 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     }
     match key.code {
         KeyCode::Tab => {
-            // The Collaboration Hub owns Tab: it cycles the form field
-            // instead of the body focus ring.
-            if app.focus == FocusArea::CollaborationHub {
-                app.collab_cycle_field();
-                return done();
-            }
             app.focus = next_body_focus(app);
             return done();
         }
@@ -735,23 +495,14 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
 }
 
 /// Tab's ring: explorer → editor → chat, but only through the panes the
-/// layout actually renders (H1-05) — tabbing to a pane hidden by chat-first
-/// would leave the user staring at an unhighlighted screen. Zen is the
-/// exception: it renders one pane at a time *from the focus*, so the full
-/// ring is how the user flips between them. Before the first draw (or with
-/// no layout recorded) every pane counts as visible, which is classic.
+/// frame actually drew (H1-05) — in the Files view that is the tree and the
+/// editor. Before the first draw (or with no layout recorded) every pane
+/// counts as visible.
 /// From any overlay panel, Tab lands back on the chat input.
 fn next_body_focus(app: &App) -> FocusArea {
     use crate::focus::FocusArea::*;
     let default_ring = [FileExplorer, CodeEditor, ChatInput];
     let ring = [FileExplorer, CodeEditor, ByteBotPanel, ChatInput];
-    if crate::templates::preset_name(&app.config.layout) == Some("zen") {
-        return match app.focus {
-            FileExplorer => CodeEditor,
-            CodeEditor => ChatInput,
-            _ => FileExplorer,
-        };
-    }
     let is_visible = |f| match f {
         FileExplorer => app.last_layout.explorer.is_some(),
         CodeEditor => app.last_layout.editor.is_some(),
@@ -788,16 +539,9 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::WorktreePanel => key_worktree_panel(app, key),
         FocusArea::AdvisePanel => key_advise_panel(app, key),
         FocusArea::ImpactPanel => key_impact_panel(app, key),
-        FocusArea::LayoutPanel => key_layout_panel(app, key),
         FocusArea::WorkerPanel => key_worker_panel(app, key, tx),
         FocusArea::ProviderHealth => key_provider_health(app, key),
-        FocusArea::LearningMode => key_learning(app, key, tx),
         FocusArea::CustomModels => key_custom_models(app, key, tx),
-        FocusArea::VoiceInterface => key_voice(app, key, tx),
-        FocusArea::TerminalAssistant => key_terminal_assistant(app, key, tx),
-        FocusArea::CollaborationHub => key_collab(app, key, tx),
-        FocusArea::PerformanceProfiler => key_profiler(app, key, tx),
-        FocusArea::FeatureNavigator => key_feature_nav(app, key),
         FocusArea::MultiLanguage => key_multi_language(app, key, tx),
         _ => false,
     }
@@ -911,18 +655,8 @@ fn on_esc(app: &mut App) {
                 app.focus = FocusArea::ChatInput;
             }
         }
-        FocusArea::LayoutPanel => {
-            // Esc unwinds the same two stages, and leaves every arrangement
-            // exactly where it was: reading the log moves nothing (`V-9`).
-            if app.layout_detail {
-                app.layout_detail = false;
-                app.layout_scroll = 0;
-            } else {
-                app.focus = FocusArea::ChatInput;
-            }
-        }
         FocusArea::WorkerPanel => {
-            // The same two stages: a row's trace closes before the panel does,
+            // Esc unwinds two stages: a row's trace closes before the panel does,
             // and closing the panel leaves every worker where it was. Reading
             // the fleet changes nothing about it (`OR-12`).
             if app.workers_detail {
@@ -932,31 +666,14 @@ fn on_esc(app: &mut App) {
                 app.focus = FocusArea::ChatInput;
             }
         }
-        FocusArea::CollaborationHub => {
-            // Esc unwinds the hub: field editing → live session (hang up,
-            // panel stays open idle) → close.
-            if app.collab_editing {
-                app.collab_editing = false;
-            } else if app.collab_session_active {
-                app.collab_disconnect();
-            } else {
-                app.focus = FocusArea::ChatInput;
-            }
-        }
         FocusArea::ModelSelector
         | FocusArea::CodeReview
-        | FocusArea::PerformanceDashboard
         | FocusArea::ProviderHealth
         | FocusArea::ProjectAnalyzer
         | FocusArea::GitCommit
-        | FocusArea::FeatureNavigator
         | FocusArea::ByteBotPanel
-        | FocusArea::VoiceInterface
-        | FocusArea::TerminalAssistant
         | FocusArea::SecurityAuditor
-        | FocusArea::PerformanceProfiler
         | FocusArea::CustomModels
-        | FocusArea::LearningMode
         | FocusArea::MultiLanguage
         | FocusArea::ReviewDashboard
         | FocusArea::TaskManager => {
@@ -1327,9 +1044,6 @@ fn stepped(v: u64, dir: i32, step: u64, min: u64, max: u64) -> u64 {
 fn settings_cycle(app: &mut App, label: &str, options: &'static [&'static str], dir: i32) {
     let current = match label {
         "Theme" => app.config.active_theme.clone(),
-        // "Layout" is not here: its options are the names the config declares,
-        // so it cycles through `keymap::cycle_layout`, which reads them
-        // (`V-5`).
         "Agent Approval" => app.config.agent_approval.clone(),
         _ => return,
     };
@@ -1379,12 +1093,6 @@ fn settings_step(app: &mut App, dir: i32) {
             settings_cycle(app, label, options, dir);
             app.save_config();
         }
-        SettingKind::CycleLayout => {
-            // The same helper Ctrl+U calls, so the panel and the chord cannot
-            // drift apart about what the next layout is.
-            cycle_layout(app, dir);
-            app.save_config();
-        }
         SettingKind::Toggle => {
             if settings_toggle(app, label) {
                 if label == "External Workers" {
@@ -1410,7 +1118,7 @@ fn settings_step(app: &mut App, dir: i32) {
                     app.push_toast(
                         crate::toast::ToastKind::Info,
                         if app.config.mouse_capture {
-                            "mouse on: wheel, clicks and divider drags are xencode's"
+                            "mouse on: the wheel scrolls and a click picks a pane"
                         } else {
                             "mouse off: the terminal keeps its own text selection"
                         }
@@ -1939,35 +1647,6 @@ fn key_impact_panel(app: &mut App, key: KeyEvent) -> bool {
     }
     true
 }
-/// bottom, each with the ask behind it. `Enter` opens one row to read what it
-/// moved from and to; the list itself stays a list because the question it
-/// answers is "what happened in order", and a row that expands inline would
-/// push the ones below it off the screen.
-fn key_layout_panel(app: &mut App, key: KeyEvent) -> bool {
-    let count = app.layout_log.len();
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') if app.layout_detail => {
-            app.layout_scroll = app.layout_scroll.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if app.layout_detail => {
-            app.layout_scroll += 1;
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            app.layout_selected = app.layout_selected.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if app.layout_selected + 1 < count {
-                app.layout_selected += 1;
-            }
-        }
-        KeyCode::Enter if count > 0 => {
-            app.layout_detail = !app.layout_detail;
-            app.layout_scroll = 0;
-        }
-        _ => return false,
-    }
-    true
-}
 
 fn key_worker_panel(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     let count = app.workers_rows.len();
@@ -2029,46 +1708,6 @@ fn key_provider_health(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
-/// Learning Mode is the workspace's own code now (J-06): Enter queues the files
-/// the project index says declare something and asks the model about the one on
-/// screen, `p`/`n` walk that queue, and the quiz is graded against the answer
-/// key the model sent. Every character is handled here so no letter can fall
-/// through to a global chord and open another panel (E2-06).
-fn key_learning(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    let options = app.learn_quiz_options.len();
-    match key.code {
-        KeyCode::Enter => {
-            // Nothing queued yet (or the index refused) — Enter retries the
-            // queue; a lesson on screen means Enter grades the quiz instead.
-            if !app.learn_active || app.learn_lessons.is_empty() {
-                app.start_learning(xencode_context_rs::default_root(), tx.clone());
-            } else if app.learn_quiz_active && !app.learn_quiz_answered {
-                app.learn_answer_quiz();
-            }
-        }
-        KeyCode::Char('n') => app.learn_step(true, tx.clone()),
-        KeyCode::Char('p') => app.learn_step(false, tx.clone()),
-        KeyCode::Char('r') if app.learn_current_lesson > 0 => {
-            app.learn_go(app.learn_current_lesson, tx.clone())
-        }
-        KeyCode::Left
-            if app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected > 0 =>
-        {
-            app.learn_quiz_selected -= 1;
-        }
-        KeyCode::Right
-            if app.learn_quiz_active
-                && !app.learn_quiz_answered
-                && app.learn_quiz_selected + 1 < options =>
-        {
-            app.learn_quiz_selected += 1;
-        }
-        KeyCode::Char(_) => {}
-        _ => return false,
-    }
-    true
-}
-
 /// Custom models are a real form now (J-05): the list is `model_profiles` from
 /// config, `n` starts one from the session's current settings, `←`/`→` and
 /// `-`/`+` move its parameters in memory, `f` says what kind of turn may take it
@@ -2104,104 +1743,6 @@ fn key_custom_models(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     true
 }
 
-fn key_voice(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    match key.code {
-        // Enter starts a capture, and Enter again ends it early — the clip
-        // recorded so far is still kept (J-07).
-        KeyCode::Enter => app.toggle_voice_session(xencode_context_rs::default_root(), tx.clone()),
-        KeyCode::Esc if app.voice_busy => {
-            app.stop_voice_session();
-        }
-        // Both Space (status bar hint) and `m` toggle mute (E2-06/E6-01:
-        // focus-first dispatch means the global `m` never fires here).
-        KeyCode::Char(' ') | KeyCode::Char('m') => {
-            app.set_voice_muted(!app.voice_muted);
-        }
-        _ => return false,
-    }
-    true
-}
-
-/// The terminal assistant is a form now (J-03): letters type the query, Enter
-/// asks the model once, and once commands come back `↑↓`/`jk` pick one and
-/// Enter or `y` runs it — through the agent's approval gate, never around it.
-/// `f` cycles the risk filter, `i` returns to the query.
-fn key_terminal_assistant(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    if app.term_asst_typing {
-        match key.code {
-            KeyCode::Enter => app.ask_terminal(tx.clone()),
-            KeyCode::Backspace => app.term_asst_backspace(),
-            KeyCode::Esc => app.term_asst_typing = false,
-            KeyCode::Char(c) => app.term_asst_char(c),
-            _ => return false,
-        }
-        return true;
-    }
-    let rows = app.term_visible_rows().len();
-    match key.code {
-        KeyCode::Enter | KeyCode::Char('y') if rows > 0 => app.run_terminal_suggestion(tx.clone()),
-        KeyCode::Up | KeyCode::Char('k') if rows > 0 => {
-            app.term_asst_selected = app.term_asst_selected.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if rows > 0 => {
-            app.term_asst_selected = (app.term_asst_selected + 1).min(rows - 1);
-        }
-        KeyCode::Char('i') => app.term_asst_typing = true,
-        KeyCode::Char('f') => {
-            app.term_risk_filter = match app.term_risk_filter.as_str() {
-                "All" => "safe",
-                "safe" => "destructive",
-                _ => "All",
-            }
-            .to_string();
-            app.term_asst_selected = 0;
-        }
-        _ => return false,
-    }
-    true
-}
-
-/// Collaboration Hub (G3-02): a real client, so the keys are a form, not a
-/// toy. Idle: `c` creates a session (server assigns the id), `j` edits the
-/// session id to join, `Enter`/`Tab` connect or edit fields. Live: only `r`
-/// (retry) and `Esc` (disconnect, handled in `on_esc`) do anything.
-fn key_collab(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    if app.collab_editing {
-        match key.code {
-            KeyCode::Enter => app.collab_editing = false,
-            KeyCode::Backspace => app.collab_edit_backspace(),
-            KeyCode::Char(c) => app.collab_edit_char(c),
-            _ => {}
-        }
-        return true;
-    }
-    match key.code {
-        KeyCode::Char('c') if !app.collab_session_active => {
-            // "create" means "connect and let the server name the session".
-            app.collab_session_id.clear();
-            app.start_collab_session(tx.clone());
-        }
-        KeyCode::Char('j') if !app.collab_session_active => {
-            app.collab_field = crate::focus::CollabField::Session;
-            app.collab_editing = true;
-        }
-        KeyCode::Enter if !app.collab_session_active => {
-            app.start_collab_session(tx.clone());
-        }
-        KeyCode::Char('r') => app.collab_retry(tx.clone()),
-        _ => return false,
-    }
-    true
-}
-
-fn key_profiler(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    if key.code == KeyCode::Enter && !app.profiler_active {
-        app.start_profiler(tx.clone());
-        return true;
-    }
-    false
-}
-
 /// Multi-Language (J-04): `Enter`/`d` walks the workspace, `Tab` selects a form
 /// field and letters then type into it, `Enter` translates. Detection is the
 /// context engine's own walk; translation is one call to the configured model.
@@ -2222,29 +1763,6 @@ fn key_multi_language(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             app.start_language_scan(tx.clone())
         }
         KeyCode::Tab => app.cycle_lang_field(),
-        _ => return false,
-    }
-    true
-}
-
-fn key_feature_nav(app: &mut App, key: KeyEvent) -> bool {
-    let items_len = app.palette_items().len();
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            if app.feature_nav_selected > 0 {
-                app.feature_nav_selected -= 1;
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if app.feature_nav_selected + 1 < items_len {
-                app.feature_nav_selected += 1;
-            }
-        }
-        KeyCode::Enter => {
-            if let Some(target) = app.selected_palette_area() {
-                app.focus = target;
-            }
-        }
         _ => return false,
     }
     true
@@ -2380,6 +1898,28 @@ mod tests {
     /// other's writes to the wrong directory.
     static CONFIG_DIR: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// Points `XCODE_CONFIG_DIR` at a test directory until dropped, then puts
+    /// back whatever was there before, so the sandbox the test run was started
+    /// with is never taken away from the tests that run after this one.
+    struct ConfigDirOverride(Option<std::ffi::OsString>);
+
+    impl ConfigDirOverride {
+        fn set(dir: &std::path::Path) -> Self {
+            let before = std::env::var_os("XCODE_CONFIG_DIR");
+            std::env::set_var("XCODE_CONFIG_DIR", dir);
+            Self(before)
+        }
+    }
+
+    impl Drop for ConfigDirOverride {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+                None => std::env::remove_var("XCODE_CONFIG_DIR"),
+            }
+        }
+    }
+
     fn press(app: &mut App, code: KeyCode) -> KeyFlow {
         let (tx, _rx) = mpsc::unbounded_channel();
         handle_key(app, KeyEvent::new(code, KeyModifiers::NONE), &tx)
@@ -2487,15 +2027,6 @@ mod tests {
             app.sec_filter_severity, "Critical",
             "plain Space still cycles"
         );
-
-        // Voice Interface: bare Space toggles mute.
-        let mut app = app_with(FocusArea::VoiceInterface);
-        app.voice_muted = false;
-        press_with_mods(&mut app, KeyCode::Char(' '), KeyModifiers::CONTROL);
-        assert_eq!(app.mode, crate::focus::Mode::Orchestrator);
-        assert!(!app.voice_muted, "Ctrl+Space must not mute");
-        press(&mut app, KeyCode::Char(' '));
-        assert!(app.voice_muted, "plain Space still mutes");
     }
 
     /// Both modes read the one shared state on `App`; no mode owns a copy, so a
@@ -2507,7 +2038,6 @@ mod tests {
         app.selected_file = 1;
         app.attached_files.insert("a.rs".into());
         app.sec_filter_severity = "High".into();
-        app.voice_muted = true;
         app.input_history.push("a prompt".into());
         app.git_branch = "topic/x".into();
         app.git_status.insert("src/main.rs".into(), "M".into());
@@ -2516,7 +2046,6 @@ mod tests {
         let before_selected = app.selected_file;
         let before_attached = app.attached_files.clone();
         let before_severity = app.sec_filter_severity.clone();
-        let before_muted = app.voice_muted;
         let before_history = app.input_history.clone();
         let before_branch = app.git_branch.clone();
         let before_git_status = app.git_status.clone();
@@ -2536,7 +2065,6 @@ mod tests {
         assert_eq!(app.selected_file, before_selected);
         assert_eq!(app.attached_files, before_attached);
         assert_eq!(app.sec_filter_severity, before_severity);
-        assert_eq!(app.voice_muted, before_muted);
         assert_eq!(app.input_history, before_history);
         assert_eq!(app.git_branch, before_branch);
         assert_eq!(app.git_status, before_git_status);
@@ -2544,275 +2072,6 @@ mod tests {
             app.worktrees, before_worktrees,
             "the tracked worktrees are untouched"
         );
-    }
-
-    fn press_alt(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::ALT)
-    }
-
-    #[test]
-    fn alt_right_promotes_and_grows_then_ctrl_u_resets() {
-        let mut app = app_with(FocusArea::ChatInput);
-        app.config.layout = "classic".into();
-        // A drawn body to promote from: the chord replays the preset at this size.
-        app.last_body_area = ratatui::layout::Rect::new(0, 1, 100, 22);
-        assert!(app.custom_view.is_none());
-        handle_key(
-            &mut app,
-            press_alt(KeyCode::Right),
-            &mpsc::unbounded_channel().0,
-        );
-        assert!(app.custom_view.is_some(), "first press promotes");
-        let chat_after = app.body_layout(app.last_body_area).chat.unwrap().width;
-        let preset = crate::layout::compute_layout(
-            app.last_body_area,
-            "classic",
-            app.show_terminal,
-            app.last_body_focus,
-        );
-        assert!(
-            chat_after > preset.chat.unwrap().width,
-            "chat column grew rightward"
-        );
-        handle_key(
-            &mut app,
-            press_alt(KeyCode::Left),
-            &mpsc::unbounded_channel().0,
-        );
-        let chat_back = app.body_layout(app.last_body_area).chat.unwrap().width;
-        assert_eq!(chat_back, preset.chat.unwrap().width, "shrinking restores");
-        // Preset cycling drops the custom tree. (From a panel: in the
-        // conversation Ctrl+U edits the line.)
-        app.focus = FocusArea::FileExplorer;
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert!(app.custom_view.is_none());
-    }
-
-    #[test]
-    fn ctrl_u_and_the_settings_row_cycle_the_layouts_config_declares() {
-        let mut app = app_with(FocusArea::FileExplorer);
-        app.config.layout = "classic".into();
-        app.config.layout_templates.insert(
-            "editor-first".to_string(),
-            serde_json::json!({"split": {"horizontal": true, "parts": [
-                [{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}],
-                [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]
-            ]}}),
-        );
-
-        // The three presets still cycle, and the declared name is one more stop.
-        for expected in ["chat-first", "zen", "editor-first"] {
-            press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-            assert_eq!(app.config.layout, expected);
-        }
-        // The stop is real: the body now renders the shape the config describes.
-        let area = ratatui::layout::Rect::new(0, 1, 100, 22);
-        let layout = app.body_layout(area);
-        assert_eq!(layout.explorer, None);
-        assert_eq!(layout.editor.map(|r| r.width), Some(70));
-        // Resizing promotes this layout the same way it promotes a preset.
-        handle_key(
-            &mut app,
-            press_alt(KeyCode::Right),
-            &mpsc::unbounded_channel().0,
-        );
-        assert!(app.custom_view.is_some(), "a declared layout promotes too");
-        app.custom_view = None;
-
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert_eq!(app.config.layout, "classic", "the cycle wraps");
-
-        // The Settings row walks the same list, so the panel cannot offer less
-        // than the chord does.
-        app.focus = FocusArea::Settings;
-        app.settings_cursor = crate::focus::settings_row_index("Layout");
-        press(&mut app, KeyCode::Right);
-        assert_eq!(app.config.layout, "chat-first");
-        for expected in ["zen", "editor-first"] {
-            press(&mut app, KeyCode::Right);
-            assert_eq!(app.config.layout, expected);
-        }
-        press(&mut app, KeyCode::Left);
-        assert_eq!(app.config.layout, "zen");
-    }
-
-    #[test]
-    fn cycling_onto_a_template_that_cannot_build_says_why() {
-        let mut app = app_with(FocusArea::FileExplorer);
-        app.config.layout = "zen".into();
-        app.config.layout_templates.insert(
-            "broken".to_string(),
-            serde_json::json!({"leaf": {"slot": "sidebar", "focus": "editor"}}),
-        );
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert_eq!(app.config.layout, "broken", "the name is stored as chosen");
-        let said: Vec<&str> = app.toasts.iter().map(|t| t.message.as_str()).collect();
-        assert!(
-            said.iter().any(|m| m.contains("unknown slot")),
-            "the keystroke explains the refusal: {said:?}"
-        );
-        // And the body renders classic, which is what the toast promises.
-        let area = ratatui::layout::Rect::new(0, 1, 100, 22);
-        assert_eq!(
-            app.body_layout(area),
-            crate::layout::compute_layout(area, "classic", false, app.last_body_focus)
-        );
-    }
-
-    /// A test app with a body already drawn at a known size, which is what the
-    /// view chords build their trees at.
-    fn app_with_body(focus: FocusArea) -> App<'static> {
-        let mut app = app_with(focus);
-        app.last_body_area = ratatui::layout::Rect::new(0, 1, 120, 40);
-        // A drawn session has an opening row; a test that never paints the
-        // screen writes it here, after giving the app a body area to describe.
-        app.note_session_opened();
-        app
-    }
-
-    #[test]
-    fn one_chord_puts_a_view_on_screen_with_its_own_geometry_and_focus() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
-        assert_eq!(app.active_view.as_deref(), Some("Code"));
-        assert_eq!(
-            app.focus,
-            FocusArea::CodeEditor,
-            "the view names the pane it is for"
-        );
-        assert_eq!(app.last_body_focus, FocusArea::CodeEditor);
-        assert!(
-            app.toasts.iter().any(|t| t.message == "View: Code"),
-            "the chord says which view is on screen"
-        );
-        // Its geometry, not the preset's: 15% explorer on 120 columns.
-        let body = crate::view::to_body_layout(
-            &app.custom_view
-                .as_ref()
-                .expect("a view is a tree")
-                .render(app.last_body_area),
-        );
-        assert_eq!(body.explorer.map(|r| r.width), Some(18));
-        assert!(body.editor.is_some() && body.chat.is_some());
-        // And it is marked for saving, because the screen just changed (`V-6`).
-        assert!(app.arrangement_dirty);
-    }
-
-    #[test]
-    fn storing_the_screen_becomes_the_view_and_outlives_a_layout_cycle() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        // Ctrl+Shift+2 on a plain preset: the tree is promoted first, so what
-        // is stored is the arrangement the user was looking at.
-        press_with_mods(
-            &mut app,
-            KeyCode::Char('2'),
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-        );
-        assert!(app.config.layout_views.contains_key("Chat"));
-        assert_eq!(app.active_view.as_deref(), Some("Chat"));
-        let stored = app
-            .custom_view
-            .as_ref()
-            .expect("storing shows what it stored")
-            .render(app.last_body_area);
-
-        // A layout cycle is leaving the view; the stored arrangement survives.
-        // (From a panel: in the conversation Ctrl+U edits the line.)
-        app.focus = FocusArea::FileExplorer;
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert!(app.custom_view.is_none());
-        assert_eq!(app.active_view, None, "cycling is not being in a view");
-
-        press_with_mods(&mut app, KeyCode::Char('2'), KeyModifiers::CONTROL);
-        assert_eq!(
-            app.custom_view
-                .as_ref()
-                .expect("recalled")
-                .render(app.last_body_area),
-            stored,
-            "the same rects come back, from config rather than the seed"
-        );
-        assert_eq!(
-            app.config.layout, "chat-first",
-            "recalling a view does not quietly change the configured layout"
-        );
-    }
-
-    #[test]
-    fn an_empty_slot_says_what_is_missing_and_changes_nothing() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(&mut app, KeyCode::Char('9'), KeyModifiers::CONTROL);
-        let said: Vec<&str> = app.toasts.iter().map(|t| t.message.as_str()).collect();
-        assert!(
-            said.iter().any(|m| m.contains("view 9 holds no view yet")),
-            "the chord names the gap instead of guessing: {said:?}"
-        );
-        assert!(app.custom_view.is_none(), "nothing was on screen");
-        assert_eq!(app.active_view, None);
-        assert!(!app.arrangement_dirty, "and nothing is worth saving");
-    }
-
-    #[test]
-    fn a_view_never_becomes_the_only_way_to_reach_a_panel() {
-        // The done-when's last clause, checked with a view on screen: every
-        // other layout chord still works exactly as it did without one.
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::CodeEditor);
-
-        press_with_mods(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::FileExplorer, "Ctrl+E is unaffected");
-
-        let explorer = |app: &App| {
-            app.custom_view
-                .as_ref()
-                .expect("still a view")
-                .render(app.last_body_area)
-                .iter()
-                .find(|(pane, _)| pane.slot == crate::view::BodySlot::Explorer)
-                .map(|(_, r)| r.width)
-                .unwrap()
-        };
-        // Ctrl+E moved focus to the explorer, so that is the pane the chord
-        // grows — the same rule it follows with no view on screen.
-        let before = explorer(&app);
-        handle_key(
-            &mut app,
-            press_alt(KeyCode::Right),
-            &mpsc::unbounded_channel().0,
-        );
-        assert!(
-            explorer(&app) > before,
-            "the resize chord works on a view's tree: {before} → {}",
-            explorer(&app)
-        );
-
-        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
-        assert!(app.show_terminal, "Ctrl+T is unaffected");
-    }
-
-    #[test]
-    fn the_view_chord_is_documented_and_handled() {
-        assert!(
-            crate::help::GLOBAL
-                .iter()
-                .any(|(key, _)| *key == "Ctrl+1…9"),
-            "the view chord missing from the GLOBAL help table"
-        );
-    }
-
-    #[test]
-    fn resize_chord_yields_to_the_editor() {
-        // In Editing mode with the editor focused, Alt+arrows belong to the
-        // textarea, not the tree.
-        let mut app = app_with(FocusArea::CodeEditor);
-        app.input_mode = InputMode::Editing;
-        handle_key(
-            &mut app,
-            press_alt(KeyCode::Right),
-            &mpsc::unbounded_channel().0,
-        );
-        assert!(app.custom_view.is_none());
     }
 
     fn app_with(focus: FocusArea) -> App<'static> {
@@ -2836,55 +2095,19 @@ mod tests {
 
     #[test]
     fn tab_ring_skips_panes_the_layout_hides() {
-        use crate::layout::compute_layout;
+        // The Files view draws the tree and the editor and no chat pane, so Tab
+        // moves between those two and never onto a pane that is not there.
         let mut app = app_with(FocusArea::CodeEditor);
-        app.config.layout = "chat-first".into();
-        app.last_layout = compute_layout(
-            ratatui::layout::Rect::new(0, 1, 80, 22),
-            "chat-first",
-            false,
-            FocusArea::CodeEditor,
-        );
+        app.last_layout = app.body_layout(ratatui::layout::Rect::new(0, 1, 80, 22));
+        assert!(app.last_layout.chat.is_none());
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, FocusArea::FileExplorer);
         press(&mut app, KeyCode::Tab);
         assert_eq!(
             app.focus,
-            FocusArea::ChatInput,
-            "the hidden explorer must stay out of the ring"
+            FocusArea::CodeEditor,
+            "the missing chat pane must stay out of the ring"
         );
-    }
-
-    #[test]
-    fn tab_flips_through_zen_panes() {
-        // Zen shows one pane at a time *following the focus*, so its ring is
-        // deliberately the full one: Tab is how you flip panes.
-        use crate::layout::compute_layout;
-        let mut app = app_with(FocusArea::FileExplorer);
-        app.config.layout = "zen".into();
-        app.last_layout = compute_layout(
-            ratatui::layout::Rect::new(0, 1, 80, 22),
-            "zen",
-            false,
-            FocusArea::FileExplorer,
-        );
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.focus, FocusArea::CodeEditor);
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.focus, FocusArea::ChatInput);
-    }
-
-    /// H1-10 pin: the help overlay advertises Ctrl+U, so the chord must
-    /// actually be handled — help and keymap may not drift apart.
-    #[test]
-    fn ctrl_u_is_documented_and_handled() {
-        assert!(
-            crate::help::GLOBAL.iter().any(|(key, _)| *key == "Ctrl+U"),
-            "Ctrl+U missing from the GLOBAL help table"
-        );
-        // From a panel: in the conversation Ctrl+U deletes to the line's start.
-        let mut app = app_with(FocusArea::FileExplorer);
-        let start = app.config.layout.clone();
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert_ne!(app.config.layout, start, "Ctrl+U did not cycle the layout");
     }
 
     #[test]
@@ -2917,7 +2140,6 @@ mod tests {
     fn readline_keys_edit_the_prompt_instead_of_opening_panels() {
         let mut app = app_with(FocusArea::ChatInput);
         app.input_mode = InputMode::Editing;
-        let layout = app.config.layout.clone();
         for c in "hello world".chars() {
             press(&mut app, KeyCode::Char(c));
         }
@@ -2940,7 +2162,6 @@ mod tests {
         ctrl(&mut app, 'a');
         ctrl(&mut app, 'k');
         assert_eq!(app.chat_input.lines().join(""), "");
-        assert_eq!(app.config.layout, layout, "Ctrl+U did not cycle the layout");
         assert_eq!(app.focus, FocusArea::ChatInput);
         assert_eq!(app.input_mode, InputMode::Editing);
     }
@@ -3375,7 +2596,7 @@ mod tests {
 
     /// An empty list is the real state of a fresh config: nothing to apply, and
     /// `n` starts from the session's own settings rather than a seeded row. `n`
-    /// and `s` must not reach the global chords that open the navigator or
+    /// and `s` must not reach a global chord such as the one that opens
     /// Settings (E2-06).
     #[test]
     fn custom_models_without_profiles_says_so_instead_of_applying_nothing() {
@@ -3392,7 +2613,7 @@ mod tests {
         assert!(app.model_profiles.is_empty());
 
         press(&mut app, KeyCode::Char('n'));
-        assert_eq!(app.focus, FocusArea::CustomModels, "n is not the navigator");
+        assert_eq!(app.focus, FocusArea::CustomModels, "n stays in the panel");
         assert_eq!(app.model_profiles.len(), 1);
         assert_eq!(app.model_profiles[0].model, before);
         assert!(app.models_dirty);
@@ -3410,7 +2631,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("xencode-profiles-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+        let _config_dir = ConfigDirOverride::set(&dir);
 
         let mut app = app_with(FocusArea::CustomModels);
         // Opts back into persistence — into the temp XCODE_CONFIG_DIR above.
@@ -3437,7 +2658,6 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", "");
     }
 
     /// A config from a newer xencode is not overwritten, and the person has to
@@ -3451,7 +2671,7 @@ mod tests {
         let path = dir.join("config.json");
         std::fs::write(&path, b"{\"config_version\": 99, \"default_model\": \"x\"}").unwrap();
         let bytes = std::fs::read(&path).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+        let _config_dir = ConfigDirOverride::set(&dir);
 
         let mut app = App::for_tests();
         app.persist_config = true;
@@ -3490,7 +2710,6 @@ mod tests {
         assert_eq!(refusals(&app), 1, "a success adds nothing");
 
         std::fs::remove_dir_all(&dir).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", "");
     }
 
     /// The same refusal for the damage a hand edit makes — the case that used to
@@ -3505,7 +2724,7 @@ mod tests {
         let path = dir.join("config.json");
         std::fs::write(&path, b"{\"default_model\": \"ollama:mine\",}").unwrap();
         let bytes = std::fs::read(&path).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+        let _config_dir = ConfigDirOverride::set(&dir);
 
         let mut app = App::for_tests();
         app.persist_config = true;
@@ -3531,7 +2750,6 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", "");
     }
 
     #[test]
@@ -3727,7 +2945,6 @@ mod tests {
             display,
             [
                 "Theme",
-                "Layout",
                 "Rounded Borders",
                 "Show Scrollbars",
                 "Line Numbers",
@@ -3901,27 +3118,13 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("xencode-settings-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+        let _config_dir = ConfigDirOverride::set(&dir);
 
         let mut app = app_with(FocusArea::Settings);
         // The point of this test is the round trip through disk, so it opts
         // back into persistence — into the temp `XCODE_CONFIG_DIR` above.
         app.persist_config = true;
         app.config = XencodeConfig::default();
-
-        // Layout row: → cycles presets and wraps back around.
-        app.settings_cursor = settings_row_index("Layout");
-        for _ in 0..crate::layout::LAYOUT_NAMES.len() {
-            press(&mut app, KeyCode::Right);
-        }
-        assert_eq!(app.config.layout, "classic", "cycle must wrap");
-        press(&mut app, KeyCode::Right);
-        assert_eq!(app.config.layout, "chat-first");
-
-        // A typo'd choice snaps into the cycle instead of wedging the row.
-        app.config.layout = "bogus".into();
-        press(&mut app, KeyCode::Right);
-        assert_eq!(app.config.layout, "chat-first");
 
         // Toggles flip.
         app.settings_cursor = settings_row_index("Rounded Borders");
@@ -3971,42 +3174,16 @@ mod tests {
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(app.settings_cursor, SETTINGS_ITEMS.len() - 1);
 
-        // The Ctrl+U chord cycles presets live and toasts the name (H1-05).
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert_eq!(app.config.layout, "zen", "chat-first → zen");
-        assert!(
-            app.toasts.iter().any(|t| t.message.contains("zen")),
-            "the chord must toast the new layout"
-        );
-
         // Esc closes Settings and persists everything above.
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.focus, FocusArea::ChatInput);
         let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
-        assert_eq!(saved.layout, "zen");
         assert!(!saved.rounded_borders);
         assert_eq!(saved.response_timeout, 5);
         assert_eq!(saved.agent_approval, "edit-allow");
         assert_eq!(saved.agent_command_timeout, 5);
 
-        // The chord keeps cycling (and saving) from a panel; in the
-        // conversation Ctrl+U edits the line (TD-3).
-        app.focus = FocusArea::FileExplorer;
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert_eq!(app.config.layout, "classic", "zen wraps to classic");
-        let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
-        assert_eq!(saved.layout, "classic");
-
-        std::env::remove_var("XCODE_CONFIG_DIR");
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn voice_m_mutes_without_opening_model_selector() {
-        let mut app = app_with(FocusArea::VoiceInterface);
-        press(&mut app, KeyCode::Char('m'));
-        assert!(app.voice_muted);
-        assert_eq!(app.focus, FocusArea::VoiceInterface);
     }
 
     #[test]
@@ -4178,92 +3355,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collab_create_connects_and_esc_hangs_up() {
-        let mut app = app_with(FocusArea::CollaborationHub);
-        press(&mut app, KeyCode::Char('c'));
-        assert!(app.collab_session_active);
-        assert!(app.collab_worker.is_some());
-        // "create" leaves the id empty: the server names the session and
-        // reports it back through the session: token.
-        assert!(app.collab_session_id.is_empty());
-        // Live already: neither 'c' nor Enter starts a second connection.
-        press(&mut app, KeyCode::Char('c'));
-        press(&mut app, KeyCode::Enter);
-        assert!(app.collab_session_active && app.collab_worker.is_some());
-        // Esc disconnects but keeps the panel open…
-        press(&mut app, KeyCode::Esc);
-        assert!(!app.collab_session_active);
-        assert!(app.collab_worker.is_none());
-        assert_eq!(app.focus, FocusArea::CollaborationHub);
-        // …'r' reconnects…
-        press(&mut app, KeyCode::Char('r'));
-        assert!(app.collab_session_active && app.collab_worker.is_some());
-        // …and Ctrl+W closes the panel without orphaning the worker.
-        press_with_mods(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::ChatInput);
-        assert!(!app.collab_session_active);
-        assert!(app.collab_worker.is_none());
-        // Re-opening the hub (via the Feature Navigator in real use) finds
-        // it idle; Esc from idle closes again.
-        app.focus = FocusArea::CollaborationHub;
-        press(&mut app, KeyCode::Esc);
-        assert_eq!(app.focus, FocusArea::ChatInput);
-    }
-
-    #[tokio::test]
-    async fn collab_form_edits_only_the_selected_field() {
-        use crate::focus::CollabField;
-        let mut app = app_with(FocusArea::CollaborationHub);
-        press(&mut app, KeyCode::Tab); // Server → Username, entering edit mode
-        assert!(app.collab_editing);
-        assert_eq!(app.collab_field, CollabField::Username);
-        // Typing belongs to the field: 'q' must not quit.
-        app.collab_username.clear();
-        press(&mut app, KeyCode::Char('q'));
-        assert_eq!(app.collab_username, "q");
-        assert_eq!(app.focus, FocusArea::CollaborationHub);
-        press(&mut app, KeyCode::Backspace);
-        assert!(app.collab_username.is_empty());
-        press(&mut app, KeyCode::Enter); // ends editing, keeps the value
-        assert!(!app.collab_editing);
-        // 'j' is the join entry point: straight into the Session field.
-        press(&mut app, KeyCode::Char('j'));
-        assert!(app.collab_editing);
-        assert_eq!(app.collab_field, CollabField::Session);
-        for c in "xencode-7".chars() {
-            press(&mut app, KeyCode::Char(c));
-        }
-        assert_eq!(app.collab_session_id, "xencode-7");
-        // Tab while editing cycles the field without leaving edit mode.
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.collab_field, CollabField::Server);
-        assert!(app.collab_editing);
-    }
-
-    #[tokio::test]
-    async fn collab_r_retries_from_idle_and_from_live() {
-        let mut app = app_with(FocusArea::CollaborationHub);
-        press(&mut app, KeyCode::Char('r'));
-        assert!(app.collab_session_active); // retry from idle = connect
-        press(&mut app, KeyCode::Char('r'));
-        assert!(app.collab_session_active); // retry while live = reconnect
-        assert!(app.collab_worker.is_some());
-    }
-
-    #[test]
-    fn collab_help_lists_only_keys_the_hub_handles() {
-        let keys: Vec<&str> = crate::help::panel_bindings(FocusArea::CollaborationHub)
-            .iter()
-            .map(|(key, _)| *key)
-            .collect();
-        assert_eq!(
-            keys,
-            vec!["c", "j", "Enter", "r", "Tab", "type", "Esc"],
-            "the help overlay and key_collab have drifted apart"
-        );
-    }
-
-    #[tokio::test]
     async fn ctrl_l_toggles_the_models_view() {
         // TD-3: insights moved into the Project view; Ctrl+L is the models.
         let mut app = app_with(FocusArea::ChatInput);
@@ -4307,207 +3398,5 @@ mod tests {
         assert_eq!(app.opened_file.as_deref(), Some("src/app.rs"));
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.focus, FocusArea::ChatInput);
-    }
-
-    /// V-9: the arrangement log. A row per change, naming the ask, and nothing
-    /// else — the list is the answer to "why is this pane here", so a row for a
-    /// keystroke that changed no arrangement, or a panel that changed one on
-    /// being read, would both be lies.
-    #[test]
-    fn a_resize_chord_is_written_down_with_the_chord_that_asked_for_it() {
-        let mut app = app_with_body(FocusArea::CodeEditor);
-        let rows = app.layout_log.len();
-        press_with_mods(&mut app, KeyCode::Right, KeyModifiers::ALT);
-        assert_eq!(app.layout_log.len(), rows + 1, "one change, one row");
-        let newest = app.layout_log.last().unwrap();
-        assert!(
-            newest.trigger.words().contains("Alt+Right"),
-            "the row names the chord: {}",
-            newest.trigger.words()
-        );
-        assert!(
-            newest.trigger.words().contains("grew"),
-            "and which way the pane went: {}",
-            newest.trigger.words()
-        );
-        assert_eq!(
-            newest.after,
-            app.arrangement_line(),
-            "and ends where the screen is"
-        );
-    }
-
-    #[test]
-    fn a_chord_the_clamps_refuse_adds_no_row() {
-        let mut app = app_with_body(FocusArea::CodeEditor);
-        // Shrink the editor past every minimum it will accept, then ask again.
-        for _ in 0..24 {
-            press_with_mods(&mut app, KeyCode::Left, KeyModifiers::ALT);
-        }
-        let rows = app.layout_log.len();
-        let line = app.arrangement_line();
-        press_with_mods(&mut app, KeyCode::Left, KeyModifiers::ALT);
-        assert_eq!(
-            app.layout_log.len(),
-            rows,
-            "a keystroke that moved nothing is not a change"
-        );
-        assert_eq!(app.arrangement_line(), line, "and nothing moved");
-    }
-
-    #[test]
-    fn cycling_a_layout_names_the_layout_it_landed_on() {
-        let mut app = app_with_body(FocusArea::FileExplorer);
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        let newest = app.layout_log.last().unwrap();
-        assert_eq!(newest.after, app.arrangement_line());
-        assert!(
-            newest.trigger.words().contains(&app.config.layout),
-            "the row names what is on screen now: {} vs {}",
-            newest.trigger.words(),
-            app.config.layout
-        );
-    }
-
-    /// `Ctrl+T` asks for the terminal strip. On a screen too short to hold it
-    /// the ask changes nothing on screen, and the log says nothing — which is
-    /// the honest answer, not a missing one. `app_with_body` draws 40 rows, so
-    /// here the strip really does arrive.
-    #[test]
-    fn the_terminal_strip_is_recorded_when_it_arrives() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let rows = app.layout_log.len();
-        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
-        assert!(app.show_terminal);
-        assert_eq!(app.layout_log.len(), rows + 1);
-        assert!(app.layout_log.last().unwrap().after.contains("Terminal"));
-        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
-        assert!(!app.show_terminal);
-        assert_eq!(app.layout_log.len(), rows + 2);
-        assert!(!app.layout_log.last().unwrap().after.contains("Terminal"));
-    }
-
-    #[test]
-    fn a_strip_the_screen_cannot_hold_is_not_written_down_as_a_change() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        app.last_body_area = ratatui::layout::Rect::new(0, 1, 120, 6);
-        let rows = app.layout_log.len();
-        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
-        assert!(app.show_terminal, "the ask is remembered");
-        assert_eq!(
-            app.layout_log.len(),
-            rows,
-            "and the screen, which gained no pane, has no row"
-        );
-    }
-
-    #[test]
-    fn an_overlay_opened_over_the_body_is_not_a_row() {
-        // The agent stack covers the screen for a moment and leaves it. It is
-        // not the arrangement, so it never appears in the log of arrangements.
-        let mut app = app_with_body(FocusArea::ChatInput);
-        let before = app.arrangement_line();
-        let rows = app.layout_log.len();
-        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
-        assert!(app.agent_stack_visible);
-        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
-        assert_eq!(app.layout_log.len(), rows, "no row for the overlay");
-        assert_eq!(app.arrangement_line(), before, "the body never moved");
-    }
-
-    #[test]
-    fn recalling_a_view_is_recorded_by_its_name_and_slot() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
-        let newest = app.layout_log.last().unwrap();
-        assert!(
-            newest.trigger.words().contains("Ctrl+1") && newest.trigger.words().contains("Code"),
-            "{}",
-            newest.trigger.words()
-        );
-        assert!(newest.after.starts_with("Code ·"), "{}", newest.after);
-    }
-
-    #[test]
-    fn storing_a_view_is_recorded_as_the_storing_it_is() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(
-            &mut app,
-            KeyCode::Char('7'),
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-        );
-        let newest = app.layout_log.last().unwrap();
-        assert!(
-            newest.trigger.words().contains("stored")
-                && newest.trigger.words().contains("Ctrl+Shift+7"),
-            "{}",
-            newest.trigger.words()
-        );
-    }
-
-    /// The panel is a reader. Opening it, walking it and closing it must leave
-    /// the screen exactly where it was — otherwise the tool built to explain
-    /// changes would be one of them.
-    #[test]
-    fn reading_the_log_changes_nothing() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        let line = app.arrangement_line();
-        let rows = app.layout_log.len();
-        press_with_mods(&mut app, KeyCode::Char('0'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::LayoutPanel);
-        assert_eq!(
-            app.layout_selected,
-            rows - 1,
-            "and it opens on the newest row, which is the one describing the screen"
-        );
-        press(&mut app, KeyCode::Up);
-        press(&mut app, KeyCode::Enter);
-        press(&mut app, KeyCode::Esc);
-        press(&mut app, KeyCode::Esc);
-        assert_eq!(app.focus, FocusArea::ChatInput);
-        assert_eq!(app.arrangement_line(), line, "nothing moved");
-        assert_eq!(app.layout_log.len(), rows, "and nothing was written");
-    }
-
-    #[test]
-    fn ctrl_w_closes_the_layout_panel_too() {
-        let mut app = app_with_body(FocusArea::ChatInput);
-        press_with_mods(&mut app, KeyCode::Char('0'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::LayoutPanel);
-        press_with_mods(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::ChatInput);
-    }
-
-    #[test]
-    fn the_log_starts_with_the_screen_the_session_found() {
-        let app = app_with_body(FocusArea::ChatInput);
-        assert_eq!(app.layout_log.len(), 1, "one row before any keystroke");
-        let first = &app.layout_log[0];
-        assert!(
-            first.trigger.words().starts_with("session opened on"),
-            "{}",
-            first.trigger.words()
-        );
-        assert_eq!(first.before, first.after, "nothing preceded it");
-        assert_eq!(first.after, app.arrangement_line());
-    }
-
-    /// The session's list is the only copy. `V-6`'s file records where the
-    /// panes were and refuses to record anything else, and a log of why would
-    /// be a fourth file describing the user's screen — so a test that the
-    /// arrangement a session saves carries no log keeps the two apart.
-    #[test]
-    fn the_saved_arrangement_carries_no_log() {
-        let mut app = app_with_body(FocusArea::CodeEditor);
-        press_with_mods(&mut app, KeyCode::Right, KeyModifiers::ALT);
-        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert_eq!(app.layout_log.len(), 3, "the session has rows to save");
-        let saved = serde_json::to_value(crate::arrangement::capture(&app)).unwrap();
-        let text = saved.to_string();
-        assert!(
-            !text.contains("session opened") && !text.contains("Alt+Right"),
-            "the arrangement file holds geometry and focus only: {text}"
-        );
     }
 }

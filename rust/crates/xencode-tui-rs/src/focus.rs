@@ -1,4 +1,4 @@
-//! Focus-area enum, input-mode enum, feature list, and feature navigation.
+//! Focus-area enum, input-mode enum, the destination table and the settings rows.
 //!
 //! Single source of truth: `app.rs` and `ui.rs` import these from here.
 
@@ -56,19 +56,12 @@ pub enum FocusArea {
     ModelSelector,
     Settings,
     CodeReview,
-    PerformanceDashboard,
     ProviderHealth,
     ProjectAnalyzer,
     GitCommit,
-    FeatureNavigator,
     ByteBotPanel,
-    CollaborationHub,
-    VoiceInterface,
-    TerminalAssistant,
     SecurityAuditor,
-    PerformanceProfiler,
     CustomModels,
-    LearningMode,
     MultiLanguage,
     ReviewDashboard,
     TaskManager,
@@ -77,9 +70,6 @@ pub enum FocusArea {
     /// Blast radius of one file (`QD-2`): the fan-out tree QD-1's three layers
     /// project into. Opened by `/impact <file>`, traversed with the arrows.
     ImpactPanel,
-    /// Why the screen is arranged as it is: this session's layout changes,
-    /// each with the ask behind it (`V-9`).
-    LayoutPanel,
     /// The worker panel (`OR-12`): the fleet, the tasks, the recorded graph, the
     /// costs, the events and what is waiting on a person — every row naming the
     /// record its figures were read from.
@@ -96,9 +86,9 @@ pub enum DisclosureLevel {
     Level1 = 1,
     /// Level 2: Standard workflow (Review, Git Commit, Tasks, Worktrees, Advice).
     Level2 = 2,
-    /// Level 3: Advanced inspection and diagnostics (Dashboards, Analyzers, Health, PR Review, Impact, Layout, Feature Navigator).
+    /// Level 3: Advanced inspection and diagnostics (Analyzers, Health, PR Review, Impact, Workers).
     Level3 = 3,
-    /// Level 4: Specialist / deep tooling (ByteBot, Collab, Voice, Terminal Assistant, Security Auditor, Profiler, Custom Models, Learning, MultiLanguage).
+    /// Level 4: Specialist / deep tooling (ByteBot, Security Auditor, Custom Models, MultiLanguage).
     Level4 = 4,
 }
 
@@ -133,37 +123,29 @@ impl DisclosureLevel {
 
 impl FocusArea {
     /// All variants of FocusArea.
-    pub const ALL: [FocusArea; 27] = [
+    pub const ALL: [FocusArea; 19] = [
         FocusArea::ChatInput,
         FocusArea::FileExplorer,
         FocusArea::CodeEditor,
         FocusArea::ModelSelector,
         FocusArea::Settings,
         FocusArea::CodeReview,
-        FocusArea::PerformanceDashboard,
         FocusArea::ProviderHealth,
         FocusArea::ProjectAnalyzer,
         FocusArea::GitCommit,
-        FocusArea::FeatureNavigator,
         FocusArea::ByteBotPanel,
-        FocusArea::CollaborationHub,
-        FocusArea::VoiceInterface,
-        FocusArea::TerminalAssistant,
         FocusArea::SecurityAuditor,
-        FocusArea::PerformanceProfiler,
         FocusArea::CustomModels,
-        FocusArea::LearningMode,
         FocusArea::MultiLanguage,
         FocusArea::ReviewDashboard,
         FocusArea::TaskManager,
         FocusArea::WorktreePanel,
         FocusArea::AdvisePanel,
         FocusArea::ImpactPanel,
-        FocusArea::LayoutPanel,
         FocusArea::WorkerPanel,
     ];
 
-    /// Progressive disclosure tier required to see this destination in navigators / palettes.
+    /// Progressive disclosure tier required to see this destination in the level's list.
     /// Exhaustive pattern match ensures any added FocusArea must explicitly define its tier.
     pub const fn disclosure_level(self) -> DisclosureLevel {
         match self {
@@ -179,23 +161,15 @@ impl FocusArea {
             | FocusArea::WorktreePanel
             | FocusArea::AdvisePanel => DisclosureLevel::Level2,
 
-            FocusArea::PerformanceDashboard
-            | FocusArea::ProviderHealth
+            FocusArea::ProviderHealth
             | FocusArea::ProjectAnalyzer
             | FocusArea::ReviewDashboard
             | FocusArea::ImpactPanel
-            | FocusArea::LayoutPanel
-            | FocusArea::WorkerPanel
-            | FocusArea::FeatureNavigator => DisclosureLevel::Level3,
+            | FocusArea::WorkerPanel => DisclosureLevel::Level3,
 
             FocusArea::ByteBotPanel
-            | FocusArea::CollaborationHub
-            | FocusArea::VoiceInterface
-            | FocusArea::TerminalAssistant
             | FocusArea::SecurityAuditor
-            | FocusArea::PerformanceProfiler
             | FocusArea::CustomModels
-            | FocusArea::LearningMode
             | FocusArea::MultiLanguage => DisclosureLevel::Level4,
         }
     }
@@ -219,35 +193,8 @@ pub enum WorktreePrompt {
     ConfirmRemove,
 }
 
-/// Which Collaboration Hub connection field typed characters edit. Tab
-/// cycles through these; the hub's form is an editing mode, not a focus.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum CollabField {
-    Server,
-    Username,
-    Session,
-}
-
-impl CollabField {
-    pub fn next(self) -> Self {
-        match self {
-            CollabField::Server => CollabField::Username,
-            CollabField::Username => CollabField::Session,
-            CollabField::Session => CollabField::Server,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            CollabField::Server => "Server",
-            CollabField::Username => "User",
-            CollabField::Session => "Session",
-        }
-    }
-}
-
-/// Which Multi-Language form field typed characters edit — the same shape as
-/// `CollabField`: the panel's text entry is a mode, not a focus area.
+/// Which Multi-Language form field typed characters edit — the panel.s text
+/// entry is a mode, not a focus area.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LangField {
     Source,
@@ -280,11 +227,6 @@ impl LangField {
 pub enum SettingKind {
     /// ←/→ selects among option names (also the config values).
     Cycle(&'static [&'static str]),
-    /// ←/→ selects among the layout names on offer: the three shipped presets
-    /// plus the templates declared in config. Read at the keystroke rather than
-    /// baked into the table, because a declared name only exists once the
-    /// config that declares it has been loaded (`V-5`).
-    CycleLayout,
     /// ←/→ flips a boolean.
     Toggle,
     /// ←/→ adjusts an integer by `step`, never below `min` nor above `max`.
@@ -317,11 +259,6 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         label: "Theme",
         section: "Display",
         kind: SettingKind::Cycle(crate::theme::THEME_NAMES),
-    },
-    SettingRow {
-        label: "Layout",
-        section: "Display",
-        kind: SettingKind::CycleLayout,
     },
     SettingRow {
         label: "Rounded Borders",
@@ -531,7 +468,7 @@ pub struct Destination {
     pub command_name: &'static str,
 }
 
-/// Canonical table of all 27 TUI destinations.
+/// Canonical table of all 19 TUI destinations.
 /// Every variant of `FocusArea` is represented with its progressive disclosure tier.
 pub const DESTINATIONS: &[Destination] = &[
     // ── Level 1: Core interaction ─────────────────────────────────────────────
@@ -618,14 +555,6 @@ pub const DESTINATIONS: &[Destination] = &[
     },
     // ── Level 3: Advanced diagnostics & inspection ────────────────────────────
     Destination {
-        area: FocusArea::PerformanceDashboard,
-        name: "Performance Dashboard",
-        description: "Session stats & metrics",
-        level: DisclosureLevel::Level3,
-        shortcut: None,
-        command_name: "dashboard",
-    },
-    Destination {
         area: FocusArea::ProviderHealth,
         name: "Provider Health",
         description: "API connection status & latency",
@@ -658,28 +587,12 @@ pub const DESTINATIONS: &[Destination] = &[
         command_name: "impact",
     },
     Destination {
-        area: FocusArea::LayoutPanel,
-        name: "Layout History",
-        description: "Why the screen is arranged this way",
-        level: DisclosureLevel::Level3,
-        shortcut: None,
-        command_name: "layout",
-    },
-    Destination {
         area: FocusArea::WorkerPanel,
         name: "Worker Panel",
         description: "Workers, tasks, graph, costs, logs, approvals — each traced",
         level: DisclosureLevel::Level3,
         shortcut: Some("Ctrl+A"),
         command_name: "workers",
-    },
-    Destination {
-        area: FocusArea::FeatureNavigator,
-        name: "Feature Navigator",
-        description: "Command palette and destination picker",
-        level: DisclosureLevel::Level3,
-        shortcut: Some("Ctrl+F"),
-        command_name: "palette",
     },
     // ── Level 4: Specialist & deep tooling ────────────────────────────────────
     Destination {
@@ -691,30 +604,6 @@ pub const DESTINATIONS: &[Destination] = &[
         command_name: "bytebot",
     },
     Destination {
-        area: FocusArea::CollaborationHub,
-        name: "Collaboration Hub",
-        description: "Team collaboration tools & sessions",
-        level: DisclosureLevel::Level4,
-        shortcut: None,
-        command_name: "collab",
-    },
-    Destination {
-        area: FocusArea::VoiceInterface,
-        name: "Voice Interface",
-        description: "Record a clip, transcribe if able",
-        level: DisclosureLevel::Level4,
-        shortcut: None,
-        command_name: "voice",
-    },
-    Destination {
-        area: FocusArea::TerminalAssistant,
-        name: "Terminal Assistant",
-        description: "AI-powered shell helper & commands",
-        level: DisclosureLevel::Level4,
-        shortcut: None,
-        command_name: "assistant",
-    },
-    Destination {
         area: FocusArea::SecurityAuditor,
         name: "Security Auditor",
         description: "Vulnerability scanning & dependencies",
@@ -723,28 +612,12 @@ pub const DESTINATIONS: &[Destination] = &[
         command_name: "security",
     },
     Destination {
-        area: FocusArea::PerformanceProfiler,
-        name: "Performance Profiler",
-        description: "Code profiling tools & CPU/mem gauges",
-        level: DisclosureLevel::Level4,
-        shortcut: None,
-        command_name: "profiler",
-    },
-    Destination {
         area: FocusArea::CustomModels,
         name: "Custom Models",
         description: "Model configuration & hyperparameter tuning",
         level: DisclosureLevel::Level4,
         shortcut: None,
         command_name: "custom-models",
-    },
-    Destination {
-        area: FocusArea::LearningMode,
-        name: "Learning Mode",
-        description: "Lessons from this repo's own files",
-        level: DisclosureLevel::Level4,
-        shortcut: None,
-        command_name: "learning",
     },
     Destination {
         area: FocusArea::MultiLanguage,
@@ -768,7 +641,6 @@ pub fn find_destination_by_name(query: &str) -> Option<&'static Destination> {
         d.command_name == q
             || d.name.eq_ignore_ascii_case(&q)
             || d.area.display_name().eq_ignore_ascii_case(&q)
-            || (d.area == FocusArea::LearningMode && (q == "learn" || q == "learning"))
             || (d.area == FocusArea::ByteBotPanel
                 && (q == "bytebot" || q == "agent" || q == "bytebot agent"))
             // Names these panels went by before they had one (TX-10).
@@ -784,14 +656,13 @@ pub fn destinations_for_level(
     DESTINATIONS.iter().filter(move |d| d.level <= max_level)
 }
 
-/// Feature list items visible in the palette / navigator up to max disclosure level.
-/// Excludes the navigator itself from its own options.
+/// Destinations visible up to the given disclosure level, as (name, description, area).
 pub fn feature_items_for_level(
     max_level: DisclosureLevel,
 ) -> Vec<(&'static str, &'static str, FocusArea)> {
     DESTINATIONS
         .iter()
-        .filter(|d| d.level <= max_level && d.area != FocusArea::FeatureNavigator)
+        .filter(|d| d.level <= max_level)
         .map(|d| (d.name, d.description, d.area))
         .collect()
 }
@@ -818,71 +689,15 @@ pub fn first_run_shortcuts_line(max_level: DisclosureLevel) -> String {
     parts.join(", ")
 }
 
-pub const FEATURE_LIST: &[(&str, &str)] = &[
-    ("Performance Dashboard", "Session stats & metrics"),
-    ("Provider Health", "API connection status"),
-    ("Project Analyzer", "Workspace file breakdown"),
-    ("Git Commit", "Stage and commit changes"),
-    ("ByteBot", "Autonomous task execution"),
-    ("Collaboration Hub", "Team collaboration tools"),
-    ("Voice Interface", "Record a clip, transcribe if able"),
-    ("Terminal Assistant", "AI-powered shell helper"),
-    ("Security Auditor", "Vulnerability scanning"),
-    ("Performance Profiler", "Code profiling tools"),
-    ("Custom Models", "Model configuration & tuning"),
-    ("Learning Mode", "Lessons from this repo's own files"),
-    ("Multi-Language", "Language detection & tools"),
-    ("PR Review", "Per-file diff browsing"),
-    ("Background Tasks", "Running & finished commands"),
-    ("Worktrees", "List, create and remove git worktrees"),
-    ("Insights", "Live refactor suggestions & warnings"),
-    ("Impact", "What a change to one file reaches"),
-    ("Layout History", "Why the screen is arranged this way"),
-];
-
-/// Maps a feature-navigator index to its target FocusArea.
-pub fn navigate_feature(idx: usize) -> FocusArea {
-    match idx {
-        0 => FocusArea::PerformanceDashboard,
-        1 => FocusArea::ProviderHealth,
-        2 => FocusArea::ProjectAnalyzer,
-        3 => FocusArea::GitCommit,
-        4 => FocusArea::ByteBotPanel,
-        5 => FocusArea::CollaborationHub,
-        6 => FocusArea::VoiceInterface,
-        7 => FocusArea::TerminalAssistant,
-        8 => FocusArea::SecurityAuditor,
-        9 => FocusArea::PerformanceProfiler,
-        10 => FocusArea::CustomModels,
-        11 => FocusArea::LearningMode,
-        12 => FocusArea::MultiLanguage,
-        13 => FocusArea::ReviewDashboard,
-        14 => FocusArea::TaskManager,
-        15 => FocusArea::WorktreePanel,
-        16 => FocusArea::AdvisePanel,
-        17 => FocusArea::ImpactPanel,
-        18 => FocusArea::LayoutPanel,
-        _ => FocusArea::ChatInput,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// TX-10: a panel goes by one name. The palette list, every title that
-    /// reads `display_name`, and the destination table agree, and no two
+    /// TX-10: a panel goes by one name. Every title that reads
+    /// `display_name` and the destination table agree, and no two
     /// destinations share a name.
     #[test]
     fn every_destination_has_one_name_everywhere() {
-        for (i, (name, _)) in super::FEATURE_LIST.iter().enumerate() {
-            let area = super::navigate_feature(i);
-            assert_eq!(
-                *name,
-                area.display_name(),
-                "palette row {i} names {area:?} differently"
-            );
-        }
         let mut seen = std::collections::HashSet::new();
         for d in super::DESTINATIONS {
             assert_eq!(d.area.display_name(), d.name);
@@ -960,8 +775,8 @@ mod tests {
     }
 
     #[test]
-    fn destinations_table_has_all_27_focus_areas_uniquely() {
-        assert_eq!(DESTINATIONS.len(), 27);
+    fn destinations_table_has_all_19_focus_areas_uniquely() {
+        assert_eq!(DESTINATIONS.len(), 19);
         let mut seen = std::collections::HashSet::new();
         for dest in DESTINATIONS {
             assert!(
@@ -989,8 +804,6 @@ mod tests {
 
         let l2_shortcuts = first_run_shortcuts_line(DisclosureLevel::Level2);
         assert!(!l2_shortcuts.contains("bytebot"));
-        assert!(!l2_shortcuts.contains("voice"));
-        assert!(!l2_shortcuts.contains("collab"));
 
         // But level 4 palette contains all features
         let l4_items = feature_items_for_level(DisclosureLevel::Level4);
@@ -999,7 +812,7 @@ mod tests {
             .any(|(_, _, a)| *a == FocusArea::ByteBotPanel));
         assert!(l4_items
             .iter()
-            .any(|(_, _, a)| *a == FocusArea::VoiceInterface));
+            .any(|(_, _, a)| *a == FocusArea::SecurityAuditor));
     }
 
     #[test]
@@ -1008,14 +821,6 @@ mod tests {
         assert_eq!(
             find_destination_by_name("bytebot").map(|d| d.area),
             Some(FocusArea::ByteBotPanel)
-        );
-        assert_eq!(
-            find_destination_by_name("/voice").map(|d| d.area),
-            Some(FocusArea::VoiceInterface)
-        );
-        assert_eq!(
-            find_destination_by_name("collab").map(|d| d.area),
-            Some(FocusArea::CollaborationHub)
         );
         assert_eq!(
             find_destination_by_name("security").map(|d| d.area),

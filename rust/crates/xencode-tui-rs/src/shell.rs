@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::focus::{FocusArea, InputMode};
+use crate::focus::InputMode;
 use crate::widgets::spinner;
 
 /// Columns the side panel takes.
@@ -237,11 +237,7 @@ pub fn areas(area: Rect, app: &App) -> ShellAreas {
 
 /// Draw the conversation screen into `area`.
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) -> ShellAreas {
-    if app.focus == FocusArea::ChatInput {
-        app.last_body_focus = FocusArea::ChatInput;
-    }
     app.last_body_area = area;
-    app.note_session_opened();
     let mut a = areas(area, app);
     // The mouse and the scroll clamp find the transcript and the input here.
     app.last_layout = crate::layout::BodyLayout {

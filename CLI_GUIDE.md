@@ -115,17 +115,15 @@ status line on the bottom row. `Tab` and `Shift+Tab` move between the tabs
 to the conversation. `/files`, `/changes`, `/models`, `/project` and
 `/settings` typed in the input open their views too.
 
-In the panels the older keys still work: `Tab` cycles explorer/editor/chat ·
+In the panels the older keys still work: `Tab` moves between the tree and the editor in Files ·
 `i` or `/` goes to the input · `m` model selector · `s` settings · `e` edit the
 focused file · `q` twice quits · `Ctrl+R` AI review · `Ctrl+Y` PR review ·
 `Ctrl+K` background tasks · `Ctrl+A` the worker panel · `Ctrl+B` ByteBot ·
-`Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel · `Ctrl+U`
-cycle the layout · `Ctrl+0` why the screen is arranged as it is (session layout
-history; `Enter` shows the pane widths a change moved between) · `Ctrl+C`
-stops a running turn (even mid-answer) and quits when nothing is running.
- If the terminal has the mouse, a divider between two
-side-by-side panes drags to resize them; if you want the terminal's own
-drag-select of text back, `xencode config set mouse_capture off` hands the
+`Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel · `Ctrl+T` the terminal strip under the editor in Files ·
+`Ctrl+C` stops a running turn (even mid-answer) and quits when nothing is running.
+ The Files view is the file tree beside the editor; there are no layout presets,
+saved views or pane resizing. If the terminal has the mouse, the wheel scrolls
+and a click picks a pane; if you want the terminal's own drag-select of text back, `xencode config set mouse_capture off` hands the
 mouse over (the same row lives on the Settings panel, and it takes effect on
 the next frame). The focused pane's title starts with `▶`, so focus does not depend on border colour, and starting the TUI with `NO_COLOR` set (any non-empty value, per no-color.org) draws it without colour: anything that stood out by its background, such as a selected row or the status bar, is shown in reverse video instead. Slash commands: `/init`, `/ctx`, `/advise`,
 `/impact <file>` (open the blast-radius panel over `xencode impact`'s three
@@ -207,7 +205,7 @@ a file read off disk, a fetched page, an `AGENTS.md` whose bytes have not been
 trusted — so a preview cannot read as though your own sentence and a webpage were
 the same kind of thing. Files pinned in the Explorer with `Space` are read through
 the same intake a real turn uses, so they are counted here too.
-`/level [1-4]` selects the progressive disclosure tier (Level 1 Core, Level 2 Workflow, Level 3 Advanced, Level 4 Specialist/All), governing the visible entries in the feature navigator (`Ctrl+F`) and first-run welcome shortcuts line without removing deferred tooling. A first start, with no settings file, opens at Level 2; a settings file that already holds a level keeps it. The command palette (`Ctrl+X`) ignores the tier and lists every panel, slash command and setting.
+`/level [1-4]` selects the progressive disclosure tier (Level 1 Core, Level 2 Workflow, Level 3 Advanced, Level 4 Specialist/All), governing the first-run welcome shortcuts line without removing deferred tooling. A first start, with no settings file, opens at Level 2; a settings file that already holds a level keeps it. The command palette (`Ctrl+P` or `Ctrl+X`) ignores the tier and lists every view, panel, slash command and setting.
 
 `/help` opens the help overlay, the same one `?` opens. A `/word` that is not a command (`/model`, `/clear`) is answered with "Unknown command" and a pointer to `/help`, instead of being sent to the model as a prompt. A first word that contains a second `/`, such as an absolute path, is still sent as a prompt.
 `/goto <destination>` switches focus directly to any panel destination by name or command, keeping all features reachable regardless of active disclosure tier.
@@ -2393,7 +2391,7 @@ recorded forward pid, runs `colab stop -s <name>`, and clears state; with no
 Once `up` is green the tunnel is an ordinary provider — there is no Colab-specific
 client path. `up` writes `llama_cpp_url` (or `ollama_url` for that runtime) and
 `remote_base_url = <forward>/v1`, so the `remote:` prefix, the TUI model picker
-and the Remote row in Provider Health (Ctrl+F) all speak through the same
+and the Remote row in Provider Health (Ctrl+P → Provider Health) all speak through the same
 forward:
 
 ```bash
@@ -2853,9 +2851,7 @@ in it was unchanged by the session that opened on it.
 | `budget_minutes_per_day` | number | What one calendar day's turns may take in the aggregate, in minutes — the seconds the turns themselves ran, not the time the interface sat open. From 1 to 1440 minutes, which is a whole day; empty clears. Crossing any of the four buys the **next** turn down one rung of `hardware_profile` and never refuses anything — see [What a day's caps do when they are passed](#what-a-days-caps-do-when-they-are-passed) |
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |
 | `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
-| `layout` | string | TUI body arrangement: `classic`, `chat-first`, `zen`, or a name declared in `layout_templates` (unknown → classic at render, with the reason printed by `config set` and toasted in the TUI) |
-| `layout_templates` | object | body layouts you wrote, `"name" → tree`, chosen by setting `layout` to that name; `Ctrl+U` and the Settings Layout row cycle the presets and these names together. A tree is a leaf `{"leaf": {"slot": "editor", "focus": "editor"}}` or a split `{"split": {"horizontal": true, "parts": [[child, share], …]}}`; slots are `explorer`, `editor`, `chat`, `input`, `terminal`, foci are `explorer`, `editor`, `chat`, and a share is `{"percent": n}`, `{"min": n}` or `{"length": n}`. Example — editor and chat, 70/30: `"editor-first": {"split": {"horizontal": true, "parts": [[{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}], [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]]}}`. Not settable with `config set` (as with `mcp_servers`, it is a nested structure) — edit the JSON, or `config show` to read it back. A template that cannot be built (mistyped slot, a split of one child, a zero share, a shape this build does not know) is refused by name and renders classic; it never fails the load, so the rest of your config survives it |
-| `layout_views` | object | saved arrangements, `"slot" → tree`, for the `Ctrl+1`…`Ctrl+9` view chords — the same tree shape `layout_templates` takes, under one of the nine slot names (`Code`, `Chat`, `Terminal`, `Focus`, `Review`, `Split` for the first six, then `7`, `8`, `9`). Six of the nine are seeded in the program, so an empty map still switches screens; `Ctrl+Shift+<digit>` writes a slot into this map, and a stored entry replaces its seed. Not settable with `config set` (as with `layout_templates`, it is a nested structure) — edit the JSON, or `config show` to read it back. An entry that cannot be read is refused by name with the reason and the rest of the config still loads |
+| `layout`, `layout_templates`, `layout_views` | — | retired with the layout presets: a config file that still holds them loads with them ignored, and they are left out the next time it is saved. `config set layout` is refused as an unknown key |
 | `active_theme` | string | UI theme: `ocean`, `midnight`, `forest`, `terminal`, `dracula`, `solarized`, `nord`, `light` (default `ocean`); cycled live in the TUI. **Not a `config set` key** — `xencode config set` has no arm for it, so edit it in the JSON. An unrecognised name is *not* rejected: `ThemeColors::get` falls through to the `ocean` palette, so a typo renders as ocean and reads back as the typo. Check the spelling against the eight above. |
 | `hardware_profile` | string | How much project context a run may spend: `auto` (default — chosen from this machine's memory), `low`, `balanced`, `high`; anything else is rejected by `config set` and reported by a run if it is already in the file. See [Which hardware profile the budget spends against](#which-hardware-profile-the-budget-spends-against) |
 | `rounded_borders` | bool | rounded panel corners, on by default; `false` draws square ones everywhere, the conversation included |
@@ -2864,7 +2860,7 @@ in it was unchanged by the session that opened on it.
 | `status_line` | list | what the line under the input shows, left to right, comma-separated: any of `model`, `provider` (`local only` or `cloud allowed` — where prompts may go), `approval`, `context`, `cost`, `branch` (default: all six). Items that do not fit the terminal are dropped from the end; `context` and `cost` show only once they are known. An unknown item is refused by `config set` |
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
-| `mouse_capture` | bool | whether xencode asks the terminal for the mouse at all: on (default) reads the wheel, pane clicks and divider drags; off hands them back, which is how a terminal's own drag-select of text comes to work again. Takes effect mid-session from the TUI's `Mouse Capture` row, and next start from here |
+| `mouse_capture` | bool | whether xencode asks the terminal for the mouse at all: on (default) reads the wheel and pane clicks; off hands them back, which is how a terminal's own drag-select of text comes to work again. Takes effect mid-session from the TUI's `Mouse Capture` row, and next start from here |
 | `badge_autostart` | bool | start the floating badge (`xencode badge`) whenever the terminal app starts; off by default. Settings → `Floating Badge` flips it |
 | `agent_approval` | string | agent tool-approval mode: `ask` (edits and shell prompt, reads free), `edit-allow` (edits free, shell prompts), `all-allow` (all local tools free, but a stranger's MCP server and the network still prompt), `plan` (read-only **and enforced**: an edit, shell call or external tool is denied, not merely prompted, so a plan turn cannot write even on a stale "always allow" grant — a grant only replaces a prompt, never a denial; and in this mode the write and shell tools are not offered to the model at all, only the read-only ones), or `autonomous` (reads, edits and shell run free with no human, but anything reaching an external MCP server or the network is denied rather than asked, because there is nobody to answer a prompt; this is what separates it from `all-allow`, which still lets those two prompt). Unknown → `ask`. Once the session has touched secrets (a key file read, an env dump, secret-shaped output), every later shell call asks in every mode — including past an `all-allow` setting or a session grant given before the secrets were read. A one-shot approval at the prompt still runs the call; headless, the prompt's absence denies it as before. All five are cycled live in the TUI's `Agent Approval` row. |
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |

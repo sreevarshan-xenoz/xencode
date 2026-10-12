@@ -30,10 +30,7 @@ const LEVEL_4_KEYWORDS: &[&str] = &[
     "bytebot",
     "/bytebot",
     "ByteBot",
-    "Voice Interface",
-    "Collaboration Hub",
     "Security Auditor",
-    "Performance Profiler",
     "Custom Models",
     "Multi-Language",
 ];
@@ -124,8 +121,7 @@ fn beginner_drive_reaches_committed_change_seeing_no_level_4_destination() {
         );
     }
 
-    // 4. Inspect palette / Feature Navigator
-    app.focus = FocusArea::FeatureNavigator;
+    // 4. The destinations this level lists hold nothing above it.
     let palette_items = app.palette_items();
     for (_name, _desc, area) in &palette_items {
         assert!(
@@ -135,14 +131,25 @@ fn beginner_drive_reaches_committed_change_seeing_no_level_4_destination() {
             area
         );
     }
-    let palette_screen = render_screen(&mut app);
-    for &kw in LEVEL_4_KEYWORDS {
-        assert!(
-            !palette_screen.contains(kw),
-            "Palette screen at Level 2 must not display Level 4 keyword '{}'",
-            kw
-        );
-    }
+    // The palette (Ctrl+P) lists every destination whatever the level, because
+    // it is the way back to what the level hides: a Level 4 panel is found by
+    // name there, and choosing nothing leaves the beginner where they were.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    xencode_tui_rs::keymap::handle_key(
+        &mut app,
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('p'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ),
+        &tx,
+    );
+    assert!(app.palette_visible);
+    app.palette_query = "bytebot".to_string();
+    assert!(app.palette_matches().iter().any(
+        |e| e.target == xencode_tui_rs::palette::PaletteTarget::Panel(FocusArea::ByteBotPanel)
+    ));
+    app.palette_visible = false;
+    app.palette_query.clear();
 
     // 5. Code Editor: make an edit
     app.focus = FocusArea::CodeEditor;
@@ -200,23 +207,11 @@ fn beginner_drive_reaches_committed_change_seeing_no_level_4_destination() {
     assert!(app.navigate_to_destination_by_name("bytebot"));
     assert_eq!(app.focus, FocusArea::ByteBotPanel);
 
-    assert!(app.navigate_to_destination_by_name("voice"));
-    assert_eq!(app.focus, FocusArea::VoiceInterface);
-
-    assert!(app.navigate_to_destination_by_name("collab"));
-    assert_eq!(app.focus, FocusArea::CollaborationHub);
-
     assert!(app.navigate_to_destination_by_name("security"));
     assert_eq!(app.focus, FocusArea::SecurityAuditor);
 
-    assert!(app.navigate_to_destination_by_name("profiler"));
-    assert_eq!(app.focus, FocusArea::PerformanceProfiler);
-
     assert!(app.navigate_to_destination_by_name("custom-models"));
     assert_eq!(app.focus, FocusArea::CustomModels);
-
-    assert!(app.navigate_to_destination_by_name("learn"));
-    assert_eq!(app.focus, FocusArea::LearningMode);
 
     assert!(app.navigate_to_destination_by_name("languages"));
     assert_eq!(app.focus, FocusArea::MultiLanguage);
@@ -228,15 +223,12 @@ fn turning_disclosure_off_restores_plain_xencode_identically() {
     app.set_disclosure_level(DisclosureLevel::Level4);
 
     // All destinations are present
-    assert_eq!(DESTINATIONS.len(), 27);
+    assert_eq!(DESTINATIONS.len(), 19);
     let palette = app.palette_items();
-    // Excludes FeatureNavigator itself (27 - 7 Level 1/2 workflow/core panes not in feature palette)
+    assert_eq!(palette.len(), DESTINATIONS.len());
     assert!(palette
         .iter()
         .any(|(_, _, a)| *a == FocusArea::ByteBotPanel));
-    assert!(palette
-        .iter()
-        .any(|(_, _, a)| *a == FocusArea::VoiceInterface));
     assert!(palette
         .iter()
         .any(|(_, _, a)| *a == FocusArea::SecurityAuditor));

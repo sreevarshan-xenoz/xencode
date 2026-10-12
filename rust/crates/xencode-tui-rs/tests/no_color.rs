@@ -62,7 +62,7 @@ fn the_focused_pane_is_marked_in_its_title() {
     assert!(
         marked
             .iter()
-            .any(|l| l.contains("▶ Files") || l.contains("▶Files")),
+            .any(|l| l.contains("▶ Files (") || l.contains("▶ 📁  Workspace (")),
         "the explorer title is not marked: {marked:?}"
     );
     assert_eq!(
