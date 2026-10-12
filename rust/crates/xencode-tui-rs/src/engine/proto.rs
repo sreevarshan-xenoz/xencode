@@ -57,6 +57,12 @@ pub enum ClientMsg {
         req: u64,
         request: TeamRequest,
     },
+    /// A request about the terminal agents (OM-2), answered with a
+    /// `TermReply` carrying the same `req`, to the asking window only.
+    Term {
+        req: u64,
+        request: TermRequest,
+    },
     /// A line a window-side command added to the transcript, so every
     /// window's transcript stays the same.
     Note {
@@ -64,6 +70,40 @@ pub enum ClientMsg {
         content: String,
     },
     Goodbye,
+}
+
+/// What a window asks about the terminal agents (OM-2). Bytes travel in
+/// base64.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "do", rename_all = "snake_case")]
+pub enum TermRequest {
+    /// The agents a tile can run, and which are installed.
+    Agents,
+    /// Start `agent` in a worktree of its own, in a terminal of this size.
+    Open { agent: String, cols: u16, rows: u16 },
+    /// Bytes typed into a tile.
+    Input { id: String, data: String },
+    /// The size of the tile that draws it.
+    Resize { id: String, cols: u16, rows: u16 },
+    /// Start sending these tiles' output to this window; the reply carries
+    /// each one's screen as it stands.
+    Watch { ids: Vec<String> },
+    /// End a tile's program and everything it started; its worktree stays.
+    Stop { id: String },
+}
+
+/// `bytes` as base64, the way terminal bytes travel in a JSON line.
+pub fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// The bytes `b64` wrote.
+pub fn unb64(text: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .map_err(|e| format!("terminal bytes that are not base64: {e}"))
 }
 
 /// What a window or the lead asks of the team (TM).
@@ -189,6 +229,19 @@ pub enum EngineMsg {
     },
     Error {
         message: String,
+    },
+    /// What terminal agent `id` wrote, to the windows watching it (OM-2);
+    /// `data` is the bytes in base64.
+    TermOutput {
+        id: String,
+        data: String,
+    },
+    /// The answer to a `Term` request: `ok` with a JSON body, or not with the
+    /// reason in words.
+    TermReply {
+        req: u64,
+        ok: bool,
+        body: serde_json::Value,
     },
     /// The answer to a `Team` request: `ok` with a JSON body, or not with the
     /// reason in words.

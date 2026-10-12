@@ -768,3 +768,139 @@ async fn a_window_reads_the_engine_with_next_and_hears_it_go() {
     .expect("the loss was noticed");
     assert!(!gone.is_empty());
 }
+
+// OM-2: terminal agents hosted by the engine. A real engine, a real
+// repository, a real shell in a pseudo-terminal, and a window that opens it,
+// types into it, goes away and comes back.
+
+use xencode_tui_rs::engine::proto::TermRequest;
+
+/// A repository with one commit, in a folder of its own so the sibling
+/// `-team` folder of worktrees goes with it.
+fn term_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+    let outer = tempfile::tempdir().unwrap();
+    let root = outer.path().join("proj");
+    std::fs::create_dir(&root).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@example.invalid"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "first"]);
+    (outer, root)
+}
+
+/// What is typed is not what the shell prints, so the word on screen is the
+/// program's output and not the echo of the keys.
+fn typed_line() -> &'static [u8] {
+    if cfg!(windows) {
+        b"echo XEN%COMSPEC:~0,0%CODE_E2E\r"
+    } else {
+        b"echo XEN''CODE_E2E\r"
+    }
+}
+
+fn term(app: &mut App<'static>, request: TermRequest) {
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    xencode_tui_rs::engine::act(app, ClientMsg::Term { req: 1, request }, &tx);
+}
+
+fn screen_text(app: &App<'_>, id: &str) -> String {
+    app.term_screens
+        .get(id)
+        .map(|screen| screen.text())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_window_opens_a_terminal_agent_types_into_it_and_sees_it_again_after_reconnecting() {
+    let (_outer, root) = term_repo();
+    let config = settings();
+    let engine = Engine::start(&root, config.path());
+    let addr = engine.address();
+    let mut app = window_onto(&addr).await;
+
+    term(
+        &mut app,
+        TermRequest::Open {
+            agent: "shell".into(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+    frames_until(&mut app, Duration::from_secs(30), |app| {
+        !app.term_tiles.is_empty()
+    })
+    .await;
+    let tile = app.term_tiles[0].clone();
+    assert_eq!(tile.agent, "shell");
+    assert!(
+        tile.worktree.contains("-team"),
+        "a tile works in a worktree of its own: {}",
+        tile.worktree
+    );
+    assert!(tile.branch.starts_with("xencode/team/"), "{}", tile.branch);
+
+    term(
+        &mut app,
+        TermRequest::Watch {
+            ids: vec![tile.id.clone()],
+        },
+    );
+    term(
+        &mut app,
+        TermRequest::Input {
+            id: tile.id.clone(),
+            data: proto::b64(typed_line()),
+        },
+    );
+    frames_until(&mut app, Duration::from_secs(30), |app| {
+        screen_text(app, &tile.id).contains("XENCODE_E2E")
+    })
+    .await;
+
+    // The window goes; the shell keeps running in the engine.
+    drop(app);
+    let mut again = window_onto(&addr).await;
+    frames_until(&mut again, Duration::from_secs(30), |app| {
+        !app.term_tiles.is_empty()
+    })
+    .await;
+    term(
+        &mut again,
+        TermRequest::Watch {
+            ids: vec![tile.id.clone()],
+        },
+    );
+    frames_until(&mut again, Duration::from_secs(30), |app| {
+        screen_text(app, &tile.id).contains("XENCODE_E2E")
+    })
+    .await;
+
+    term(
+        &mut again,
+        TermRequest::Stop {
+            id: tile.id.clone(),
+        },
+    );
+    frames_until(&mut again, Duration::from_secs(30), |app| {
+        app.term_tiles
+            .iter()
+            .any(|t| t.id == tile.id && matches!(t.state.as_str(), "done" | "failed"))
+    })
+    .await;
+    // The worktree stays for a later merge or clean.
+    assert!(std::path::Path::new(&tile.worktree).exists());
+}

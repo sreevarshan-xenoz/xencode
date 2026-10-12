@@ -570,6 +570,14 @@ pub struct App<'a> {
     /// Messages typed while a turn was running, sent in order once it ends
     /// (TD-3).
     pub queued: Vec<String>,
+    /// The terminal agents this app runs, when it is the engine or runs in
+    /// process (OM-2).
+    pub term_host: crate::engine::term::TermHost,
+    /// The terminal agents as the engine last described them.
+    pub term_tiles: Vec<crate::engine::term::TileInfo>,
+    /// Each watched tile's screen, drawn from the engine's replay and then
+    /// its live output.
+    pub term_screens: std::collections::BTreeMap<String, xencode_term_rs::Screen>,
     /// The transcript's length in rows at the last frame, so reading further
     /// up holds still while new lines arrive.
     pub(crate) transcript_rows: u16,
@@ -2384,6 +2392,9 @@ impl<'a> App<'a> {
             last_title: String::new(),
             terminal_focused: true,
             queued: Vec::new(),
+            term_host: Default::default(),
+            term_tiles: Vec::new(),
+            term_screens: Default::default(),
             transcript_rows: 0,
             approval_shown: None,
             last_esc_at: None,
@@ -3822,6 +3833,27 @@ impl<'a> App<'a> {
         }
         self.submit_message(tx);
         self.chat_scroll = 0;
+    }
+
+    /// Feed what terminal agent `id` wrote into this app's screen for it, made
+    /// at the tile's size the first time. This screen only draws: the engine's
+    /// own screen for the tile is the one that answers the program.
+    pub(crate) fn feed_tile(&mut self, id: &str, bytes: &[u8]) {
+        let size = self
+            .term_tiles
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| xencode_term_rs::Size {
+                cols: t.cols,
+                rows: t.rows,
+            })
+            .unwrap_or(xencode_term_rs::Size { cols: 80, rows: 24 });
+        let screen = self
+            .term_screens
+            .entry(id.to_string())
+            .or_insert_with(|| xencode_term_rs::Screen::new(size));
+        screen.feed(bytes);
+        screen.take_replies();
     }
 
     /// Shift+Tab (TD-3): ask → auto-edit → plan → ask, for this session (the

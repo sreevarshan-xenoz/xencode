@@ -284,6 +284,30 @@ pub fn frame(app: &mut App) -> Frame {
             LinkEvent::Msg(EngineMsg::Error { message }) => {
                 app.push_toast(crate::toast::ToastKind::Warning, message);
             }
+            LinkEvent::Msg(EngineMsg::TermOutput { id, data }) => {
+                if let Ok(bytes) = super::proto::unb64(&data) {
+                    app.feed_tile(&id, &bytes);
+                }
+            }
+            LinkEvent::Msg(EngineMsg::TermReply { ok, body, .. }) => {
+                // A watch's reply carries each tile's screen as it stands: a
+                // fresh screen is drawn from it, then the live output follows.
+                if let Some(replays) = body.get("replays").and_then(|r| r.as_object()) {
+                    for (id, data) in replays {
+                        if let Some(bytes) = data.as_str().and_then(|d| super::proto::unb64(d).ok())
+                        {
+                            app.term_screens.remove(id);
+                            app.feed_tile(id, &bytes);
+                        }
+                    }
+                } else if !ok {
+                    let why = body
+                        .as_str()
+                        .unwrap_or("the terminal agent refused")
+                        .to_string();
+                    app.push_toast(crate::toast::ToastKind::Warning, why);
+                }
+            }
             LinkEvent::Msg(EngineMsg::TeamReply { ok, body, .. }) => {
                 super::team_toast(app, ok, &body);
             }

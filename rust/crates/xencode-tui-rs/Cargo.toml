@@ -25,6 +25,8 @@ xencode-colab-rs = { path = "../xencode-colab-rs" }
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-server-rs = { path = "../xencode-server-rs" }
 xencode-agents-rs = { path = "../xencode-agents-rs" }
+xencode-term-rs = { path = "../xencode-term-rs" }
+base64 = "0.23"
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.28"
 ratatui = "0.29"

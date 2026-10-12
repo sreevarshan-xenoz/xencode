@@ -15,6 +15,7 @@ pub mod link;
 pub mod proto;
 pub mod server;
 pub mod team;
+pub mod term;
 pub mod transport;
 pub mod view;
 
@@ -66,6 +67,8 @@ pub struct Pump {
     pub messages: usize,
     pub approvals: usize,
     pub out: Vec<EngineMsg>,
+    /// What each terminal agent wrote, for the windows watching it (OM-2).
+    pub term: Vec<(String, Vec<u8>)>,
 }
 
 /// Take in everything the agent loops reported since the last call, in the
@@ -81,6 +84,15 @@ pub fn pump(
     let mut messages = 0;
     let approvals_tx = app.approval_tx.clone();
     app.team.pump(&approvals_tx);
+    let term = app.term_host.pump();
+    // In process there is no window to send to: the app's own tile screens
+    // are fed here, as a window's are from `TermOutput`.
+    if !app.is_window() {
+        for (id, bytes) in &term {
+            app.feed_tile(id, bytes);
+        }
+        app.term_tiles = app.term_host.tiles();
+    }
     while let Ok(token) = rx.try_recv() {
         messages += 1;
         app.apply_token(&token, tx);
@@ -103,6 +115,43 @@ pub fn pump(
         messages,
         approvals,
         out,
+        term,
+    }
+}
+
+/// Carry out one request about the terminal agents (OM-2).
+fn term_request(app: &mut App, request: proto::TermRequest) -> Result<serde_json::Value, String> {
+    use proto::TermRequest;
+    use xencode_term_rs::Size;
+    match request {
+        TermRequest::Agents => Ok(serde_json::to_value(term::picker()).unwrap_or_default()),
+        TermRequest::Open { agent, cols, rows } => {
+            let root = xencode_context_rs::default_root();
+            let tile = app.term_host.open(&root, &agent, Size { cols, rows })?;
+            Ok(serde_json::to_value(tile).unwrap_or_default())
+        }
+        TermRequest::Input { id, data } => {
+            let bytes = proto::unb64(&data)?;
+            app.term_host.input(&id, &bytes)?;
+            Ok(serde_json::Value::Null)
+        }
+        TermRequest::Resize { id, cols, rows } => {
+            app.term_host.resize(&id, Size { cols, rows })?;
+            Ok(serde_json::Value::Null)
+        }
+        TermRequest::Watch { ids } => {
+            let mut replays = serde_json::Map::new();
+            for id in ids {
+                if let Some(bytes) = app.term_host.replay(&id) {
+                    replays.insert(id, serde_json::Value::String(proto::b64(&bytes)));
+                }
+            }
+            Ok(serde_json::json!({ "replays": replays }))
+        }
+        TermRequest::Stop { id } => {
+            app.term_host.stop(&id)?;
+            Ok(serde_json::Value::Null)
+        }
     }
 }
 
@@ -308,6 +357,13 @@ pub fn handle(
                 });
             }
             Vec::new()
+        }
+        ClientMsg::Term { req, request } => {
+            let (ok, body) = match term_request(app, request) {
+                Ok(body) => (true, body),
+                Err(why) => (false, serde_json::Value::String(why)),
+            };
+            vec![EngineMsg::TermReply { req, ok, body }]
         }
         ClientMsg::ResumeTasks => {
             app.bytebot_start_next(tx.clone());

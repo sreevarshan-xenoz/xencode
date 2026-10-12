@@ -17808,6 +17808,11 @@ program; the keys themselves are covered by their own tests.
     and `sh` in a Unix PTY run, take input, report exit codes, resize, ring for attention, replay
     their screen and stop with everything they started; 14 tests on each platform. vt100 0.15.2,
     not 0.16 (ratatui 0.29 pins unicode-width 0.2.0).
+  - [x] **OM-2 — the engine hosts terminal agents.** Done 2026-10-12 (`engine/term.rs`,
+    `TermRequest`, `TermOutput`, `TermReply`): watched end to end with a real engine, a real
+    repository and a real shell on Windows and Linux — open in a worktree, type, disconnect,
+    reconnect and see the screen again, stop with the worktree kept. Ruling: tiles live in their
+    own host, not yet in the Team; joining them for merge and clean is OM-5.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.

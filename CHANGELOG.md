@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tree on Windows, its whole session on Unix, background jobs included. It is
   the groundwork for orchestrator mode's tiles and changes nothing on screen
   yet. Tested against a real shell on Windows and Linux.
+- `OM-2`: the project's engine runs terminal agents. A window can open one (a
+  plain shell or an installed coding agent's own CLI) in a git worktree and
+  branch of its own, type into it, resize it, watch it and stop it; the engine
+  keeps its screen, so a window that connects later is shown the screen as it
+  stands and then the live output, and the engine stays running while any
+  terminal agent does. Stopping one keeps its worktree. Nothing on screen uses
+  this yet; the tiles come with OM-3.
 
 ### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
 

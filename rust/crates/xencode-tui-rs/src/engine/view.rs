@@ -53,6 +53,9 @@ pub struct View {
     pub plan: Option<Vec<PlanItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The terminal agents (OM-2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terms: Option<Vec<super::term::TileInfo>>,
     /// The approval mode, cloud access and external workers in force in the
     /// engine (C1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +96,7 @@ struct Agent {
     plan: Vec<PlanItem>,
     model: String,
     policy: (String, bool, bool),
+    terms: Vec<super::term::TileInfo>,
     llm_calls: u64,
     timings: Option<LlamaCppTimings>,
     team: Vec<xencode_team_rs::WorkerSnapshot>,
@@ -135,6 +139,7 @@ impl Agent {
                 app.config.allow_cloud_models,
                 app.config.allow_external_workers,
             ),
+            terms: app.term_host.tiles(),
             llm_calls: app.total_llm_calls,
             timings: app.last_llamacpp_timings.clone(),
             team: app.team.snapshots(),
@@ -169,6 +174,7 @@ impl Watcher {
             plan: Some(agent.plan.clone()),
             model: Some(agent.model.clone()),
             policy: Some(agent.policy.clone()),
+            terms: Some(agent.terms.clone()),
             llm_calls: Some(agent.llm_calls),
             timings: Some(agent.timings.clone()),
             team: Some(agent.team.clone()),
@@ -221,6 +227,7 @@ impl Watcher {
         field!(plan);
         field!(model);
         field!(policy);
+        field!(terms);
         field!(llm_calls);
         field!(timings);
         field!(team);
@@ -296,6 +303,9 @@ pub fn apply(app: &mut App, view: View) {
     }
     if let Some(model) = view.model {
         app.config.default_model = model;
+    }
+    if let Some(tiles) = view.terms {
+        app.term_tiles = tiles;
     }
     if let Some((approval, cloud, external)) = view.policy {
         app.config.agent_approval = approval;

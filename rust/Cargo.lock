@@ -5012,6 +5012,7 @@ dependencies = [
 name = "xencode-tui-rs"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "crossterm",
  "dirs",
  "libc",
@@ -5044,6 +5045,7 @@ dependencies = [
  "xencode-providers-rs",
  "xencode-server-rs",
  "xencode-team-rs",
+ "xencode-term-rs",
 ]
 
 [[package]]
