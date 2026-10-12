@@ -103,11 +103,33 @@ pub fn egress_label(app: &App) -> &'static str {
 /// kitty show as a desktop notification and other terminals ignore.
 pub const NOTIFY_SEQUENCE: &str = "\x1b]9;xencode needs you\x1b\\";
 
+/// Everything waiting on the person, one key each: every approval, and
+/// every terminal agent that rang or sent a notification (OM-4). A new key
+/// is what a notification is sent for.
+pub fn waiting_keys(app: &App) -> std::collections::BTreeSet<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    for id in &app.approval_ids {
+        keys.insert(format!("approval {id}"));
+    }
+    for (id, _) in &app.remote_approvals {
+        keys.insert(format!("approval {id}"));
+    }
+    if app.pending_approval().is_some() && keys.is_empty() {
+        keys.insert("approval".to_string());
+    }
+    for tile in app.term_tiles.iter().filter(|t| t.state == "needs_you") {
+        keys.insert(format!("tile {}", tile.id));
+    }
+    keys
+}
+
 /// The window title: the project, or a call for the person while something
 /// waits on their answer.
 pub fn attention_title(app: &App) -> String {
-    if app.pending_approval().is_some() {
-        return "xencode · needs you".to_string();
+    match waiting_keys(app).len() {
+        0 => {}
+        1 => return "xencode · needs you".to_string(),
+        n => return format!("xencode · {n} need you"),
     }
     let project = xencode_context_rs::default_root()
         .file_name()
@@ -643,6 +665,29 @@ mod tests {
         );
         // It is the last item a narrow terminal drops.
         assert_eq!(status_items(&app, 20), ["orchestrator"]);
+    }
+
+    #[test]
+    fn the_title_counts_everything_waiting_on_the_person() {
+        let mut app = App::for_tests();
+        let tile = |id: &str, state: &str| crate::engine::term::TileInfo {
+            id: id.into(),
+            agent: "shell".into(),
+            branch: String::new(),
+            worktree: String::new(),
+            state: state.into(),
+            cols: 80,
+            rows: 24,
+            exit: None,
+        };
+        app.term_tiles = vec![
+            tile("t1", "needs_you"),
+            tile("t2", "working"),
+            tile("t3", "needs_you"),
+        ];
+        assert_eq!(attention_title(&app), "xencode · 2 need you");
+        let keys = waiting_keys(&app);
+        assert!(keys.contains("tile t1") && keys.contains("tile t3") && !keys.contains("tile t2"));
     }
 
     #[test]

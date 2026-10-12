@@ -4637,6 +4637,9 @@ focused agent and everything it started (its worktree stays), and `Ctrl+A`
 sends a Ctrl+A to the agent. A tile whose agent rang the bell or sent a
 notification has a yellow frame and moves to Needs you on the rail until you
 type into it. The conversation's side panel lists the agents still running.
+The Inbox at the bottom of the rail lists what waits on you (approvals, and agents
+that called), the window title counts it (`xencode · 2 need you`), and a terminal
+window that is not in front gets one desktop notification for each new one.
 
 The verbs are the surface, and the four that report answer from either side — a
 mode that would not say which mode you are in, or let you leave, only locks you

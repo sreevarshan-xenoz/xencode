@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Ctrl+A. An agent that rings or notifies gets a yellow frame and moves to
   Needs you. Leaving the mode leaves the agents running, and the conversation's
   side panel lists them.
+- `OM-4`: the rail ends with an Inbox of what waits on the person (approvals and
+  agents that rang or notified), the window title counts them, and a terminal
+  not in front gets one desktop notification for each new one rather than for
+  the first only.
 
 ### Changed — `TD-1` … `TD-4`: the TUI opens on a conversation, not a grid of panes
 
