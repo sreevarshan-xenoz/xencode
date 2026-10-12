@@ -37,6 +37,10 @@ pub struct OrchState {
     pub picker: Option<Picker>,
     /// `x` was pressed once on this tile; a second `x` stops it.
     pub stop_armed: Option<String>,
+    /// `m` was pressed once on this tile; a second `m` stops it and merges.
+    pub merge_armed: Option<String>,
+    /// The line `a` (ask all) is typing, sent to every agent on Enter.
+    pub ask: Option<String>,
     /// The size each tile was last told, so a resize is only sent on change.
     pub sizes: std::collections::BTreeMap<String, (u16, u16)>,
     /// Sizes to send to the engine on the next frame.
@@ -293,6 +297,30 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     }
     if app.orch.picker.is_some() {
         draw_picker(f, app, area);
+    }
+    if let Some(text) = app.orch.ask.as_ref() {
+        let row = Rect {
+            y: area.y + area.height.saturating_sub(1),
+            height: 1.min(area.height),
+            ..area
+        };
+        f.render_widget(Clear, row);
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    " ask every agent › ",
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(text.clone(), Style::default().fg(app.theme.fg)),
+                Span::styled(
+                    "  enter sends · esc cancels",
+                    Style::default().fg(app.theme.message_system),
+                ),
+            ])),
+            row,
+        );
     }
 }
 

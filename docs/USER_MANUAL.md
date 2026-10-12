@@ -195,6 +195,8 @@ In orchestrator mode (`Ctrl+Space`), everything typed goes to the focused tile; 
 | `Ctrl+A` `t` | Draw every agent as a tile |
 | `Ctrl+A` `n` | The picker: open more agents |
 | `Ctrl+A` `x` `x` | Stop the focused agent and everything it started; its worktree stays |
+| `Ctrl+A` `m` `m` | Stop it and land its work on its base branch through the checked merge |
+| `Ctrl+A` `a` | Type one line and send it to every working or idle agent |
 | `Ctrl+A` `Ctrl+A` | Send Ctrl+A to the agent |
 
 Each agent runs its vendor's own CLI with your sign-in, in a git worktree of its own, kept running by the project's engine when you leave the mode.
