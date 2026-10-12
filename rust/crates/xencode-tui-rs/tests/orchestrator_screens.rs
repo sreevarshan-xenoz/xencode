@@ -229,3 +229,40 @@ async fn the_mode_draws_at_any_size() {
         assert!(drawn.is_ok(), "{w}x{h}");
     }
 }
+
+/// OM-4: a real program in a tile that rings the bell is marked as needing
+/// the person: its rail row moves to Needs you, it is in the Inbox, and the
+/// window title counts it; typing into it answers it.
+#[tokio::test]
+async fn a_tile_that_rings_needs_you_until_it_is_typed_into() {
+    let _here = scratch();
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    enter_mode(&mut app);
+    key(&mut app, KeyCode::Char(' '), KeyModifiers::NONE);
+    key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    frames_until(&mut app, "the tile", |_| true);
+    ctrl_a(&mut app, KeyCode::Char('1'));
+    let ring = if cfg!(windows) {
+        "powershell -NoProfile -Command \"[char]7\""
+    } else {
+        "printf '\\a'"
+    };
+    for c in ring.chars() {
+        key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
+    }
+    key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    let text = frames_until(&mut app, "the bell", |t| t.contains("Needs you"));
+    assert!(text.contains("Inbox"), "{text}");
+    assert_eq!(
+        xencode_tui_rs::shell::attention_title(&app),
+        "xencode · needs you"
+    );
+    // Typing into the tile answers whatever it was asking.
+    key(&mut app, KeyCode::Char(' '), KeyModifiers::NONE);
+    frames_until(&mut app, "the call to clear", |t| !t.contains("Needs you"));
+    assert_ne!(
+        xencode_tui_rs::shell::attention_title(&app),
+        "xencode · needs you"
+    );
+}

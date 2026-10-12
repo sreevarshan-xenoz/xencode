@@ -357,6 +357,41 @@ fn draw_rail(f: &mut Frame, app: &App, area: Rect, tiles: &[crate::engine::term:
         }
     }
     lines.push(Line::from(Span::styled("+ new agent (ctrl+a n)", dim)));
+    // What waits on the person, approvals first (OM-4).
+    let mut inbox: Vec<Line<'static>> = Vec::new();
+    if let Some(request) = app.pending_approval() {
+        let waiting = app.approval_queue.len() + app.remote_approvals.len();
+        inbox.push(Line::from(Span::styled(
+            format!(
+                "? {}{}",
+                crate::transcript::clean(&request.summary),
+                if waiting > 1 {
+                    format!(" +{}", waiting - 1)
+                } else {
+                    String::new()
+                }
+            ),
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+    for (i, t) in tiles
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.state == "needs_you")
+    {
+        inbox.push(Line::from(Span::styled(
+            format!("! {} {} called", i + 1, t.agent),
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+    if !inbox.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Inbox".to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        lines.extend(inbox);
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_set(crate::widgets::panel_border_set(app.config.rounded_borders))

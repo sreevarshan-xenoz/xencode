@@ -12841,8 +12841,9 @@ pub async fn run_app<B: Backend + io::Write>(
     // Whether the terminal has been asked for mouse events, `None` until it
     // has been asked either way (`V-7`).
     let mut capture: Option<bool> = None;
-    // Whether the notification for the approval now waiting was already sent.
-    let mut notified = false;
+    // What was already notified: each approval and each agent that called
+    // is sent one notification, not one per frame (OM-4).
+    let mut notified: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     // Whether the next frame repaints every cell rather than the changes.
     let mut repaint = false;
     // Focus events tell the loop whether the person is looking (TD-2); a
@@ -13093,13 +13094,15 @@ pub async fn run_app<B: Backend + io::Write>(
             );
             app.last_title = title;
         }
-        if app.pending_approval().is_none() {
-            notified = false;
-        } else if !app.terminal_focused && !notified {
+        let waiting = crate::shell::waiting_keys(&app);
+        let fresh = waiting.iter().any(|key| !notified.contains(key));
+        if fresh && !app.terminal_focused {
             let _ = write!(terminal.backend_mut(), "{}", crate::shell::NOTIFY_SEQUENCE);
             let _ = std::io::Write::flush(terminal.backend_mut());
-            notified = true;
         }
+        // Whatever waits now counts as told: in front of the person it is on
+        // the screen, behind it the notification just went.
+        notified = waiting;
 
         signals.toasts_after = app.toasts.len();
         signals.activity = app.activity_animating();

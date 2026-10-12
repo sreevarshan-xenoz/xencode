@@ -17818,6 +17818,9 @@ program; the keys themselves are covered by their own tests.
     with `t`), zoom, Ctrl+A prefix keys, stop with the worktree kept, the conversation as tile 0;
     tested with real shell tiles in a scratch repository. Ruling: the prefix is fixed at Ctrl+A
     (no `orchestrator.prefix` setting yet); the picker's list comes from the window's own PATH.
+  - [x] **OM-4 — attention, inbox, title and notification.** Done 2026-10-12: a real shell that
+    rings the bell moves to Needs you and the Inbox and the title counts it, until it is typed
+    into; one OSC 9 notification per new waiting item while the terminal is not in front.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
