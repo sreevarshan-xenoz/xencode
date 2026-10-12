@@ -19,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bottom with one status line under it — model, `local only` or `cloud allowed` (where
   prompts may go), approval mode, context used, cost and branch, dropped from the end when the terminal is
   narrow (`status_line` setting). An approval the agent waits on is drawn
-  inside the conversation with its diff, instead of a box over everything. At
+  inside the conversation with its diff, instead of a box over everything. Every
+  line of the call and the change is wrapped, never cut at the box's edge, and a
+  change longer than the box says how many lines are out of sight and scrolls
+  with ↑/↓. At
   100 columns or wider a side panel shows the changed files, the plan, a
   context gauge, the agents at work and the project's branch (`side_panel`:
   `auto`, `on`, `off`; `Ctrl+B` hides it for the session). The files view keeps

@@ -115,8 +115,28 @@ pub fn attention_title(app: &App) -> String {
     format!("xencode · {project}")
 }
 
-/// The approval prompt: its title, then the call, the change, and the keys.
-fn approval_lines(app: &App) -> Option<(String, Vec<Line<'static>>)> {
+/// `text` cut into rows of at most `width` columns, every character kept: a
+/// command's tail past the box's edge is exactly what must not be hidden.
+pub fn hard_wrap(text: &str, width: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    let width = width.max(1);
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for c in text.chars() {
+        let w = c.width().unwrap_or(0);
+        if used + w > width && used > 0 {
+            rows.push(String::new());
+            used = 0;
+        }
+        rows.last_mut().unwrap().push(c);
+        used += w;
+    }
+    rows
+}
+
+/// The approval prompt at `width` columns of text: its title, the call and
+/// the change wrapped so nothing is cut off, and the keys line.
+fn approval_lines(app: &App, width: usize) -> Option<(String, Vec<Line<'static>>, Line<'static>)> {
     let request = app.pending_approval()?;
     let waiting = app.approval_queue.len() + app.remote_approvals.len();
     let more = if waiting > 1 {
@@ -125,12 +145,13 @@ fn approval_lines(app: &App) -> Option<(String, Vec<Line<'static>>)> {
         String::new()
     };
     let title = format!(" Allow {}?{more} ", request.class_label());
-    let mut lines = vec![Line::from(Span::styled(
-        request.summary.clone(),
-        Style::default()
-            .fg(app.theme.fg)
-            .add_modifier(Modifier::BOLD),
-    ))];
+    let bold = Style::default()
+        .fg(app.theme.fg)
+        .add_modifier(Modifier::BOLD);
+    let mut body: Vec<Line<'static>> = hard_wrap(&crate::transcript::clean(&request.summary), width)
+        .into_iter()
+        .map(|row| Line::from(Span::styled(row, bold)))
+        .collect();
     for line in request.preview.lines() {
         let color = if line.starts_with("@@") {
             app.theme.accent
@@ -141,10 +162,9 @@ fn approval_lines(app: &App) -> Option<(String, Vec<Line<'static>>)> {
         } else {
             app.theme.message_system
         };
-        lines.push(Line::from(Span::styled(
-            crate::transcript::clean(line),
-            Style::default().fg(color),
-        )));
+        for row in hard_wrap(&crate::transcript::clean(line), width) {
+            body.push(Line::from(Span::styled(row, Style::default().fg(color))));
+        }
     }
     let key = |k: &'static str| {
         Span::styled(
@@ -155,15 +175,15 @@ fn approval_lines(app: &App) -> Option<(String, Vec<Line<'static>>)> {
         )
     };
     let word = |w: &'static str| Span::styled(w, Style::default().fg(app.theme.message_system));
-    lines.push(Line::from(vec![
+    let keys = Line::from(vec![
         key("y"),
         word(" allow · "),
         key("a"),
         word(" always for this kind · "),
         key("n"),
         word(" deny"),
-    ]));
-    Some((title, lines))
+    ]);
+    Some((title, body, keys))
 }
 
 /// Where everything goes in `area`.
@@ -189,10 +209,11 @@ pub fn areas(area: Rect, app: &App) -> ShellAreas {
     } else {
         (top, None)
     };
-    let (transcript, approval) = match approval_lines(app) {
-        Some((_, lines)) if top.height >= 6 => {
-            let wanted = lines.len() as u16 + 2;
-            let height = wanted.min(top.height / 2).max(4);
+    let (transcript, approval) = match approval_lines(app, approval_text_width(top.width)) {
+        Some((_, body, _)) if top.height >= 6 => {
+            // The change gets up to two thirds of the rows; past that it scrolls.
+            let wanted = body.len() as u16 + 3;
+            let height = wanted.min(top.height * 2 / 3).max(4);
             let split = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Min(1), Constraint::Length(height)])
@@ -347,8 +368,14 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: Rect, with_plan: bool) ->
     (text.y - top) + total.min(text.height)
 }
 
+/// Columns of text inside the approval box drawn `width` wide: its border and
+/// one column of padding on each side.
+fn approval_text_width(width: u16) -> usize {
+    width.saturating_sub(4).max(1) as usize
+}
+
 fn draw_approval(f: &mut Frame, app: &App, area: Rect) {
-    let Some((title, lines)) = approval_lines(app) else {
+    let Some((title, body, keys)) = approval_lines(app, approval_text_width(area.width)) else {
         return;
     };
     let block = Block::default()
@@ -356,17 +383,32 @@ fn draw_approval(f: &mut Frame, app: &App, area: Rect) {
         .border_set(crate::widgets::panel_border_set(app.config.rounded_borders))
         .border_style(Style::default().fg(app.theme.warning))
         .title(Span::styled(title, Style::default().fg(app.theme.warning)));
-    // The keys are the last line; when the box is short, the change gives way
-    // so the keys always show.
-    let rows = area.height.saturating_sub(2) as usize;
-    let lines = if lines.len() > rows && rows >= 2 {
-        let keys = lines.last().cloned().unwrap_or_default();
-        let mut kept: Vec<Line<'static>> = lines.into_iter().take(rows - 1).collect();
-        kept.push(keys);
-        kept
-    } else {
-        lines
-    };
+    // The keys are always the last row. A change longer than the rows above
+    // them scrolls with ↑↓ (or j/k), and a row of its own says how much is
+    // out of sight, so nothing is approved unseen without the box saying so.
+    let mut rows = (area.height.saturating_sub(2) as usize).saturating_sub(1);
+    if body.len() > rows {
+        rows = rows.saturating_sub(1);
+    }
+    let hidden = body.len().saturating_sub(rows);
+    let scroll = app.approval_scroll.min(hidden);
+    let below = hidden - scroll;
+    let mut lines: Vec<Line<'static>> = body.into_iter().skip(scroll).take(rows).collect();
+    if hidden > 0 {
+        let mut note = Vec::new();
+        if scroll > 0 {
+            note.push(format!("↑ {scroll} above"));
+        }
+        if below > 0 {
+            note.push(format!("↓ {below} more"));
+        }
+        note.push("↑↓ scroll".to_string());
+        lines.push(Line::from(Span::styled(
+            note.join(" · "),
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+    lines.push(keys);
     f.render_widget(
         Paragraph::new(lines).block(block.padding(ratatui::widgets::Padding::horizontal(1))),
         area,

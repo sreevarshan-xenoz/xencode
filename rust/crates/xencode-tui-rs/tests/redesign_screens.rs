@@ -103,6 +103,63 @@ fn an_approval_is_drawn_in_the_conversation_with_its_diff() {
     assert!(text.contains("y allow") && text.contains("n deny"), "{text}");
 }
 
+
+/// A shell command waiting for the person's yes.
+fn queue_shell_approval(app: &mut App<'static>, summary: &str, preview: &str) {
+    let (responder, _answer) = tokio::sync::oneshot::channel();
+    app.approval_queue.push_back((
+        xencode_tui_rs::agent_tools::ApprovalRequest {
+            tool: "run_command".into(),
+            class: xencode_tui_rs::agent_tools::ToolClass::Shell,
+            summary: summary.into(),
+            preview: preview.into(),
+            draft: Default::default(),
+        },
+        responder,
+    ));
+}
+
+/// TD-2: a command longer than the box is wrapped, not cut: its tail is the
+/// part that must not be hidden from the person approving it.
+#[test]
+fn a_long_command_is_shown_whole_in_the_approval() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    let command = format!("echo {} TAILMARK", "x".repeat(150));
+    queue_shell_approval(&mut app, "run_command", &command);
+    let text = screen(&mut app, 80, 30).join("\n");
+    assert!(text.contains("TAILMARK"), "{text}");
+}
+
+/// TD-2: a change longer than the box says how much is out of sight, and
+/// scrolls to show the rest.
+#[test]
+fn a_long_change_says_how_much_is_hidden_and_scrolls() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    let preview: Vec<String> = (1..=60).map(|i| format!("+line {i:02}")).collect();
+    queue_shell_approval(&mut app, "write_file big.rs", &preview.join("\n"));
+    let text = screen(&mut app, 100, 30).join("\n");
+    assert!(text.contains("+line 01") && !text.contains("+line 60"), "{text}");
+    assert!(text.contains("more") && text.contains("↑↓ scroll"), "{text}");
+    app.approval_scroll = 1000;
+    let text = screen(&mut app, 100, 30).join("\n");
+    assert!(text.contains("+line 60") && text.contains("above"), "{text}");
+    assert!(text.contains("y allow"), "{text}");
+}
+
+/// TD-2: the summary of a call is drawn without terminal escape codes, so a
+/// model cannot hide part of what it asks for.
+#[test]
+fn an_approval_summary_carries_no_escape_codes() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    queue_shell_approval(&mut app, "run_command \u{1b}[8mhidden part", "ls");
+    let text = screen(&mut app, 100, 30).join("\n");
+    assert!(text.contains("hidden part"), "{text}");
+    assert!(!text.contains('\u{1b}'), "{text:?}");
+}
+
 /// TD-2: a fresh screen says what to do in one line, not a list of keys.
 #[test]
 fn the_empty_conversation_says_what_to_do_in_one_line() {
@@ -112,3 +169,4 @@ fn the_empty_conversation_says_what_to_do_in_one_line() {
     assert!(text.contains("What should xencode do?"), "{text}");
     assert!(!text.contains("Shortcuts:"), "{text}");
 }
+

@@ -75,6 +75,8 @@ The TUI opens on the conversation: the transcript fills the screen, each
 message marked `▍You` or `▍xencode` and each tool call one folded `⎿` line
 with its outcome. An approval the agent is waiting on is drawn inside the
 conversation with its diff and `y` allow · `a` always for this kind · `n` deny.
+Every line of it is wrapped rather than cut, and a change longer than the box
+says how many lines are out of sight; `↑`/`↓` (or `j`/`k`) scroll it.
 The input box sits at the bottom with one status line under it (model, `local only` or
 `cloud allowed`, approval mode, context used, cost, branch — whatever fits), and at 100
 columns or wider a side panel on the right shows the changed files, the plan,
