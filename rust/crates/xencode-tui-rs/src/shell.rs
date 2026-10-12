@@ -520,6 +520,11 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 /// Every item the status line could show, in the configured order.
 fn all_status_items(app: &App) -> Vec<String> {
     let mut out = Vec::new();
+    // Orchestrator mode changes what the agent may do, so it is always said,
+    // first, whatever `status_line` lists; coding mode is the quiet default.
+    if app.mode == crate::focus::Mode::Orchestrator {
+        out.push("orchestrator".to_string());
+    }
     for item in &app.config.status_line {
         match item.as_str() {
             "model" if !app.config.default_model.is_empty() => {
@@ -618,6 +623,19 @@ mod tests {
         let narrow = status_items(&app, 30);
         assert_eq!(narrow, ["ollama:qwen2.5:7b"]);
         assert!(status_items(&app, 4).len() <= 1);
+    }
+
+    #[test]
+    fn orchestrator_mode_is_named_first_on_the_status_line() {
+        let mut app = App::for_tests();
+        assert!(!status_items(&app, 200).iter().any(|i| i == "orchestrator"));
+        app.mode = crate::focus::Mode::Orchestrator;
+        assert_eq!(
+            status_items(&app, 200).first().map(String::as_str),
+            Some("orchestrator")
+        );
+        // It is the last item a narrow terminal drops.
+        assert_eq!(status_items(&app, 20), ["orchestrator"]);
     }
 
     #[test]

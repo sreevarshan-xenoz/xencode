@@ -4609,8 +4609,8 @@ reading `an estimate, not a measurement`.
 ### TUI slash: `/orchestrator` (and `Ctrl+Space`)
 
 The same state `/workers` shows, seen as a way of working rather than a screen to
-look at. `Ctrl+Space` flips between `CODING` and `ORCHESTRATOR` in the status bar,
-and `/orchestrator on` and `/orchestrator off` are the same switch by name. The
+look at. `Ctrl+Space` flips between coding and orchestrator mode (the status
+line under the input starts with `orchestrator` while it is on), and `/orchestrator on` and `/orchestrator off` are the same switch by name. The
 mode is one field on the app: nothing is copied, no second task list, no second
 session, and the badge is the only thing that moves.
 
