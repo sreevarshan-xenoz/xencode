@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xencode · needs you`, and a terminal that is not in front gets one desktop
   notification (OSC 9). On Windows the whole screen is repainted after a resize
   so no stale characters are left behind.
+- The status line starts with `orchestrator` while orchestrator mode is on,
+  whatever `status_line` lists, so the mode is never hidden.
 - `xencode config set` accepts `tool_output`, `side_panel` and `status_line`,
   and refuses words it does not know.
 - Rounded corners (`rounded_borders`) are now on by default; `false` still draws
