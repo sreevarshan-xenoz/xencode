@@ -28,7 +28,10 @@ async fn a_tool_call_is_drawn_once_as_one_row() {
         &tx,
     );
     app.apply_token("[TOOL]← fn a() {}", &tx);
-    app.apply_token(r#"[TOOLEND]{"id":"c1","outcome":"done","preview":"fn a() {}"}"#, &tx);
+    app.apply_token(
+        r#"[TOOLEND]{"id":"c1","outcome":"done","preview":"fn a() {}"}"#,
+        &tx,
+    );
     app.apply_token("[DONE]", &tx);
     let rows = screen(&mut app, 160, 40);
     let tool_rows: Vec<&String> = rows.iter().filter(|r| r.contains("⎿")).collect();
@@ -45,8 +48,9 @@ fn queue_edit_approval(app: &mut App<'static>) {
             tool: "edit_file".into(),
             class: xencode_tui_rs::agent_tools::ToolClass::Edit,
             summary: "edit_file src/parser.rs".into(),
-            preview: "@@ -40,3 +40,4 @@\n     let level = self.indent();\n+    self.close_level();\n"
-                .into(),
+            preview:
+                "@@ -40,3 +40,4 @@\n     let level = self.indent();\n+    self.close_level();\n"
+                    .into(),
             draft: Default::default(),
         },
         responder,
@@ -60,8 +64,15 @@ fn the_input_sits_on_the_last_rows_and_the_status_line_under_it() {
     app.toasts.clear();
     let rows = screen(&mut app, 100, 30);
     assert!(rows[29].contains("ctrl+p"), "{:?}", rows[29]);
-    assert!(rows[26].contains("╭") && rows[28].contains("╰"), "{rows:#?}");
-    assert!(rows[29].contains(&app.config.default_model), "{:?}", rows[29]);
+    assert!(
+        rows[26].contains("╭") && rows[28].contains("╰"),
+        "{rows:#?}"
+    );
+    assert!(
+        rows[29].contains(&app.config.default_model),
+        "{:?}",
+        rows[29]
+    );
 }
 
 /// TD-2: the side panel shows at wide sizes and hides under 100 columns.
@@ -71,7 +82,10 @@ fn the_side_panel_shows_at_wide_sizes_and_hides_under_100_columns() {
     app.toasts.clear();
     app.side_panel_open = true;
     let wide = screen(&mut app, 160, 40).join("\n");
-    assert!(wide.contains("Context") && wide.contains("Changes"), "{wide}");
+    assert!(
+        wide.contains("Context") && wide.contains("Changes"),
+        "{wide}"
+    );
     let narrow = screen(&mut app, 80, 24).join("\n");
     assert!(!narrow.contains("Context"), "{narrow}");
     app.side_panel_open = false;
@@ -87,7 +101,10 @@ fn a_resize_from_wide_to_narrow_keeps_the_frame_whole() {
     app.side_panel_open = true;
     for w in [160u16, 120, 100, 99, 80, 60, 40, 20] {
         let rows = screen(&mut app, w, 24);
-        assert!(rows.iter().any(|r| r.contains("╰")), "input box lost at {w}");
+        assert!(
+            rows.iter().any(|r| r.contains("╰")),
+            "input box lost at {w}"
+        );
         assert!(!rows[23].trim().is_empty(), "status line lost at {w}");
     }
 }
@@ -99,10 +116,15 @@ fn an_approval_is_drawn_in_the_conversation_with_its_diff() {
     app.toasts.clear();
     queue_edit_approval(&mut app);
     let text = screen(&mut app, 120, 36).join("\n");
-    assert!(text.contains("src/parser.rs") && text.contains("+    self.close_level();"), "{text}");
-    assert!(text.contains("y allow") && text.contains("n deny"), "{text}");
+    assert!(
+        text.contains("src/parser.rs") && text.contains("+    self.close_level();"),
+        "{text}"
+    );
+    assert!(
+        text.contains("y allow") && text.contains("n deny"),
+        "{text}"
+    );
 }
-
 
 /// A shell command waiting for the person's yes.
 fn queue_shell_approval(app: &mut App<'static>, summary: &str, preview: &str) {
@@ -140,11 +162,20 @@ fn a_long_change_says_how_much_is_hidden_and_scrolls() {
     let preview: Vec<String> = (1..=60).map(|i| format!("+line {i:02}")).collect();
     queue_shell_approval(&mut app, "write_file big.rs", &preview.join("\n"));
     let text = screen(&mut app, 100, 30).join("\n");
-    assert!(text.contains("+line 01") && !text.contains("+line 60"), "{text}");
-    assert!(text.contains("more") && text.contains("↑↓ scroll"), "{text}");
+    assert!(
+        text.contains("+line 01") && !text.contains("+line 60"),
+        "{text}"
+    );
+    assert!(
+        text.contains("more") && text.contains("↑↓ scroll"),
+        "{text}"
+    );
     app.approval_scroll = 1000;
     let text = screen(&mut app, 100, 30).join("\n");
-    assert!(text.contains("+line 60") && text.contains("above"), "{text}");
+    assert!(
+        text.contains("+line 60") && text.contains("above"),
+        "{text}"
+    );
     assert!(text.contains("y allow"), "{text}");
 }
 
@@ -416,10 +447,7 @@ async fn a_bang_command_asks_before_it_runs() {
     let request = app
         .pending_approval()
         .unwrap_or_else(|| panic!("no approval for the command: {:?}", app.messages));
-    assert_eq!(
-        request.class,
-        xencode_tui_rs::agent_tools::ToolClass::Shell
-    );
+    assert_eq!(request.class, xencode_tui_rs::agent_tools::ToolClass::Shell);
     assert!(request.summary.contains("echo hi"), "{}", request.summary);
 }
 
@@ -443,4 +471,3 @@ fn an_at_word_lists_matching_files() {
     key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     assert_eq!(draft(&app), "look at @Cargo.toml ");
 }
-

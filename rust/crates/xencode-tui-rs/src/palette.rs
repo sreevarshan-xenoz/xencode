@@ -66,12 +66,14 @@ impl PaletteEntry {
 /// Every entry, in table order: the seven views, then panels, then commands,
 /// then settings.
 pub fn entries() -> Vec<PaletteEntry> {
-    let screens = crate::screens::Screen::ALL.into_iter().map(|s| PaletteEntry {
-        label: s.name(),
-        name: s.command(),
-        detail: s.description(),
-        target: PaletteTarget::Screen(s),
-    });
+    let screens = crate::screens::Screen::ALL
+        .into_iter()
+        .map(|s| PaletteEntry {
+            label: s.name(),
+            name: s.command(),
+            detail: s.description(),
+            target: PaletteTarget::Screen(s),
+        });
     let panels = DESTINATIONS.iter().map(|d| PaletteEntry {
         label: d.name,
         name: d.name,
@@ -200,17 +202,27 @@ mod tests {
 
     #[test]
     fn a_file_named_like_the_mention_ranks_first() {
-        let paths: Vec<String> = ["src/scargo.rs", "docs/cargo-notes.md", "Cargo.toml", "x/c_a_r_g_o.txt"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let paths: Vec<String> = [
+            "src/scargo.rs",
+            "docs/cargo-notes.md",
+            "Cargo.toml",
+            "x/c_a_r_g_o.txt",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let order: Vec<&str> = rank_paths("cargo", &paths)
             .into_iter()
             .map(|i| paths[i].as_str())
             .collect();
         assert_eq!(
             order,
-            ["Cargo.toml", "docs/cargo-notes.md", "src/scargo.rs", "x/c_a_r_g_o.txt"]
+            [
+                "Cargo.toml",
+                "docs/cargo-notes.md",
+                "src/scargo.rs",
+                "x/c_a_r_g_o.txt"
+            ]
         );
         assert!(rank_paths("", &paths).is_empty());
     }

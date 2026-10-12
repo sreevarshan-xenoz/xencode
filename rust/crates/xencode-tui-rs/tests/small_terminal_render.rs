@@ -1291,7 +1291,10 @@ fn header_ladder_drops_chips_as_width_shrinks() {
 
     let text = header(&mut app, 30);
     assert!(text.contains("✦"), "brand vanished at 30: {text}");
-    assert!(!text.contains("Explorer"), "focus badge survived at 30: {text}");
+    assert!(
+        !text.contains("Explorer"),
+        "focus badge survived at 30: {text}"
+    );
 }
 
 /// H1-09: the toast overlay must never sit on top of the input strip. On

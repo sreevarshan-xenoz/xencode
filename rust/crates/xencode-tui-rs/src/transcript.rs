@@ -69,7 +69,9 @@ const TOOL_PREVIEW_LINES: usize = 4;
 /// it acts on — `read_file src/a.rs`, `run_command cargo test`. `None` when
 /// the call has no such argument, so the caller keeps what it had.
 pub fn headline(name: &str, arguments: &serde_json::Value) -> Option<String> {
-    const KEYS: [&str; 8] = ["path", "command", "pattern", "query", "url", "file", "name", "task"];
+    const KEYS: [&str; 8] = [
+        "path", "command", "pattern", "query", "url", "file", "name", "task",
+    ];
     let object = arguments.as_object()?;
     let value = KEYS
         .iter()
@@ -77,7 +79,11 @@ pub fn headline(name: &str, arguments: &serde_json::Value) -> Option<String> {
         .or_else(|| object.values().find_map(|v| v.as_str()))?;
     let value = clean(value).replace('\n', " ");
     let short: String = value.chars().take(100).collect();
-    let more = if value.chars().count() > 100 { "…" } else { "" };
+    let more = if value.chars().count() > 100 {
+        "…"
+    } else {
+        ""
+    };
     Some(format!("{name} {short}{more}"))
 }
 
@@ -407,9 +413,15 @@ mod tests {
     #[test]
     fn a_call_is_named_by_what_it_acts_on() {
         let args = serde_json::json!({"path": "src/a.rs", "limit": 20});
-        assert_eq!(headline("read_file", &args).as_deref(), Some("read_file src/a.rs"));
+        assert_eq!(
+            headline("read_file", &args).as_deref(),
+            Some("read_file src/a.rs")
+        );
         let args = serde_json::json!({"command": "cargo test\n-q"});
-        assert_eq!(headline("run_command", &args).as_deref(), Some("run_command cargo test -q"));
+        assert_eq!(
+            headline("run_command", &args).as_deref(),
+            Some("run_command cargo test -q")
+        );
         assert_eq!(headline("list", &serde_json::json!({})), None);
     }
 
