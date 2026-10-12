@@ -79,6 +79,8 @@ struct Window {
     name: String,
     out: mpsc::Sender<String>,
     watcher: Watcher,
+    /// The terminal agents whose output this window asked for (OM-2).
+    watching: std::collections::BTreeSet<String>,
     greeted: bool,
     /// The reading task, then the writing task.
     tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -194,6 +196,14 @@ pub async fn serve(project: PathBuf, wait_limit: Duration) -> Result<(), String>
                 let mut gone = Vec::new();
                 for (id, window) in windows.iter_mut().filter(|(_, w)| w.greeted) {
                     let mut alive = pumped.out.iter().all(|msg| window.send(msg));
+                    for (tile, bytes) in &pumped.term {
+                        if window.watching.contains(tile) {
+                            alive &= window.send(&EngineMsg::TermOutput {
+                                id: tile.clone(),
+                                data: proto::b64(bytes),
+                            });
+                        }
+                    }
                     if let Some(view) = window.watcher.changes(&app) {
                         alive &= window.send(&EngineMsg::View { view: Box::new(view) });
                     }
@@ -233,6 +243,7 @@ pub async fn serve(project: PathBuf, wait_limit: Duration) -> Result<(), String>
 /// Whether anything is running or waiting on the person.
 fn has_work(app: &App) -> bool {
     app.team.has_work()
+        || app.term_host.has_work()
         || app.is_generating
         || app.bytebot_running
         || app.question_id.is_some()
@@ -292,6 +303,7 @@ fn open_window(id: u64, conn: Conn, lines: mpsc::UnboundedSender<(u64, Option<St
         name: format!("window {id}"),
         out,
         watcher: Watcher::default(),
+        watching: std::collections::BTreeSet::new(),
         greeted: false,
         tasks: vec![reading, writing],
     }
@@ -353,6 +365,15 @@ fn on_line(
         }
         msg => {
             let name = window.name.clone();
+            // A window that watches a terminal agent is sent its output from
+            // the next tick on; the reply below carries the screen so far.
+            if let ClientMsg::Term {
+                request: proto::TermRequest::Watch { ids },
+                ..
+            } = &msg
+            {
+                window.watching.extend(ids.iter().cloned());
+            }
             for reply in super::handle(app, msg, tx, &name) {
                 let for_everyone = matches!(
                     reply,
