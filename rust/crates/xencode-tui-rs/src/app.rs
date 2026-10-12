@@ -3782,6 +3782,12 @@ impl<'a> App<'a> {
             return;
         }
         self.reset_chat_input();
+        self.submit_text(prompt, &tx);
+    }
+
+    /// Send `prompt` as the person's message without touching the composer:
+    /// what a queued message goes through, so the draft typed since is kept.
+    pub(crate) fn submit_text(&mut self, prompt: String, tx: &mpsc::UnboundedSender<String>) {
         if self.input_history.last().is_none_or(|last| *last != prompt) {
             self.input_history.push(prompt.clone());
             if self.input_history.len() > INPUT_HISTORY_LIMIT {
@@ -3793,7 +3799,7 @@ impl<'a> App<'a> {
         crate::engine::act(
             self,
             crate::engine::proto::ClientMsg::SubmitChat { prompt },
-            &tx,
+            tx,
         );
     }
 
@@ -3809,14 +3815,6 @@ impl<'a> App<'a> {
             self.reset_chat_input();
             self.queued.push(text);
             return;
-        }
-        if let Some(command) = text.strip_prefix('!').map(str::trim) {
-            if !command.is_empty() {
-                let command = command.to_string();
-                self.reset_chat_input();
-                self.run_shell_line(command, tx);
-                return;
-            }
         }
         self.submit_message(tx);
         self.chat_scroll = 0;
@@ -3876,24 +3874,27 @@ impl<'a> App<'a> {
         if self.is_generating || self.queued.is_empty() {
             return;
         }
-        let text = self.queued.remove(0);
-        self.set_chat_text(&text);
-        self.send_or_queue(tx.clone());
+        while !self.is_generating && !self.queued.is_empty() {
+            let text = self.queued.remove(0);
+            // A slash command or a `!` line starts no turn of the model, so
+            // nothing would come to send the next one: carry straight on.
+            let starts_turn = !text.starts_with('/') && !text.starts_with('!');
+            self.submit_text(text, tx);
+            if starts_turn {
+                // A window hears that the turn began only from the engine's
+                // next view; until then it must not send the next one too.
+                if self.is_window() {
+                    self.is_generating = true;
+                }
+                break;
+            }
+        }
     }
 
     /// `!command` (TD-3): run `command` exactly as the agent's `run_command`
     /// would — the same approval prompt, sandbox and time limit — and show it
     /// as one tool call in the transcript.
     pub(crate) fn run_shell_line(&mut self, command: String, tx: mpsc::UnboundedSender<String>) {
-        if self.is_window() {
-            self.messages.push(UiMessage {
-                role: "system".to_string(),
-                content: "`!` commands run in the window that started the project's engine; \
-                          ask the agent to run it here instead."
-                    .to_string(),
-            });
-            return;
-        }
         self.bang_count += 1;
         let call = xencode_providers_rs::ToolCall {
             id: format!("bang-{}", self.bang_count),
@@ -3944,6 +3945,16 @@ impl<'a> App<'a> {
             role: "user".to_string(),
             content: prompt.clone(),
         });
+        // `!command` (TD-3): a shell command the person typed, run where the
+        // tools run, through the agent's own approval. Not conversation, so it
+        // is not kept in memory for the model.
+        if let Some(command) = prompt.strip_prefix('!').map(str::trim) {
+            if !command.is_empty() {
+                let command = command.to_string();
+                self.run_shell_line(command, tx);
+                return;
+            }
+        }
         // Only real conversation goes to persistent memory: a slash command is
         // a local TUI verb, and persisting it replays it to the model (and into
         // restored transcripts) forever.
@@ -12736,6 +12747,10 @@ pub async fn run_app<B: Backend + io::Write>(
         // and ByteBot questions, through the engine (EN-1). In process the
         // engine's outgoing messages have no other window to go to yet.
         let pumped = crate::engine::pump(&mut app, &mut rx, &tx);
+        // A message typed during a turn goes once the turn is over, in a
+        // window as well as in process (TD-3): the engine's view is what says
+        // the turn ended there.
+        app.send_next_queued(&tx);
         signals.messages += pumped.messages;
         signals.approvals += pumped.approvals;
         // In a window, what the engine sent since the last frame (EN-2). An
