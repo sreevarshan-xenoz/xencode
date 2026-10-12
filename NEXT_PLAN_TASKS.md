@@ -17802,7 +17802,12 @@ program; the keys themselves are covered by their own tests.
   `docs/superpowers/specs/2026-10-11-orchestrator-mode-design.md`). Turning the mode on opens a
   picker of installed coding agents; each runs its real interface in an embedded terminal, in
   its own worktree, in a tile beside a rail of every agent. Built after TD. Stages OM-1 … OM-6
-  (terminal crate, engine host, the mode, attention, merge and the rest, manuals).
+  (terminal crate, engine host, the mode, attention, merge and the rest, manuals). Plan:
+  `docs/superpowers/plans/2026-10-12-orchestrator-mode.md`.
+  - [x] **OM-1 — the terminal crate.** Done 2026-10-12 (`xencode-term-rs`): a real `cmd` in ConPTY
+    and `sh` in a Unix PTY run, take input, report exit codes, resize, ring for attention, replay
+    their screen and stop with everything they started; 14 tests on each platform. vt100 0.15.2,
+    not 0.16 (ratatui 0.29 pins unicode-width 0.2.0).
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.

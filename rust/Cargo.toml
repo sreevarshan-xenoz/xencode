@@ -19,6 +19,7 @@ members = [
     "crates/xencode-plugin-rs",
     "crates/xencode-colab-rs",
     "crates/xencode-agents-rs",
+    "crates/xencode-term-rs",
 ]
 # The floating badge is its own workspace, so this one and its CI never
 # build the GPU interface library it uses.

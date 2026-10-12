@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (19 crates, about 3,000
+At its core is a fast, single-file **Rust** binary (20 crates, about 3,000
 tests) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -63,7 +63,7 @@ and fix your code — driven from your terminal, or from Zed through `xencode ac
 - **Measures itself.** `xencode eval run` seeds eight real bugs and grades each fix with the
   bug's own tests and the exact files it changed — and reports a failure as a failure.
 
-One Rust binary: 19 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
+One Rust binary: 20 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
 
 ## 📍 Where it stands, honestly
 
@@ -817,7 +817,7 @@ CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/
 
 ```
 xencode/
-├── rust/                    # Rust workspace — the whole product, 16 crates
+├── rust/                    # Rust workspace — the whole product, 20 crates
 │   └── crates/
 │       ├── xencode-cli      # CLI entry point (xencode binary)
 │       ├── xencode-tui-rs   # Ratatui TUI + agent loop + `mcp serve` tool server
@@ -827,6 +827,7 @@ xencode/
 │       ├── xencode-colab-rs     # Google Colab bridge: preflight + VM lifecycle
 │       ├── xencode-server-rs    # Axum HTTP/WebSocket collaboration server
 │       ├── xencode-analysis-rs  # Code analysis + pattern scanner + image intake
+│       ├── xencode-term-rs      # Real programs in pseudo-terminals, for orchestrator tiles
 │       └── ...              # agents, core, config, cache, memory, models, collaboration, plugin
 ├── docs/                    # User manual, install manual, server API, long-term roadmap
 ├── scripts/                 # Shell/PowerShell build + smoke-test helpers
