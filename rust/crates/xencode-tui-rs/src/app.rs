@@ -643,6 +643,16 @@ pub struct App<'a> {
     /// Whether the terminal window has the person's focus, from crossterm's
     /// focus events; `true` until a terminal says otherwise.
     pub terminal_focused: bool,
+    /// Messages typed while a turn was running, sent in order once it ends
+    /// (TD-3).
+    pub queued: Vec<String>,
+    /// When Esc was last pressed in the conversation, so a second press soon
+    /// after puts the last message back in the input to edit.
+    pub last_esc_at: Option<std::time::Instant>,
+    /// Whether Ctrl+C on an empty input already asked to quit.
+    pub ctrl_c_armed: bool,
+    /// How many `!` commands this session ran, for their tool-call ids.
+    pub bang_count: u64,
     /// The engine's team of worker agents (TM); empty in a window.
     pub team: crate::engine::team::Team,
     /// A window's copy of the engine's team, from its view (TM-4).
@@ -3239,6 +3249,10 @@ impl<'a> App<'a> {
             last_prompt_tokens: 0,
             last_title: String::new(),
             terminal_focused: true,
+            queued: Vec::new(),
+            last_esc_at: None,
+            ctrl_c_armed: false,
+            bang_count: 0,
             team_view: Vec::new(),
             team_req: 0,
             approval_tx,
@@ -3769,7 +3783,7 @@ impl<'a> App<'a> {
             .set_cursor_line_style(ratatui::style::Style::default());
     }
 
-    fn reset_chat_input(&mut self) {
+    pub(crate) fn reset_chat_input(&mut self) {
         self.chat_input = TextArea::default();
         self.style_chat_input();
     }
@@ -3831,13 +3845,14 @@ impl<'a> App<'a> {
     /// the composer for the person to finish and send: most commands take
     /// arguments, so running one unasked would guess them. A draft already in
     /// the composer is kept in the prompt history, where Alt+Up brings it back.
-    pub(crate) fn choose_palette_entry(&mut self) {
+    pub(crate) fn choose_palette_entry(&mut self, tx: &mpsc::UnboundedSender<String>) {
         use crate::palette::PaletteTarget;
         let Some(entry) = self.palette_matches().get(self.palette_selected).cloned() else {
             return;
         };
         self.palette_visible = false;
         match entry.target {
+            PaletteTarget::Screen(screen) => self.open_screen_with(screen, Some(tx)),
             PaletteTarget::Panel(area) => {
                 self.focus = area;
                 self.input_mode = if area == FocusArea::ChatInput {
@@ -3871,6 +3886,126 @@ impl<'a> App<'a> {
                 self.input_mode = InputMode::Editing;
             }
         }
+    }
+
+    /// The view on show (TD-3), read from the focused panel so the two can
+    /// never disagree.
+    pub fn screen(&self) -> crate::screens::Screen {
+        crate::screens::Screen::of(self.focus)
+    }
+
+    /// Open a view on its first panel; the conversation opens ready to type.
+    pub fn open_screen(&mut self, screen: crate::screens::Screen) {
+        self.open_screen_with(screen, None);
+    }
+
+    /// `open_screen`, with the channel a panel that loads in the background
+    /// (the model list) reports to.
+    pub(crate) fn open_screen_with(
+        &mut self,
+        screen: crate::screens::Screen,
+        tx: Option<&mpsc::UnboundedSender<String>>,
+    ) {
+        self.open_panel(screen.panels()[0], tx);
+    }
+
+    /// Focus `area`, after reading again whatever it shows that may have
+    /// changed since it was last open: the worktrees, the worker records, the
+    /// insights, the pull request, the model list.
+    pub(crate) fn open_panel(
+        &mut self,
+        area: FocusArea,
+        tx: Option<&mpsc::UnboundedSender<String>>,
+    ) {
+        match area {
+            FocusArea::ChatInput => {
+                self.focus = FocusArea::ChatInput;
+                self.input_mode = InputMode::Editing;
+                return;
+            }
+            FocusArea::ReviewDashboard => {
+                let base = self.review_dash.base.clone();
+                self.review_dash.open(&base);
+            }
+            FocusArea::TaskManager => {
+                self.tasks_selected = 0;
+                self.tasks_detail = false;
+                self.tasks_scroll = 0;
+            }
+            FocusArea::WorktreePanel => {
+                self.worktree_selected = 0;
+                self.worktree_prompt = crate::focus::WorktreePrompt::None;
+                self.worktree_status.clear();
+                self.refresh_worktrees();
+            }
+            FocusArea::WorkerPanel => self.refresh_worker_panel(),
+            FocusArea::AdvisePanel => {
+                self.advise_selected = 0;
+                self.advise_detail = false;
+                self.advise_scroll = 0;
+                self.advise_status.clear();
+                self.refresh_advise();
+            }
+            FocusArea::ModelSelector => {
+                self.llamacpp_action_msg.clear();
+                if let Some(tx) = tx {
+                    self.refresh_models(tx.clone());
+                }
+            }
+            _ => {}
+        }
+        self.focus = area;
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// The id of the newest tool call in the transcript, the one Ctrl+O
+    /// unfolds.
+    pub fn latest_tool_id(&self) -> Option<String> {
+        self.messages
+            .iter()
+            .rev()
+            .find_map(crate::transcript::read_tool)
+            .map(|entry| entry.id)
+            .filter(|id| !id.is_empty())
+    }
+
+    /// The files whose path matches the `@word` the cursor is on, best first
+    /// (TD-3). Empty when the cursor is not on such a word.
+    pub fn mention_matches(&self) -> Vec<String> {
+        let Some(word) = self.mention_word() else {
+            return Vec::new();
+        };
+        crate::palette::rank_paths(&word, &self.file_tree)
+            .into_iter()
+            .take(8)
+            .map(|i| self.file_tree[i].clone())
+            .collect()
+    }
+
+    /// The text after `@` in the word the cursor is at the end of.
+    fn mention_word(&self) -> Option<String> {
+        let (row, col) = self.chat_input.cursor();
+        let line = self.chat_input.lines().get(row)?;
+        let before: String = line.chars().take(col).collect();
+        let word = before.rsplit(char::is_whitespace).next()?;
+        let rest = word.strip_prefix('@')?;
+        (!rest.is_empty()).then(|| rest.to_string())
+    }
+
+    /// Put the best match for the `@word` under the cursor in its place.
+    /// Returns whether there was one.
+    pub(crate) fn complete_mention(&mut self) -> bool {
+        let Some(word) = self.mention_word() else {
+            return false;
+        };
+        let Some(path) = self.mention_matches().into_iter().next() else {
+            return false;
+        };
+        for _ in 0..word.chars().count() {
+            self.chat_input.delete_char();
+        }
+        self.chat_input.insert_str(format!("{path} "));
+        true
     }
 
     /// Start the floating badge (DK-2). A second copy is harmless: the badge
@@ -4515,6 +4650,10 @@ impl<'a> App<'a> {
             self.handle_watch_event(body);
         } else {
             self.append_generation(token);
+            // A message typed during the turn goes now that it is over (TD-3).
+            if token == "[DONE]" {
+                self.send_next_queued(tx);
+            }
         }
     }
 
@@ -4542,6 +4681,11 @@ impl<'a> App<'a> {
         let mut entry = waiting
             .and_then(|i| crate::transcript::read_tool(&self.messages[i]))
             .unwrap_or_default();
+        // The call's own words, `read_file src/a.rs`, over the loop's one-line
+        // summary, which spells the arguments out as JSON.
+        if let Some(headline) = crate::transcript::headline(&name, &arguments) {
+            entry.summary = headline;
+        }
         entry.id = id;
         entry.name = name;
         entry.arguments = arguments;
@@ -4699,6 +4843,124 @@ impl<'a> App<'a> {
             crate::engine::proto::ClientMsg::SubmitChat { prompt },
             &tx,
         );
+    }
+
+    /// Send the composer's text, or keep it for later (TD-3): while a turn
+    /// runs it waits in `queued` and goes when the turn ends; a line starting
+    /// with `!` runs as a shell command through the agent's own approval.
+    pub fn send_or_queue(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let text = self.chat_input.lines().join("\n");
+        if text.trim().is_empty() {
+            return;
+        }
+        if self.is_generating {
+            self.reset_chat_input();
+            self.queued.push(text);
+            return;
+        }
+        if let Some(command) = text.strip_prefix('!').map(str::trim) {
+            if !command.is_empty() {
+                let command = command.to_string();
+                self.reset_chat_input();
+                self.run_shell_line(command, tx);
+                return;
+            }
+        }
+        self.submit_message(tx);
+        self.chat_scroll = 0;
+    }
+
+    /// Shift+Tab (TD-3): ask → auto-edit → plan → ask. Saved like the
+    /// Settings row, so the mode in force is always the one in the file; any
+    /// other mode set there steps back to `ask`.
+    pub(crate) fn cycle_approval_mode(&mut self) {
+        let next = match self.config.agent_approval.as_str() {
+            "ask" => "edit-allow",
+            "edit-allow" => "plan",
+            _ => "ask",
+        };
+        self.config.agent_approval = next.to_string();
+        self.save_config();
+        self.push_toast(
+            crate::toast::ToastKind::Info,
+            format!("approval: {}", crate::shell::approval_label(self)),
+        );
+    }
+
+    /// Esc Esc (TD-3): the person's last message back in the input, to edit
+    /// and send again. A draft already there goes to the prompt history.
+    pub(crate) fn recall_last_message(&mut self) {
+        let Some(last) = self
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.clone())
+        else {
+            return;
+        };
+        let draft = self.chat_input.lines().join("\n");
+        if !draft.trim().is_empty() && draft != last {
+            self.input_history.push(draft);
+        }
+        self.set_chat_text(&last);
+    }
+
+    /// The next queued message, sent now that the turn it waited for is over.
+    pub(crate) fn send_next_queued(&mut self, tx: &mpsc::UnboundedSender<String>) {
+        if self.is_generating || self.queued.is_empty() {
+            return;
+        }
+        let text = self.queued.remove(0);
+        self.set_chat_text(&text);
+        self.send_or_queue(tx.clone());
+    }
+
+    /// `!command` (TD-3): run `command` exactly as the agent's `run_command`
+    /// would — the same approval prompt, sandbox and time limit — and show it
+    /// as one tool call in the transcript.
+    pub(crate) fn run_shell_line(&mut self, command: String, tx: mpsc::UnboundedSender<String>) {
+        if self.is_window() {
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: "`!` commands run in the window that started the project's engine; \
+                          ask the agent to run it here instead."
+                    .to_string(),
+            });
+            return;
+        }
+        self.bang_count += 1;
+        let call = xencode_providers_rs::ToolCall {
+            id: format!("bang-{}", self.bang_count),
+            name: "run_command".to_string(),
+            arguments: serde_json::json!({ "command": command }),
+        };
+        self.messages
+            .push(crate::transcript::tool_message(&crate::transcript::ToolEntry {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                summary: crate::transcript::headline(&call.name, &call.arguments)
+                    .unwrap_or_else(|| crate::agent_tools::summarize_call(&call)),
+                outcome: None,
+                preview: String::new(),
+            }));
+        self.chat_scroll = 0;
+        let approval = self.approval_ctx();
+        let runtime = self.task_runtime.clone();
+        let root = xencode_context_rs::default_root();
+        tokio::spawn(async move {
+            let result = crate::agent_tools::execute_tool_call_approved(
+                &runtime,
+                &root,
+                &call,
+                &approval,
+                Some(&approval.mcp),
+            )
+            .await;
+            let outcome = crate::agent_tools::call_outcome(&result);
+            let _ = tx.send(tool_end_token(&call.id, outcome.label(), &result));
+        });
     }
 
     /// Everything a submitted line does once it has left the composer: a slash

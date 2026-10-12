@@ -101,7 +101,7 @@ fn a_session_on_an_unreadable_config_says_so_on_the_first_frame() {
     );
     // It is a notice, not a block: the session opened on the conversation.
     assert!(
-        screen.contains("ctrl+x commands"),
+        screen.contains("ctrl+p commands"),
         "the screen did not open:\n{screen}"
     );
     // And their bytes are still the bytes they wrote.

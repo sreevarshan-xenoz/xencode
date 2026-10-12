@@ -81,20 +81,44 @@ The input box sits at the bottom with one status line under it (model, `local on
 `cloud allowed`, approval mode, context used, cost, branch — whatever fits), and at 100
 columns or wider a side panel on the right shows the changed files, the plan,
 the context gauge, the agents at work and the project's branch. The files view
-(explorer and editor, `Tab`) keeps the older header and status bar.
+(explorer and editor, `Ctrl+E`) keeps the older header and status bar.
 
-TUI keys — press `?` (or `F1`) in the TUI for the live, panel-aware
-keybinding overlay; the authoritative list lives there. Essentials:
-`Tab` cycles explorer/editor/chat · `i` edits chat (`Enter` sends,
-`Alt+Enter`/`Ctrl+J` newline, `Ctrl+A`/`Ctrl+E`/`Ctrl+K`/`Ctrl+U`/`Ctrl+W` edit the line as in a shell, `Alt+↑/↓` history, `Tab` completes `/`
-commands) · `m` model selector · `s` settings · `e` edit focused file ·
-`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+A` the worker panel (fleet · recipe roles · tasks · graph · costs · logs · approvals, each figure traced) · `Ctrl+B` shows or hides the side panel on the conversation (ByteBot from any other panel) ·
-`Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
-`Ctrl+U` cycle the layout · `Ctrl+0` why the screen is arranged as it is
-(session layout history; `Enter` shows the pane widths a change moved between) ·
-`Ctrl+Space` switch mode (`CODING` ⇄ `ORCHESTRATOR`; both read the same tasks,
-agents and git state, so nothing is lost in the switch) ·
-`Ctrl+C` stops a running turn (even mid-answer) and quits when nothing is running; `q` pressed twice also quits (a single `q` asks first, and any other key keeps the session). A session with nothing said yet opens in the composer, so the first thing typed is a prompt. If the terminal has the mouse, a divider between two
+TUI keys — press `?` on an empty input (or `F1` anywhere) for the live,
+panel-aware keybinding overlay; the authoritative list lives there.
+
+In the conversation the input is always ready: letters are text, there is no
+mode to switch into first. `Enter` sends; a message sent while a turn runs waits
+and goes after it (shown as `queued: …`). `Alt+Enter`/`Ctrl+J` adds a line ·
+`Esc` stops the running turn, and twice in a row puts your last message back in
+the input to edit · `Ctrl+C` clears the input, and on an empty input asks once,
+then quits · `Ctrl+P` opens the palette: the seven views, every panel, command
+and setting (`Ctrl+X` does the same) · `Ctrl+B` the side panel · `Ctrl+O`
+unfolds the newest tool call's output, and folds it again · `Ctrl+L` the Models
+view · `Ctrl+E` the Files view (on an empty input; with text it is end of line)
+· `Shift+Tab` steps the approval mode ask → auto-edit → plan, saved like the
+Settings row · `PageUp`/`PageDown` scroll the transcript · `Ctrl+Space` switches
+mode (`CODING` ⇄ `ORCHESTRATOR`; both read the same tasks, agents and git state,
+so nothing is lost in the switch) · `@path` mentions a file, and `Tab` puts the
+best match in · `!command` runs a shell command through the same approval
+prompt, sandbox and time limit as the agent's `run_command`, shown as one tool
+call · `/command` runs a slash command, `Tab` completes it · `Alt+↑/↓` recall
+what you sent · `Ctrl+A`/`Ctrl+K`/`Ctrl+U`/`Ctrl+W` edit the line as in a shell.
+
+The views, from `Ctrl+P` by name: `conversation` (the chat, and ByteBot),
+`files` (tree and editor), `changes` (review, pull request, commit), `agents`
+(worker agents, worktrees, background tasks), `models` (picker, your models,
+provider health), `project` (insights, impact, analysis, security, languages)
+and `settings`. `Esc` in a view comes back to the conversation.
+
+In the panels the older keys still work: `Tab` cycles explorer/editor/chat ·
+`i` or `/` goes to the input · `m` model selector · `s` settings · `e` edit the
+focused file · `q` twice quits · `Ctrl+R` AI review · `Ctrl+Y` PR review ·
+`Ctrl+K` background tasks · `Ctrl+A` the worker panel · `Ctrl+B` ByteBot ·
+`Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel · `Ctrl+U`
+cycle the layout · `Ctrl+0` why the screen is arranged as it is (session layout
+history; `Enter` shows the pane widths a change moved between) · `Ctrl+C`
+stops a running turn (even mid-answer) and quits when nothing is running.
+ If the terminal has the mouse, a divider between two
 side-by-side panes drags to resize them; if you want the terminal's own
 drag-select of text back, `xencode config set mouse_capture off` hands the
 mouse over (the same row lives on the Settings panel, and it takes effect on

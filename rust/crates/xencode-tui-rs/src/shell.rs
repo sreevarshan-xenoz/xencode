@@ -23,7 +23,7 @@ pub const SIDE_MIN_WIDTH: u16 = 100;
 const INPUT_MAX_ROWS: usize = 6;
 /// The hints on the right of the status line, longest first; the first that
 /// fits is drawn.
-const HINTS: [&str; 3] = ["ctrl+x commands · ctrl+b panel · f1 keys", "ctrl+x · f1 keys", "f1"];
+const HINTS: [&str; 3] = ["ctrl+p commands · ctrl+b panel · ? keys", "ctrl+p · ? keys", "?"];
 
 /// Where each part of the conversation screen goes this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +254,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) -> ShellAreas {
     if let Some(rect) = a.side {
         crate::sidepanel::draw(f, app, rect);
     }
+    draw_mentions(f, app, a.transcript);
     draw_input(f, app, a.input);
     draw_status(f, app, a.status);
     a
@@ -272,7 +273,7 @@ pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         )));
         let dim = Style::default().fg(app.theme.message_system);
         for row in crate::transcript::wrap_indented(
-            "/ commands · @ files · ctrl+x finds anything · f1 keys",
+            "/ commands · @ files · ! shell · ctrl+p finds anything · ? keys",
             width as usize,
             1,
         ) {
@@ -300,6 +301,16 @@ pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 expanded: app.tool_expanded.clone(),
             },
         );
+    }
+    // Messages typed during the turn, waiting for it to end (TD-3).
+    for queued in &app.queued {
+        let first = queued.lines().next().unwrap_or_default();
+        for row in crate::transcript::wrap_indented(&format!("queued: {first}"), width as usize, 2) {
+            lines.push(Line::from(Span::styled(
+                row,
+                Style::default().fg(app.theme.message_system),
+            )));
+        }
     }
     if app.is_generating {
         lines.push(Line::from(""));
@@ -415,6 +426,51 @@ fn draw_approval(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+/// The files matching the `@word` being typed, in a box sitting on the input
+/// (TD-3). Tab puts the first one in.
+fn draw_mentions(f: &mut Frame, app: &App, transcript: Rect) {
+    let matches = app.mention_matches();
+    if matches.is_empty() || transcript.height < 4 || transcript.width < 20 {
+        return;
+    }
+    let rows = (matches.len() as u16).min(transcript.height - 2);
+    let width = transcript.width.min(64);
+    let area = Rect {
+        x: transcript.x,
+        y: transcript.y + transcript.height - rows - 2,
+        width,
+        height: rows + 2,
+    };
+    let lines: Vec<Line<'static>> = matches
+        .into_iter()
+        .take(rows as usize)
+        .enumerate()
+        .map(|(i, path)| {
+            let style = if i == 0 {
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.fg)
+            };
+            Line::from(Span::styled(path, style))
+        })
+        .collect();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(crate::widgets::panel_border_set(app.config.rounded_borders))
+        .border_style(Style::default().fg(app.theme.border))
+        .title(Span::styled(
+            " files · tab inserts ",
+            Style::default().fg(app.theme.message_system),
+        ));
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(
+        Paragraph::new(lines).block(block.padding(ratatui::widgets::Padding::horizontal(1))),
+        area,
+    );
+}
+
 fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     let editing = app.input_mode == InputMode::Editing;
     let block = Block::default()
@@ -436,11 +492,9 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     let empty = app.chat_input.lines().iter().all(|l| l.is_empty());
     if empty {
         let hint = if app.is_generating {
-            "xencode is working · esc stops"
-        } else if editing {
-            "Ask xencode…   / commands   @ files"
+            "xencode is working · type to queue a message · esc stops"
         } else {
-            "press i to type · / commands · ? keys"
+            "Ask xencode…   / commands   @ files   ! shell"
         };
         f.render_widget(
             Paragraph::new(Span::styled(

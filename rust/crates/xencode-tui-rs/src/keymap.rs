@@ -41,7 +41,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     // The command palette is modal too (AG-3): everything typed goes into its
     // own query, so a half-written prompt in the composer is never touched.
     if app.palette_visible {
-        return palette_modal_key(app, key);
+        return palette_modal_key(app, key, tx);
     }
     // The agent stack overlay is modal the same way: Esc closes, Ctrl+N
     // advances while it is open, everything else is swallowed so typing never
@@ -71,6 +71,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     // Only a second bare `q` confirms a quit; any other key withdraws it.
     if !(key.code == KeyCode::Char('q') && key.modifiers.is_empty()) {
         app.quit_armed = false;
+    }
+    // The same for a second Ctrl+C on an empty input.
+    if !(key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)) {
+        app.ctrl_c_armed = false;
+    }
+    // The conversation is always ready to type (TD-3): there is no mode to
+    // switch into first, so a letter is a letter there.
+    if app.focus == FocusArea::ChatInput {
+        app.input_mode = InputMode::Editing;
     }
     // Global Ctrl chords work in ALL input modes.
     if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -153,12 +162,12 @@ fn stop_running_turn(app: &mut App, tx: &Tx) -> bool {
 /// Keys while the command palette is open. Printable characters extend the
 /// query; arrows (or Ctrl+P / Ctrl+N) move the highlight; Enter chooses; Esc
 /// or Ctrl+X closes it and leaves focus and mode exactly as they were.
-fn palette_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
+fn palette_modal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Esc => app.palette_visible = false,
         KeyCode::Char('x') | KeyCode::Char('X') if ctrl => app.palette_visible = false,
-        KeyCode::Enter => app.choose_palette_entry(),
+        KeyCode::Enter => app.choose_palette_entry(tx),
         KeyCode::Up => palette_move(app, -1),
         KeyCode::Char('p') if ctrl => palette_move(app, -1),
         KeyCode::Down => palette_move(app, 1),
@@ -386,7 +395,16 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
     // composer: Ctrl+A/E/K/U/W used to open panels or cycle the layout.
     if app.input_mode == InputMode::Editing
         && app.focus == FocusArea::ChatInput
-        && matches!(key.code, KeyCode::Char('a' | 'e' | 'k' | 'u' | 'w'))
+        && matches!(key.code, KeyCode::Char('a' | 'k' | 'u' | 'w'))
+    {
+        return None;
+    }
+    // Ctrl+E too, while there is text to move to the end of; on an empty
+    // input it opens the files view (TD-3), which loses nothing.
+    if app.input_mode == InputMode::Editing
+        && app.focus == FocusArea::ChatInput
+        && key.code == KeyCode::Char('e')
+        && !app.chat_input.is_empty()
     {
         return None;
     }
@@ -451,13 +469,29 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             return Some(done());
         }
         KeyCode::Char('c') => {
-            // A running turn is cancelled first; only an idle session quits.
+            // A running turn is cancelled first. Then, in the conversation, a
+            // draft is cleared; an empty input asks once, and the next Ctrl+C
+            // quits (TD-3). Elsewhere an idle session quits, as before.
             if stop_running_turn(app, tx) {
                 app.push_toast(
                     crate::toast::ToastKind::Info,
                     "Ctrl+C again quits".to_string(),
                 );
                 return Some(done());
+            }
+            if app.focus == FocusArea::ChatInput {
+                if !app.chat_input.is_empty() {
+                    app.reset_chat_input();
+                    return Some(done());
+                }
+                if !app.ctrl_c_armed {
+                    app.ctrl_c_armed = true;
+                    app.push_toast(
+                        crate::toast::ToastKind::Info,
+                        "Ctrl+C again quits".to_string(),
+                    );
+                    return Some(done());
+                }
             }
             return Some(quit());
         }
@@ -490,18 +524,18 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             };
         }
         KeyCode::Char('p') => {
-            app.focus = if app.focus == FocusArea::ProjectAnalyzer {
-                FocusArea::ChatInput
-            } else {
-                FocusArea::ProjectAnalyzer
-            };
+            // The palette (TD-3): the seven views, every panel, command and
+            // setting. The project analyzer moved into the Project view.
+            app.open_palette();
         }
         KeyCode::Char('e') => {
-            app.focus = if app.focus == FocusArea::FileExplorer {
-                FocusArea::ChatInput
+            // The files view, and from its explorer back (TD-3); from the
+            // editor it is the explorer, as it always was.
+            if app.focus == FocusArea::FileExplorer {
+                app.open_screen(crate::screens::Screen::Conversation);
             } else {
-                FocusArea::FileExplorer
-            };
+                app.open_screen(crate::screens::Screen::Files);
+            }
         }
         KeyCode::Char('w') => {
             // Closing the hub with a live socket must not orphan the worker —
@@ -569,16 +603,14 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
         }
         KeyCode::Char('o') => {
-            // Worktree panel (D3-02): re-reads git on every open.
-            if app.focus == FocusArea::WorktreePanel {
-                app.focus = FocusArea::ChatInput;
+            // Unfold the newest tool call's output, or fold it again (TD-3).
+            // The worktrees moved into the Agents view.
+            let latest = app.latest_tool_id();
+            app.tool_expanded = if app.tool_expanded.is_some() && app.tool_expanded == latest {
+                None
             } else {
-                app.worktree_selected = 0;
-                app.worktree_prompt = crate::focus::WorktreePrompt::None;
-                app.worktree_status.clear();
-                app.refresh_worktrees();
-                app.focus = FocusArea::WorktreePanel;
-            }
+                latest
+            };
         }
         KeyCode::Char('a') => {
             // The worker panel (`OR-12`): re-reads the streams, the registry and
@@ -592,19 +624,11 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
         }
         KeyCode::Char('l') => {
-            // Insights panel (F2-01): re-runs the deterministic analyses on
-            // every open — they're pure and the snapshot is kept live.
-            // (Ctrl+S stays with editor-save/GitCommit; Ctrl+I is Tab's
-            // alias, so the panel lives on L.)
-            if app.focus == FocusArea::AdvisePanel {
-                app.focus = FocusArea::ChatInput;
+            // The Models view (TD-3); insights moved into the Project view.
+            if app.screen() == crate::screens::Screen::Models {
+                app.open_screen(crate::screens::Screen::Conversation);
             } else {
-                app.advise_selected = 0;
-                app.advise_detail = false;
-                app.advise_scroll = 0;
-                app.advise_status.clear();
-                app.refresh_advise();
-                app.focus = FocusArea::AdvisePanel;
+                app.open_screen_with(crate::screens::Screen::Models, Some(tx));
             }
         }
         KeyCode::Char('t') => {
@@ -2251,16 +2275,57 @@ fn editing_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         KeyCode::Char('w') if key.modifiers == KeyModifiers::CONTROL => {
             app.chat_input.delete_word();
         }
+        // Enter sends; while a turn runs the message waits its turn, and a
+        // line starting with `!` is a shell command (TD-3).
+        KeyCode::Enter if app.focus == FocusArea::ChatInput => {
+            app.send_or_queue(tx.clone());
+        }
         KeyCode::Enter => {
             if !app.is_generating {
                 app.submit_message(tx.clone());
                 app.chat_scroll = 0;
             }
         }
+        // `?` on an empty input is the key help; in a sentence it is a
+        // question mark.
+        KeyCode::Char('?')
+            if app.focus == FocusArea::ChatInput
+                && app.chat_input.is_empty()
+                && key.modifiers.difference(KeyModifiers::SHIFT).is_empty() =>
+        {
+            app.help_visible = true;
+            app.help_scroll = 0;
+        }
+        // The transcript scrolls by half a screen from the keyboard; the
+        // wheel does the same (TD-3: k and j are letters here now).
+        KeyCode::PageUp if app.focus == FocusArea::ChatInput => {
+            let step = app.last_layout.chat.map_or(10, |r| (r.height / 2).max(1));
+            app.chat_scroll = app.chat_scroll.saturating_add(step);
+        }
+        KeyCode::PageDown if app.focus == FocusArea::ChatInput => {
+            let step = app.last_layout.chat.map_or(10, |r| (r.height / 2).max(1));
+            app.chat_scroll = app.chat_scroll.saturating_sub(step);
+        }
+        // Shift+Tab steps the approval mode: ask, auto-edit, plan (TD-3).
+        KeyCode::BackTab if app.focus == FocusArea::ChatInput => app.cycle_approval_mode(),
         // F1 types nothing, so it opens help even while typing a prompt.
         KeyCode::F(1) => {
             app.help_visible = true;
             app.help_scroll = 0;
+        }
+        // In the conversation Esc never leaves the input (TD-3); twice in a
+        // row puts the last message back in it to edit and send again.
+        KeyCode::Esc if app.focus == FocusArea::ChatInput => {
+            let now = std::time::Instant::now();
+            let again = app
+                .last_esc_at
+                .is_some_and(|at| now.duration_since(at) < std::time::Duration::from_millis(600));
+            if again {
+                app.last_esc_at = None;
+                app.recall_last_message();
+            } else {
+                app.last_esc_at = Some(now);
+            }
         }
         KeyCode::Esc => {
             app.input_mode = InputMode::Normal;
@@ -2272,7 +2337,8 @@ fn editing_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
             app.recall_history(1);
         }
         KeyCode::Tab => {
-            if !app.complete_slash_draft() {
+            // An `@word` takes the best matching file first (TD-3).
+            if !app.complete_mention() && !app.complete_slash_draft() {
                 app.chat_input.insert_str("    ");
             }
         }
@@ -2331,8 +2397,9 @@ mod tests {
             "/init"
         );
 
-        // A draft already there is left as it was.
-        press(&mut app, KeyCode::Esc);
+        // A draft already there is left as it was, when `/` comes from a panel.
+        app.focus = FocusArea::FileExplorer;
+        app.input_mode = InputMode::Normal;
         press(&mut app, KeyCode::Char('/'));
         assert_eq!(
             app.chat_input.lines().join(
@@ -2497,14 +2564,16 @@ mod tests {
         );
         let chat_back = app.body_layout(app.last_body_area).chat.unwrap().width;
         assert_eq!(chat_back, preset.chat.unwrap().width, "shrinking restores");
-        // Preset cycling drops the custom tree.
+        // Preset cycling drops the custom tree. (From a panel: in the
+        // conversation Ctrl+U edits the line.)
+        app.focus = FocusArea::FileExplorer;
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
         assert!(app.custom_view.is_none());
     }
 
     #[test]
     fn ctrl_u_and_the_settings_row_cycle_the_layouts_config_declares() {
-        let mut app = app_with(FocusArea::ChatInput);
+        let mut app = app_with(FocusArea::FileExplorer);
         app.config.layout = "classic".into();
         app.config.layout_templates.insert(
             "editor-first".to_string(),
@@ -2552,7 +2621,7 @@ mod tests {
 
     #[test]
     fn cycling_onto_a_template_that_cannot_build_says_why() {
-        let mut app = app_with(FocusArea::ChatInput);
+        let mut app = app_with(FocusArea::FileExplorer);
         app.config.layout = "zen".into();
         app.config.layout_templates.insert(
             "broken".to_string(),
@@ -2631,6 +2700,8 @@ mod tests {
             .render(app.last_body_area);
 
         // A layout cycle is leaving the view; the stored arrangement survives.
+        // (From a panel: in the conversation Ctrl+U edits the line.)
+        app.focus = FocusArea::FileExplorer;
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
         assert!(app.custom_view.is_none());
         assert_eq!(app.active_view, None, "cycling is not being in a view");
@@ -2736,11 +2807,12 @@ mod tests {
 
     #[test]
     fn tab_cycles_body_focus() {
-        let mut app = app_with(FocusArea::ChatInput);
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.focus, FocusArea::FileExplorer);
+        let mut app = app_with(FocusArea::FileExplorer);
         press(&mut app, KeyCode::Tab);
         assert_eq!(app.focus, FocusArea::CodeEditor);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        // In the conversation Tab completes or indents; it does not leave (TD-3).
         press(&mut app, KeyCode::Tab);
         assert_eq!(app.focus, FocusArea::ChatInput);
     }
@@ -2748,16 +2820,14 @@ mod tests {
     #[test]
     fn tab_ring_skips_panes_the_layout_hides() {
         use crate::layout::compute_layout;
-        let mut app = app_with(FocusArea::ChatInput);
+        let mut app = app_with(FocusArea::CodeEditor);
         app.config.layout = "chat-first".into();
         app.last_layout = compute_layout(
             ratatui::layout::Rect::new(0, 1, 80, 22),
             "chat-first",
             false,
-            FocusArea::ChatInput,
+            FocusArea::CodeEditor,
         );
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.focus, FocusArea::CodeEditor);
         press(&mut app, KeyCode::Tab);
         assert_eq!(
             app.focus,
@@ -2771,16 +2841,14 @@ mod tests {
         // Zen shows one pane at a time *following the focus*, so its ring is
         // deliberately the full one: Tab is how you flip panes.
         use crate::layout::compute_layout;
-        let mut app = app_with(FocusArea::ChatInput);
+        let mut app = app_with(FocusArea::FileExplorer);
         app.config.layout = "zen".into();
         app.last_layout = compute_layout(
             ratatui::layout::Rect::new(0, 1, 80, 22),
             "zen",
             false,
-            FocusArea::ChatInput,
+            FocusArea::FileExplorer,
         );
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.focus, FocusArea::FileExplorer);
         press(&mut app, KeyCode::Tab);
         assert_eq!(app.focus, FocusArea::CodeEditor);
         press(&mut app, KeyCode::Tab);
@@ -2795,7 +2863,8 @@ mod tests {
             crate::help::GLOBAL.iter().any(|(key, _)| *key == "Ctrl+U"),
             "Ctrl+U missing from the GLOBAL help table"
         );
-        let mut app = app_with(FocusArea::ChatInput);
+        // From a panel: in the conversation Ctrl+U deletes to the line's start.
+        let mut app = app_with(FocusArea::FileExplorer);
         let start = app.config.layout.clone();
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
         assert_ne!(app.config.layout, start, "Ctrl+U did not cycle the layout");
@@ -2869,9 +2938,12 @@ mod tests {
             |app: &mut App| press_with_mods(app, KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(ctrl_c(&mut app), KeyFlow::Continue);
         assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
-        assert_eq!(ctrl_c(&mut app), KeyFlow::Quit, "the second one quits");
+        // Then, on an empty input, one asks and the next quits (TD-3).
+        assert_eq!(ctrl_c(&mut app), KeyFlow::Continue, "the second one asks");
+        assert_eq!(ctrl_c(&mut app), KeyFlow::Quit, "the third one quits");
 
         let mut idle = app_with(FocusArea::ChatInput);
+        assert_eq!(ctrl_c(&mut idle), KeyFlow::Continue);
         assert_eq!(ctrl_c(&mut idle), KeyFlow::Quit);
     }
 
@@ -2969,7 +3041,8 @@ mod tests {
 
     #[test]
     fn ctrl_k_is_still_the_background_tasks_panel() {
-        let mut app = app_with(FocusArea::ChatInput);
+        // From a panel: in the conversation Ctrl+K deletes to the end of the line.
+        let mut app = app_with(FocusArea::FileExplorer);
         ctrl(&mut app, 'k');
         assert_eq!(app.focus, FocusArea::TaskManager);
         assert!(!app.palette_visible);
@@ -2992,9 +3065,10 @@ mod tests {
             InputMode::Editing,
             "the first Esc only stops the turn"
         );
-        // A second Esc, with the stop already asked for, does what it always did.
+        // A second Esc, with the stop already asked for, is the ordinary key,
+        // and in the conversation that never leaves the input (TD-3).
         assert_eq!(press(&mut app, KeyCode::Esc), KeyFlow::Continue);
-        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.input_mode, InputMode::Editing);
 
         // A ByteBot run is stopped the same way.
         let mut app = app_with(FocusArea::ByteBotPanel);
@@ -3013,18 +3087,23 @@ mod tests {
         let mut idle = app_with(FocusArea::ChatInput);
         idle.input_mode = InputMode::Editing;
         press(&mut idle, KeyCode::Esc);
-        assert_eq!(idle.input_mode, InputMode::Normal);
+        assert_eq!(idle.input_mode, InputMode::Editing);
     }
 
     #[test]
     fn plain_q_asks_once_then_quits_but_not_while_typing() {
+        // In the conversation q is a letter (TD-3).
         let mut app = app_with(FocusArea::ChatInput);
+        assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
+        assert_eq!(app.chat_input.lines().join(""), "q");
+
+        let mut app = app_with(FocusArea::FileExplorer);
         assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
         assert!(app.quit_armed, "the first q asks");
         assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Quit);
 
         // Any other key in between withdraws the question.
-        let mut app = app_with(FocusArea::ChatInput);
+        let mut app = app_with(FocusArea::FileExplorer);
         press(&mut app, KeyCode::Char('q'));
         press(&mut app, KeyCode::Down);
         assert!(!app.quit_armed);
@@ -3165,11 +3244,12 @@ mod tests {
     }
 
     #[test]
-    fn chat_k_j_scroll_transcript() {
+    fn page_up_and_down_scroll_the_transcript() {
+        // TD-3: k and j are letters in the conversation now.
         let mut app = app_with(FocusArea::ChatInput);
-        press(&mut app, KeyCode::Char('k'));
-        assert_eq!(app.chat_scroll, 1);
-        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::PageUp);
+        assert!(app.chat_scroll > 0);
+        press(&mut app, KeyCode::PageDown);
         assert_eq!(app.chat_scroll, 0);
     }
 
@@ -3892,7 +3972,9 @@ mod tests {
         assert_eq!(saved.agent_approval, "edit-allow");
         assert_eq!(saved.agent_command_timeout, 5);
 
-        // The chord keeps cycling (and saving) from the chat pane.
+        // The chord keeps cycling (and saving) from a panel; in the
+        // conversation Ctrl+U edits the line (TD-3).
+        app.focus = FocusArea::FileExplorer;
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
         assert_eq!(app.config.layout, "classic", "zen wraps to classic");
         let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
@@ -3933,6 +4015,8 @@ mod tests {
         press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
         assert!(app.show_terminal);
         assert_eq!(app.input_mode, InputMode::Editing);
+        // On an empty input the first Ctrl+C asks and the second quits.
+        press_with_mods(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(
             press_with_mods(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL),
             KeyFlow::Quit
@@ -3949,7 +4033,7 @@ mod tests {
 
     #[test]
     fn ctrl_k_toggles_task_panel_and_resets_cursor() {
-        let mut app = app_with(FocusArea::ChatInput);
+        let mut app = app_with(FocusArea::FileExplorer);
         app.tasks_selected = 4;
         app.tasks_detail = true;
         press_with_mods(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
@@ -4016,16 +4100,17 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_o_toggles_worktree_panel_and_prompts_reset() {
+    fn opening_the_worktree_panel_resets_its_prompt() {
+        // TD-3: Ctrl+O unfolds tool output now; the panel is in the Agents view.
         let mut app = app_with(FocusArea::ChatInput);
         app.worktree_prompt = crate::focus::WorktreePrompt::AddPath;
-        press_with_mods(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        app.open_panel(FocusArea::WorktreePanel, None);
         assert_eq!(app.focus, FocusArea::WorktreePanel);
         assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::None);
         // Read-only listing of the repo the tests run in: at least the main
         // worktree, and no side effects.
         assert!(!app.worktrees.is_empty());
-        press_with_mods(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Esc);
         assert_eq!(app.focus, FocusArea::ChatInput);
     }
 
@@ -4161,12 +4246,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ctrl_l_toggles_advise_panel() {
+    #[tokio::test]
+    async fn ctrl_l_toggles_the_models_view() {
+        // TD-3: insights moved into the Project view; Ctrl+L is the models.
         let mut app = app_with(FocusArea::ChatInput);
         press_with_mods(&mut app, KeyCode::Char('l'), KeyModifiers::CONTROL);
-        assert_eq!(app.focus, FocusArea::AdvisePanel);
-        assert!(!app.advise_detail);
+        assert_eq!(app.focus, FocusArea::ModelSelector);
         press_with_mods(&mut app, KeyCode::Char('l'), KeyModifiers::CONTROL);
         assert_eq!(app.focus, FocusArea::ChatInput);
     }
@@ -4255,7 +4340,7 @@ mod tests {
 
     #[test]
     fn cycling_a_layout_names_the_layout_it_landed_on() {
-        let mut app = app_with_body(FocusArea::ChatInput);
+        let mut app = app_with_body(FocusArea::FileExplorer);
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
         let newest = app.layout_log.last().unwrap();
         assert_eq!(newest.after, app.arrangement_line());

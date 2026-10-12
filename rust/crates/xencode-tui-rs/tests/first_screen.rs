@@ -27,7 +27,7 @@ fn help_is_on_the_status_bar_at_80_columns() {
     app.input_mode = InputMode::Normal;
     let screen = rendered(&mut app, 80, 24);
     // The conversation's status line names the help key (TD-2).
-    assert!(screen.contains("f1 keys"), "got {screen}");
+    assert!(screen.contains("? keys"), "got {screen}");
 }
 
 #[test]

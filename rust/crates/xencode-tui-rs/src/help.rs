@@ -12,31 +12,45 @@ use ratatui::{
 
 type Binding = (&'static str, &'static str);
 
+/// The conversation (TD-3): the input is always ready, so these are the
+/// keys there.
+const CONVERSATION: &[Binding] = &[
+    ("Enter", "send · while a turn runs, the message waits and goes after it"),
+    ("Alt+Enter / Ctrl+J", "new line"),
+    ("Esc", "stop the running turn · twice: your last message back to edit"),
+    ("Ctrl+C", "clear the input · on an empty input, twice quits"),
+    ("Ctrl+P", "open a view, a panel, a command or a setting"),
+    ("Ctrl+B", "show or hide the side panel"),
+    ("Ctrl+O", "unfold the latest tool output · again folds it"),
+    ("Ctrl+L", "the Models view"),
+    ("Ctrl+E", "the Files view (on an empty input; else end of line)"),
+    ("Shift+Tab", "approval mode: ask → auto-edit → plan"),
+    ("Ctrl+Space", "Coding ⇄ Orchestrator mode"),
+    ("?", "this help (on an empty input)"),
+    ("@path", "mention a file · Tab puts the best match in"),
+    ("!command", "run a shell command, asking first like the agent does"),
+    ("/command", "a slash command · Tab completes it"),
+    ("Alt+Up / Alt+Down", "previous / next message you sent"),
+    ("Ctrl+A / K / U / W", "start of line · delete to end / to start / the word"),
+];
+
 pub(crate) const GLOBAL: &[Binding] = &[
     (
         "Ctrl+C / q q",
-        "quit — Ctrl+C stops a running turn first; a bare q asks once",
-    ),
-    (
-        "Ctrl+Space",
-        "Coding ⇄ Orchestrator mode (one view of the same session)",
+        "quit outside the conversation — Ctrl+C stops a running turn first",
     ),
     ("Ctrl+G", "refresh git status"),
-    ("Ctrl+E", "file explorer"),
     ("Ctrl+S", "save editor / git commit panel"),
     ("Ctrl+R", "code review (AI, current file)"),
     ("Ctrl+Y", "PR review dashboard"),
     ("Ctrl+K", "background tasks panel"),
-    ("Ctrl+O", "worktree panel"),
-    ("Ctrl+L", "insights panel"),
     (
         "Ctrl+X",
-        "command palette: every panel, command and setting",
+        "the palette, as Ctrl+P",
     ),
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
-    ("Ctrl+P", "project analyzer"),
-    ("Ctrl+B", "side panel on the conversation; ByteBot elsewhere"),
+    ("Ctrl+B", "ByteBot, from a panel"),
     ("Ctrl+,", "settings"),
     ("Ctrl+W", "close panel → chat"),
     ("Ctrl+N", "agent stack overlay (Esc closes)"),
@@ -70,23 +84,8 @@ const UNIVERSAL: &[Binding] = &[
     ("e", "edit code editor"),
     ("m", "model selector (r refresh, l load, u unload)"),
     ("s", "settings (panels that bind s keep it)"),
-    ("Esc", "stop the turn · close popup / leave edit mode"),
+    ("Esc", "close the panel · back to the conversation"),
     ("? / F1", "this help"),
-];
-
-const EDITING: &[Binding] = &[
-    ("Enter", "send message"),
-    ("Alt+Enter / Ctrl+J", "insert newline"),
-    ("Ctrl+A / Ctrl+E", "start / end of the line"),
-    (
-        "Ctrl+K / Ctrl+U / Ctrl+W",
-        "delete to end / to start / the word before",
-    ),
-    ("Alt+Up / Alt+Down", "recall previous / next prompt"),
-    ("Esc", "back to normal mode"),
-    ("Tab", "complete /command · else 4 spaces"),
-    ("← → ↑ ↓ Home End", "move cursor"),
-    ("Backspace/Del", "delete"),
 ];
 
 /// The agent approval prompt (I1-03) is modal: these are the only keys it
@@ -341,12 +340,37 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
 pub fn help_lines(focus: FocusArea, theme: &ThemeColors) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     section(&mut lines, "This panel", panel_bindings(focus), theme);
-    section(&mut lines, "Universal", UNIVERSAL, theme);
-    section(&mut lines, "Global (Ctrl)", GLOBAL, theme);
-    section(&mut lines, "While editing chat", EDITING, theme);
+    section(&mut lines, "The conversation", CONVERSATION, theme);
+    views(&mut lines, theme);
     section(&mut lines, "Agent approval prompt", APPROVAL, theme);
     section(&mut lines, "Slash commands", COMMANDS, theme);
+    section(&mut lines, "In a panel", UNIVERSAL, theme);
+    section(&mut lines, "More keys", GLOBAL, theme);
     lines
+}
+
+/// The seven views, read from the registry so the list cannot drift.
+fn views(out: &mut Vec<Line<'static>>, theme: &ThemeColors) {
+    let rows: Vec<(String, &'static str)> = crate::screens::Screen::ALL
+        .iter()
+        .map(|s| (format!("Ctrl+P {}", s.command()), s.description()))
+        .collect();
+    out.push(Line::from(Span::styled(
+        " Views".to_string(),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+    )));
+    for (key, desc) in rows {
+        out.push(Line::from(vec![
+            Span::styled(
+                format!("   {key:<22}"),
+                Style::default().fg(theme.message_assistant),
+            ),
+            Span::styled(desc, Style::default().fg(theme.fg)),
+        ]));
+    }
+    out.push(Line::from(""));
 }
 
 fn section(out: &mut Vec<Line<'static>>, title: &str, rows: &[Binding], theme: &ThemeColors) {
@@ -433,10 +457,11 @@ mod tests {
             .join("\n");
         for section in [
             "This panel",
-            "Universal",
-            "Global (Ctrl)",
-            "While editing chat",
+            "The conversation",
+            "Views",
             "Slash commands",
+            "In a panel",
+            "More keys",
         ] {
             assert!(text.contains(section), "missing {section}");
         }

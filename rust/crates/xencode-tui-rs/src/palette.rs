@@ -33,6 +33,8 @@ pub enum PaletteTarget {
     Command(&'static str),
     /// Open Settings on this row of `SETTINGS_ITEMS`.
     Setting(usize),
+    /// Open one of the seven views (TD-3).
+    Screen(crate::screens::Screen),
 }
 
 /// One row of the palette.
@@ -56,12 +58,20 @@ impl PaletteEntry {
             PaletteTarget::Panel(_) => "panel",
             PaletteTarget::Command(_) => "command",
             PaletteTarget::Setting(_) => "setting",
+            PaletteTarget::Screen(_) => "view",
         }
     }
 }
 
-/// Every entry, in table order: panels, then commands, then settings.
+/// Every entry, in table order: the seven views, then panels, then commands,
+/// then settings.
 pub fn entries() -> Vec<PaletteEntry> {
+    let screens = crate::screens::Screen::ALL.into_iter().map(|s| PaletteEntry {
+        label: s.name(),
+        name: s.command(),
+        detail: s.description(),
+        target: PaletteTarget::Screen(s),
+    });
     let panels = DESTINATIONS.iter().map(|d| PaletteEntry {
         label: d.name,
         name: d.name,
@@ -86,7 +96,11 @@ pub fn entries() -> Vec<PaletteEntry> {
             detail: row.section,
             target: PaletteTarget::Setting(i),
         });
-    panels.chain(commands).chain(settings).collect()
+    screens
+        .chain(panels)
+        .chain(commands)
+        .chain(settings)
+        .collect()
 }
 
 /// The entries that match `query`, best first, as indices into `all`.
@@ -133,9 +147,73 @@ pub fn rank(query: &str, all: &[PaletteEntry]) -> Vec<usize> {
     scored.into_iter().map(|(_, _, _, i)| i).collect()
 }
 
+/// The indexes of `paths` that match `query`, best first, for an `@` file
+/// mention (TD-3). A file whose name starts with the query ranks first, then
+/// one whose name contains it, then any path the letters can be found in, in
+/// order; ties go to the shorter path.
+pub fn rank_paths(query: &str, paths: &[String]) -> Vec<usize> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let lower = query.to_lowercase();
+    let fuzzy = Pattern::new(
+        query,
+        CaseMatching::Ignore,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    );
+    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+    let mut buf = Vec::new();
+    let mut scored: Vec<(u8, u32, usize, usize)> = Vec::new();
+    for (i, path) in paths.iter().enumerate() {
+        let name = path
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(path)
+            .to_lowercase();
+        let group = if name.starts_with(&lower) {
+            0
+        } else if name.contains(&lower) {
+            1
+        } else {
+            2
+        };
+        if group < 2 {
+            scored.push((group, 0, path.len(), i));
+        } else if let Some(score) = fuzzy.score(Utf32Str::new(path, &mut buf), &mut matcher) {
+            scored.push((2, score, path.len(), i));
+        }
+    }
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(b.1.cmp(&a.1))
+            .then(a.2.cmp(&b.2))
+            .then(a.3.cmp(&b.3))
+    });
+    scored.into_iter().map(|(_, _, _, i)| i).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_named_like_the_mention_ranks_first() {
+        let paths: Vec<String> = ["src/scargo.rs", "docs/cargo-notes.md", "Cargo.toml", "x/c_a_r_g_o.txt"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let order: Vec<&str> = rank_paths("cargo", &paths)
+            .into_iter()
+            .map(|i| paths[i].as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["Cargo.toml", "docs/cargo-notes.md", "src/scargo.rs", "x/c_a_r_g_o.txt"]
+        );
+        assert!(rank_paths("", &paths).is_empty());
+    }
 
     fn top(query: &str) -> PaletteEntry {
         let all = entries();
@@ -151,7 +229,10 @@ mod tests {
         let all = entries();
         assert_eq!(
             all.len(),
-            DESTINATIONS.len() + crate::help::COMMANDS.len() + SETTINGS_ITEMS.len()
+            crate::screens::Screen::ALL.len()
+                + DESTINATIONS.len()
+                + crate::help::COMMANDS.len()
+                + SETTINGS_ITEMS.len()
         );
         for d in DESTINATIONS {
             let n = all
@@ -182,13 +263,14 @@ mod tests {
     fn ordinary_words_land_on_what_a_person_means() {
         assert_eq!(top("theme").target, PaletteTarget::Setting(0));
         assert_eq!(top("rewind").target, PaletteTarget::Command("/rewind"));
+        // A view's own word lands on the view (TD-3).
         assert_eq!(
             top("models").target,
-            PaletteTarget::Panel(FocusArea::ModelSelector)
+            PaletteTarget::Screen(crate::screens::Screen::Models)
         );
         assert_eq!(
             top("settings").target,
-            PaletteTarget::Panel(FocusArea::Settings)
+            PaletteTarget::Screen(crate::screens::Screen::Settings)
         );
         assert_eq!(
             top("worktree").target,

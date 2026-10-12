@@ -163,23 +163,42 @@ Launch the interactive TUI with `xencode tui`:
 
 **TUI keyboard shortcuts:**
 
-Global (work in every panel, any mode):
+In the conversation (the input is always ready — letters are text):
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send; while a turn runs the message waits and goes after it (`queued: …`) |
+| `Alt+Enter` / `Ctrl+J` | New line |
+| `Esc` | Stop the running turn · twice in a row: your last message back in the input |
+| `Ctrl+C` | Clear the input · on an empty input it asks once, then quits |
+| `Ctrl+P` | The palette: the seven views, every panel, command and setting |
+| `Ctrl+B` | Show or hide the side panel |
+| `Ctrl+O` | Unfold the newest tool call's output · again folds it |
+| `Ctrl+L` | The Models view |
+| `Ctrl+E` | The Files view (on an empty input; with text, end of line) |
+| `Shift+Tab` | Approval mode: ask → auto-edit → plan (saved like the Settings row) |
+| `PageUp` / `PageDown` | Scroll the transcript |
+| `?` | This help, on an empty input |
+| `@path` | Mention a file; `Tab` puts the best match in |
+| `!command` | Run a shell command through the agent's own approval prompt, sandbox and time limit |
+| `Ctrl+A` / `Ctrl+K` / `Ctrl+U` / `Ctrl+W` | Start of line · delete to end / to start / the word before |
+
+The views, from `Ctrl+P` by name: `conversation`, `files`, `changes`, `agents`, `models`, `project`, `settings`. `Esc` in a view comes back to the conversation.
+
+In the panels:
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+C` | Stop the running turn (even mid-answer); quit when nothing is running |
 | `Ctrl+G` | Refresh git status |
-| `Ctrl+E` | File explorer |
+| `Ctrl+E` | File explorer; from the explorer, back to the conversation |
 | `Ctrl+S` | Save editor / Git commit panel |
 | `Ctrl+R` | AI code review (current file) |
 | `Ctrl+Y` | PR review dashboard |
 | `Ctrl+K` | Background tasks panel |
-| `Ctrl+O` | Worktree panel (list/add/remove git worktrees) |
-| `Ctrl+L` | Insights panel (live refactor suggestions & warnings) |
-| `Ctrl+X` | Command palette: type a few words to reach any panel, slash command or setting, whatever the disclosure level. `Enter` opens a panel or setting, or puts a command in the composer for you to finish; a draft already there goes to the prompt history (`Alt+Up`). `Esc` closes it and leaves everything as it was |
+| `Ctrl+P` / `Ctrl+X` | Command palette (the seven views first): type a few words to reach any panel, slash command or setting, whatever the disclosure level. `Enter` opens a panel or setting, or puts a command in the composer for you to finish; a draft already there goes to the prompt history (`Alt+Up`). `Esc` closes it and leaves everything as it was |
 | `Ctrl+F` | Feature Navigator (17 panels) |
 | `Ctrl+D` | Performance dashboard |
-| `Ctrl+P` | Project analyzer |
 | `Ctrl+B` | On the conversation, show or hide the side panel; from any other panel, the ByteBot agent panel |
 | `Ctrl+H` | Run provider health check |
 | `Ctrl+T` | Toggle embedded terminal strip |
@@ -187,7 +206,7 @@ Global (work in every panel, any mode):
 | `Ctrl+0` | Layout history: every change this screen has been through, oldest first, each named by the ask behind it (`Enter` on a row shows the pane widths before and after) |
 | `Ctrl+W` | Close panel → chat |
 
-While you are typing a prompt, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` edit the line as in a shell (start, end, delete to end, delete to start, delete the word before the cursor) instead of the panel actions above.
+The worktrees are in the Agents view and the insights and project analyzer in the Project view (`Ctrl+P`). In the conversation, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` edit the line as in a shell (start, end, delete to end, delete to start, delete the word before the cursor) instead of the panel actions above.
 | `Ctrl+,` | Settings |
 
 Panel-independent (Normal mode):
@@ -196,7 +215,7 @@ Panel-independent (Normal mode):
 |-----|--------|
 | `?` / `F1` | Keybinding help overlay (lists the focused panel's keys); `F1` and `/help` also work while typing |
 | `Tab` | Cycle explorer → editor → chat |
-| `Esc` | Stop the running turn (what it already said stays) · close popup / leave edit mode |
+| `Esc` | Stop the running turn (what it already said stays) · close the panel, back to the conversation |
 | `i` or `/` | Edit the chat input (`/` types the slash, so `/init` works straight away). A session with nothing said yet starts here already |
 | `m` | Model selector (`r` refresh, `l`/`u` llama.cpp load/unload) |
 | `s` | Settings (except in panels that bind `s` themselves: Security Auditor sort, Custom Models save) |
@@ -331,8 +350,8 @@ One terminal fact: `Ctrl+0`, like `Ctrl+1`…`Ctrl+9`, has no control byte of it
 own — the byte a terminal would send is the one that means `Ctrl+P`. The chord
 arrives only when the terminal reports it as an escape sequence (the kitty
 keyboard protocol's `CSI 48;5u`), which is how it was checked here: over a raw
-PTY that sequence opened this panel and the plain byte opened the project
-analyzer. A terminal that cannot send it leaves the saved views and this panel
+PTY that sequence opened this panel and the plain byte opened what `Ctrl+P`
+opens (then the project analyzer, now the palette). A terminal that cannot send it leaves the saved views and this panel
 alike out of reach; `Ctrl+T`, `Ctrl+U`, `Alt+Left`/`Alt+Right` and dragging a
 divider still do all the rearranging.
 
