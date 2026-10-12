@@ -691,6 +691,23 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
 
 fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     // Keys with no focus-specific meaning at all.
+    // In a view of several tabs, Tab and Shift+Tab move between them (TD-4).
+    // The files view keeps its own pane ring, and the languages panel its
+    // own use of Tab, which Shift+Tab still steps past.
+    let screen = app.screen();
+    let tabbed = !matches!(
+        screen,
+        crate::screens::Screen::Conversation | crate::screens::Screen::Files
+    ) && screen.panels().len() > 1;
+    if tabbed
+        && (key.code == KeyCode::BackTab
+            || (key.code == KeyCode::Tab && app.focus != FocusArea::MultiLanguage))
+    {
+        let step = if key.code == KeyCode::BackTab { -1 } else { 1 };
+        let next = screen.step_tab(app.focus, step);
+        app.open_panel(next, Some(tx));
+        return done();
+    }
     match key.code {
         KeyCode::Tab => {
             // The Collaboration Hub owns Tab: it cycles the form field

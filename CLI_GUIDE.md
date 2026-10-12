@@ -81,7 +81,7 @@ The input box sits at the bottom with one status line under it (model, `local on
 `cloud allowed`, approval mode, context used, cost, branch — whatever fits), and at 100
 columns or wider a side panel on the right shows the changed files, the plan,
 the context gauge, the agents at work and the project's branch. The files view
-(explorer and editor, `Ctrl+E`) keeps the older header and status bar.
+(explorer and editor, `Ctrl+E`) is one of the views described below.
 
 TUI keys — press `?` on an empty input (or `F1` anywhere) for the live,
 panel-aware keybinding overlay; the authoritative list lives there.
@@ -108,7 +108,12 @@ The views, from `Ctrl+P` by name: `conversation` (the chat, and ByteBot),
 `files` (tree and editor), `changes` (review, pull request, commit), `agents`
 (worker agents, worktrees, background tasks), `models` (picker, your models,
 provider health), `project` (insights, impact, analysis, security, languages)
-and `settings`. `Esc` in a view comes back to the conversation.
+and `settings`. Each view fills the screen: its tab bar on the top row (for
+example `Changes ▸ Diff · AI review · Commit`), the active tab's panel, and the
+status line on the bottom row. `Tab` and `Shift+Tab` move between the tabs
+(in Files, `Tab` moves between the tree and the editor), and `Esc` comes back
+to the conversation. `/files`, `/changes`, `/models`, `/project` and
+`/settings` typed in the input open their views too.
 
 In the panels the older keys still work: `Tab` cycles explorer/editor/chat ·
 `i` or `/` goes to the input · `m` model selector · `s` settings · `e` edit the

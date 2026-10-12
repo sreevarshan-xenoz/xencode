@@ -471,3 +471,111 @@ fn an_at_word_lists_matching_files() {
     key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     assert_eq!(draft(&app), "look at @Cargo.toml ");
 }
+
+// ── TD-4: the merged views ────────────────────────────────────────────────
+
+const VIEWS: [Screen; 6] = [
+    Screen::Files,
+    Screen::Changes,
+    Screen::Agents,
+    Screen::Models,
+    Screen::Project,
+    Screen::Settings,
+];
+
+fn is_corner(c: char) -> bool {
+    matches!(c, '╭' | '┌' | '╮' | '┐')
+}
+
+/// TD-4: each view fills the screen: a tab bar on top naming its tabs, the
+/// panel's frame from the first column to the last, the status line below.
+#[tokio::test]
+async fn each_view_fills_the_screen_under_its_tab_bar() {
+    for view in VIEWS {
+        let mut app = App::for_tests();
+        app.toasts.clear();
+        app.open_screen(view);
+        let rows = screen(&mut app, 120, 36);
+        assert!(rows[0].contains(view.name()), "{view:?}: {:?}", rows[0]);
+        for tab in view.panels() {
+            assert!(
+                rows[0].contains(xencode_tui_rs::screens::tab_name(*tab)),
+                "{view:?} tab {tab:?}: {:?}",
+                rows[0]
+            );
+        }
+        let first = rows[1].chars().next().unwrap_or(' ');
+        let last = rows[1].chars().last().unwrap_or(' ');
+        // Files still lays its panes out by the layout presets until TD-5
+        // replaces them, so only its left edge is checked here.
+        assert!(
+            is_corner(first) && (view == Screen::Files || is_corner(last)),
+            "{view:?} is not full width: {:?}",
+            rows[1]
+        );
+        assert!(rows[35].contains("esc"), "{view:?}: {:?}", rows[35]);
+    }
+}
+
+/// TD-4: Tab and Shift+Tab move between a view's tabs.
+#[tokio::test]
+async fn tab_moves_between_a_views_tabs() {
+    use xencode_tui_rs::app::FocusArea;
+    let mut app = App::for_tests();
+    app.open_screen(Screen::Agents);
+    assert_eq!(app.focus, FocusArea::WorkerPanel);
+    key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(app.focus, FocusArea::WorktreePanel);
+    key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(app.focus, FocusArea::TaskManager);
+    key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(app.focus, FocusArea::WorkerPanel, "the last tab wraps");
+    key(&mut app, KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(app.focus, FocusArea::TaskManager);
+    key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.screen(), Screen::Conversation);
+}
+
+/// TD-4: a view's slash command typed in the input opens it.
+#[tokio::test]
+async fn a_views_slash_command_opens_it() {
+    for (command, view) in [
+        ("/files", Screen::Files),
+        ("/changes", Screen::Changes),
+        ("/models", Screen::Models),
+        ("/project", Screen::Project),
+        ("/settings", Screen::Settings),
+    ] {
+        let mut app = App::for_tests();
+        type_text(&mut app, command);
+        key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(app.screen(), view, "{command}");
+    }
+}
+
+/// Review focus 4: every view and every tab draws at every size without a
+/// panic, down to a terminal of a few cells.
+#[tokio::test]
+async fn every_view_and_tab_draws_at_any_size() {
+    for view in VIEWS {
+        for tab in view.panels() {
+            let mut app = App::for_tests();
+            app.open_screen(view);
+            app.focus = *tab;
+            for (w, h) in [
+                (160u16, 48u16),
+                (120, 36),
+                (80, 24),
+                (60, 20),
+                (40, 12),
+                (20, 6),
+                (4, 3),
+            ] {
+                let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    screen(&mut app, w, h);
+                }));
+                assert!(drawn.is_ok(), "{view:?}/{tab:?} at {w}x{h}");
+            }
+        }
+    }
+}

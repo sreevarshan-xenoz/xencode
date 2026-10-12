@@ -50,9 +50,11 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
     let bg = Block::default().style(Style::default().bg(app.theme.bg).fg(app.theme.fg));
     f.render_widget(bg, f.area());
 
-    // The conversation (TD-2) owns the whole screen; the files view keeps the
-    // header + body + status frame it has always had.
+    // The conversation (TD-2) owns the whole screen; every other view (TD-4)
+    // is its tab bar, the active tab's panel across the screen, and the
+    // status line.
     let shell = crate::shell::active(app);
+    let mut panel_area = f.area();
     let overlay_area = if shell {
         // Toasts float over the conversation's column, down to the input, so
         // their rule of keeping clear of the input's rows still holds.
@@ -72,50 +74,43 @@ fn draw_frame(f: &mut Frame, app: &mut App) {
             ..a.transcript
         }
     } else {
-        let outer = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // header
-                Constraint::Min(1),    // body
-                Constraint::Length(1), // status bar
-            ])
-            .split(f.area());
-        draw_header(f, app, outer[0]);
-        draw_body(f, app, outer[1]);
-        draw_status_bar(f, app, outer[2]);
-        outer[1]
+        let body = draw_view(f, app);
+        panel_area = body;
+        body
     };
 
-    // Overlays (rendered on top)
+    // The active panel: a view's tab across its body, or a box over the
+    // conversation for a panel that belongs to no view.
+    let area = panel_area;
     match app.focus {
-        FocusArea::ModelSelector => draw_model_selector(f, app, f.area()),
-        FocusArea::Settings => draw_settings(f, app, f.area()),
-        FocusArea::CodeReview => draw_code_review(f, app, f.area()),
-        FocusArea::PerformanceDashboard => draw_performance_dashboard(f, app, f.area()),
-        FocusArea::ProviderHealth => draw_provider_health(f, app, f.area()),
-        FocusArea::ProjectAnalyzer => draw_project_analyzer(f, app, f.area()),
-        FocusArea::GitCommit => draw_git_commit(f, app, f.area()),
-        FocusArea::FeatureNavigator => draw_feature_navigator(f, app, f.area()),
+        FocusArea::ModelSelector => draw_model_selector(f, app, area),
+        FocusArea::Settings => draw_settings(f, app, area),
+        FocusArea::CodeReview => draw_code_review(f, app, area),
+        FocusArea::PerformanceDashboard => draw_performance_dashboard(f, app, area),
+        FocusArea::ProviderHealth => draw_provider_health(f, app, area),
+        FocusArea::ProjectAnalyzer => draw_project_analyzer(f, app, area),
+        FocusArea::GitCommit => draw_git_commit(f, app, area),
+        FocusArea::FeatureNavigator => draw_feature_navigator(f, app, area),
         FocusArea::ByteBotPanel => {
             if app.last_layout.agents.is_none() {
-                draw_bytebot_panel(f, app, f.area());
+                draw_bytebot_panel(f, app, area);
             }
         }
-        FocusArea::CollaborationHub => draw_collaboration_hub(f, app, f.area()),
-        FocusArea::VoiceInterface => draw_voice_interface(f, app, f.area()),
-        FocusArea::TerminalAssistant => draw_terminal_assistant(f, app, f.area()),
-        FocusArea::SecurityAuditor => draw_security_auditor(f, app, f.area()),
-        FocusArea::PerformanceProfiler => draw_performance_profiler(f, app, f.area()),
-        FocusArea::CustomModels => draw_custom_models(f, app, f.area()),
-        FocusArea::LearningMode => draw_learning_mode(f, app, f.area()),
-        FocusArea::MultiLanguage => draw_multi_language(f, app, f.area()),
-        FocusArea::ReviewDashboard => draw_review_dashboard(f, app, f.area()),
-        FocusArea::TaskManager => draw_task_manager(f, app, f.area()),
-        FocusArea::WorktreePanel => draw_worktree_panel(f, app, f.area()),
-        FocusArea::AdvisePanel => draw_advise_panel(f, app, f.area()),
-        FocusArea::ImpactPanel => draw_impact_panel(f, app, f.area()),
-        FocusArea::LayoutPanel => draw_layout_panel(f, app, f.area()),
-        FocusArea::WorkerPanel => draw_worker_panel(f, app, f.area()),
+        FocusArea::CollaborationHub => draw_collaboration_hub(f, app, area),
+        FocusArea::VoiceInterface => draw_voice_interface(f, app, area),
+        FocusArea::TerminalAssistant => draw_terminal_assistant(f, app, area),
+        FocusArea::SecurityAuditor => draw_security_auditor(f, app, area),
+        FocusArea::PerformanceProfiler => draw_performance_profiler(f, app, area),
+        FocusArea::CustomModels => draw_custom_models(f, app, area),
+        FocusArea::LearningMode => draw_learning_mode(f, app, area),
+        FocusArea::MultiLanguage => draw_multi_language(f, app, area),
+        FocusArea::ReviewDashboard => draw_review_dashboard(f, app, area),
+        FocusArea::TaskManager => draw_task_manager(f, app, area),
+        FocusArea::WorktreePanel => draw_worktree_panel(f, app, area),
+        FocusArea::AdvisePanel => draw_advise_panel(f, app, area),
+        FocusArea::ImpactPanel => draw_impact_panel(f, app, area),
+        FocusArea::LayoutPanel => draw_layout_panel(f, app, area),
+        FocusArea::WorkerPanel => draw_worker_panel(f, app, area),
         _ => {}
     }
 
@@ -422,200 +417,7 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Header ──────────────────────────────────────────────────────────────────
 
-fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    // Width ladder (H1-08): brand always, layout chip from 72 cols,
-    // branch + model from 60, focus badge from 40.
-    let w = area.width as usize;
-    let mut left = String::from(" ✦ xencode ");
-    if w >= 72 {
-        // The chip names what is on screen: a view has one, and while it is up
-        // its tree — not the configured layout — is the geometry (`V-4`).
-        let shown = match app.active_view.as_deref() {
-            Some(view) => view.to_string(),
-            None => {
-                crate::templates::effective_name(&app.config.layout_templates, &app.config.layout)
-            }
-        };
-        left.push_str(&format!("[{shown}] "));
-    }
-    if w >= 60 {
-        left.push_str(&format!("⎇ {} ", app.git_branch));
-        left.push_str(&app.config.default_model);
-        if app.init_running {
-            left.push_str(" ⏳init");
-        }
-    }
-    let right = if w >= 40 {
-        format!(" {} ", app.focus.display_name())
-    } else {
-        String::new()
-    };
-
-    // Display width, not byte length: the header holds multi-byte glyphs.
-    // Saturating so a narrow terminal cannot underflow the padding.
-    let padding = (area.width as usize)
-        .saturating_sub(Line::raw(&left).width())
-        .saturating_sub(Line::raw(&right).width());
-    let header_text = format!("{}{}{}", left, " ".repeat(padding), right);
-
-    let header = Paragraph::new(header_text).style(
-        Style::default()
-            .bg(app.theme.accent)
-            .fg(app.theme.highlight_fg)
-            .add_modifier(Modifier::BOLD),
-    );
-    f.render_widget(header, area);
-}
-
 // ── Status Bar ──────────────────────────────────────────────────────────────
-
-fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
-    let mode_str = match app.input_mode {
-        InputMode::Normal => "NORMAL",
-        InputMode::Editing => "EDITING",
-    };
-
-    // Git branch
-    let branch_str = format!(" \u{1F9F0} {}", app.git_branch);
-
-    // The provider in use and its state, in words (TX-6).
-    let health_icon = app.provider_status();
-
-    // Uptime
-    let uptime_secs = (xencode_models_rs::current_timestamp() - app.session_start_time).max(0.0);
-    let uptime_mins = (uptime_secs / 60.0) as u64;
-    let uptime_secs_rem = (uptime_secs % 60.0) as u64;
-    let uptime_str = if uptime_mins > 0 {
-        format!("{}m {}s", uptime_mins, uptime_secs_rem)
-    } else {
-        format!("{}s", uptime_secs_rem)
-    };
-
-    // File count
-    let files_str = format!("\u{1F4C4} {}", app.file_tree.len());
-
-    // Where a prompt is allowed to go (PR-2). Read from the same setting the
-    // router builds its policy from, so the bar describes the rule in force.
-    let egress_str = if app.egress_policy().allow_cloud {
-        "\u{1F310} cloud allowed"
-    } else {
-        "\u{1F512} local only"
-    };
-
-    // Build status text chunks
-    let left_parts = match app.input_mode {
-        InputMode::Normal => format!(
-            " ?:help  {}  [{}]  {} | {}  {}  {}  {}  \u{394} {}  | ",
-            mode_str,
-            app.mode.label(),
-            branch_str,
-            health_icon,
-            egress_str,
-            uptime_str,
-            files_str,
-            app.git_status.len()
-        ),
-        InputMode::Editing => format!(" {}  | ", mode_str),
-    };
-
-    // Context-sensitive hints based on current focus
-    let hints = if app.pending_approval().is_some() {
-        "y:allow  a:allow like this  n/Esc:deny  k/j:scroll diff"
-    } else if app.input_mode == InputMode::Editing {
-        "F1:help  Enter:send  Esc:normal  \u{2190}\u{2192}:cursor"
-    } else {
-        match app.focus {
-            FocusArea::Settings => "\u{2191}\u{2193}:nav  \u{2190}\u{2192}:change  Enter:save  Esc:close",
-            FocusArea::FileExplorer => "\u{2191}\u{2193}:select  Enter:open  Space:attach  m:models",
-            FocusArea::CodeEditor => "e:edit  \u{2191}\u{2193}:scroll  Ctrl+S:save  Tab:next",
-            FocusArea::ModelSelector => "\u{2191}\u{2193}:select  Enter:confirm  Esc:close",
-            FocusArea::CodeReview => "Enter:review  Esc:close",
-            FocusArea::ReviewDashboard => "↑↓:file  u/d:scroll  b:base  Enter:reload  Esc:close",
-            FocusArea::TaskManager => {
-                if app.tasks_detail {
-                    "↑↓:scroll  Enter:back to list  Esc:close"
-                } else {
-                    "↑↓:select  Enter:output  x:stop  d:remove  Esc:close"
-                }
-            }
-            FocusArea::WorktreePanel => match app.worktree_prompt {
-                crate::focus::WorktreePrompt::None =>
-                    "a:add  d:remove  r:refresh  Esc:close",
-                crate::focus::WorktreePrompt::AddPath =>
-                    "path: <type>  Enter:next  Esc:cancel",
-                crate::focus::WorktreePrompt::AddBranch =>
-                    "branch (Enter=auto): <type>  Enter:run  Esc:cancel",
-                crate::focus::WorktreePrompt::ConfirmRemove =>
-                    "y:confirm  n/Esc:cancel",
-            },
-            FocusArea::AdvisePanel => {
-                if app.advise_detail {
-                    "↑↓:scroll  Enter:back to list  Esc:close"
-                } else {
-                    "↑↓:select  Enter:detail  o:open file  r:recompute  Esc:close"
-                }
-            }
-            FocusArea::LayoutPanel => {
-                if app.layout_detail {
-                    "↑↓:scroll  Enter:back to list  Esc:close"
-                } else {
-                    "↑↓:select  Enter:from and to  Esc:close"
-                }
-            }
-            FocusArea::WorkerPanel => {
-                if app.workers_detail {
-                    "↑↓:scroll  Enter:back to list  r:re-read  Esc:close the record"
-                } else {
-                    "↑↓:select  Enter:where each figure came from  r:re-read  Esc:close"
-                }
-            }
-            FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
-            FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
-            FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
-            FocusArea::TerminalAssistant => {
-                "type:ask  Enter:ask/run  j/k:select  y:run  f:filter  Esc:close"
-            }
-            FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
-            FocusArea::GitCommit | FocusArea::CollaborationHub |
-            FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler => "Enter:start  Esc:close",
-            FocusArea::VoiceInterface => "Enter:record  Enter again:stop  m:mute  Esc:close",
-            FocusArea::LearningMode => {
-                "Enter:lessons  p/n:file  ←→+Enter:quiz  r:re-ask  Esc:close"
-            }
-            FocusArea::CustomModels => {
-                "n:new  -/+:temp  ←/→:tokens  Enter:apply  s:save  t:test  Esc:close"
-            }
-            FocusArea::MultiLanguage => {
-                "Enter:detect  Tab:pick a field  type:edit  Enter:translate  Esc:close"
-            }
-            _ => "i:edit  m:models  s:settings  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
-        }
-    };
-
-    // What this session has spent so far, from the records on disk (L-9). Empty
-    // until a turn has been recorded, so the bar does not show a made-up zero.
-    let spend_str = app
-        .spend
-        .as_ref()
-        .map(|snapshot| format!("{}  ", snapshot.line))
-        .unwrap_or_default();
-
-    // AF-2: permission denial status indicator from reduced events.
-    let denied_str = app
-        .last_permission_denied
-        .as_ref()
-        .map(|d| format!("[{d}]  "))
-        .unwrap_or_default();
-
-    let status_text = format!("{}{}{}{}", left_parts, spend_str, denied_str, hints);
-
-    let bar = Paragraph::new(status_text).style(
-        Style::default()
-            .bg(app.theme.status_bg)
-            .fg(app.theme.status_fg),
-    );
-    f.render_widget(bar, area);
-}
 
 // ── Body (explorer + editor + chat + input) ────────────────────────────────
 
@@ -658,6 +460,60 @@ fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
         draw_input(f, app, rect);
     }
     draw_boundary_grab(f, app, area);
+}
+
+/// A view other than the conversation (TD-4): the tab bar on the first row,
+/// the body, and the status line on the last. Returns the body, where the
+/// active tab's panel draws; the Files view fills it with its panes here.
+fn draw_view(f: &mut Frame, app: &mut App) -> Rect {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+    draw_tab_bar(f, app, rows[0]);
+    if app.screen() == crate::screens::Screen::Files {
+        draw_body(f, app, rows[1]);
+    } else {
+        f.render_widget(Clear, rows[1]);
+    }
+    crate::shell::draw_view_status(f, app, rows[2]);
+    rows[1]
+}
+
+/// `Changes ▸ Diff · AI review · Commit`, the active tab in the accent colour.
+fn draw_tab_bar(f: &mut Frame, app: &App, area: Rect) {
+    let screen = app.screen();
+    let dim = Style::default().fg(app.theme.message_system);
+    let mut spans = vec![
+        Span::styled(
+            format!(" {} ", screen.name()),
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("▸ ", dim),
+    ];
+    for (i, panel) in screen.panels().iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ", dim));
+        }
+        let name = crate::screens::tab_name(*panel);
+        if *panel == app.focus {
+            spans.push(Span::styled(
+                name,
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ));
+        } else {
+            spans.push(Span::styled(name, dim));
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Paint the divider the pointer is on (`V-7`).
@@ -1183,7 +1039,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect) {
 // ── Overlays ────────────────────────────────────────────────────────────────
 
 fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(55, 50, area);
+    let popup_area = panel_rect(app, 55, 50, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -1436,7 +1292,7 @@ fn setting_display(app: &App, idx: usize) -> String {
 }
 
 fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(65, 80, area);
+    let popup_area = panel_rect(app, 65, 80, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -1644,7 +1500,7 @@ fn review_display_text(app: &App) -> String {
 }
 
 fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(80, 80, area);
+    let popup_area = panel_rect(app, 80, 80, area);
     f.render_widget(Clear, popup_area);
 
     let title = if app.is_reviewing {
@@ -1677,7 +1533,7 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
 fn draw_review_dashboard(f: &mut Frame, app: &App, area: Rect) {
     use crate::review::format_review_file_line;
 
-    let popup_area = centered_rect(90, 85, area);
+    let popup_area = panel_rect(app, 90, 85, area);
     f.render_widget(Clear, popup_area);
 
     let dash = &app.review_dash;
@@ -1802,7 +1658,7 @@ fn task_manager_title(locked: bool, running: usize, total: usize) -> String {
 fn draw_task_manager(f: &mut Frame, app: &App, area: Rect) {
     use xencode_core_rs::TaskStatus;
 
-    let popup_area = centered_rect(85, 75, area);
+    let popup_area = panel_rect(app, 85, 75, area);
     f.render_widget(Clear, popup_area);
 
     // Registry read without blocking. `None` means a turn holds the lock, so
@@ -1925,7 +1781,7 @@ fn task_line(
 fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
     use crate::focus::WorktreePrompt;
 
-    let popup_area = centered_rect(80, 65, area);
+    let popup_area = panel_rect(app, 80, 65, area);
     f.render_widget(Clear, popup_area);
 
     let outer = Block::default()
@@ -2034,7 +1890,7 @@ fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
 /// findings list a viewport that follows the selection for free; only the
 /// wrapped detail body needs manual scrolling.
 fn draw_advise_panel(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(85, 70, area);
+    let popup_area = panel_rect(app, 85, 70, area);
     f.render_widget(Clear, popup_area);
 
     let outer = Block::default()
@@ -2194,7 +2050,7 @@ fn layout_detail_text(app: &App) -> String {
 /// from. The list is the answer to "what is running and what is it costing";
 /// the detail under `Enter` is the answer to "how do you know".
 fn draw_worker_panel(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(88, 76, area);
+    let popup_area = panel_rect(app, 88, 76, area);
     f.render_widget(Clear, popup_area);
 
     let outer = Block::default()
@@ -2305,7 +2161,7 @@ fn advise_detail_text(app: &App) -> String {
 fn draw_impact_panel(f: &mut Frame, app: &App, area: Rect) {
     use xencode_context_rs::ImpactRow;
 
-    let popup_area = centered_rect(90, 75, area);
+    let popup_area = panel_rect(app, 90, 75, area);
     f.render_widget(Clear, popup_area);
 
     let tree = app.impact_tree.as_ref();
@@ -2868,7 +2724,7 @@ fn provider_health_lines(app: &App) -> Vec<Line<'static>> {
 }
 
 fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(70, 55, area);
+    let popup_area = panel_rect(app, 70, 55, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -2891,7 +2747,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_project_analyzer(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(60, 60, area);
+    let popup_area = panel_rect(app, 60, 60, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -2929,7 +2785,7 @@ fn draw_project_analyzer(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_git_commit(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(50, 40, area);
+    let popup_area = panel_rect(app, 50, 40, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -2962,6 +2818,16 @@ fn draw_git_commit(f: &mut Frame, app: &App, area: Rect) {
 fn clamp_scroll(rows: usize, area_height: u16) -> u16 {
     let visible = (area_height as usize).saturating_sub(2); // borders
     rows.saturating_sub(visible).min(u16::MAX as usize) as u16
+}
+
+/// Where a panel draws: the whole `area` while it is a tab of a view (TD-4),
+/// a centred box when it opens over the conversation.
+fn panel_rect(app: &App, percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    if app.screen() == crate::screens::Screen::Conversation {
+        centered_rect(percent_x, percent_y, area)
+    } else {
+        area
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -4367,7 +4233,7 @@ fn security_findings_lines(app: &App) -> Vec<Line<'static>> {
 }
 
 fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(75, 70, area);
+    let popup_area = panel_rect(app, 75, 70, area);
     f.render_widget(Clear, popup_area);
 
     let scanned = if app.sec_scan_path.is_empty() {
@@ -4661,7 +4527,7 @@ fn param_bar(fraction: f64, width: usize) -> String {
 }
 
 fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(74, 70, area);
+    let popup_area = panel_rect(app, 74, 70, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -5076,7 +4942,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
 // ── Multi-Language Panel ────────────────────────────────────────────────────
 
 fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(70, 65, area);
+    let popup_area = panel_rect(app, 70, 65, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()

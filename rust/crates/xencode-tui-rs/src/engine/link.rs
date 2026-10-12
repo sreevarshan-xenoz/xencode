@@ -27,6 +27,12 @@ pub const ENGINE_COMMANDS: &[&str] = &[
 /// hand the terminal over, or only read.
 pub const WINDOW_COMMANDS: &[&str] = &[
     "/init",
+    // The views (TD-4) change only what this window shows.
+    "/files",
+    "/changes",
+    "/models",
+    "/project",
+    "/settings",
     "/advise",
     "/impact",
     "/trace",
