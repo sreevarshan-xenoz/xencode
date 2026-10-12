@@ -45,6 +45,7 @@ pub fn strip_colors(buffer: &mut ratatui::buffer::Buffer, base_bg: ratatui::styl
 fn draw_frame(f: &mut Frame, app: &mut App) {
     // AF-2: drain queued agent events and reduce into UI state before drawing.
     app.drain_agent_events();
+    app.note_approval_shown();
 
     // Full-screen themed background
     let bg = Block::default().style(Style::default().bg(app.theme.bg).fg(app.theme.fg));

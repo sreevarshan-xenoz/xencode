@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xencode · needs you`, and a terminal that is not in front gets one desktop
   notification (OSC 9). On Windows the whole screen is repainted after a resize
   so no stale characters are left behind.
+- A letter typed in the half second after an approval appears goes into the
+  draft instead of answering it, so the `a` of a word being typed cannot grant a
+  whole kind of tool; Esc still denies at once.
 - The status line starts with `orchestrator` while orchestrator mode is on,
   whatever `status_line` lists, so the mode is never hidden.
 - `xencode config set` accepts `tool_output`, `side_panel` and `status_line`,

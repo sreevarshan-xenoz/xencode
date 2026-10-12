@@ -570,6 +570,9 @@ pub struct App<'a> {
     /// Messages typed while a turn was running, sent in order once it ends
     /// (TD-3).
     pub queued: Vec<String>,
+    /// The approval on screen and when it was first drawn, so a key typed in
+    /// the moment it appears is not taken as its answer.
+    pub(crate) approval_shown: Option<(u64, std::time::Instant)>,
     /// When Esc was last pressed in the conversation, so a second press soon
     /// after puts the last message back in the input to edit.
     pub last_esc_at: Option<std::time::Instant>,
@@ -2378,6 +2381,7 @@ impl<'a> App<'a> {
             last_title: String::new(),
             terminal_focused: true,
             queued: Vec::new(),
+            approval_shown: None,
             last_esc_at: None,
             ctrl_c_armed: false,
             bang_count: 0,
@@ -2761,6 +2765,38 @@ impl<'a> App<'a> {
             if !grants.contains(&class) {
                 grants.push(class);
             }
+        }
+    }
+
+    /// The id of the approval at the front of the line, local or remote.
+    pub(crate) fn front_approval_id(&self) -> Option<u64> {
+        self.approval_ids
+            .front()
+            .copied()
+            .or_else(|| self.remote_approvals.front().map(|(id, _)| *id))
+    }
+
+    /// Called as a frame is drawn: start the clock on an approval the first
+    /// time it is on screen, and start its change at the top.
+    pub(crate) fn note_approval_shown(&mut self) {
+        match self.front_approval_id() {
+            Some(id) if self.approval_shown.map(|(shown, _)| shown) != Some(id) => {
+                self.approval_shown = Some((id, std::time::Instant::now()));
+                self.approval_scroll = 0;
+            }
+            Some(_) => {}
+            None => self.approval_shown = None,
+        }
+    }
+
+    /// Whether the approval in front has been on screen too briefly for a key
+    /// to be an answer to it: not drawn yet, or drawn under half a second ago.
+    pub(crate) fn approval_settling(&self) -> bool {
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+        match (self.front_approval_id(), self.approval_shown) {
+            (None, _) => false,
+            (Some(id), Some((shown, at))) if shown == id => at.elapsed() < SETTLE,
+            _ => true,
         }
     }
 

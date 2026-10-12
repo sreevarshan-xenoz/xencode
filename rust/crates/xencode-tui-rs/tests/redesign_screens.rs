@@ -284,6 +284,9 @@ async fn a_draft_survives_an_approval() {
         .unwrap();
     app.drain_agent_channels();
     assert!(app.pending_approval().is_some());
+    // The box has to be on screen a moment before a key answers it.
+    screen(&mut app, 100, 30);
+    std::thread::sleep(std::time::Duration::from_millis(600));
     key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
     assert!(app.pending_approval().is_none());
     assert_eq!(
@@ -704,4 +707,47 @@ fn model_text_and_side_panel_rows_carry_no_escape_codes() {
     assert!(text.contains("hi") && text.contains("there"), "{text}");
     assert!(text.contains("step red one"), "{text}");
     assert!(!text.contains('\u{1b}'), "{text:?}");
+}
+
+/// Review C2: a letter typed in the moment an approval appears goes into the
+/// draft instead of answering it — the "a" of "also" must not grant a whole
+/// class of tools. Once the box has been on screen for half a second, the
+/// keys answer it.
+#[tokio::test]
+async fn a_key_typed_as_an_approval_appears_does_not_answer_it() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    type_text(&mut app, "also ");
+    let (responder, answer) = tokio::sync::oneshot::channel();
+    app.approval_tx
+        .send((
+            xencode_tui_rs::agent_tools::ApprovalRequest {
+                tool: "run_command".into(),
+                class: xencode_tui_rs::agent_tools::ToolClass::Shell,
+                summary: "run_command rm -rf build".into(),
+                preview: "rm -rf build".into(),
+                draft: Default::default(),
+            },
+            responder,
+        ))
+        .unwrap();
+    app.drain_agent_channels();
+    // Not even drawn yet: the key is text.
+    key(&mut app, KeyCode::Char('a'), KeyModifiers::NONE);
+    screen(&mut app, 100, 30);
+    // Drawn this instant: still text.
+    key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+    assert!(
+        app.pending_approval().is_some(),
+        "the approval was answered"
+    );
+    assert_eq!(draft(&app), "also ad");
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    screen(&mut app, 100, 30);
+    key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+    assert!(app.pending_approval().is_none());
+    assert_eq!(
+        answer.await.unwrap(),
+        xencode_tui_rs::agent_tools::ApprovalAnswer::Denied
+    );
 }

@@ -188,6 +188,23 @@ fn done() -> KeyFlow {
 /// deliberately swallowed rather than treated as a deny: a stray Return in
 /// the terminal should never be read as an answer.
 fn approval_modal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
+    // A letter typed in the moment the box appears was meant for the draft:
+    // it goes there, and only a key pressed once the box has been on screen
+    // for half a second answers it.
+    // Other keys (Esc denies, the arrows scroll) still work: none of them is
+    // typed by accident in the middle of a word, and none of them allows.
+    if app.approval_settling() {
+        if let KeyCode::Char(c) = key.code {
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && app.focus == FocusArea::ChatInput
+            {
+                app.chat_input.insert_char(c);
+            }
+            return done();
+        }
+    }
     use crate::engine::proto::{ClientMsg, WireAnswer};
     let answer = |app: &mut App, answer: WireAnswer| {
         if let Some(&id) = app.approval_ids.front() {
@@ -2386,7 +2403,19 @@ mod tests {
             ))
             .unwrap();
         app.drain_agent_channels();
+        seen(app);
         answer
+    }
+
+    /// The approval in front has been on screen a second, as a person
+    /// answering it would have seen it.
+    fn seen(app: &mut App) {
+        app.approval_shown = app.front_approval_id().map(|id| {
+            (
+                id,
+                std::time::Instant::now() - std::time::Duration::from_secs(1),
+            )
+        });
     }
 
     #[test]
