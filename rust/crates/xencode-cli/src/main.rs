@@ -2998,7 +2998,6 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         .parse()
                         .map_err(|_| format!("invalid number: {value}"))?;
                 }
-                "layout" => config.layout = value.clone(),
                 // The context budget profile. "auto" hands the choice to the
                 // memory probe; a name pins it. Reject a word that is neither,
                 // rather than storing a value that silently means "auto".
@@ -3316,18 +3315,6 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 println!("cleared {key} — nothing is set for it, and the behaviour is what it was before it was ever named");
             } else {
                 println!("set {key} = {value}");
-            }
-            // A layout name that is neither a shipped preset nor a template the
-            // config declares renders classic. `config set` is where a user
-            // types such a name, so it is where saying so is worth the line —
-            // the value is stored anyway, because the template it names may be
-            // added afterwards.
-            if key == "layout" {
-                if let Some(problem) =
-                    xencode_tui_rs::templates::problem(&config.layout_templates, &config.layout)
-                {
-                    println!("note: {problem}");
-                }
             }
             // An energy cap is measured from the machine's own counter. On a
             // machine that publishes none there is no reading that could ever

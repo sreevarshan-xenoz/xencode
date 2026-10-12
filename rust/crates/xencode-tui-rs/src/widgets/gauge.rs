@@ -1,7 +1,7 @@
 //! ASCII progress-bar helper.
 //!
-//! Extracted from the inline `bar()` closure in `draw_performance_dashboard`
-//! (`ui.rs:659`). That closure took `(value: u64, max: u64, width: usize)`.
+//! Extracted from an inline `bar()` closure in `ui.rs`. That closure took
+//! `(value: u64, max: u64, width: usize)`.
 //! Other panels use slightly different signatures (`gauge_block` with title/color,
 //! inline `filled/empty` blocks) — those are left in place for now to avoid
 //! changing pixels; they'll be unified in a later pass once panels migrate.

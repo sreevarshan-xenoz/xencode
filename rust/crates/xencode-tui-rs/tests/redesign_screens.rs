@@ -506,10 +506,8 @@ async fn each_view_fills_the_screen_under_its_tab_bar() {
         }
         let first = rows[1].chars().next().unwrap_or(' ');
         let last = rows[1].chars().last().unwrap_or(' ');
-        // Files still lays its panes out by the layout presets until TD-5
-        // replaces them, so only its left edge is checked here.
         assert!(
-            is_corner(first) && (view == Screen::Files || is_corner(last)),
+            is_corner(first) && is_corner(last),
             "{view:?} is not full width: {:?}",
             rows[1]
         );
@@ -577,5 +575,74 @@ async fn every_view_and_tab_draws_at_any_size() {
                 assert!(drawn.is_ok(), "{view:?}/{tab:?} at {w}x{h}");
             }
         }
+    }
+}
+
+/// TD-5: the voice, learning, terminal assistant, profiler, dashboard,
+/// collaboration, layout history and feature navigator panels are retired.
+/// Nineteen focus areas remain, and the palette offers no panel or view for
+/// any of the retired names.
+#[test]
+fn retired_panels_are_gone() {
+    use xencode_tui_rs::palette::PaletteTarget;
+    assert_eq!(xencode_tui_rs::app::FocusArea::ALL.len(), 19);
+    let mut app = App::for_tests();
+    key(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+    assert!(app.palette_visible);
+    for query in [
+        "voice",
+        "learning",
+        "collab",
+        "profiler",
+        "dashboard",
+        "navigator",
+        "layout history",
+    ] {
+        app.palette_query = query.to_string();
+        let found: Vec<_> = app
+            .palette_matches()
+            .into_iter()
+            .filter(|e| matches!(e.target, PaletteTarget::Panel(_) | PaletteTarget::Screen(_)))
+            .collect();
+        assert!(found.is_empty(), "{query}: {found:#?}");
+    }
+}
+
+/// TD-5: the Files view is the file tree on the left and the editor beside
+/// it, edge to edge, with no chat pane.
+#[tokio::test]
+async fn the_files_view_is_the_tree_and_the_editor() {
+    let mut app = App::for_tests();
+    app.toasts.clear();
+    app.open_screen(Screen::Files);
+    let rows = screen(&mut app, 120, 36);
+    let top: Vec<char> = rows[1].chars().collect();
+    assert!(is_corner(top[0]), "{:?}", rows[1]);
+    assert!(is_corner(*top.last().unwrap()), "{:?}", rows[1]);
+    assert!(
+        top[1..top.len() - 1].iter().any(|c| is_corner(*c)),
+        "the editor's frame starts inside the row: {:?}",
+        rows[1]
+    );
+    assert!(
+        !rows.iter().any(|r| r.contains(" Chat ")),
+        "no chat pane in the Files view: {rows:#?}"
+    );
+    // Ctrl+T puts the terminal strip under the editor, not across the tree.
+    app.show_terminal = true;
+    screen(&mut app, 120, 36);
+    let body = app.last_layout;
+    let (tree, editor, strip) = (
+        body.explorer.unwrap(),
+        body.editor.unwrap(),
+        body.terminal.expect("the strip is on screen"),
+    );
+    assert_eq!(strip.x, editor.x, "{body:?}");
+    assert!(strip.y > editor.y && strip.x >= tree.right(), "{body:?}");
+    for (w, h) in [(60u16, 20u16), (20, 6), (4, 3)] {
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            screen(&mut app, w, h);
+        }));
+        assert!(drawn.is_ok(), "Files with the strip at {w}x{h}");
     }
 }

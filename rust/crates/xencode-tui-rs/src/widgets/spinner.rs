@@ -1,8 +1,7 @@
 //! Braille spinner frames.
 //!
-//! Extracted from `ui.rs` where the same `['⠋', '⠙', ...]` array was duplicated
-//! ~10× across dashboard, provider-health, bytebot, collab, voice, terminal,
-//! security, profiler, and learning panels.
+//! Extracted from `ui.rs`, where the same frame array was once duplicated in
+//! every panel that shows a spinner.
 
 /// Braille spinner frames, cycled by `spinner_tick`.
 pub const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];

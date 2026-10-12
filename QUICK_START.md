@@ -236,12 +236,7 @@ budget of their own. To see what the head costs and whose words a turn is made o
 ```bash
 xencode server           # local-first: http://127.0.0.1:8765, ws://
 ```
-Then in the TUI open the Collaboration Hub (Ctrl+F → Collaboration Hub):
-`c` creates and connects a session, `j` edits in a session id to join one,
-`Tab` cycles the server/user/session fields, `r` retries, `Esc` hangs up.
-The panel shows only the real connection state — transport, session id,
-live members with roles. Flags, tokens, TLS and the audit log are in
-`CLI_GUIDE.md`.
+Flags, tokens, TLS and the audit log are in `CLI_GUIDE.md`.
 
 ### Use xencode inside Zed
 Zed can run xencode as its agent. Add this to Zed's `settings.json` (point
@@ -303,7 +298,7 @@ xencode colab down                       # ALWAYS run this: an unstopped VM keep
 `config.json` in the settings directory, so after it succeeds the VM is just
 another provider:
 select it in the TUI model picker (`m`) or watch it in Provider Health
-(Ctrl+F → Provider Health). Colab gives a free-tier VM about 12 hours and wipes
+(Ctrl+P → Provider Health). Colab gives a free-tier VM about 12 hours and wipes
 its disk, so when the row goes red run `xencode colab up --reconnect` — it
 reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 `colab.json` alone.
@@ -349,35 +344,21 @@ xencode remote show
 /trust [status|forget] [path] - Follow an AGENTS.md as instructions — the workspace's, or a directory's like src/auth/AGENTS.md — or report/withdraw (trust is per content hash)
 /egress [text]         - Show where the next turn would send your prompt and what redaction holds back, without sending it
 /goto <destination>    - Switch focus directly to any panel destination by name (also `/nav`); every feature stays reachable whatever disclosure level is set
-/level [1-4]           - Read or set the progressive disclosure tier — 1 Core, 2 Workflow, 3 Advanced, 4 All — which governs what the feature navigator (`Ctrl+F`) and welcome line show. A first start opens at 2; the command palette (`Ctrl+X`) always lists everything
+/level [1-4]           - Read or set the progressive disclosure tier — 1 Core, 2 Workflow, 3 Advanced, 4 All — which governs what the welcome line shows. A first start opens at 2; the command palette (`Ctrl+P` or `Ctrl+X`) always lists everything
 /model [name]          - Switch model by name, or list the models found and the current one. Works in the ByteBot panel too, where `/model` alone opens a list to pick from without leaving it
 /help                  - Open the help overlay (the same as `?`). A `/word` that is not a command is answered with "Unknown command" instead of being sent to the model
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full
-keybinding help overlay, or `Ctrl+X` for the command palette, which finds
-any panel, command or setting by a few typed words. `Ctrl+U` cycles the body layout (classic →
-chat-first → zen, then any layouts you declared in `layout_templates`);
-`Alt+Left`/`Alt+Right` grows or shrinks the focused pane by five points, and a
-divider between two side-by-side panes drags to do the same by hand — dragging
-needs the mouse, and **Settings → `Mouse Capture`** gives it back to the
-terminal when a plain drag should select text instead.
-The same choice lives on the Settings panel (`s`) and the same list drives
-both, alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
-everything persists to `config.json` in the settings directory. A layout you
-resized comes back next start from `layout.json` beside it (private, `0600`); `Ctrl+U`
-clears it, and the file never stores your conversation or model state — only
-where the panes were. `Ctrl+0` lists every one of those changes this session has
-been through, each named by what caused it, with the pane widths before and
-after on `Enter`; it is session memory, and reading it moves nothing.
-
-`Ctrl+1`…`Ctrl+9` recall a *view* — a saved arrangement with the pane it was
-focused on. Six slots arrive filled: `Code`, `Chat`, `Terminal`, `Focus`,
-`Review`, `Split`; `Ctrl+Shift+<digit>` stores the screen you are looking at
-into any of the nine, including the empty `7`–`9`. The view you were on comes
-back next start. Stored views are `layout_views` in `config.json`; `Ctrl+U`
-leaves a view without renaming it, and nothing here is a gate — every panel a
-view shows is still reachable on its own keys.
+keybinding help overlay, or `Ctrl+P` (also `Ctrl+X`) for the command palette, which finds
+any view, panel, command or setting by a few typed words. The Files view is the
+file tree beside the editor, with the terminal strip under the editor while
+`Ctrl+T` has it on; there are no layout presets, saved views or pane resizing.
+A config file that still holds `layout`, `layout_templates` or `layout_views`
+loads as before with those keys ignored. The Settings panel (`s`) holds the
+Rounded Borders / Show Scrollbars / Line Numbers toggles, and everything persists
+to `config.json` in the settings directory. **Settings → `Mouse Capture`** gives
+the mouse back to the terminal when a plain drag should select text instead.
 
 ## Examples
 

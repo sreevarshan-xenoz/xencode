@@ -60,38 +60,26 @@ pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+Y", "PR review dashboard"),
     ("Ctrl+K", "background tasks panel"),
     ("Ctrl+X", "the palette, as Ctrl+P"),
-    ("Ctrl+F", "feature navigator"),
-    ("Ctrl+D", "performance dashboard"),
     ("Ctrl+B", "ByteBot, from a panel"),
     ("Ctrl+,", "settings"),
     ("Ctrl+W", "close panel → chat"),
     ("Ctrl+N", "agent stack overlay (Esc closes)"),
     (
-        "Alt+Left/Right",
-        "resize focused pane (Ctrl+U clears the resize)",
+        "Mouse",
+        "the wheel scrolls; a click picks a pane in Files (off with Settings → Mouse Capture)",
     ),
     (
-        "Drag a divider",
-        "resize the panes it splits (off with Settings → Mouse Capture)",
-    ),
-    ("Ctrl+T", "toggle terminal strip"),
-    (
-        "Ctrl+U",
-        "cycle body layout (presets + templates you declared)",
-    ),
-    (
-        "Ctrl+1…9",
-        "recall a named view (Ctrl+Shift+N stores this screen as one)",
-    ),
-    (
-        "Ctrl+0",
-        "why the screen is arranged this way (layout history)",
+        "Ctrl+T",
+        "toggle the terminal strip under the editor in Files",
     ),
     ("Ctrl+H", "run provider health check"),
 ];
 
 const UNIVERSAL: &[Binding] = &[
-    ("Tab", "cycle explorer → editor → chat"),
+    (
+        "Tab",
+        "in Files, tree ↔ editor; from another panel, back to chat",
+    ),
     ("i or /", "edit chat input"),
     ("e", "edit code editor"),
     ("m", "model selector (r refresh, l load, u unload)"),
@@ -226,21 +214,10 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("↑ ↓ / j k", "move cursor"),
             ("← →", "change value / number"),
             ("Enter", "toggle, edit URL/number, or save"),
-            ("row 13 + Enter twice", "factory reset"),
+            ("Factory Reset + Enter twice", "factory reset"),
         ],
         CodeReview => &[("↑ ↓ / j k", "scroll review"), ("Enter", "start review")],
-        CollaborationHub => &[
-            ("c", "create + connect a new session"),
-            ("j", "edit session id to join"),
-            ("Enter", "connect / finish editing"),
-            ("r", "retry"),
-            ("Tab", "cycle server/user/session field"),
-            ("type", "edit selected field"),
-            ("Esc", "stop editing / disconnect / close"),
-        ],
-        PerformanceDashboard | ProjectAnalyzer | PerformanceProfiler => {
-            &[("Enter", "start / continue")]
-        }
+        ProjectAnalyzer => &[("Enter", "start / continue")],
         MultiLanguage => &[
             ("Enter / d", "walk the workspace for language totals"),
             ("Tab", "pick the field letters edit (From, To, Text)"),
@@ -248,26 +225,11 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "translate the text with one model call"),
             ("Esc", "leave the field"),
         ],
-        VoiceInterface => &[
-            ("Enter", "record a clip from the microphone"),
-            ("Enter again", "end the capture early; the clip is kept"),
-            ("Space / m", "mute — the recorder runs, audio is discarded"),
-            ("Esc", "stop if recording, otherwise close"),
-        ],
-        TerminalAssistant => &[
-            ("type", "what you want to do"),
-            ("Enter", "ask the model / run the selected command"),
-            ("↑ ↓ / j k", "select a command"),
-            ("f", "cycle the risk filter"),
-            ("i", "edit the question again"),
-            ("y", "run selection (approval-gated)"),
-        ],
         GitCommit => &[
             ("type", "commit message"),
             ("Enter", "git commit -am (async)"),
             ("Backspace", "delete char"),
         ],
-        FeatureNavigator => &[("↑ ↓ / j k", "select feature"), ("Enter", "open feature")],
         ByteBotPanel => &[
             ("type", "command"),
             ("Enter", "run command"),
@@ -288,12 +250,6 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "apply to the next turn"),
             ("s", "write profiles to config.json"),
             ("t", "one test request to the provider"),
-        ],
-        LearningMode => &[
-            ("Enter", "queue lessons from .xencode / grade the quiz"),
-            ("p / n", "previous / next file in the queue"),
-            ("r", "re-ask the model about this file"),
-            ("← →", "pick quiz option"),
         ],
         ReviewDashboard => &[
             ("↑ ↓ / j k", "select file"),
@@ -332,11 +288,6 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("o", "open the selected consumer file in the editor"),
             ("r", "recompute this file's blast radius in place"),
             ("Esc", "back to tree · pop descend stack · close panel"),
-        ],
-        LayoutPanel => &[
-            ("↑ ↓ / j k", "select a change · scroll its detail"),
-            ("Enter", "open/close what the change moved from and to"),
-            ("Esc", "back to list · close panel"),
         ],
         WorkerPanel => &[
             ("↑ ↓ / j k", "select a row · scroll its detail"),
@@ -415,35 +366,7 @@ mod tests {
 
     #[test]
     fn every_panel_has_bindings() {
-        use FocusArea::*;
-        for f in [
-            ChatInput,
-            FileExplorer,
-            CodeEditor,
-            ModelSelector,
-            Settings,
-            CodeReview,
-            PerformanceDashboard,
-            ProviderHealth,
-            ProjectAnalyzer,
-            GitCommit,
-            FeatureNavigator,
-            ByteBotPanel,
-            CollaborationHub,
-            VoiceInterface,
-            TerminalAssistant,
-            SecurityAuditor,
-            PerformanceProfiler,
-            CustomModels,
-            LearningMode,
-            MultiLanguage,
-            ReviewDashboard,
-            TaskManager,
-            WorktreePanel,
-            AdvisePanel,
-            LayoutPanel,
-            WorkerPanel,
-        ] {
+        for f in FocusArea::ALL {
             assert!(!panel_bindings(f).is_empty(), "{f:?} has no help rows");
         }
     }

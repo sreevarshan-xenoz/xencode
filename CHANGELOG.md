@@ -58,6 +58,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the bottom row. `/files`, `/changes`, `/models`, `/project` and
   `/settings` open their views (`/agents` still lists the coding-agent CLIs on
   this machine). The old header row and status bar are gone.
+- `TD-5`: eight rarely used TUI panels are removed — Voice
+  Interface, Learning Mode, Terminal Assistant, Performance Profiler,
+  Performance Dashboard, Collaboration Hub, Layout History and the Feature
+  Navigator. Their keys are gone with them: `Ctrl+D` (performance dashboard),
+  `Ctrl+F` (feature navigator) and `Ctrl+0` (layout history) no longer open
+  a panel, and `/goto` no longer knows the names `voice`, `learning`, `learn`,
+  `assistant`, `profiler`, `dashboard`, `collab`, `layout` or `palette`. The
+  palette (`Ctrl+P`, also `Ctrl+X`) is the one place every remaining view,
+  panel, command and setting is found. The TUI has 19 panels now, down from
+  27. `xencode server` and the collaboration crates are unchanged; only the
+  TUI's client panel for them is gone. The `/level` setting now governs only
+  the shortcuts line on the first screen, since the feature navigator it also
+  filtered is gone.
+- `TD-5`: the body layout machinery is gone as well. The layout presets
+  (classic, chat-first, zen) and the layouts you could declare in the config,
+  the saved views on `Ctrl+1`…`Ctrl+9` (stored with `Ctrl+Shift`+digit), pane
+  resizing with `Alt+Left` and `Alt+Right`, dragging the line between two panes,
+  the layout history and `layout.json` (the file that brought a resized
+  arrangement back at the next start) are all removed, and so is the Layout row
+  in Settings. `Ctrl+U` no longer cycles layouts; in the conversation it still
+  deletes to the start of the line. The Files view is now the file tree on the
+  left beside the editor, with no chat column, and `Ctrl+T` puts the terminal
+  strip under the editor. A config file that still holds `layout`,
+  `layout_templates` or `layout_views` loads as before with those keys ignored,
+  `xencode config set layout` is refused as an unknown key, and an existing
+  `layout.json` is not read and not deleted. The mouse wheel still scrolls, and
+  a click still picks the tree or the editor in the Files view; a click in the
+  conversation no longer changes focus.
 
 ### Added — `TM-1`: the engine can run worker agents
 

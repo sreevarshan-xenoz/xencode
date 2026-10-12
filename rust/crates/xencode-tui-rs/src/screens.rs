@@ -97,8 +97,7 @@ impl Screen {
         }
     }
 
-    /// The view a panel belongs to. A panel in none of them (the ones being
-    /// retired, and overlays such as the feature navigator) is drawn over the
+    /// The view a panel belongs to. A panel in none of them is drawn over the
     /// conversation, so it counts as the conversation.
     pub fn of(focus: FocusArea) -> Screen {
         Screen::ALL
@@ -130,7 +129,6 @@ pub fn tab_name(area: FocusArea) -> &'static str {
         FocusArea::SecurityAuditor => "Security",
         FocusArea::MultiLanguage => "Languages",
         FocusArea::Settings => "All settings",
-        _ => "",
     }
 }
 

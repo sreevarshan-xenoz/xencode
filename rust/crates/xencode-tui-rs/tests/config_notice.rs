@@ -35,20 +35,32 @@ fn temp_config_dir(tag: &str) -> PathBuf {
     dir
 }
 
+/// The lock, and the value `XCODE_CONFIG_DIR` had before a test repointed it.
+struct Held {
+    guard: MutexGuard<'static, ()>,
+    before: Option<std::ffi::OsString>,
+}
+
 /// Point the process at a config directory holding `body`, for as long as the
 /// returned guard is held.
-fn with_config(body: &str) -> (PathBuf, MutexGuard<'static, ()>) {
+fn with_config(body: &str) -> (PathBuf, Held) {
     let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = temp_config_dir("dir");
     std::fs::write(dir.join("config.json"), body).unwrap();
+    let before = std::env::var_os("XCODE_CONFIG_DIR");
     std::env::set_var("XCODE_CONFIG_DIR", &dir);
-    (dir, guard)
+    (dir, Held { guard, before })
 }
 
-fn leave(dir: &Path, guard: MutexGuard<'static, ()>) {
-    std::env::remove_var("XCODE_CONFIG_DIR");
+/// Put `XCODE_CONFIG_DIR` back as it was, so the sandbox the test run was
+/// started with is never taken away, and remove the test directory.
+fn leave(dir: &Path, held: Held) {
+    match held.before {
+        Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+        None => std::env::remove_var("XCODE_CONFIG_DIR"),
+    }
     std::fs::remove_dir_all(dir).ok();
-    drop(guard);
+    drop(held.guard);
 }
 
 /// Everything the app paints into a terminal one frame deep.

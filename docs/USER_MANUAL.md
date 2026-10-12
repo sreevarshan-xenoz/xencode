@@ -25,7 +25,7 @@ Xencode is a **Rust-only** workspace (`rust/crates/*`, 16 crates):
 The Rust binary (`xencode`) is the entry point.
 
 ### Key Features
-- **Rust TUI**: Ratatui-based terminal interface with 27 panels. The `Ctrl+F` feature navigator lists 10 of them at the default disclosure level 2 and 26 at `/level 4`; the `Ctrl+X` command palette reaches every panel, command and setting at any level
+- **Rust TUI**: Ratatui-based terminal interface with 19 panels in seven views. The `Ctrl+P` command palette (also `Ctrl+X`) reaches every view, panel, command and setting at any disclosure level
 - **Multi-Provider AI Routing**: Ollama and llama.cpp locally + Gemini, Qwen and OpenRouter (any OpenAI-compatible model id) in the cloud, with status-code-driven retry middleware and a sequential `agent_fallback_models` chain
 - **Code Analysis**: per-language heuristics (Python, JS/TS, Rust) + a pattern-based OWASP Top 10 scanner
 - **HTTP/WebSocket Server**: Axum-based collaboration server with token auth, role-based access control, a JSONL audit trail and local-first bind defaults (TLS opt-in)
@@ -33,19 +33,12 @@ The Rust binary (`xencode`) is the entry point.
 - **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
-> **No panel is a mockup.** Seven TUI panels used to play hardcoded phrase lists;
-> all seven now do work.
+> **No panel is a mockup.** The TUI panels that used to play hardcoded phrase
+> lists now do work.
 > The **Security Auditor** — `Enter` walks the
 > workspace and runs the same `VulnerabilityScanner` behind `xencode analyze`,
 > so an empty result means the scanner found nothing, not that the panel is a
-> demo. The **Performance Profiler** — `Enter` samples this process's CPU and
-> resident memory from `/proc`, reads the turn latency, llama.cpp timings and
-> provider health the session already measured, and lists the last rows of
-> `.xencode/cache/metrics.jsonl`; anything with no data behind it shows `n/a` instead
-> of a number. The **Terminal Assistant** — you type what you want to do, it
-> makes one call to the configured model for candidate commands, and a command
-> you pick runs through the agent's approval gate exactly as the model's own
-> `run_command` would. The **Multi-Language** panel — `Enter` (or `d`) walks the
+> demo. The **Multi-Language** panel — `Enter` (or `d`) walks the
 > workspace with the same `scan_tree` the context engine uses and tabulates the
 > languages that are actually present: file count, non-blank non-comment lines
 > and share, with notes for what was skipped, listed as secret (counted, never
@@ -55,22 +48,9 @@ The Rust binary (`xencode`) is the entry point.
 > than a fake answer. The **Custom Models** panel — the list is
 > `model_profiles` from `config.json`, `Enter` applies a profile to the next
 > turn, `s` is the only key that writes the file, and `t` shows the provider's
-> own reply or its own error. The **Learning Mode** panel — `Enter` queues the
-> files `.xencode/index/symbols.json` says declare something, shows the chosen
-> file's own text and its recorded declarations, and asks the model once to
-> teach that file and set a quiz with its answer key; `p`/`n` walk the queue.
-> With no project index the panel says so and spends no request. The **Voice
-> Interface** — `Enter` opens the microphone through the first of `arecord`,
-> `pw-record` or `parec` found on `PATH`, and the meter, the peak and the clip
-> length are computed from the PCM that came out of it; `Enter` again (or `Esc`)
-> stops early and keeps what it has, and `m` mutes for real — the audio is
-> discarded, not recorded quietly. The clip is written to
-> `.xencode/voice/clip-<unix>.wav`. Words appear in the transcript only when a
-> whisper CLI is installed and produced them; with none, the panel says so and
-> names the clip. The closest working equivalents for everything else are the
-> chat itself (a real model call)
-> and `xencode advise` for repo insights. The performance dashboard, a separate
-> panel, reports real session metrics.
+> own reply or its own error. The closest working equivalents for everything
+> else are the chat itself (a real model call) and `xencode advise` for repo
+> insights.
 
 ## Installation
 
@@ -197,13 +177,9 @@ In the panels:
 | `Ctrl+Y` | PR review dashboard |
 | `Ctrl+K` | Background tasks panel |
 | `Ctrl+P` / `Ctrl+X` | Command palette (the seven views first): type a few words to reach any panel, slash command or setting, whatever the disclosure level. `Enter` opens a panel or setting, or puts a command in the composer for you to finish; a draft already there goes to the prompt history (`Alt+Up`). `Esc` closes it and leaves everything as it was |
-| `Ctrl+F` | Feature Navigator (17 panels) |
-| `Ctrl+D` | Performance dashboard |
 | `Ctrl+B` | On the conversation, show or hide the side panel; from any other panel, the ByteBot agent panel |
 | `Ctrl+H` | Run provider health check |
-| `Ctrl+T` | Toggle embedded terminal strip |
-| `Ctrl+U` | Cycle the body layout: classic → chat-first → zen → any template you declared in config |
-| `Ctrl+0` | Layout history: every change this screen has been through, oldest first, each named by the ask behind it (`Enter` on a row shows the pane widths before and after) |
+| `Ctrl+T` | Toggle the terminal strip under the editor in the Files view |
 | `Ctrl+W` | Close panel → chat |
 
 The worktrees are in the Agents view and the insights and project analyzer in the Project view (`Ctrl+P`). In the conversation, `Ctrl+A`, `Ctrl+E`, `Ctrl+K`, `Ctrl+U` and `Ctrl+W` edit the line as in a shell (start, end, delete to end, delete to start, delete the word before the cursor) instead of the panel actions above.
@@ -214,7 +190,7 @@ Panel-independent (Normal mode):
 | Key | Action |
 |-----|--------|
 | `?` / `F1` | Keybinding help overlay (lists the focused panel's keys); `F1` and `/help` also work while typing |
-| `Tab` | Cycle explorer → editor → chat |
+| `Tab` | In the Files view, move between the file tree and the editor; from another panel, back to the conversation |
 | `Esc` | Stop the running turn (what it already said stays) · close the panel, back to the conversation |
 | `i` or `/` | Edit the chat input (`/` types the slash, so `/init` works straight away). A session with nothing said yet starts here already |
 | `m` | Model selector (`r` refresh, `l`/`u` llama.cpp load/unload) |
@@ -223,7 +199,7 @@ Panel-independent (Normal mode):
 | `e` | Code editor: start typing edits |
 | `↑ ↓` / `j k` | Scroll or move selection (all scrollable panels) |
 | Mouse wheel | Scroll the panel under the cursor |
-| Drag a divider | Resize the two panes it splits (side-by-side panes only). The line lights when the pointer is on it; nothing moves until the pointer leaves the divider's two cells, and a line clamped at its minimum stops while the pointer keeps going. |
+| Click | In the Files view, focus the tree or the editor under the pointer |
 
 Reading the mouse costs something: while xencode asks the terminal for mouse
 events, a plain click-drag belongs to xencode and the terminal stops selecting
@@ -231,9 +207,8 @@ text with it. The way back is **Settings → `Mouse Capture`** (config key
 `mouse_capture`, default on) — switch it off mid-session and xencode hands the
 mouse to the terminal on the next frame, so the terminal's own drag-select and
 shift-select work again, and the setting is remembered for the next start. With
-it off, scrolling, pane clicks and divider drags are gone until it is back on;
-every one of them has a keyboard equivalent (`Tab` for pane focus, `↑ ↓` for
-scroll, `Alt+Left` / `Alt+Right` for resize).
+it off, scrolling and pane clicks are gone until it is back on; both have a
+keyboard equivalent (`Tab` for pane focus, `↑ ↓` for scroll).
 
 Chat editing (after `i`):
 
@@ -254,127 +229,47 @@ do anything):
 | `n` / `Esc` | Deny (the model is told it was denied and must not retry unchanged) |
 | `k` / `j` | Scroll the diff or command preview |
 
-**Feature Navigator panels (Ctrl+F → select → Enter):**
+**Panels (each opens from the palette: `Ctrl+P`, type its name, `Enter`):**
 
 | Panel | Description |
 |-------|-------------|
-| Performance Dashboard | Session stats, file breakdown (real metrics) |
 | Provider Health | Health checks with status icons (real requests): Ollama, llama.cpp and each keyed API get a row, and so does the Remote/Colab forward — it probes `remote_base_url`'s `/models` (the same endpoint `xencode colab status` waits on) and shows the forward URI under the row, while Connection Details lists the configured Remote URI or says it is not configured. With no remote URL set the row reads "Remote URL not configured (Settings → Remote URL)" instead of hiding |
 | Project Analyzer | Workspace file type analysis (real scan) |
 | Git Commit | Type a message, Enter runs `git commit -am` (tracked modifications only — untracked files are never added); result returns as a chat line |
 | ByteBot | Step-through autonomous task execution (real tool loop) |
-| Collaboration Hub | Real WebSocket client: create/join sessions, live members with roles, server errors verbatim |
-| Voice Interface | Real capture: `Enter` spawns the first recorder on `PATH` — `arecord`, `pw-record` or `parec` — streaming raw 16-bit mono 16 kHz, and the level bar, the peak and the clip length are RMS over the bytes it actually sent (one reading per 100 ms chunk). `Enter` again, or `Esc` while it is recording, ends the capture early and keeps the clip; `m`/`Space` mutes, which discards audio instead of saving a silent file. The clip is written to `.xencode/voice/clip-<unix>.wav`. The transcript stays empty unless a whisper CLI (`whisper`, `whisper-cpp`, `whisper-cli`) is installed — then its stdout is the text, and its failure is shown as its failure. With no engine the panel says so and names the clip it kept |
-| Terminal Assistant | Real delegation: type what you want to do and `Enter` makes one call to the configured model, which answers with up to 8 `command · risk · why` rows built from the workspace it was told about. `f` filters by risk, `j`/`k` select, `y`/`Enter` runs the selection — through the agent's approval gate, so the same modal and policy as a model-issued `run_command`, and the outcome (a denial included) is listed in the panel's history. A provider error is printed rather than papered over |
 | Security Auditor | Real scan: `Enter` walks the workspace with the context engine and runs `VulnerabilityScanner::scan_file` on every readable file; findings stream in with their CWE ids and a log line gives the true totals. Files the walker lists as secret are reported, never read |
-| Performance Profiler | Real measurement: `Enter` reads this process's CPU (two `/proc/self/stat` samples 250 ms apart) and resident memory, then the session's own numbers — average turn latency, llama.cpp tokens/s, per-provider health, and the last 6 rows of `.xencode/metrics.jsonl` (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with nothing to show reads `n/a` |
 | Custom Models | Real profiles: the panel lists `model_profiles` from `config.json` (empty on a fresh install, which it says out loud rather than filling with samples). `n` adds one seeded from the current session settings, `-`/`+` moves temperature (0.0–2.0) and `←`/`→` steps the token budget along 64…8192; `Enter` applies it to the next turn — model id plus both knobs, and a llama.cpp profile also asks the server to load that model — without touching disk; `s` writes the whole list through `XencodeConfig::save`; `t` sends one request with exactly that profile's settings and prints the provider's real reply or its real error. Unset knobs render as "the server decides" and are sent as nothing |
-| Learning Mode | Real lessons: `Enter` reads `.xencode/index/symbols.json` and queues the files that actually declare something — most declarations first, ties by path, five at a time. The panel shows that file's own text (capped at a line boundary, with a note saying how much was sent) and the declarations the index recorded, then makes one model call asking it to teach that file and reply with `{explain, question, options, answer, why}`; the model's sentences are labelled as its own. `p`/`n` walk the queue, `r` re-asks, `←→` + `Enter` answer the quiz, and grading uses the model's answer key — a reply with no usable key in it is printed as the reply, never replaced by a canned question. No project index → the panel says "run /init first" and sends nothing |
 | Multi-Language | Real detection + real translation: `Enter`/`d` runs the context engine's `scan_tree` over the workspace and lists each language actually found with files, lines (blanks and comment leads excluded) and share, plus notes for skipped, secret-listed (never read) and binary files. The language list is `scanner::Language`, with `▸` marking what the walk found. `Tab` selects From / To / Text, typing edits it, `Enter` makes one model call and prints its reply — or the provider's own error |
 | PR Review | Per-file diff browsing, base toggle (real git diff) |
 | Background Tasks | Live registry of background commands (stop/remove) |
 | Worktrees | Git worktree list, add (path+branch) and remove with confirm (real git) |
 | Insights | Refactor findings from the live symbol graph (broken imports, cycles, hubs, orphans) |
 
-**Collaboration Hub keys (while the panel is focused):**
-
-| Key | Action |
-|-----|--------|
-| `c` | Create a new session and connect (the server assigns the id) |
-| `j` | Edit the session id to join an existing session |
-| `Enter` | Connect with the fields as shown / finish editing a field |
-| `r` | Retry: hang up and dial the same server/session again |
-| `Tab` | Cycle the edited field: server → user → session |
-| `Esc` | Stop editing → disconnect (stops the client) → close the panel |
-
-The hub talks to `xencode server` (see Collaboration Server): it logs in
-over HTTP, authenticates the WebSocket with the first `auth` frame, and
-renders only real state — transport (`ws (no TLS)` / `wss (TLS)`), session
-id, live members with their roles, connected-for time, and the server's
-last error. There is no auto-reconnect; `r` is manual by design.
-
 ### Layouts & Display
 
-The body layout is one tree chosen by name — pick it with `Ctrl+U` (live, with
-a toast) or on the Settings panel (`s`); both walk the same list, which is the
-three shipped presets plus anything you declared in config. All choices persist
-to `~/.xencode/config.json`.
-
-| Name | Shape |
-|------|-------|
-| `classic` | explorer 20 % / editor 50 % / chat 30 % (the default look) |
-| `chat-first` | explorer hidden, editor 25 %, chat 75 % |
-| `zen` | one pane fills the body — explorer or editor when focused, otherwise chat |
-| *yours* | declared under `layout_templates`, selected with `layout` |
-
-The presets are built in; a name you add is data, so a new arrangement costs no
-code:
-
-```json
-"layout": "editor-first",
-"layout_templates": {
-  "editor-first": { "split": { "horizontal": true, "parts": [
-    [{ "leaf": { "slot": "editor", "focus": "editor" }}, { "percent": 70 }],
-    [{ "leaf": { "slot": "chat",   "focus": "chat"   }}, { "percent": 30 }]
-  ]}}
-}
-```
-
-A leaf names one of five slots (`explorer`, `editor`, `chat`, `input`,
-`terminal`) and the focus it carries (`explorer`, `editor` or `chat`); a split
-names `horizontal: true` for side-by-side or `false` for stacked, and each
-child's share as `{"percent": n}`, `{"min": n}` or `{"length": n}`. A name that
-is neither a preset nor a declared template renders `classic`, and a template
-that cannot be built — a mistyped slot, a split with one child, a zero share —
-is refused with its reason in a toast instead of costing you the rest of the
-config; `xencode config set layout <name>` prints the same note. There is no
-layouts directory and no layout file format: templates live in the config file,
-and `zen` is the one preset no template can reproduce, because its single pane
-follows the focus.
-
-**Why the screen is arranged this way.** `Ctrl+0` opens the layout history:
-every change the arrangement has been through since this session opened, oldest
-at the top, each row named by the ask behind it — `Ctrl+U cycled to
-chat-first`, `dragged the Code / Chat divider 6 cells, took 5`, `Ctrl+T put the
-terminal strip on the screen`. `Enter` opens a row into the pane widths before
-and after it, `j`/`k` move, `Esc` (or `Ctrl+0` again) closes; opening the panel
-moves nothing, and the newest row is the screen in front of you. Two things are
-deliberately absent. A keystroke that changed nothing adds no row — `Alt+Left`
-against a pane's minimum, or a drag the terminal is too short to hold. And an
-overlay is not a row: the agent stack and a permission prompt *cover* the
-arrangement rather than change it, so they are not on the list. The history is
-session memory; `~/.xencode/layout.json` holds geometry and focus only, so
-nothing about "how it got here" reaches the disk.
-
-One terminal fact: `Ctrl+0`, like `Ctrl+1`…`Ctrl+9`, has no control byte of its
-own — the byte a terminal would send is the one that means `Ctrl+P`. The chord
-arrives only when the terminal reports it as an escape sequence (the kitty
-keyboard protocol's `CSI 48;5u`), which is how it was checked here: over a raw
-PTY that sequence opened this panel and the plain byte opened what `Ctrl+P`
-opens (then the project analyzer, now the palette). A terminal that cannot send it leaves the saved views and this panel
-alike out of reach; `Ctrl+T`, `Ctrl+U`, `Alt+Left`/`Alt+Right` and dragging a
-divider still do all the rearranging.
+The Files view is the file tree on the left (30 %) beside the editor, with the
+terminal strip under the editor while `Ctrl+T` has it on. There are no layout
+presets, saved views, pane resizing or divider dragging. A config file that
+still holds `layout`, `layout_templates` or `layout_views` loads as before with
+those keys ignored, and they are left out the next time it is saved; an old
+`layout.json` in the settings directory is not read and not deleted.
 
 Display settings (Settings panel rows, same keys as `xencode config set`):
 
 | Row / config key | Default | Effect |
 |------------------|---------|--------|
-| `Layout` / `layout` | `classic` | preset or declared template above; unknown values fall back to classic |
 | `Rounded Borders` / `rounded_borders` | on | rounded panel corners; off draws square ones |
 | `tool_output` | `fold` | `fold` shows a tool call's first four lines and `+N lines`; `expand` shows all of it (JSON or `config set` only) |
 | `side_panel` | `auto` | the conversation's side panel: `auto` at 100 columns or wider, `on`, or `off`; `Ctrl+B` toggles it for the session (JSON or `config set` only) |
 | `status_line` | all six | the items under the input, in order: `model`, `provider`, `approval`, `context`, `cost`, `branch` (JSON or `config set` only) |
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
-| `Mouse Capture` / `mouse_capture` | on | xencode reads the wheel, pane clicks and divider drags; off hands the mouse back to the terminal, which is how a terminal's own drag-select comes back (see the note above the chat table) |
+| `Mouse Capture` / `mouse_capture` | on | xencode reads the wheel and pane clicks; off hands the mouse back to the terminal, which is how a terminal's own drag-select comes back (see the note above the chat table) |
 | `Floating Badge` / `badge_autostart` | off | on starts the floating badge with the terminal app; if the `xencode-badge` program is not found next to `xencode` or on `PATH`, a warning says so and the session carries on |
 | `Agent Approval` / `agent_approval` | `ask` | how the chat agent may use its tools: `ask` prompts before mutating tools, `edit-allow` auto-approves file edits but still prompts for shell, `all-allow` auto-approves everything inside the workspace (paths outside it, `.git/` and the config dir are always refused) |
 | `Command Timeout` / `agent_command_timeout` | 30 s | how long the agent's `run_command` may run before it is killed; the panel steps 5–300 s, `config set` accepts 1–600 |
 
-The header reads ` ✦ xencode [layout] ⎇branch model` on the left with the
-focused panel name on the right; on narrow terminals parts drop out in that
-order (layout chip below 72 columns, branch/model below 60, badge below 40).
-Tab cycles only the panes the current layout shows.
+Tab moves only between the panes the Files view shows: the tree and the editor.
 
 ### Agent Tools & Approvals
 
@@ -835,7 +730,7 @@ xencode colab down
   the CPU instead of the GPU, `up` and `status` say so in a `warning:` line.
 - After that the VM is an ordinary provider: pick it with `m` in the TUI,
   address it as `remote:<served-model-id>` (`/v1/models` on the forward lists
-  the ids), and watch the Remote row in Provider Health (Ctrl+F).
+  the ids), and watch the Remote row in Provider Health (`Ctrl+P` → Provider Health).
 - Free-tier VMs last about 12 hours and their disk is wiped. `status` says
   when the recorded VM is old enough to have been reaped; `xencode colab up
   --reconnect` rebuilds from `~/.xencode/colab.json` — reusing the forward if
@@ -1065,8 +960,7 @@ Routes: `/`, `/sessions/create`, `/sessions/{id}`, `/ws/{session_id}`,
 $ xencode tui
 
 # The TUI opens with 3 panels: File Explorer | Code Editor | Chat
-# Press Ctrl+F to open the Feature Navigator
-# Select any panel with arrow keys + Enter
+# Press Ctrl+P to open the palette, type a view or panel name, then Enter
 # Press Esc to close an overlay
 # Press Tab to cycle focus between main panels
 ```

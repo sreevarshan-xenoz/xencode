@@ -6,8 +6,9 @@
 //! This file holds one test because it sets `XCODE_CONFIG_DIR` for the whole
 //! test process; a second test here would race it.
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
-use xencode_tui_rs::app::{App, FocusArea};
+use xencode_tui_rs::app::App;
 use xencode_tui_rs::ui::draw;
 
 fn rendered(app: &mut App, width: u16, height: u16) -> String {
@@ -38,19 +39,26 @@ async fn a_fresh_start_is_simple_and_says_where_everything_else_is() {
     let shortcuts = xencode_tui_rs::focus::first_run_shortcuts_line(app.active_disclosure_level());
     let shortcut_count = shortcuts.split(", ").filter(|s| !s.is_empty()).count();
 
-    app.focus = FocusArea::FeatureNavigator;
-    let navigator = rendered(&mut app, 120, 40);
+    // Ctrl+P opens the palette, the one place every destination is reached.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    xencode_tui_rs::keymap::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        &tx,
+    );
+    assert!(app.palette_visible);
+    let palette = rendered(&mut app, 120, 40);
     let listed: Vec<&str> = app
         .palette_items()
         .iter()
         .map(|(name, _, _)| *name)
-        .filter(|name| navigator.contains(name))
+        .filter(|name| palette.contains(name))
         .collect();
 
     println!("FRESH START: disclosure level {level}");
     println!("FRESH START: {shortcut_count} shortcuts on the first screen: {shortcuts}");
     println!(
-        "FRESH START: {} panels on screen in the Ctrl+F navigator: {}",
+        "FRESH START: {} panels on screen in the Ctrl+P palette: {}",
         listed.len(),
         listed.join(", ")
     );
@@ -63,9 +71,9 @@ async fn a_fresh_start_is_simple_and_says_where_everything_else_is() {
     assert_eq!(listed.len(), app.palette_items().len());
 
     // `/level 4` goes through `set_disclosure_level`; every panel comes back
-    // into the navigator, and the choice is saved in the settings file.
+    // into the level's list, and the choice is saved in the settings file.
     app.set_disclosure_level(xencode_tui_rs::focus::DisclosureLevel::Level4);
-    let all = xencode_tui_rs::focus::DESTINATIONS.len() - 1; // not the navigator itself
+    let all = xencode_tui_rs::focus::DESTINATIONS.len();
     assert_eq!(app.palette_items().len(), all);
     let saved = std::fs::read_to_string(dir.path().join("config.json")).unwrap();
     assert!(saved.contains("\"disclosure_level\": 4"), "{saved}");
