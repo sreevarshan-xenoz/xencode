@@ -17825,6 +17825,9 @@ program; the keys themselves are covered by their own tests.
     tile's file lands on main through the checked merge from the rail (Windows and Linux);
     ask all reaches every agent; stop, tile 0 and the narrow layout came with OM-3. Ruling: merging
     stops the agent first, so nothing writes into the worktree mid-merge.
+  - [ ] **OM-6 — manuals and a watched live run.** Manuals done 2026-10-12 (README, QUICK_START,
+    CLI_GUIDE, USER_MANUAL). The live run with the installed agents (claude, codex, opencode, …)
+    needs the owner present, since each runs with their own sign-in; it is not done yet.
 - [ ] **DK-4 — desktop app shell.** Chat, approvals, model picker and settings on GPUI. Needs its
   own design first.
 - [ ] **DK-5 — the remaining panels** ported to the desktop app, in groups. Needs its own design.
