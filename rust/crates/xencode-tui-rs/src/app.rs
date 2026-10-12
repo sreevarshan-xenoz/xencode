@@ -4935,8 +4935,8 @@ impl<'a> App<'a> {
             name: "run_command".to_string(),
             arguments: serde_json::json!({ "command": command }),
         };
-        self.messages
-            .push(crate::transcript::tool_message(&crate::transcript::ToolEntry {
+        self.messages.push(crate::transcript::tool_message(
+            &crate::transcript::ToolEntry {
                 id: call.id.clone(),
                 name: call.name.clone(),
                 arguments: call.arguments.clone(),
@@ -4944,7 +4944,8 @@ impl<'a> App<'a> {
                     .unwrap_or_else(|| crate::agent_tools::summarize_call(&call)),
                 outcome: None,
                 preview: String::new(),
-            }));
+            },
+        ));
         self.chat_scroll = 0;
         let approval = self.approval_ctx();
         let runtime = self.task_runtime.clone();
@@ -14383,10 +14384,7 @@ pub async fn run_app<B: Backend + io::Write>(
     let mut repaint = false;
     // Focus events tell the loop whether the person is looking (TD-2); a
     // terminal that cannot report them simply never says it lost focus.
-    let _ = crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::event::EnableFocusChange
-    );
+    let _ = crossterm::execute!(terminal.backend_mut(), crossterm::event::EnableFocusChange);
     loop {
         // The mouse belongs to xencode only while the config says it does.
         // Applied here rather than at process start because the row is on the

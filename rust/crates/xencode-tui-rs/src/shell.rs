@@ -23,7 +23,11 @@ pub const SIDE_MIN_WIDTH: u16 = 100;
 const INPUT_MAX_ROWS: usize = 6;
 /// The hints on the right of the status line, longest first; the first that
 /// fits is drawn.
-const HINTS: [&str; 3] = ["ctrl+p commands · ctrl+b panel · ? keys", "ctrl+p · ? keys", "?"];
+const HINTS: [&str; 3] = [
+    "ctrl+p commands · ctrl+b panel · ? keys",
+    "ctrl+p · ? keys",
+    "?",
+];
 
 /// Where each part of the conversation screen goes this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,10 +152,11 @@ fn approval_lines(app: &App, width: usize) -> Option<(String, Vec<Line<'static>>
     let bold = Style::default()
         .fg(app.theme.fg)
         .add_modifier(Modifier::BOLD);
-    let mut body: Vec<Line<'static>> = hard_wrap(&crate::transcript::clean(&request.summary), width)
-        .into_iter()
-        .map(|row| Line::from(Span::styled(row, bold)))
-        .collect();
+    let mut body: Vec<Line<'static>> =
+        hard_wrap(&crate::transcript::clean(&request.summary), width)
+            .into_iter()
+            .map(|row| Line::from(Span::styled(row, bold)))
+            .collect();
     for line in request.preview.lines() {
         let color = if line.starts_with("@@") {
             app.theme.accent
@@ -288,7 +293,9 @@ pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         } else {
             app.config.default_model.clone()
         };
-        for row in crate::transcript::wrap_indented(&format!("{model} · {project}"), width as usize, 1) {
+        for row in
+            crate::transcript::wrap_indented(&format!("{model} · {project}"), width as usize, 1)
+        {
             lines.push(Line::from(Span::styled(row, dim)));
         }
     } else {
@@ -305,7 +312,8 @@ pub fn transcript_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     // Messages typed during the turn, waiting for it to end (TD-3).
     for queued in &app.queued {
         let first = queued.lines().next().unwrap_or_default();
-        for row in crate::transcript::wrap_indented(&format!("queued: {first}"), width as usize, 2) {
+        for row in crate::transcript::wrap_indented(&format!("queued: {first}"), width as usize, 2)
+        {
             lines.push(Line::from(Span::styled(
                 row,
                 Style::default().fg(app.theme.message_system),
@@ -372,8 +380,8 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: Rect, with_plan: bool) ->
             width: 1,
             ..area
         };
-        let mut state = ratatui::widgets::ScrollbarState::new(total as usize)
-            .position(scroll as usize);
+        let mut state =
+            ratatui::widgets::ScrollbarState::new(total as usize).position(scroll as usize);
         f.render_stateful_widget(crate::ui::scrollbar_bar(app), bar, &mut state);
     }
     (text.y - top) + total.min(text.height)

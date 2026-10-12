@@ -15,23 +15,38 @@ type Binding = (&'static str, &'static str);
 /// The conversation (TD-3): the input is always ready, so these are the
 /// keys there.
 const CONVERSATION: &[Binding] = &[
-    ("Enter", "send · while a turn runs, the message waits and goes after it"),
+    (
+        "Enter",
+        "send · while a turn runs, the message waits and goes after it",
+    ),
     ("Alt+Enter / Ctrl+J", "new line"),
-    ("Esc", "stop the running turn · twice: your last message back to edit"),
+    (
+        "Esc",
+        "stop the running turn · twice: your last message back to edit",
+    ),
     ("Ctrl+C", "clear the input · on an empty input, twice quits"),
     ("Ctrl+P", "open a view, a panel, a command or a setting"),
     ("Ctrl+B", "show or hide the side panel"),
     ("Ctrl+O", "unfold the latest tool output · again folds it"),
     ("Ctrl+L", "the Models view"),
-    ("Ctrl+E", "the Files view (on an empty input; else end of line)"),
+    (
+        "Ctrl+E",
+        "the Files view (on an empty input; else end of line)",
+    ),
     ("Shift+Tab", "approval mode: ask → auto-edit → plan"),
     ("Ctrl+Space", "Coding ⇄ Orchestrator mode"),
     ("?", "this help (on an empty input)"),
     ("@path", "mention a file · Tab puts the best match in"),
-    ("!command", "run a shell command, asking first like the agent does"),
+    (
+        "!command",
+        "run a shell command, asking first like the agent does",
+    ),
     ("/command", "a slash command · Tab completes it"),
     ("Alt+Up / Alt+Down", "previous / next message you sent"),
-    ("Ctrl+A / K / U / W", "start of line · delete to end / to start / the word"),
+    (
+        "Ctrl+A / K / U / W",
+        "start of line · delete to end / to start / the word",
+    ),
 ];
 
 pub(crate) const GLOBAL: &[Binding] = &[
@@ -44,10 +59,7 @@ pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+R", "code review (AI, current file)"),
     ("Ctrl+Y", "PR review dashboard"),
     ("Ctrl+K", "background tasks panel"),
-    (
-        "Ctrl+X",
-        "the palette, as Ctrl+P",
-    ),
+    ("Ctrl+X", "the palette, as Ctrl+P"),
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
     ("Ctrl+B", "ByteBot, from a panel"),

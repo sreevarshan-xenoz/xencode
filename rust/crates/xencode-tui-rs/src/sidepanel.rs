@@ -109,7 +109,10 @@ fn plan(app: &App) -> Section {
             .collect();
         cap(app, rows)
     };
-    Section { title: "Plan", rows }
+    Section {
+        title: "Plan",
+        rows,
+    }
 }
 
 /// Tokens as people read them: `950`, `12.3k`, `128k`.
@@ -337,7 +340,10 @@ mod tests {
     #[test]
     fn a_long_path_keeps_its_file_name() {
         assert_eq!(path_tail("src/a.rs", 20), "src/a.rs");
-        assert_eq!(path_tail("rust/crates/xencode-cli/src/main.rs", 12), "…src/main.rs");
+        assert_eq!(
+            path_tail("rust/crates/xencode-cli/src/main.rs", 12),
+            "…src/main.rs"
+        );
     }
 
     #[test]
