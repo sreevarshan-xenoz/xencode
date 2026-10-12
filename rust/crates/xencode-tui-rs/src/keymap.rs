@@ -701,9 +701,6 @@ fn on_esc(app: &mut App) {
         | FocusArea::TaskManager => {
             app.focus = FocusArea::ChatInput;
         }
-        FocusArea::CodeEditor => {
-            app.input_mode = InputMode::Normal;
-        }
         _ => {}
     }
 }
