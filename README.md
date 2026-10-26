@@ -817,6 +817,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo llvm-cov --workspace --summary-only   # Line coverage (needs cargo-llvm-cov)
 ```
 
+With [`just`](https://github.com/casey/just) installed, the [`justfile`](justfile) at the root runs the same commands: `just build`, `just test`, `just lint`, `just coverage`.
+
 CI runs fmt + clippy + the full suite on every push, a coverage job that fails below 80% line coverage (82.8% measured on Linux, 2026-10-26), and a gitleaks secret scan of the whole history — see [`.github/workflows/`](.github/workflows/).
 
 ---

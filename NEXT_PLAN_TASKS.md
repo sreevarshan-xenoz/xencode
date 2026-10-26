@@ -17967,3 +17967,7 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   causes, which is how the timeout was seen. Still open: why 1.54.1 stalls a request from a
   single-threaded runtime, whether xencode's own commands are affected, and a newer tokio to move
   to. (These web tests also fail on this Windows machine with any tokio, for an unrelated reason.)
+- [x] **RH-24 — a justfile.** Done 2026-10-26: `build`, `release`, `test`, `lint`, `fmt`, `coverage`,
+  `docs` (Unix only) and `clean`, each the command CI runs, with `--manifest-path` so they work
+  from the repository root. The commands were run from the root; `just` itself was not installed
+  here, so the file has not been parsed by it yet.
