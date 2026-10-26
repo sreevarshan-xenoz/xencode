@@ -17895,3 +17895,5 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   `RUST_LOG`. `tests/server_logging.rs` starts the real binary with an audit path it cannot open
   and finds the warning; with the subscriber removed that test fails. `docker-compose.yml`'s
   unused `LOG_LEVEL` became `RUST_LOG`.
+- [x] **RH-9 — a `/health` route.** Done 2026-10-26: `GET /health` answers like `GET /`; a unit test
+  covers it, a live `xencode server` answered it, and the Dockerfile and compose health checks use it.

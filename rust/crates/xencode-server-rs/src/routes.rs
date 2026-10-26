@@ -246,6 +246,8 @@ async fn llamacpp_unload(
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(health_check))
+        // The conventional path for load balancers and container health checks.
+        .route("/health", get(health_check))
         .route("/sessions/create", post(create_session))
         .route("/sessions/{id}", get(get_session))
         .route("/ws/{session_id}", get(ws_handler))

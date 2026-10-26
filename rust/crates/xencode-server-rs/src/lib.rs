@@ -413,6 +413,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn health_answers_the_same_as_the_root() {
+        let app = build_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["status"], "online");
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
     async fn test_health_check_body() {
         let app = build_app();
         let response = app

@@ -3653,6 +3653,9 @@ cannot be opened or written. The level is `info` unless `RUST_LOG` sets
 another (`RUST_LOG=warn xencode server`, or per crate:
 `RUST_LOG=xencode_server_rs=debug`).
 
+`GET /health` (and `GET /`) answers `{"status":"online",…}` for load balancers
+and container health checks; `GET /api/status` adds the session count and uptime.
+
 ### `xencode plugin <action>`
 `list`, `install <git-url> | <path>`, `update <name>`, `remove <name>`. Plugins
 live in `$XCODE_PLUGIN_DIR`, else `<data dir>/xencode/plugins` — the same

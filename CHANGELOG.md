@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — repository hygiene
 
+- `RH-9`: the server answers `GET /health`, the path load balancers and
+  container health checks expect; the Dockerfile and compose file use it.
 - `RH-1`: Dependabot opens weekly update pull requests for the Rust
   workspace, the separate badge workspace and the GitHub Actions in the
   workflows. Minor and patch updates of each come grouped in one pull request.

@@ -37,9 +37,9 @@ USER xencode
 # Expose the collaboration server port
 EXPOSE 8765
 
-# Health check against the server status endpoint
+# Health check against the /health endpoint
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8765/api/status || exit 1
+    CMD curl -f http://localhost:8765/health || exit 1
 
 # Default command: collaboration server (override for CLI use)
 CMD ["xencode", "server", "--port", "8765"]
