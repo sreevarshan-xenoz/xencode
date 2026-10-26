@@ -30,6 +30,15 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 
+# Lint levels every crate inherits through `[lints] workspace = true`, so a
+# plain `cargo clippy` checks what CI checks. CI adds `-D warnings` on top.
+[workspace.lints.clippy]
+# AGENTS.md forbids placeholders standing in for real behavior, so the macros
+# that make one compile are refused outright, along with leftover debug output.
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

@@ -17897,3 +17897,8 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   unused `LOG_LEVEL` became `RUST_LOG`.
 - [x] **RH-9 — a `/health` route.** Done 2026-10-26: `GET /health` answers like `GET /`; a unit test
   covers it, a live `xencode server` answered it, and the Dockerfile and compose health checks use it.
+- [x] **RH-10 — lint settings in the repository.** Done 2026-10-26: `rust/Cargo.toml` has
+  `[workspace.lints.clippy]` (every crate inherits it) refusing `todo!`, `unimplemented!` and
+  `dbg!`, and `rust/rustfmt.toml` sets the edition. The old `-A clippy::format-in-format-args`
+  flag was dropped from CI and the docs: with that lint switched on, no code triggers it. Workspace
+  clippy with `-D warnings` is clean; a probe lint confirmed the settings reach every crate.

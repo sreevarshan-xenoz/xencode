@@ -1,0 +1,3 @@
+# Formatting settings for rustfmt. The defaults apply; the edition is set here
+# so that running rustfmt on a single file formats it the way cargo fmt does.
+edition = "2021"

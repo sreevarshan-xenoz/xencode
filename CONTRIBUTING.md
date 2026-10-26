@@ -102,7 +102,7 @@ cargo test -p xencode-tui-rs      # one crate
 4. **Run the full gate** from `rust/` — all three must be clean:
    ```bash
    cargo test --workspace
-   cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+   cargo clippy --workspace --all-targets -- -D warnings
    cargo fmt --all --check
    ```
 
@@ -122,7 +122,8 @@ cargo test -p xencode-tui-rs      # one crate
 
 - `cargo fmt` is authoritative for formatting; CI fails on `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings` must be clean
-  (`clippy::format-in-format-args` is allowed workspace-wide)
+  (lint levels live in `[workspace.lints]` in `rust/Cargo.toml`; `todo!`,
+  `unimplemented!` and `dbg!` are refused there)
 - Prefer `thiserror`-style typed errors over stringly-typed `Result`s; the
   workspace crates each own their error enum
 - `unwrap()`/`expect()` are fine in tests, not in product paths that can hit a
@@ -216,7 +217,7 @@ cargo llvm-cov --workspace --summary-only     # line coverage; CI fails below 80
 ### PR Checklist
 
 - [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args` is clean
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings` is clean
 - [ ] `cargo fmt --all --check` is clean
 - [ ] Tests added/updated for new behavior
 - [ ] Manuals updated (`README.md`, `QUICK_START.md`, `CLI_GUIDE.md`, `CHANGELOG.md`, `NEXT_PLAN_TASKS.md`)

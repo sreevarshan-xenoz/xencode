@@ -34,7 +34,7 @@ jobs:
       working-directory: rust
 
     - name: Run clippy lints
-      run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+      run: cargo clippy --workspace --all-targets -- -D warnings
       working-directory: rust
 
     - name: Run cargo test

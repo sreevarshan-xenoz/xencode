@@ -807,7 +807,7 @@ cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
 cargo fmt --check                   # Format gate (CI)
-cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+cargo clippy --workspace --all-targets -- -D warnings
 cargo llvm-cov --workspace --summary-only   # Line coverage (needs cargo-llvm-cov)
 ```
 
