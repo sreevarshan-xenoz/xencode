@@ -17906,3 +17906,6 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   behavior switches xencode reads, each commented out and empty, and says plainly that xencode
   loads no `.env` file by itself. Loading a filled copy the documented way made
   `xencode config show` report the key as coming from the environment.
+- [x] **RH-12 — the README says what kind of project this is.** Done 2026-10-26: one line under
+  the introduction: a command-line application and terminal UI in a Rust workspace, with a
+  Dockerfile and compose file only for the optional server.

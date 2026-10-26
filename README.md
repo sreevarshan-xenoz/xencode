@@ -37,6 +37,11 @@ At its core is a fast, single-file **Rust** binary (20 crates, about 3,000
 tests) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
+**Project type:** a command-line application and terminal UI, written as a Rust
+workspace under [`rust/`](rust/). It is not infrastructure tooling: the only
+deployment files are a [`Dockerfile`](Dockerfile) and a
+[`docker-compose.yml`](docker-compose.yml) for the optional collaboration server.
+
 ---
 
 ## ⚡ At a glance
