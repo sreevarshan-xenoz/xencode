@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — repository hygiene
+
+- `RH-1`: Dependabot opens weekly update pull requests for the Rust
+  workspace, the separate badge workspace and the GitHub Actions in the
+  workflows. Minor and patch updates of each come grouped in one pull request.
+
 ### Added — `OM-1`: a terminal crate for orchestrator mode's tiles
 
 - A new crate, `xencode-term-rs`, runs a real program in a pseudo-terminal

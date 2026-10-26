@@ -1,0 +1,33 @@
+# Weekly dependency update pull requests. Minor and patch updates of each
+# ecosystem arrive grouped in one pull request so they do not flood the queue;
+# major updates arrive one by one, since they are the ones that break builds.
+version: 2
+updates:
+  # The main Rust workspace (rust/Cargo.toml and rust/Cargo.lock).
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      rust-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The floating badge is its own workspace with its own lock file.
+  - package-ecosystem: cargo
+    directory: /rust/badge
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      badge-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Actions used by .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

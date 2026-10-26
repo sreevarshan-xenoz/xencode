@@ -17851,3 +17851,24 @@ program; the keys themselves are covered by their own tests.
   function that also clears the old model's measured context window. Done 2026-10-09:
   `App::set_model` is used by the Models screen, `/model` and the ByteBot panel's list; tests
   cover the forgotten window, `/model` in chat, and switching from the panel without leaving it.
+
+## Milestone RH — repository hygiene (owner directive, 2026-10-26)
+
+An outside review of the repository listed gaps a newcomer or a reviewer would notice: no
+dependency update automation, no coverage figure, no secret scan in CI, no one-command dev
+container, and source files of ten to nineteen thousand lines. Each item below is one commit.
+
+- [x] **RH-1 — Dependabot.** Done 2026-10-26; the file passes the published dependabot schema. `.github/dependabot.yml` opens weekly update pull requests for the
+  Rust workspace, the separate badge workspace and the GitHub Actions the workflows use.
+- [ ] **RH-2 — a coverage job.** CI measures line coverage of the workspace with
+  `cargo llvm-cov` and fails below a floor set from a measured run, not a guessed one.
+- [ ] **RH-3 — slash commands out of `app.rs`.** The slash command table and its completion and
+  unknown-command helpers move to `xencode-tui-rs/src/slash_commands.rs`.
+- [ ] **RH-4 — the query stream protocol out of `main.rs`.** The `query_stream` module of
+  `xencode-cli/src/main.rs` moves to its own file with its tests.
+- [ ] **RH-5 — `agent_tools.rs` split.** The largest self-contained parts of
+  `xencode-tui-rs/src/agent_tools.rs` move to their own modules.
+- [ ] **RH-6 — a secret scan in CI.** A `secret-scan` job runs gitleaks over the history, with an
+  allowlist for the deliberately fake test credentials the Secret Fixture Rule requires.
+- [ ] **RH-7 — a dev container.** `.devcontainer/devcontainer.json` gives a Rust toolchain with
+  rustfmt and clippy in one step.
