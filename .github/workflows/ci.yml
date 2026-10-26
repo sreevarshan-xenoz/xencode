@@ -40,7 +40,14 @@ jobs:
       run: cargo clippy --workspace --all-targets -- -D warnings
       working-directory: rust
 
+    - name: Build the tests
+      run: cargo test --workspace --no-run
+      working-directory: rust
+
+    # A time limit, so a stuck test ends this step while the runner is still
+    # alive and its log is kept; cargo names a test running over 60 seconds.
     - name: Run cargo test
+      timeout-minutes: 20
       run: cargo test --workspace --no-fail-fast
       working-directory: rust
 
@@ -87,6 +94,7 @@ jobs:
       run: command -v cargo-llvm-cov || cargo install cargo-llvm-cov --version 0.9.1 --locked
 
     - name: Measure line coverage
+      timeout-minutes: 40
       run: |
         cargo llvm-cov --workspace --lcov --output-path lcov.info
         cargo llvm-cov report --summary-only --fail-under-lines 80

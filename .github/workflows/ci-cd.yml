@@ -49,7 +49,14 @@ jobs:
       run: cargo clippy --workspace --all-targets -- -D warnings
       working-directory: rust
 
+    - name: Build the tests
+      run: cargo test --workspace --no-run
+      working-directory: rust
+
+    # A time limit, so a stuck test ends this step while the runner is still
+    # alive and its log is kept; cargo names a test running over 60 seconds.
     - name: Run cargo test
+      timeout-minutes: 20
       run: cargo test --workspace --no-fail-fast
       working-directory: rust
 
