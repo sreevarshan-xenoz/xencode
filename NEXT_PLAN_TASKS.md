@@ -17934,3 +17934,7 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   runner (`kill(-1, SIGKILL)` from the `kill` program). The group is now signalled with kill(2)
   directly, and 0 and 1 are never targets. The terminal tests ran 20 rounds there without a death,
   where before the container died within 12.
+- [x] **RH-16 — GitHub Actions updates from Dependabot.** Done 2026-10-26: `ci-cd.yml` takes
+  docker/login-action 4.7.0, docker/build-push-action 7.4.0, codeql upload-sarif 4.39.1 and
+  docker/setup-buildx-action 4.4.1 (#57, #55). #56 is not taken: it loosens the exact checkout pins
+  to `@v7`, and its only other change is to `release.yml`, which cargo-dist generates and checks.
