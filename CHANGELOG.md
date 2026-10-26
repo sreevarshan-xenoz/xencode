@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RH-4`: `xencode-cli/src/main.rs` is split: the NDJSON query protocol lives
   in `query_stream.rs`, the `xencode orchestrator` commands in
   `orchestrator.rs`, and the unit tests in `tests.rs`. No behavior changes.
+- `RH-5`: the unit tests of `xencode-tui-rs/src/agent_tools.rs` live in
+  `agent_tools/tests.rs`. No behavior changes.
 
 ### Added — `OM-1`: a terminal crate for orchestrator mode's tiles
 

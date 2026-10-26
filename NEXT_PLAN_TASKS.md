@@ -17871,8 +17871,9 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   unit tests to `tests.rs`, going from 17,418 to 13,314 lines. The 81 unit tests pass; four
   integration tests (`agents_contract_cli`, `compete_cli`, `mcp_serve_stdio`) fail on Windows
   with or without this change.
-- [ ] **RH-5 — `agent_tools.rs` split.** The largest self-contained parts of
-  `xencode-tui-rs/src/agent_tools.rs` move to their own modules.
+- [x] **RH-5 — `agent_tools.rs` split.** Done 2026-10-26: its unit tests, more than half the file,
+  moved to `xencode-tui-rs/src/agent_tools/tests.rs`; `agent_tools.rs` went from 11,881 to 5,351
+  lines. The crate's 720 unit tests pass.
 - [ ] **RH-6 — a secret scan in CI.** A `secret-scan` job runs gitleaks over the history, with an
   allowlist for the deliberately fake test credentials the Secret Fixture Rule requires.
 - [ ] **RH-7 — a dev container.** `.devcontainer/devcontainer.json` gives a Rust toolchain with
