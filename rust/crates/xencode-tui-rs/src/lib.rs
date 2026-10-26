@@ -32,6 +32,7 @@ pub mod sandbox;
 pub mod screens;
 pub mod shell;
 pub mod sidepanel;
+pub mod slash_commands;
 pub mod task_eval;
 pub mod task_profiles;
 pub mod theme;

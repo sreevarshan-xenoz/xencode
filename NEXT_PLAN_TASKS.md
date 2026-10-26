@@ -17862,8 +17862,10 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   Rust workspace, the separate badge workspace and the GitHub Actions the workflows use.
 - [ ] **RH-2 — a coverage job.** CI measures line coverage of the workspace with
   `cargo llvm-cov` and fails below a floor set from a measured run, not a guessed one.
-- [ ] **RH-3 — slash commands out of `app.rs`.** The slash command table and its completion and
-  unknown-command helpers move to `xencode-tui-rs/src/slash_commands.rs`.
+- [x] **RH-3 — `app.rs` split.** Done 2026-10-26: the slash command table and its completion and
+  unknown-command helpers moved to `xencode-tui-rs/src/slash_commands.rs` (re-exported from `app`,
+  so every caller is unchanged) and the unit tests to `src/app/tests.rs`; `app.rs` went from
+  19,923 to 13,197 lines. The crate's 720 unit tests pass, the same 166 test functions as before.
 - [ ] **RH-4 — the query stream protocol out of `main.rs`.** The `query_stream` module of
   `xencode-cli/src/main.rs` moves to its own file with its tests.
 - [ ] **RH-5 — `agent_tools.rs` split.** The largest self-contained parts of
