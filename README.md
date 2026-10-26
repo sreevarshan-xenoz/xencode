@@ -747,7 +747,8 @@ flowchart TD
   key (`command:pass show xencode/openai`, `command:secret-tool lookup …`), or the
   environment variable named for the provider (`API_KEY_OPENAI`,
   `API_KEY_OPENROUTER`, `API_KEY_GEMINI`, `API_KEY_QWEN`, `API_KEY_REMOTE` /
-  `XENCODE_API_KEY`, `API_KEY_NVIDIA` / `NVIDIA_NIM_API_KEY`). A reference is run
+  `XENCODE_API_KEY`, `API_KEY_NVIDIA` / `NVIDIA_NIM_API_KEY`; every variable
+  xencode reads is listed in [`.env.example`](.env.example)). A reference is run
   directly — no shell, so nothing in it expands — with no terminal and ten seconds
   to answer, and its error output is dropped rather than printed. There is **no
   encrypted vault** in the Rust implementation; a desktop keyring is reachable only

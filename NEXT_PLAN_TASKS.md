@@ -17902,3 +17902,7 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   `dbg!`, and `rust/rustfmt.toml` sets the edition. The old `-A clippy::format-in-format-args`
   flag was dropped from CI and the docs: with that lint switched on, no code triggers it. Workspace
   clippy with `-D warnings` is clean; a probe lint confirmed the settings reach every crate.
+- [x] **RH-11 — `.env.example`.** Done 2026-10-26: lists the provider keys, directory overrides and
+  behavior switches xencode reads, each commented out and empty, and says plainly that xencode
+  loads no `.env` file by itself. Loading a filled copy the documented way made
+  `xencode config show` report the key as coming from the environment.

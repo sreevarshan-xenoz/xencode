@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — repository hygiene
 
+- `RH-11`: `.env.example` lists every environment variable xencode reads,
+  with how to load it, since xencode does not read a `.env` file by itself.
 - `RH-10`: lint levels live in `rust/Cargo.toml` under `[workspace.lints]`,
   so a plain `cargo clippy` checks what CI checks; `todo!`, `unimplemented!`
   and `dbg!` are refused. `rust/rustfmt.toml` sets the edition for rustfmt.
