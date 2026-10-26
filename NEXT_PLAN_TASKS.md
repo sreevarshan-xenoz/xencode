@@ -17958,3 +17958,4 @@ container, and source files of ten to nineteen thousand lines. Each item below i
 - [x] **RH-21 — windows-sys 0.61 in core (#53).** Done 2026-10-26: xencode-core-rs joins live-rs and
   tui-rs on windows-sys 0.61; it builds unchanged on Windows and its tests pass apart from the
   three task tests already failing there.
+- [x] **RH-22 — serde_json 1.0.154 in the badge (#44).** Done 2026-10-26: the badge workspace's 4 tests pass.
