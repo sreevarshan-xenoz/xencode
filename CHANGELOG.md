@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `RH-8`: `xencode server` prints its logs
+
+- The server's sign-ins, dropped peers, plugin events and audit-log failures
+  were logged through `tracing` with nothing installed to print them, so they
+  were lost; an audit log that could not be written stopped silently. The
+  server now writes them to standard error at `info`, or at the level
+  `RUST_LOG` names. `docker-compose.yml` sets `RUST_LOG` instead of an unused
+  `LOG_LEVEL`.
+
 ### Added — repository hygiene
 
 - `RH-1`: Dependabot opens weekly update pull requests for the Rust

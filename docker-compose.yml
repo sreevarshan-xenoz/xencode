@@ -14,7 +14,7 @@ services:
       - "8765:8765"
     environment:
       - XENCODE_ENV=production
-      - LOG_LEVEL=INFO
+      - RUST_LOG=info
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data

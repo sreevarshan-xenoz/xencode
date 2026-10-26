@@ -3647,6 +3647,12 @@ binds with a loud clear-text warning); `--cert` without `--key` (or the
 reverse) is an error; the banner prints the real scheme — `ws://` stays
 `ws://`, only certificates earn `wss://`.
 
+The server logs to standard error: sign-ins and departures, peers dropped
+for a full send buffer, plugin events, and a warning when the audit log
+cannot be opened or written. The level is `info` unless `RUST_LOG` sets
+another (`RUST_LOG=warn xencode server`, or per crate:
+`RUST_LOG=xencode_server_rs=debug`).
+
 ### `xencode plugin <action>`
 `list`, `install <git-url> | <path>`, `update <name>`, `remove <name>`. Plugins
 live in `$XCODE_PLUGIN_DIR`, else `<data dir>/xencode/plugins` — the same

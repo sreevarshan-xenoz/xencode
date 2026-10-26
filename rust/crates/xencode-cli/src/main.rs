@@ -8346,6 +8346,21 @@ fn resolve_audit_path(audit_path: Option<&str>) -> Result<Option<PathBuf>, Strin
     }
 }
 
+/// The server is the one command whose libraries report through `tracing`:
+/// sign-ins, peers dropped for a full send buffer, plugin events, and an audit
+/// log that has stopped being written. Without a subscriber those lines were
+/// dropped, so the server installs one that writes to standard error at `info`
+/// and above, or at whatever level `RUST_LOG` names. Only the server does this:
+/// in the TUI, lines written to the terminal would break the screen.
+fn init_server_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
+}
+
 async fn run_server(
     port: u16,
     host: String,
@@ -8355,6 +8370,8 @@ async fn run_server(
     allow_insecure_public: bool,
 ) -> Result<(), String> {
     use xencode_server_rs::audit::AuditSink;
+
+    init_server_logging();
 
     let bind = resolve_bind(
         &host,

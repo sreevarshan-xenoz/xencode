@@ -17889,3 +17889,9 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   file passes the published dev container schema; the image and its create command were run
   under Podman in WSL and built the workspace (exit 0) with rustfmt, clippy and rustc 1.99 in it.
   Not yet opened in VS Code or Codespaces themselves.
+- [x] **RH-8 — the server prints its logs.** Done 2026-10-26: `xencode server`'s crates logged through
+  `tracing` with no subscriber installed, so sign-ins, dropped peers, plugin events and a
+  failing audit log were never shown. The server now logs to standard error at `info`, or at
+  `RUST_LOG`. `tests/server_logging.rs` starts the real binary with an audit path it cannot open
+  and finds the warning; with the subscriber removed that test fails. `docker-compose.yml`'s
+  unused `LOG_LEVEL` became `RUST_LOG`.
