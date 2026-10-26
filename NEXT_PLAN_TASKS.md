@@ -17971,7 +17971,9 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   `docs` (Unix only) and `clean`, each the command CI runs, with `--manifest-path` so they work
   from the repository root. The commands were run from the root; `just` itself was not installed
   here, so the file has not been parsed by it yet.
-- [ ] **RH-25 — `xencode-cli/src/main.rs` split by subcommand.** Started 2026-10-26: whole blocks move
+- [x] **RH-25 — `xencode-cli/src/main.rs` split by subcommand.** Done 2026-10-26: whole blocks move
   to their own modules with no logic change, each checked by clippy, the 81 unit tests and a
   byte-for-byte comparison of the generated man page and completions. First: the command-line
-  definitions to `cli.rs` (13,331 to 11,262 lines).
+  definitions to `cli.rs`, then fourteen `cmd_*.rs` modules, one group of subcommands each; `main.rs`
+  went from 13,331 to 603 lines. After the last move: clippy clean, 81 unit tests passing, the
+  generated man page and completions identical.
