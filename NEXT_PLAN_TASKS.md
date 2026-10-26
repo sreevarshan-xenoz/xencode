@@ -17884,5 +17884,8 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   database default in files since deleted. `.gitleaks.toml` allows lines marked fake, and
   `.gitleaksignore` lists the other 38 by fingerprint. The job's steps pass on Linux, and a key
   planted in a scratch repository fails them.
-- [ ] **RH-7 — a dev container.** `.devcontainer/devcontainer.json` gives a Rust toolchain with
-  rustfmt and clippy in one step.
+- [x] **RH-7 — a dev container.** Done 2026-10-26: `.devcontainer/devcontainer.json` uses the
+  `mcr.microsoft.com/devcontainers/rust:1-bookworm` image and builds the workspace on create. The
+  file passes the published dev container schema; the image and its create command were run
+  under Podman in WSL and built the workspace (exit 0) with rustfmt, clippy and rustc 1.99 in it.
+  Not yet opened in VS Code or Codespaces themselves.

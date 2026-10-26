@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RH-6`: CI scans every commit for secrets with gitleaks. The 39 matches in
   the existing history were checked by hand and are all fake test values; they
   are listed in `.gitleaksignore`.
+- `RH-7`: a dev container (`.devcontainer/devcontainer.json`) gives a Rust
+  toolchain with rustfmt and clippy and builds the workspace when created.
 - `RH-3`: `xencode-tui-rs/src/app.rs` is split: the slash command list and its
   helpers live in `slash_commands.rs`, and the unit tests in `app/tests.rs`.
   No behavior changes.

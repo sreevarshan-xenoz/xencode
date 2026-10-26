@@ -283,6 +283,14 @@ script before running it.
 .\install.ps1
 ```
 
+### Option C: Dev container
+
+For working on xencode without installing Rust yourself,
+[`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) gives a Rust
+toolchain with rustfmt and clippy. Open the repository in VS Code with the Dev
+Containers extension, or in GitHub Codespaces, and the workspace is built when the
+container is created. Docker (or Podman) is the only thing you need installed.
+
 > ✨ Tip: pull a small model first so you can validate the whole path:
 > `ollama pull qwen3:4b`
 
@@ -986,7 +994,7 @@ collaboration server — each is a decision to make, not an oversight.
 We welcome contributions of all kinds — bug reports, docs, features, and plugins.
 
 1. Fork the repo and create a branch.
-2. Set up the dev environment: `cargo test --workspace` under `rust/` (plus `cargo fmt --check` and clippy per above).
+2. Set up the dev environment: `cargo test --workspace` under `rust/` (plus `cargo fmt --check` and clippy per above), or open the repository in the dev container (Installation, Option C).
 3. Follow the standards in [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) (rustfmt, clippy `-D warnings`, atomic commits, Conventional Commits).
 4. Open a PR — CI runs fmt, clippy, and the full workspace suite automatically.
 
