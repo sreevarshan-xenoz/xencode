@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RH-1`: Dependabot opens weekly update pull requests for the Rust
   workspace, the separate badge workspace and the GitHub Actions in the
   workflows. Minor and patch updates of each come grouped in one pull request.
+- `RH-2`: CI measures line coverage of the workspace with `cargo llvm-cov` and
+  fails below 80%. Coverage measured on Linux on 2026-10-26: 82.84% of lines.
 - `RH-3`: `xencode-tui-rs/src/app.rs` is split: the slash command list and its
   helpers live in `slash_commands.rs`, and the unit tests in `app/tests.rs`.
   No behavior changes.

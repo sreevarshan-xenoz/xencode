@@ -17860,8 +17860,12 @@ container, and source files of ten to nineteen thousand lines. Each item below i
 
 - [x] **RH-1 — Dependabot.** Done 2026-10-26; the file passes the published dependabot schema. `.github/dependabot.yml` opens weekly update pull requests for the
   Rust workspace, the separate badge workspace and the GitHub Actions the workflows use.
-- [ ] **RH-2 — a coverage job.** CI measures line coverage of the workspace with
-  `cargo llvm-cov` and fails below a floor set from a measured run, not a guessed one.
+- [x] **RH-2 — a coverage job.** Done 2026-10-26: the `coverage` job in `ci.yml` measures line
+  coverage of the workspace with `cargo llvm-cov` and fails below 80%. Measured in a fresh Linux
+  clone (WSL): 82.84% of 124,899 lines; 3,131 tests passed, and the 5 that failed did so for
+  reasons of that machine (run as root, no Docker daemon, no coding agents installed). The
+  report command was checked to pass at 80% and fail at 90%. This laptop's `windows-gnu`
+  toolchain has no profiler runtime, so coverage cannot be measured on Windows here.
 - [x] **RH-3 — `app.rs` split.** Done 2026-10-26: the slash command table and its completion and
   unknown-command helpers moved to `xencode-tui-rs/src/slash_commands.rs` (re-exported from `app`,
   so every caller is unchanged) and the unit tests to `src/app/tests.rs`; `app.rs` went from

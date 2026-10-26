@@ -51,6 +51,47 @@ jobs:
         git diff --exit-code -- docs/completions docs/man
       working-directory: .
 
+  coverage:
+    # Line coverage of the whole workspace. The floor is set below the 82.8%
+    # measured on Linux on 2026-10-26, so a change that drops it noticeably
+    # fails here; raise it when coverage rises.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Cache Cargo registry and build
+      uses: actions/cache@v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin/cargo-llvm-cov
+          rust/target
+        key: ${{ runner.os }}-coverage-${{ hashFiles('rust/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-coverage-
+
+    - name: Install cargo-llvm-cov
+      run: command -v cargo-llvm-cov || cargo install cargo-llvm-cov --version 0.9.1 --locked
+
+    - name: Measure line coverage
+      run: |
+        cargo llvm-cov --workspace --lcov --output-path lcov.info
+        cargo llvm-cov report --summary-only --fail-under-lines 80
+      working-directory: rust
+
+    - name: Keep the coverage report
+      uses: actions/upload-artifact@v7.0.2
+      with:
+        name: lcov
+        path: rust/lcov.info
+
   windows-build:
     # Windows is a release target, and from 2026-10-01 to 2026-10-08 it did not
     # compile without anyone noticing, because every other job runs on Linux.

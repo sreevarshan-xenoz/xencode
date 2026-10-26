@@ -800,9 +800,10 @@ cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
 cargo fmt --check                   # Format gate (CI)
 cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+cargo llvm-cov --workspace --summary-only   # Line coverage (needs cargo-llvm-cov)
 ```
 
-CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/`](.github/workflows/).
+CI runs fmt + clippy + the full suite on every push, and a coverage job that fails below 80% line coverage (82.8% measured on Linux, 2026-10-26) — see [`.github/workflows/`](.github/workflows/).
 
 ---
 

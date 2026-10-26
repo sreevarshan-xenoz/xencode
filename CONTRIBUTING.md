@@ -208,6 +208,7 @@ cd rust
 cargo test --workspace                        # everything
 cargo test -p xencode-providers-rs            # one crate
 cargo test -p xencode-tui-rs focus            # tests matching a name
+cargo llvm-cov --workspace --summary-only     # line coverage; CI fails below 80%
 ```
 
 ## Pull Request Guidelines
