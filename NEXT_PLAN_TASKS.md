@@ -17866,8 +17866,11 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   unknown-command helpers moved to `xencode-tui-rs/src/slash_commands.rs` (re-exported from `app`,
   so every caller is unchanged) and the unit tests to `src/app/tests.rs`; `app.rs` went from
   19,923 to 13,197 lines. The crate's 720 unit tests pass, the same 166 test functions as before.
-- [ ] **RH-4 — the query stream protocol out of `main.rs`.** The `query_stream` module of
-  `xencode-cli/src/main.rs` moves to its own file with its tests.
+- [x] **RH-4 — `main.rs` split.** Done 2026-10-26: `xencode-cli/src/main.rs` lost its `query_stream`
+  protocol to `query_stream.rs`, the `xencode orchestrator` commands to `orchestrator.rs` and its
+  unit tests to `tests.rs`, going from 17,418 to 13,314 lines. The 81 unit tests pass; four
+  integration tests (`agents_contract_cli`, `compete_cli`, `mcp_serve_stdio`) fail on Windows
+  with or without this change.
 - [ ] **RH-5 — `agent_tools.rs` split.** The largest self-contained parts of
   `xencode-tui-rs/src/agent_tools.rs` move to their own modules.
 - [ ] **RH-6 — a secret scan in CI.** A `secret-scan` job runs gitleaks over the history, with an
