@@ -17948,3 +17948,6 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   change was needed; the generated man page and completions are byte-for-byte the same. The core,
   server and cli tests pass on Windows except three task tests in core that fail the same way with
   which 7.
+- [x] **RH-19 — toml 1.x (#51).** Done 2026-10-26: analysis, core and team move from toml 0.9 to 1;
+  no code change. Their tests pass on Windows apart from failures that are identical with 0.9
+  (13 in analysis: local web servers, lcov paths, rustfmt; 3 task tests in core).
