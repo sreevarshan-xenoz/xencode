@@ -9,6 +9,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # With tokio 1.54.1 an HTTP request made from a single-threaded runtime is
+      # never sent; the analysis crate's web tests time out. See RH-23.
+      - dependency-name: tokio
+        versions: ["1.54.1"]
     groups:
       rust-minor-and-patch:
         update-types: [minor, patch]

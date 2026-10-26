@@ -17959,3 +17959,11 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   tui-rs on windows-sys 0.61; it builds unchanged on Windows and its tests pass apart from the
   three task tests already failing there.
 - [x] **RH-22 — serde_json 1.0.154 in the badge (#44).** Done 2026-10-26: the badge workspace's 4 tests pass.
+- [ ] **RH-23 — tokio stays on 1.53.1 for now.** 2026-10-26: after #45 moved tokio to 1.54.1, nine web
+  tests and one search test in xencode-analysis-rs failed on GitHub's Linux runners: the client
+  connects to a local server but never sends its request, and the call times out. Rolling back
+  only tokio makes all 20 pass on Linux (rolling back hyper, hyper-util or want does not). The
+  lockfile pins tokio 1.53.1 and Dependabot skips 1.54.1. A fetch error now also carries its
+  causes, which is how the timeout was seen. Still open: why 1.54.1 stalls a request from a
+  single-threaded runtime, whether xencode's own commands are affected, and a newer tokio to move
+  to. (These web tests also fail on this Windows machine with any tokio, for an unrelated reason.)

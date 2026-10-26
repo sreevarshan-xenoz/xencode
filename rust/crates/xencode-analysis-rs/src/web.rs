@@ -107,6 +107,20 @@ pub async fn fetch_url_guarded(url: &str) -> Result<FetchedPage, FetchError> {
     fetch(url, true).await
 }
 
+/// An error and every cause beneath it, joined with `: `. reqwest's own text
+/// for a failed request is only "error sending request for url", and the part
+/// a person can act on, such as a refused connection or a reset, is in the causes.
+fn with_causes(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 async fn fetch(url: &str, guarded: bool) -> Result<FetchedPage, FetchError> {
     // Both paths, not just the guarded one: a scheme reqwest cannot dial is a
     // mistake in the address, and it should be said so rather than arriving as
@@ -130,7 +144,7 @@ async fn fetch(url: &str, guarded: bool) -> Result<FetchedPage, FetchError> {
             .get(&target)
             .send()
             .await
-            .map_err(|e| FetchError::Network(e.to_string()))?;
+            .map_err(|e| FetchError::Network(with_causes(&e)))?;
         if !answered.status().is_redirection() {
             break answered;
         }
