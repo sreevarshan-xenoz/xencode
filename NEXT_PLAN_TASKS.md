@@ -17943,3 +17943,8 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   exact ACP pin moved from `=3.3.0` to `=3.5.0` in the three crates that use it. Workspace clippy
   is clean; the ACP, MCP, team and server suites pass on Windows except one MCP test that fails
   the same way with the old lockfile (a refused localhost connection takes about 4 s on Windows).
+- [x] **RH-18 — four major updates that each touch one crate (#47, #48, #49, #50).** Done 2026-10-26:
+  which 8 (core), tokio-tungstenite 0.30 (server), clap_mangen 0.3 and axum-server 0.8 (cli). No code
+  change was needed; the generated man page and completions are byte-for-byte the same. The core,
+  server and cli tests pass on Windows except three task tests in core that fail the same way with
+  which 7.

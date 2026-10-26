@@ -353,7 +353,7 @@ dependencies = [
  "sha1 0.10.7",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.29.0",
  "tower",
  "tower-layer",
  "tower-service",
@@ -381,12 +381,13 @@ dependencies = [
 
 [[package]]
 name = "axum-server"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ab4a3ec9ea8a657c72d99a03a824af695bd0fb5ec639ccbd9cd3543b41a5f9"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
 dependencies = [
  "arc-swap",
  "bytes",
+ "either",
  "fs-err",
  "http",
  "http-body",
@@ -394,7 +395,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
@@ -740,9 +740,9 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "clap_mangen"
-version = "0.2.33"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e30ffc187e2e3aeafcd1c6e2aa416e29739454c0ccaa419226d5ecd181f2d78"
+checksum = "211d617eaa4b735c96c9e0228fcbdb5120ef623f2b8cb67ffb84c3e02dbc28a4"
 dependencies = [
  "clap",
  "roff",
@@ -1215,12 +1215,6 @@ dependencies = [
  "scopeguard",
  "simdutf8",
 ]
-
-[[package]]
-name = "env_home"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f84e12ccf0a7ddc17a6c41c93326024c42920d7ee630d04950e6926645c0fe"
 
 [[package]]
 name = "equivalent"
@@ -3163,15 +3157,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
-]
-
-[[package]]
 name = "rustls-pki-types"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3945,7 +3930,19 @@ dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite",
+ "tungstenite 0.29.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.30.0",
 ]
 
 [[package]]
@@ -4181,6 +4178,22 @@ dependencies = [
  "log",
  "rand 0.9.5",
  "sha1 0.10.7",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.10.2",
+ "sha1 0.11.0",
  "thiserror 2.0.21",
 ]
 
@@ -4501,14 +4514,11 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "which"
-version = "7.0.3"
+version = "8.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24d643ce3fd3e5b54854602a080f34fb10ab75e0b813ee32d00ca2b44fa74762"
+checksum = "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f"
 dependencies = [
- "either",
- "env_home",
- "rustix 1.1.5",
- "winsafe",
+ "libc",
 ]
 
 [[package]]
@@ -4800,12 +4810,6 @@ checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
 ]
-
-[[package]]
-name = "winsafe"
-version = "0.0.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "wiremock"
@@ -5101,7 +5105,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "tower",
  "tracing",
  "uuid",
