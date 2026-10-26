@@ -17915,3 +17915,9 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   passed on 2026-10-12. The test jobs (`rust-tests`, `coverage`, and `rust` in `ci-cd.yml`) are
   pinned to `ubuntu-24.04`. Done when they pass there. Still to find: what in the suite starves
   an Ubuntu 26 runner, so the pin can be removed.
+- [ ] **RH-14 — no personal data in the repository or its history.** The owner asked on 2026-10-26
+  for their Windows account name to be removed from GitHub, history included, and for LICENSE to
+  name their GitHub handle instead of their name. A build folder committed by mistake in May and
+  deleted in August, one plan document and one old generated JSON file carried local paths with
+  the account name. Done when every branch and tag on GitHub has been rewritten without them and a
+  search of the pushed history finds none.
