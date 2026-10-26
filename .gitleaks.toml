@@ -1,0 +1,19 @@
+# Secret scan settings for gitleaks (run by the secret-scan job in ci.yml).
+# The default rules apply; this file only names what is known not to be a
+# secret. Fingerprints of past findings that were checked by hand and found to
+# be fake live in .gitleaksignore.
+title = "xencode secret scan"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """Deliberately fake test credentials. AGENTS.md's Secret Fixture Rule \
+requires a test key to say it is fake in its own text, so the line that holds \
+it carries one of these markers."""
+regexTarget = "line"
+regexes = [
+  '''(?i)fake''',
+  '''(?i)not[-_]?a[-_]?real''',
+  '''(?i)notreal''',
+]

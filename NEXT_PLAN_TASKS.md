@@ -17878,7 +17878,11 @@ container, and source files of ten to nineteen thousand lines. Each item below i
 - [x] **RH-5 — `agent_tools.rs` split.** Done 2026-10-26: its unit tests, more than half the file,
   moved to `xencode-tui-rs/src/agent_tools/tests.rs`; `agent_tools.rs` went from 11,881 to 5,351
   lines. The crate's 720 unit tests pass.
-- [ ] **RH-6 — a secret scan in CI.** A `secret-scan` job runs gitleaks over the history, with an
-  allowlist for the deliberately fake test credentials the Secret Fixture Rule requires.
+- [x] **RH-6 — a secret scan in CI.** Done 2026-10-26: the `secret-scan` job runs gitleaks 8.30.1
+  (checksum-pinned) over every commit. The first scan of all 1,221 commits found 39 matches,
+  each checked by hand without printing it: all were fake test keys, demo values or a local
+  database default in files since deleted. `.gitleaks.toml` allows lines marked fake, and
+  `.gitleaksignore` lists the other 38 by fingerprint. The job's steps pass on Linux, and a key
+  planted in a scratch repository fails them.
 - [ ] **RH-7 — a dev container.** `.devcontainer/devcontainer.json` gives a Rust toolchain with
   rustfmt and clippy in one step.

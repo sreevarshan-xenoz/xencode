@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflows. Minor and patch updates of each come grouped in one pull request.
 - `RH-2`: CI measures line coverage of the workspace with `cargo llvm-cov` and
   fails below 80%. Coverage measured on Linux on 2026-10-26: 82.84% of lines.
+- `RH-6`: CI scans every commit for secrets with gitleaks. The 39 matches in
+  the existing history were checked by hand and are all fake test values; they
+  are listed in `.gitleaksignore`.
 - `RH-3`: `xencode-tui-rs/src/app.rs` is split: the slash command list and its
   helpers live in `slash_commands.rs`, and the unit tests in `app/tests.rs`.
   No behavior changes.
