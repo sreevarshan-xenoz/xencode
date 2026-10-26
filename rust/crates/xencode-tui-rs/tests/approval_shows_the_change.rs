@@ -171,7 +171,11 @@ fn checksums(root: &PathBuf) -> std::collections::BTreeMap<String, String> {
             hasher.update(std::fs::read(&path).unwrap());
             out.insert(
                 path.strip_prefix(root).unwrap().display().to_string(),
-                format!("{:x}", hasher.finalize()),
+                hasher
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>(),
             );
         }
     }

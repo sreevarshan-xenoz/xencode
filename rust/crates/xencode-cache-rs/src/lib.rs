@@ -260,7 +260,11 @@ impl ResponseCache {
         hasher.update(prompt.as_bytes());
         hasher.update(b"|");
         hasher.update(model.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     }
 
     /// Next recency number. Sequence counters never tie (unlike wall-clock

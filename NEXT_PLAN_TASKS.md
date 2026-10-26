@@ -17951,3 +17951,7 @@ container, and source files of ten to nineteen thousand lines. Each item below i
 - [x] **RH-19 — toml 1.x (#51).** Done 2026-10-26: analysis, core and team move from toml 0.9 to 1;
   no code change. Their tests pass on Windows apart from failures that are identical with 0.9
   (13 in analysis: local web servers, lcov paths, rustfmt; 3 task tests in core).
+- [x] **RH-20 — sha2 0.11 (#52).** Done 2026-10-26: six crates move from sha2 0.10 to 0.11. The digest
+  no longer prints with `{:x}`, so three places write its bytes as two lowercase hex digits each,
+  the same text as before, which keeps cache keys and the stable-prefix digest unchanged. The
+  cache, context, models and server suites pass apart from Windows failures identical with 0.10.

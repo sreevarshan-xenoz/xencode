@@ -174,7 +174,11 @@ impl ContextDoc {
     pub fn stable_prefix_sha256(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.stable_prefix.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     }
 }
 

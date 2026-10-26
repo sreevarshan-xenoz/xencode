@@ -19,7 +19,7 @@ regex = "1"
 # `set_language`, and that failure is only visible at run time.
 tree-sitter = "0.27"
 tree-sitter-rust = "0.24"
-sha2 = "0.10"
+sha2 = "0.11"
 notify = "8"
 pdf-extract = "0.12.1"
 zip = "8.6.0"
