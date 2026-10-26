@@ -7,7 +7,7 @@ description = "xencode as an Agent Client Protocol agent, for editors such as Ze
 publish = false
 
 [dependencies]
-agent-client-protocol = { version = "=3.3.0", features = ["stdio"] }
+agent-client-protocol = { version = "=3.5.0", features = ["stdio"] }
 xencode-tui-rs = { path = "../xencode-tui-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-live-rs = { path = "../xencode-live-rs" }

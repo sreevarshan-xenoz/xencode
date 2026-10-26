@@ -17938,3 +17938,8 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   docker/login-action 4.7.0, docker/build-push-action 7.4.0, codeql upload-sarif 4.39.1 and
   docker/setup-buildx-action 4.4.1 (#57, #55). #56 is not taken: it loosens the exact checkout pins
   to `@v7`, and its only other change is to `release.yml`, which cargo-dist generates and checks.
+- [x] **RH-17 — the Rust minor and patch updates from Dependabot (#45).** Done 2026-10-26: thiserror,
+  serde_json, tokio, libc, tree-sitter, rmcp 3.7, proptest, uuid, hyper and hyper-util, and the
+  exact ACP pin moved from `=3.3.0` to `=3.5.0` in the three crates that use it. Workspace clippy
+  is clean; the ACP, MCP, team and server suites pass on Windows except one MCP test that fails
+  the same way with the old lockfile (a refused localhost connection takes about 4 s on Windows).
