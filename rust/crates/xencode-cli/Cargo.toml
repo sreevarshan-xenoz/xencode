@@ -38,7 +38,7 @@ crossterm = "0.28"
 ratatui = "0.29"
 walkdir = "2"
 axum = "0.8"
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi", "std"] }
 
 [dev-dependencies]
