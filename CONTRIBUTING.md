@@ -215,9 +215,6 @@ cargo llvm-cov --workspace --summary-only     # line coverage; CI fails below 80
 From the repository root, `just test`, `just lint` and `just coverage` run the
 same commands (see the `justfile`).
 
-```bash
-```
-
 ## Pull Request Guidelines
 
 ### PR Checklist
