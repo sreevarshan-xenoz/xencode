@@ -5056,6 +5056,7 @@ dependencies = [
 name = "xencode-term-rs"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "portable-pty",
  "ratatui",
  "vt100",

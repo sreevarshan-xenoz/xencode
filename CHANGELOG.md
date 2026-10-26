@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `RH-15`: stopping a terminal tile could kill every process you own
+
+- On Linux and macOS, stopping an orchestrator tile ran `kill -KILL -<pid>`
+  to end the tile's process group. The `kill` program from procps-ng reads
+  that argument as options, and for a pid starting with 1 it signalled -1:
+  every process belonging to the user. The group is now signalled directly
+  through the system call, and 0 and 1 are never used as targets.
+
 ### Fixed — `RH-8`: `xencode server` prints its logs
 
 - The server's sign-ins, dropped peers, plugin events and audit-log failures

@@ -17921,3 +17921,11 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   deleted in August, one plan document and one old generated JSON file carried local paths with
   the account name. Done when every branch and tag on GitHub has been rewritten without them and a
   search of the pushed history finds none.
+- [x] **RH-15 — stopping a terminal tile can no longer kill every process the user owns.** Done
+  2026-10-26: `xencode-term-rs` ended a tile's process group by running `kill -KILL -<pid>`.
+  procps-ng's `kill` reads `-164` as options and signals -1, so for any shell whose pid began with
+  1 it killed every process of the user; on GitHub's runners that included the runner, which is
+  why every Linux test job ended in "lost communication". Found with strace in a container like a
+  runner (`kill(-1, SIGKILL)` from the `kill` program). The group is now signalled with kill(2)
+  directly, and 0 and 1 are never targets. The terminal tests ran 20 rounds there without a death,
+  where before the container died within 12.

@@ -203,6 +203,9 @@ impl Drop for Session {
 
 #[cfg(unix)]
 fn kill_tree(pid: u32) {
+    let Some(group) = group_target(pid) else {
+        return;
+    };
     // The child was started as a session leader, so its session id is its
     // pid. An interactive shell puts each background job in a process group
     // of its own, so the whole session is ended, not only the child's group:
@@ -212,12 +215,24 @@ fn kill_tree(pid: u32) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
-    // And the group, by its negative pid, where `pkill` is not installed.
-    let _ = std::process::Command::new("kill")
-        .args(["-KILL", &format!("-{pid}")])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    // And the group, where `pkill` is not installed. This is the system call,
+    // not the `kill` program: procps-ng's `kill -KILL -164` reads `-164` as
+    // options and signals -1, which is every process the user owns. On CI
+    // that killed the runner itself.
+    // SAFETY: kill(2) takes no pointers; `group` is a negative pid below -1.
+    unsafe {
+        libc::kill(group, libc::SIGKILL);
+    }
+}
+
+/// The process group to signal for a session led by `pid`, as the negative
+/// number kill(2) expects. None for 0 and 1: as targets, 0 is the caller's
+/// own group and -1 is every process the user may signal, and `pkill -s 0`
+/// is pkill's own session.
+#[cfg(unix)]
+fn group_target(pid: u32) -> Option<libc::pid_t> {
+    let pid = libc::pid_t::try_from(pid).ok()?;
+    (pid > 1).then_some(-pid)
 }
 
 #[cfg(windows)]
@@ -227,4 +242,19 @@ fn kill_tree(pid: u32) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::group_target;
+
+    /// As kill(2) targets, 0 is the caller's own group and -1 is every process
+    /// the user owns, so neither is ever signalled; a real leader's group is.
+    #[test]
+    fn only_a_real_session_leader_is_ever_signalled() {
+        assert_eq!(group_target(0), None);
+        assert_eq!(group_target(1), None);
+        assert_eq!(group_target(164), Some(-164));
+        assert_eq!(group_target(u32::MAX), None);
+    }
 }

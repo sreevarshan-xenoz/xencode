@@ -11,5 +11,8 @@ portable-pty = "0.9"
 vt100 = "0.15"
 ratatui = "0.29"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [lints]
 workspace = true
