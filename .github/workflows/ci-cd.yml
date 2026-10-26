@@ -17,10 +17,7 @@ env:
 
 jobs:
   rust:
-    # Pinned to Ubuntu 24.04: since ubuntu-latest moved to Ubuntu 26 (2026-10-19)
-    # the test suite starves the runner until GitHub reports "lost communication",
-    # on commits that passed before the move as well. See RH-13 in NEXT_PLAN_TASKS.md.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v7.0.1

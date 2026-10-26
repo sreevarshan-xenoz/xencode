@@ -8,10 +8,7 @@ on:
 
 jobs:
   rust-tests:
-    # Pinned to Ubuntu 24.04: since ubuntu-latest moved to Ubuntu 26 (2026-10-19)
-    # the test suite starves the runner until GitHub reports "lost communication",
-    # on commits that passed before the move as well. See RH-13 in NEXT_PLAN_TASKS.md.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v7.0.1
@@ -65,10 +62,7 @@ jobs:
     # Line coverage of the whole workspace. The floor is set below the 82.8%
     # measured on Linux on 2026-10-26, so a change that drops it noticeably
     # fails here; raise it when coverage rises.
-    # Pinned to Ubuntu 24.04: since ubuntu-latest moved to Ubuntu 26 (2026-10-19)
-    # the test suite starves the runner until GitHub reports "lost communication",
-    # on commits that passed before the move as well. See RH-13 in NEXT_PLAN_TASKS.md.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v7.0.1

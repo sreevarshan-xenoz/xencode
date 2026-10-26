@@ -17909,7 +17909,8 @@ container, and source files of ten to nineteen thousand lines. Each item below i
 - [x] **RH-12 — the README says what kind of project this is.** Done 2026-10-26: one line under
   the introduction: a command-line application and terminal UI in a Rust workspace, with a
   Dockerfile and compose file only for the optional server.
-- [ ] **RH-13 — the Linux test jobs run on Ubuntu 24.04.** Since `ubuntu-latest` moved to Ubuntu 26
+- [x] **RH-13 — the Linux test jobs run on Ubuntu 24.04.** Superseded 2026-10-26 by RH-15, which found
+  the real cause; the pin is removed again and only the 20-minute step limit stays. Since `ubuntu-latest` moved to Ubuntu 26
   (2026-10-19), every Linux job that runs the test suite ends with "The hosted runner lost
   communication with the server" after about 45 minutes — including a rerun of `d759e9d3`, which
   passed on 2026-10-12. The test jobs (`rust-tests`, `coverage`, and `rust` in `ci-cd.yml`) are
