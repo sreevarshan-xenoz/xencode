@@ -30,7 +30,7 @@ xencode-mcp-rs = { path = "../xencode-mcp-rs" }
 xencode-colab-rs = { path = "../xencode-colab-rs" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-clap_mangen = "0.2"
+clap_mangen = "0.3"
 tempfile = "3"
 serde_json = "1"
 tokio = { version = "1", features = ["full", "rt-multi-thread"] }
