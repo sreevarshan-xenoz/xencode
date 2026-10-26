@@ -17955,3 +17955,6 @@ container, and source files of ten to nineteen thousand lines. Each item below i
   no longer prints with `{:x}`, so three places write its bytes as two lowercase hex digits each,
   the same text as before, which keeps cache keys and the stable-prefix digest unchanged. The
   cache, context, models and server suites pass apart from Windows failures identical with 0.10.
+- [x] **RH-21 — windows-sys 0.61 in core (#53).** Done 2026-10-26: xencode-core-rs joins live-rs and
+  tui-rs on windows-sys 0.61; it builds unchanged on Windows and its tests pass apart from the
+  three task tests already failing there.

@@ -4994,7 +4994,7 @@ dependencies = [
  "tokio",
  "toml",
  "which",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
