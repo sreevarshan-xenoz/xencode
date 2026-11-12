@@ -29,7 +29,7 @@ xencode-term-rs = { path = "../xencode-term-rs" }
 base64 = "0.23"
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.28"
-ratatui = "0.29"
+ratatui = "0.30"
 unicode-width = "0.2"
 tui-textarea = "0.7"
 reqwest = { version = "0.13", features = ["json"] }
