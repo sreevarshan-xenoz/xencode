@@ -57,6 +57,117 @@ pub struct Picker {
     pub chosen: std::collections::BTreeSet<String>,
 }
 
+/// One thing waiting on the person (OM-7). Built only from real `App` state,
+/// and shared by the Inbox and the window title so they cannot disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Waiting {
+    /// A question the engine waits to have answered (EN-1).
+    Question { id: u64, text: String },
+    /// An approval prompt, local or from an engine window (OM-4, EN-2).
+    /// The id can be absent in state built outside the normal tool loop.
+    Approval { id: Option<u64>, summary: String },
+    /// A ByteBot task whose changes wait for review (BT-3).
+    Review { task_id: String, text: String },
+    /// A terminal agent that rang or sent a notification (OM-4). `n` is its
+    /// number in the rail, where 0 is xencode's own conversation.
+    Tile { n: usize, id: String, agent: String },
+}
+
+impl Waiting {
+    /// The key used to notice this item newly waiting, for the one desktop
+    /// notification and the attention count in the window title.
+    pub fn key(&self) -> String {
+        match self {
+            Waiting::Question { id, .. } => format!("question {id}"),
+            Waiting::Approval { id: Some(id), .. } => format!("approval {id}"),
+            Waiting::Approval { id: None, .. } => "approval".to_string(),
+            Waiting::Review { task_id, .. } => format!("review {task_id}"),
+            Waiting::Tile { id, .. } => format!("tile {id}"),
+        }
+    }
+
+    /// The Inbox row, before the `+N` for further approvals is appended.
+    pub fn label(&self) -> String {
+        match self {
+            Waiting::Question { text, .. } => format!("? {text}"),
+            Waiting::Approval { summary, .. } => format!("? {summary}"),
+            Waiting::Review { text, .. } => format!("! {text} needs review"),
+            Waiting::Tile { n, agent, .. } => format!("! {n} {agent} called"),
+        }
+    }
+}
+
+/// Everything that waits on the person, in the order the Inbox shows it:
+/// the question, pending approvals, a ByteBot review, then calling agents.
+/// Pure: it reads `App` state and changes nothing. This is the one definition
+/// used by both the Inbox and `shell::waiting_keys`/`attention_title`.
+pub fn waiting_on_user(app: &App) -> Vec<Waiting> {
+    let mut out = Vec::new();
+    if let Some(id) = app.question_id {
+        out.push(Waiting::Question {
+            id,
+            text: app.question_text.clone().unwrap_or_default(),
+        });
+    }
+    for (i, (request, _)) in app.approval_queue.iter().enumerate() {
+        out.push(Waiting::Approval {
+            id: app.approval_ids.get(i).copied(),
+            summary: crate::transcript::clean(&request.summary),
+        });
+    }
+    for (id, request) in &app.remote_approvals {
+        out.push(Waiting::Approval {
+            id: Some(*id),
+            summary: crate::transcript::clean(&request.summary),
+        });
+    }
+    if let Some(i) = app.bytebot_reviewing() {
+        let task = &app.bytebot_tasks[i];
+        out.push(Waiting::Review {
+            task_id: task.id.clone(),
+            text: task.text.clone(),
+        });
+    }
+    for (i, tile) in app.term_tiles.iter().enumerate() {
+        if tile.state == "needs_you" {
+            out.push(Waiting::Tile {
+                n: i + 1,
+                id: tile.id.clone(),
+                agent: tile.agent.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// The Inbox rows for `waiting`. Every approval after the first is folded
+/// into a `+N` on the first row, as the Inbox has always done (OM-4).
+fn inbox_lines(app: &App, waiting: &[Waiting]) -> Vec<Line<'static>> {
+    let approvals = waiting
+        .iter()
+        .filter(|w| matches!(w, Waiting::Approval { .. }))
+        .count();
+    let mut shown = 0;
+    let mut lines = Vec::new();
+    for item in waiting {
+        let mut label = item.label();
+        if let Waiting::Approval { .. } = item {
+            shown += 1;
+            if shown > 1 {
+                continue;
+            }
+            if approvals > 1 {
+                label.push_str(&format!(" +{}", approvals - 1));
+            }
+        }
+        lines.push(Line::from(Span::styled(
+            label,
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+    lines
+}
+
 /// Where the rail and each tile go in `area`, for `tiles` tiles (the
 /// conversation included). A tile not drawn gets an empty rect.
 pub fn tile_rects(
@@ -385,33 +496,8 @@ fn draw_rail(f: &mut Frame, app: &App, area: Rect, tiles: &[crate::engine::term:
         }
     }
     lines.push(Line::from(Span::styled("+ new agent (ctrl+a n)", dim)));
-    // What waits on the person, approvals first (OM-4).
-    let mut inbox: Vec<Line<'static>> = Vec::new();
-    if let Some(request) = app.pending_approval() {
-        let waiting = app.approval_queue.len() + app.remote_approvals.len();
-        inbox.push(Line::from(Span::styled(
-            format!(
-                "? {}{}",
-                crate::transcript::clean(&request.summary),
-                if waiting > 1 {
-                    format!(" +{}", waiting - 1)
-                } else {
-                    String::new()
-                }
-            ),
-            Style::default().fg(app.theme.warning),
-        )));
-    }
-    for (i, t) in tiles
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.state == "needs_you")
-    {
-        inbox.push(Line::from(Span::styled(
-            format!("! {} {} called", i + 1, t.agent),
-            Style::default().fg(app.theme.warning),
-        )));
-    }
+    // What waits on the person, from the same list the title counts (OM-7).
+    let inbox = inbox_lines(app, &waiting_on_user(app));
     if !inbox.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -494,6 +580,128 @@ fn draw_picker(f: &mut Frame, app: &App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn approval(summary: &str) -> crate::agent_tools::ApprovalRequest {
+        crate::agent_tools::ApprovalRequest {
+            tool: "run_shell".into(),
+            class: crate::agent_tools::ToolClass::Shell,
+            summary: summary.into(),
+            preview: String::new(),
+            draft: Default::default(),
+        }
+    }
+
+    fn review_task(text: &str) -> crate::bytebot_tasks::ByteBotTask {
+        let mut task = crate::bytebot_tasks::ByteBotTask::new(text, "test-model");
+        task.state = crate::bytebot_tasks::TaskState::NeedsReview;
+        task
+    }
+
+    fn tile(id: &str, state: &str) -> crate::engine::term::TileInfo {
+        crate::engine::term::TileInfo {
+            id: id.into(),
+            agent: "shell".into(),
+            branch: String::new(),
+            worktree: String::new(),
+            state: state.into(),
+            cols: 80,
+            rows: 24,
+            exit: None,
+        }
+    }
+
+    #[test]
+    fn a_pending_question_appears_with_its_text() {
+        let mut app = App::for_tests();
+        app.question_id = Some(7);
+        app.question_text = Some("Which database should I use?".into());
+        let waiting = waiting_on_user(&app);
+        assert_eq!(
+            waiting,
+            vec![Waiting::Question {
+                id: 7,
+                text: "Which database should I use?".into()
+            }]
+        );
+        let rows = inbox_lines(&app, &waiting);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].to_string().contains("Which database should I use?"));
+    }
+
+    #[test]
+    fn a_task_waiting_for_review_appears() {
+        let mut app = App::for_tests();
+        app.bytebot_tasks.push(review_task("write the parser"));
+        let waiting = waiting_on_user(&app);
+        assert_eq!(waiting.len(), 1);
+        assert!(matches!(
+            &waiting[0],
+            Waiting::Review { text, .. } if text == "write the parser"
+        ));
+        let rows = inbox_lines(&app, &waiting);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].to_string().contains("write the parser"));
+    }
+
+    #[test]
+    fn approvals_and_calling_tiles_still_appear_with_the_plus_summary() {
+        let mut app = App::for_tests();
+        let (first, _answer) = tokio::sync::oneshot::channel();
+        app.approval_queue
+            .push_back((approval("run the tests"), first));
+        app.approval_ids.push_back(11);
+        let (second, _answer) = tokio::sync::oneshot::channel();
+        app.approval_queue
+            .push_back((approval("commit the change"), second));
+        app.approval_ids.push_back(12);
+        app.term_tiles = vec![tile("t1", "needs_you"), tile("t2", "working")];
+        let waiting = waiting_on_user(&app);
+        assert_eq!(
+            waiting,
+            vec![
+                Waiting::Approval {
+                    id: Some(11),
+                    summary: "run the tests".into()
+                },
+                Waiting::Approval {
+                    id: Some(12),
+                    summary: "commit the change".into()
+                },
+                Waiting::Tile {
+                    n: 1,
+                    id: "t1".into(),
+                    agent: "shell".into()
+                },
+            ]
+        );
+        let rows: Vec<String> = inbox_lines(&app, &waiting)
+            .iter()
+            .map(|line| line.to_string())
+            .collect();
+        assert_eq!(rows, ["? run the tests +1", "! 1 shell called"]);
+    }
+
+    #[test]
+    fn nothing_waiting_yields_no_inbox_rows() {
+        let app = App::for_tests();
+        assert!(waiting_on_user(&app).is_empty());
+        assert!(inbox_lines(&app, &waiting_on_user(&app)).is_empty());
+    }
+
+    #[test]
+    fn attention_title_counts_the_question_and_the_review_once_each() {
+        let mut app = App::for_tests();
+        assert!(!crate::shell::attention_title(&app).contains("need you"));
+        app.question_id = Some(3);
+        app.question_text = Some("pick one".into());
+        assert_eq!(crate::shell::attention_title(&app), "xencode · needs you");
+        app.bytebot_tasks.push(review_task("ship it"));
+        assert_eq!(crate::shell::attention_title(&app), "xencode · 2 need you");
+        assert_eq!(
+            crate::shell::waiting_keys(&app).len(),
+            waiting_on_user(&app).len()
+        );
+    }
 
     #[test]
     fn a_wide_screen_has_a_rail_and_a_grid_of_four() {
