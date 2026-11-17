@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — multimodal capability gate (MM-12)
+
+- `MM-12`: image turns are now checked against the selected model's reported vision support before anything is sent. A llama.cpp `/props` answer is parsed for `modalities.vision` and the per-launch `media_marker`, and Ollama's `/api/show` capabilities are read for `vision`; these are folded into `ModelCapabilities::supports_vision`. When an image is attached to a model that has not positively reported vision, `xencode query` stops with `model X does not report vision support; use --model with a vision-capable model` before a provider is built. A cached text answer is no longer reused for an image turn, so the check cannot be bypassed. The refusal path is verified with a captured `/props` shape; a successful image answer remains unverified here because no vision model is installed on this machine.
 
 - `DI-3`: `install.sh` and `install.ps1` can now install from a published GitHub Release with `--release`/`-r` (`-Release` in PowerShell). The host OS and architecture are mapped to the exact archive name from the verified dist plan, the matching `.sha256` file is downloaded and checked with `sha256sum -c` or PowerShell's `Get-FileHash` before extraction, and the binary is installed to the same location with the same PATH shim and smoke test. Source build remains the default and `--source` selects it explicitly. `--version` (or `XENCODE_RELEASE_VERSION`) picks the release version, and `--dry-run` prints the derived archive name and URLs without making any network request. No release has been tagged yet, so release mode currently fails with HTTP 404 — the download half is blocked until a `v0.1.0` tag is pushed. An offline test checks the asset and URL derivation against the captured dist plan and exercises checksum verification with real local files.
 ### Added — Phase 1 distribution

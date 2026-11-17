@@ -23,6 +23,15 @@
 //! Precedence at the call site is therefore:
 //! `window the serving side runs with (llama.cpp) or was asked to use (Ollama)
 //! → known model window → hardware profile default`.
+//!
+//! Vision is the one capability the offline table cannot know and the serving
+//! side can: a running `llama-server` reports `modalities.vision` in `/props`,
+//! and Ollama lists a `vision` capability in `/api/show`. [`capabilities_with_report`]
+//! folds whatever the server said into the table, treating silence as "no" so
+//! an image is never sent to a model that has not positively claimed to see.
+//! With no server report the table's conservative `false` stands.
+
+use xencode_models_rs::llamacpp::ServerReport;
 
 /// What the context budgeter and agent loop need to know about a model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,8 +45,13 @@ pub struct ModelCapabilities {
     /// This route parses and echoes `tool_calls` (llama.cpp, Ollama,
     /// OpenRouter, Qwen). Gemini/Anthropic degrade to single-shot text.
     pub supports_tools: bool,
-    /// Conservative: `false` until a vision pipeline exists.
+    /// `true` only when the serving side positively reported vision support.
+    /// The offline table never claims it: a wrong "yes" sends a picture to a
+    /// model that reads it as text, which is worse than an honest refusal.
     pub supports_vision: bool,
+    /// The server's per-launch `media_marker`, read from `/props` when present.
+    /// Random per launch, so only a value actually reported is kept here.
+    pub media_marker: Option<String>,
     /// Best-effort reasoning-model heuristic, advisory only.
     pub supports_reasoning: bool,
     /// All routes stream.
@@ -54,9 +68,54 @@ pub fn capabilities_for(model: &str) -> ModelCapabilities {
         max_output_tokens: None,
         supports_tools: route_supports_tools(model),
         supports_vision: false,
+        media_marker: None,
         supports_reasoning: is_reasoning_family(&lower),
         supports_streaming: true,
     }
+}
+
+/// Fold what the serving side reported into the table's answer for a model.
+///
+/// The offline table cannot know whether a given set of weights can see; only
+/// the process serving them can. On the llama.cpp route the `/props` answer
+/// carries `modalities.vision` and a per-launch `media_marker`; on the Ollama
+/// route `/api/show` lists a `vision` capability. Both take precedence over the
+/// table, and both are conservative: a field that is absent, or a server that
+/// cannot be reached, leaves `supports_vision` at the table's `false`.
+pub fn capabilities_with_report(
+    model: &str,
+    llamacpp: Option<&ServerReport>,
+    ollama_vision: Option<bool>,
+) -> ModelCapabilities {
+    let mut caps = capabilities_for(model);
+    if crate::routes_to_llamacpp(model) {
+        if let Some(report) = llamacpp {
+            caps.supports_vision = report.supports_vision.unwrap_or(false);
+            caps.media_marker = report.media_marker.clone();
+        }
+    } else if crate::routes_to_ollama(model) {
+        caps.supports_vision = ollama_vision.unwrap_or(false);
+    }
+    caps
+}
+
+/// Decide whether an image-bearing turn may go out, before any provider call.
+///
+/// Returns a named, actionable refusal when the turn carries images and the
+/// selected model has not been confirmed to see them; `None` when the turn may
+/// proceed (no images, or vision support was reported). This is a pure check —
+/// it touches no network and constructs no provider, so a refusal here is
+/// guaranteed to happen before a request could be sent.
+pub fn image_vision_refusal(
+    model: &str,
+    vision_supported: bool,
+    has_images: bool,
+) -> Option<String> {
+    (has_images && !vision_supported).then(|| {
+        format!(
+            "model {model} does not report vision support; use --model with a vision-capable model"
+        )
+    })
 }
 
 /// Stable, public-knowledge context windows. Deliberately narrow: ambiguous
@@ -293,5 +352,103 @@ mod tests {
             assert!(caps.supports_streaming);
             assert!(!caps.supports_vision);
         }
+    }
+
+    /// A `/props` answer with the vision fields as reported by b10809: vision
+    /// false and a per-launch marker. Provenance: `NEXT_PLAN_TASKS.md` §Z-1,
+    /// observed verbatim on 2026-10-05. Parsed by the models crate in its own
+    /// tests; here it is the input to the capability mapping.
+    fn llamacpp_report(vision: Option<bool>, marker: Option<&str>) -> ServerReport {
+        ServerReport {
+            context_tokens: Some(7168),
+            slots: Some(4),
+            supports_vision: vision,
+            media_marker: marker.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_vision_report_overrides_the_tables_conservative_default() {
+        let model = "llamacpp:smolvlm2";
+        let caps = capabilities_with_report(
+            model,
+            Some(&llamacpp_report(
+                Some(true),
+                Some("<__media_vISIONMARKERcaptured__>"),
+            )),
+            None,
+        );
+        assert!(caps.supports_vision);
+        assert_eq!(
+            caps.media_marker.as_deref(),
+            Some("<__media_vISIONMARKERcaptured__>")
+        );
+        // Still the table's answer for everything the server did not speak to.
+        assert!(caps.supports_tools);
+        assert!(caps.supports_streaming);
+
+        // A reported "no" is a real answer and overrides the table too.
+        let caps = capabilities_with_report(
+            model,
+            Some(&llamacpp_report(
+                Some(false),
+                Some("<__media_vDInAurkiv92eIIfmePeq5FKhw1ceqZi__>"),
+            )),
+            None,
+        );
+        assert!(!caps.supports_vision);
+        assert_eq!(
+            caps.media_marker.as_deref(),
+            Some("<__media_vDInAurkiv92eIIfmePeq5FKhw1ceqZi__>")
+        );
+    }
+
+    #[test]
+    fn silence_from_the_serving_side_stays_a_conservative_no() {
+        let caps = capabilities_with_report("llamacpp:qwen3-4b", None, None);
+        assert!(!caps.supports_vision);
+        assert_eq!(caps.media_marker, None);
+        // A server that answered but did not report the fields is the same.
+        let caps = capabilities_with_report(
+            "llamacpp:qwen3-4b",
+            Some(&llamacpp_report(None, None)),
+            None,
+        );
+        assert!(!caps.supports_vision);
+
+        // Ollama's `vision` capability is folded in the same way, and only on
+        // an Ollama route. No live vision model was available here, so this
+        // checks the boolean the models crate parses, not an image answer.
+        assert!(capabilities_with_report("qwen2.5-vl:7b", None, Some(true)).supports_vision);
+        assert!(!capabilities_with_report("qwen2.5-vl:7b", None, Some(false)).supports_vision);
+        assert!(!capabilities_with_report("qwen2.5-vl:7b", None, None).supports_vision);
+        // A vision report from a llama.cpp server is not applied to a cloud
+        // route: it describes a different process.
+        assert!(
+            !capabilities_with_report(
+                "anthropic:claude-sonnet-4",
+                Some(&llamacpp_report(Some(true), None)),
+                None
+            )
+            .supports_vision
+        );
+    }
+
+    #[test]
+    fn an_image_on_a_text_only_model_is_refused_by_name() {
+        let model = "llamacpp:qwen3-4b";
+        let refusal = image_vision_refusal(model, false, true)
+            .expect("an image on a text-only model must be refused before sending");
+        assert_eq!(
+            refusal,
+            format!("model {model} does not report vision support; use --model with a vision-capable model")
+        );
+        assert!(refusal.contains(model));
+        assert!(refusal.contains("--model"));
+
+        // No images: nothing to refuse, whatever the model claims. Confirmed
+        // vision: the image may go out.
+        assert_eq!(image_vision_refusal(model, false, false), None);
+        assert_eq!(image_vision_refusal("llamacpp:smolvlm2", true, true), None);
     }
 }

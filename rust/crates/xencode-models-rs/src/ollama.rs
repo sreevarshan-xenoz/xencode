@@ -67,6 +67,17 @@ impl ModelShow {
         self.has("tools")
     }
 
+    /// Whether this model can see images, from the `vision` capability Ollama
+    /// lists in `/api/show` for vision models (for example `llava`). A model
+    /// without that word in its capabilities is reported as unable to see, which
+    /// is the conservative answer the image gate needs. No vision model was
+    /// installed here to capture a real `/api/show` answer from, so the test
+    /// below checks the parser against the documented capability name rather
+    /// than claiming a live vision model was exercised.
+    pub fn can_vision(&self) -> bool {
+        self.has("vision")
+    }
+
     fn has(&self, capability: &str) -> bool {
         self.capabilities
             .iter()
@@ -620,6 +631,25 @@ mod tests {
         let show = parse_show(&serde_json::json!({ "capabilities": ["completion", "Thinking"] }));
         assert!(show.can_think());
         assert!(!show.can_use_tools());
+    }
+
+    #[test]
+    fn a_vision_capability_is_recognised_and_a_missing_one_is_not() {
+        // Provenance: `vision` is the capability Ollama lists in `/api/show` for
+        // models that accept images (the same array the file already checks for
+        // `tools` and `thinking`). No vision model was installed here to capture
+        // a live answer, so this checks the parser against that documented name,
+        // not an actual image answer from a model.
+        let show = parse_show(&serde_json::json!({
+            "capabilities": ["completion", "vision", "tools"]
+        }));
+        assert!(show.can_vision());
+        let text_only = parse_show(&serde_json::json!({
+            "capabilities": ["completion", "tools"]
+        }));
+        assert!(!text_only.can_vision());
+        let no_report = parse_show(&serde_json::json!({}));
+        assert!(!no_report.can_vision());
     }
 
     #[test]

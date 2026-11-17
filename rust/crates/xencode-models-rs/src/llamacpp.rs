@@ -103,13 +103,33 @@ impl LlamaCppTimings {
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// The part of a `/props` answer this program reads.
+///
+/// `modalities` and `media_marker` are the vision report. On `llama-server`
+/// b10809 they appear verbatim as `"modalities": {"vision": false, "video":
+/// false, "audio": false}` and `"media_marker": "<__media_…__>"`; the marker is
+/// random per launch, so it is read rather than assumed. Both are optional: an
+/// older build that does not report them leaves the capability unreported, which
+/// the gate treats as "no", never as a guess.
+#[derive(Debug, Default, Deserialize)]
 struct LlamaCppProps {
     #[serde(default)]
     default_generation_settings: Option<serde_json::Value>,
     #[serde(default)]
     #[allow(dead_code)]
     total_slots: Option<u32>,
+    #[serde(default)]
+    modalities: Option<LlamaCppModalities>,
+    #[serde(default)]
+    media_marker: Option<String>,
+}
+
+/// The modality flags in a `/props` answer. Only `vision` is acted on; `video`
+/// and `audio` are left for a build that has a pipeline for them.
+#[derive(Debug, Default, Deserialize)]
+struct LlamaCppModalities {
+    #[serde(default)]
+    vision: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,7 +176,7 @@ fn as_window(tokens: u64) -> Option<u32> {
 ///
 /// A field is `None` when the server answered without reporting it, which is a
 /// different answer from `Some` and stays that way in the caller's wording.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerReport {
     /// Tokens of context per slot — see [`context_window_from_props`].
     ///
@@ -165,15 +185,25 @@ pub struct ServerReport {
     pub context_tokens: Option<u32>,
     /// How many conversations the server serves at once (`total_slots`).
     pub slots: Option<u32>,
+    /// Whether the loaded model can see images, from `modalities.vision`.
+    /// `None` when the build does not report the field — not the same as a
+    /// reported `false`, though the image gate treats both as "no".
+    pub supports_vision: Option<bool>,
+    /// The server's per-launch marker for where media belongs in a prompt, from
+    /// `media_marker`. Random per launch, so only a value read here is usable.
+    pub media_marker: Option<String>,
 }
 
-/// Pick both reported values out of a `/props` response.
+/// Pick the reported values out of a `/props` response.
 ///
 /// Measured on b10809: `default_generation_settings.n_ctx` and a top-level
 /// `total_slots` are both present; the launch's `--cache-type-k`,
 /// `--cache-type-v` and `--batch-size` appear nowhere in the response, so a
-/// preset that includes them cannot be checked this way.
+/// preset that includes them cannot be checked this way. The two vision fields
+/// come from the same response through [`LlamaCppProps`]; a malformed or absent
+/// one leaves the capability unreported rather than guessed at.
 pub fn report_from_props(props: &serde_json::Value) -> ServerReport {
+    let typed: LlamaCppProps = serde_json::from_value(props.clone()).unwrap_or_default();
     ServerReport {
         context_tokens: context_window_from_props(props),
         slots: props
@@ -181,6 +211,8 @@ pub fn report_from_props(props: &serde_json::Value) -> ServerReport {
             .and_then(|v| v.as_u64())
             .and_then(|s| u32::try_from(s).ok())
             .filter(|s| *s > 0),
+        supports_vision: typed.modalities.and_then(|m| m.vision),
+        media_marker: typed.media_marker,
     }
 }
 
@@ -208,11 +240,11 @@ pub fn counted_tokens_from_response(body: &serde_json::Value, text: &str) -> Opt
 /// `/props` is the only witness, and it carries two of the preset's values —
 /// the window and the slot count. The cache quantization and batch size appear
 /// nowhere in the response, so this says nothing about them either way.
-pub fn settings_check_line(label: &str, asked: ServerReport, got: ServerReport) -> String {
+pub fn settings_check_line(label: &str, asked: &ServerReport, got: &ServerReport) -> String {
     if got.context_tokens.is_none() && got.slots.is_none() {
         return format!("{label}: the server reported no settings, so nothing is verified");
     }
-    let summary = |report: ServerReport| match (report.context_tokens, report.slots) {
+    let summary = |report: &ServerReport| match (report.context_tokens, report.slots) {
         (Some(ctx), Some(slots)) => format!("{ctx} tokens of context in {slots} slot(s)"),
         (Some(ctx), None) => format!("{ctx} tokens of context"),
         (None, Some(slots)) => format!("{slots} slot(s)"),
@@ -1956,14 +1988,16 @@ mod tests {
         let asked = ServerReport {
             context_tokens: Some(8192),
             slots: Some(1),
+            ..ServerReport::default()
         };
         assert_eq!(
             settings_check_line(
                 "BALANCED preset",
-                asked,
-                ServerReport {
+                &asked,
+                &ServerReport {
                     context_tokens: Some(8192),
-                    slots: Some(1)
+                    slots: Some(1),
+                    ..ServerReport::default()
                 }
             ),
             "BALANCED preset: 8192 tokens of context in 1 slot(s), as asked"
@@ -1971,26 +2005,28 @@ mod tests {
         assert_eq!(
             settings_check_line(
                 "BALANCED preset",
-                asked,
-                ServerReport {
+                &asked,
+                &ServerReport {
                     context_tokens: Some(2048),
-                    slots: Some(1)
+                    slots: Some(1),
+                    ..ServerReport::default()
                 }
             ),
             "BALANCED preset: 2048 tokens of context in 1 slot(s), not the 8192 tokens of context in 1 slot(s) asked for — later flags win, so check llama_cpp_args"
         );
         assert_eq!(
-            settings_check_line("BALANCED preset", asked, ServerReport::default()),
+            settings_check_line("BALANCED preset", &asked, &ServerReport::default()),
             "BALANCED preset: the server reported no settings, so nothing is verified"
         );
         // A server that answers half of it has not contradicted the other half.
         assert_eq!(
             settings_check_line(
                 "BALANCED preset",
-                asked,
-                ServerReport {
+                &asked,
+                &ServerReport {
                     context_tokens: Some(8192),
-                    slots: None
+                    slots: None,
+                    ..ServerReport::default()
                 }
             ),
             "BALANCED preset: 8192 tokens of context, as asked"
@@ -2011,6 +2047,8 @@ mod tests {
             ServerReport {
                 context_tokens: Some(4096),
                 slots: Some(1),
+                supports_vision: None,
+                media_marker: None,
             }
         );
     }
@@ -2027,6 +2065,69 @@ mod tests {
             serde_json::json!({}),
         ] {
             assert_eq!(report_from_props(&props).slots, None, "{props}");
+        }
+    }
+
+    /// The vision part of a `/props` answer observed verbatim on `llama-server`
+    /// b10809 (build 5266f24da7) on 2026-10-05, trimmed to the keys read here.
+    /// Provenance: `NEXT_PLAN_TASKS.md`, "§Z-1 The server already says what it
+    /// can do, and we do not read it". The whole fixture is that observation,
+    /// not a value invented to make the assertion pass. The marker is random per
+    /// launch; this one is from that capture and must be read, never assumed.
+    fn props_with_vision_report(vision: bool, marker: &str) -> serde_json::Value {
+        serde_json::json!({
+            "build_info": "b10809-5266f24da7",
+            "default_generation_settings": { "n_ctx": 7168 },
+            "modalities": { "vision": vision, "video": false, "audio": false },
+            "media_marker": marker,
+            "model_alias": "Qwen3-0.6B",
+            "total_slots": 4,
+        })
+    }
+
+    #[test]
+    fn props_report_a_text_only_model_as_no_vision_with_its_marker() {
+        // The real b10809 capture: Qwen3-0.6B reported vision false and a
+        // per-launch marker of the form <__media_…__>.
+        let props = props_with_vision_report(false, "<__media_vDInAurkiv92eIIfmePeq5FKhw1ceqZi__>");
+        let report = report_from_props(&props);
+        assert_eq!(report.supports_vision, Some(false));
+        assert_eq!(
+            report.media_marker.as_deref(),
+            Some("<__media_vDInAurkiv92eIIfmePeq5FKhw1ceqZi__>")
+        );
+        // The other values in the same response are still read.
+        assert_eq!(report.context_tokens, Some(7168));
+        assert_eq!(report.slots, Some(4));
+    }
+
+    #[test]
+    fn props_report_a_vision_model_as_vision_true() {
+        // Provenance: §Z-1 records `modalities.vision` as true for the SmolVLM2
+        // build the research pass loaded ("observed by the pass; not re-run
+        // here"). No vision model is available in this session, so only the
+        // parsing of that reported value is asserted, not a real image answer.
+        let props = props_with_vision_report(true, "<__media_vISIONMARKERcaptured__>");
+        let report = report_from_props(&props);
+        assert_eq!(report.supports_vision, Some(true));
+        assert_eq!(
+            report.media_marker.as_deref(),
+            Some("<__media_vISIONMARKERcaptured__>")
+        );
+    }
+
+    #[test]
+    fn a_server_without_vision_fields_leaves_them_unreported() {
+        // An older build, or one with the fields absent, says nothing. That is
+        // `None`, not a reported `false`: the caller can tell the two apart.
+        for props in [
+            serde_json::json!({ "total_slots": 4 }),
+            serde_json::json!({ "modalities": { "audio": true } }),
+            serde_json::json!({ "modalities": { "vision": "yes" }, "media_marker": 42 }),
+        ] {
+            let report = report_from_props(&props);
+            assert_eq!(report.supports_vision, None, "{props}");
+            assert_eq!(report.media_marker, None, "{props}");
         }
     }
 

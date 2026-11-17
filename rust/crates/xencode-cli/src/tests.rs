@@ -2,8 +2,8 @@
 
 use super::{
     attach_images_to_final_user_message, compute_advise, doc, format_image_text, human_duration,
-    join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind, Cli, Commands,
-    GenerateShell, OutputFormat, PerfAction, PriceAction, RunsAction, SessionAction,
+    join, parse_comma_list, plural_count, resolve_audit_path, resolve_bind, vision_gate, Cli,
+    Commands, GenerateShell, OutputFormat, PerfAction, PriceAction, RunsAction, SessionAction,
 };
 use clap::Parser;
 use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -1647,6 +1647,39 @@ fn a_done_line_leaves_out_the_counts_no_route_reported() {
     assert!(unmeasured["tokens_generated"].is_null(), "{unmeasured}");
     assert!(unmeasured["tokens_per_second"].is_null(), "{unmeasured}");
     assert_eq!(unmeasured["cached"], true);
+}
+
+/// An image on a text-only model is refused before any provider exists. The
+/// gate is a pure check, so this is the whole decision: the named reason comes
+/// back and there is no request that could have carried the picture. A model
+/// whose server reported vision, or a turn with no image, is allowed through.
+#[test]
+fn an_image_on_a_text_only_model_is_refused_before_a_provider_call() {
+    let text_only = xencode_providers_rs::capabilities_for("llamacpp:qwen3-4b");
+    assert!(!text_only.supports_vision);
+
+    let err = vision_gate("llamacpp:qwen3-4b", true, &text_only)
+        .expect_err("a text-only model must refuse an image turn");
+    assert_eq!(
+        err,
+        "model llamacpp:qwen3-4b does not report vision support; use --model with a vision-capable model"
+    );
+
+    // No image: nothing to refuse even on the same text-only model.
+    assert!(vision_gate("llamacpp:qwen3-4b", false, &text_only).is_ok());
+
+    // A model whose server reported vision is allowed to receive the image.
+    let vision = xencode_providers_rs::capabilities_with_report(
+        "llamacpp:smolvlm2",
+        Some(&xencode_models_rs::llamacpp::ServerReport {
+            supports_vision: Some(true),
+            media_marker: Some("<__media_vISIONMARKERcaptured__>".to_string()),
+            ..Default::default()
+        }),
+        None,
+    );
+    assert!(vision.supports_vision);
+    assert!(vision_gate("llamacpp:smolvlm2", true, &vision).is_ok());
 }
 
 /// Images go out as parts on the final user turn, with the prompt text
