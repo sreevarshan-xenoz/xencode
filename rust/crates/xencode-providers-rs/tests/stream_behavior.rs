@@ -112,6 +112,8 @@ enum PlanStep {
     ChunkedClose,
     /// Chunked NDJSON: stream the given lines, then terminate cleanly.
     ChunkedOk(Vec<(String, bool)>),
+    /// A final NDJSON line carrying `done` but without its trailing newline.
+    ChunkedUnterminatedEnd,
 }
 
 impl PlanStep {
@@ -142,6 +144,20 @@ impl PlanStep {
                 )
                 .into_bytes()
             }
+            PlanStep::ChunkedUnterminatedEnd => {
+                let body =
+                    "{\"message\":{\"role\":\"assistant\",\"content\":\"Whole\"},\"done\":true}";
+                format!(
+                    "HTTP/1.1 200 OK\r\n\
+                     Content-Type: application/x-ndjson\r\n\
+                     Transfer-Encoding: chunked\r\n\
+                     Connection: close\r\n\r\n\
+                     {:x}\r\n{}\r\n0\r\n\r\n",
+                    body.len(),
+                    body
+                )
+                .into_bytes()
+            }
             PlanStep::ChunkedOk(lines) => {
                 let body: String = lines.iter().map(|(c, d)| ndjson_line(c, *d)).collect();
                 format!(
@@ -157,6 +173,19 @@ impl PlanStep {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn an_ollama_end_line_without_a_newline_is_accepted() {
+    let (base_url, _counter) = spawn_server(vec![PlanStep::ChunkedUnterminatedEnd]).await;
+    let manager = ProviderManager::new(OllamaClient::new(&base_url, 5), None, None, None, None);
+    let mut tokens: Vec<String> = Vec::new();
+    let answer = manager
+        .generate_stream("test-model", &messages(), |t| tokens.push(t.to_string()))
+        .await
+        .expect("a done line is complete even without a trailing newline");
+    assert_eq!(answer, "Whole");
+    assert_eq!(tokens, vec!["Whole".to_string()]);
 }
 
 /// The core scenario this fix targets: a stream that fails *mid-way* (after
