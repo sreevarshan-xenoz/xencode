@@ -3621,6 +3621,18 @@ async fn run_foreground(
         result.push('\n');
         result.push_str(tail);
     }
+    // EC-1: a failed command now carries a short, classified next step beside
+    // the raw output, so the model can act on the failure instead of re-reading
+    // a wall of text. The classifier is pure and only recognises Rust/cargo
+    // shapes; when it sees none, nothing is appended.
+    if !output.status.success() {
+        let diagnostics = xencode_analysis_rs::classify_command_output(body);
+        let suggestions = xencode_analysis_rs::render_suggestions(&diagnostics);
+        if !suggestions.is_empty() {
+            result.push('\n');
+            result.push_str(&suggestions);
+        }
+    }
     result
 }
 

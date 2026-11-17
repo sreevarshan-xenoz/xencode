@@ -5,6 +5,7 @@ pub mod covdiff;
 pub mod dap;
 pub mod deps;
 pub mod envdrift;
+pub mod failure;
 pub mod images;
 pub mod issues;
 pub mod merge_decision;
@@ -32,6 +33,10 @@ pub use merge_decision::{
 pub use veto::{
     check_clearance, clear_veto, load_vetoes, open_vetoes_for, persist_clearance, record_veto,
     veto_path, Veto, VetoClearance, VetoSource, VetoStore, VETO_FILE,
+};
+
+pub use failure::{
+    classify_command_output, render_suggestions, Category, FailureDiagnostic, FailureSeverity,
 };
 
 pub use analyzer::CodeAnalyzer;

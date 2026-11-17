@@ -165,9 +165,13 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **Zero-duplicate-token** streaming retry middleware with token-delivery tracking.
 - Tool and shell failures reach the model as `error:`-prefixed or `exit <code>`
   results, and the agent's instructions make it name the failure and change
-  approach instead of retrying it unchanged. There is **no automatic error
-  classifier** — nothing parses a compiler or test message into a category and a
-  suggested fix; that is a planned item, not current behavior.
+  approach instead of retrying it unchanged. A failed command also carries a
+  short **`suggested fix:`** block: a pure classifier parses Rust/cargo output
+  into a category (compile error, test failure, panic, I/O or permission), a file
+  and line when the output gives one, and a next step drawn from the compiler's
+  own hint or the failure message. It recognises Rust/cargo shapes only — not
+  every language or provider — and adds nothing when it cannot classify the
+  output.
 - Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
