@@ -283,6 +283,41 @@ async fn provider_manager_ollama_success_no_retry() {
     assert_eq!(result.unwrap(), "Hello from Ollama!");
 }
 
+// ── the agent-tool stream path honours the same timeout ─────────────────
+
+#[tokio::test]
+async fn tool_stream_timeout_fires_on_a_stalled_server() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(30))
+                .set_body_string("data: [DONE]\n\n"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let llm_client = xencode_models_rs::OllamaClient::new(&mock_server.uri(), 60);
+    let manager = xencode_providers_rs::ProviderManager::new(llm_client, None, None, None, None)
+        .with_remote(&format!("{}/v1", mock_server.uri()), None)
+        .with_request_timeout(1);
+
+    let started = std::time::Instant::now();
+    let result = manager
+        .generate_stream_with_tools("remote:m", &test_messages(), &[], &[], None, |_| {})
+        .await;
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("no response within 1s"),
+        "expected the configured timeout, got: {err}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "a silent provider held the turn far past the timeout"
+    );
+}
+
 // ── request timeout fires on a stalled server ───────────────────────────
 //
 // The mock delays 30s; the manager allows 1s with no retries. Without the

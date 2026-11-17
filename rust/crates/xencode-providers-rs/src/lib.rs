@@ -966,14 +966,47 @@ impl ProviderManager {
         history: &[AgentTurn],
         tools: &[ToolDefinition],
         options: Option<&LlamaCppOptions>,
-        callback: F,
+        mut callback: F,
     ) -> Result<AgentStep, ProviderError>
     where
         F: FnMut(&str),
     {
-        let mut step = self
-            .generate_stream_with_tools_raw(model, messages, history, tools, options, callback)
-            .await?;
+        // The ordinary stream path bounds silence with `request_timeout_secs`,
+        // but the agent loop calls this method instead. A provider that accepts
+        // the connection and then never sends a byte must not hang the turn, so
+        // apply the same guard here. Once a token has been delivered the attempt
+        // is allowed to run to completion: cutting a live stream would leave a
+        // half-written answer in the transcript.
+        let mut step = if self.request_timeout_secs == 0 {
+            self.generate_stream_with_tools_raw(model, messages, history, tools, options, callback)
+                .await?
+        } else {
+            let emitted = AtomicBool::new(false);
+            let seen = &emitted;
+            let watched = |token: &str| {
+                seen.store(true, Ordering::SeqCst);
+                callback(token);
+            };
+            let mut attempt =
+                Box::pin(self.generate_stream_with_tools_raw(
+                    model, messages, history, tools, options, watched,
+                ));
+            tokio::select! {
+                result = &mut attempt => result?,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(
+                    self.request_timeout_secs,
+                )) => {
+                    if seen.load(Ordering::SeqCst) {
+                        attempt.await?
+                    } else {
+                        return Err(ProviderError::Network(format!(
+                            "no response within {}s",
+                            self.request_timeout_secs
+                        )));
+                    }
+                }
+            }
+        };
         tools::recover_text_tool_calls(&mut step, tools);
         Ok(step)
     }
