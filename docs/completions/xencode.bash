@@ -82,6 +82,9 @@ _xencode() {
             xencode,generate)
                 cmd="xencode__subcmd__generate"
                 ;;
+            xencode,git)
+                cmd="xencode__subcmd__git"
+                ;;
             xencode,help)
                 cmd="xencode__subcmd__help"
                 ;;
@@ -397,6 +400,18 @@ _xencode() {
             xencode__subcmd__eval__subcmd__help,run)
                 cmd="xencode__subcmd__eval__subcmd__help__subcmd__run"
                 ;;
+            xencode__subcmd__git,commit-message)
+                cmd="xencode__subcmd__git__subcmd__commit__subcmd__message"
+                ;;
+            xencode__subcmd__git,help)
+                cmd="xencode__subcmd__git__subcmd__help"
+                ;;
+            xencode__subcmd__git__subcmd__help,commit-message)
+                cmd="xencode__subcmd__git__subcmd__help__subcmd__commit__subcmd__message"
+                ;;
+            xencode__subcmd__git__subcmd__help,help)
+                cmd="xencode__subcmd__git__subcmd__help__subcmd__help"
+                ;;
             xencode__subcmd__help,acp)
                 cmd="xencode__subcmd__help__subcmd__acp"
                 ;;
@@ -462,6 +477,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,generate)
                 cmd="xencode__subcmd__help__subcmd__generate"
+                ;;
+            xencode__subcmd__help,git)
+                cmd="xencode__subcmd__help__subcmd__git"
                 ;;
             xencode__subcmd__help,help)
                 cmd="xencode__subcmd__help__subcmd__help"
@@ -651,6 +669,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help__subcmd__eval,run)
                 cmd="xencode__subcmd__help__subcmd__eval__subcmd__run"
+                ;;
+            xencode__subcmd__help__subcmd__git,commit-message)
+                cmd="xencode__subcmd__help__subcmd__git__subcmd__commit__subcmd__message"
                 ;;
             xencode__subcmd__help__subcmd__history,digest)
                 cmd="xencode__subcmd__help__subcmd__history__subcmd__digest"
@@ -1493,7 +1514,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --dump-config --help --version scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team orchestrator advise server analyze fetch interop anchor toolchain doctor session badge acp engine paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp setup hw history bootstrap tui help"
+            opts="-h -V --dump-config --help --version scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team orchestrator advise server analyze fetch interop anchor toolchain doctor session badge acp engine paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp setup hw history bootstrap git tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3014,8 +3035,86 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__git)
+            opts="-h --help commit-message help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__git__subcmd__commit__subcmd__message)
+            opts="-m -h --model --commit --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --model)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -m)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__git__subcmd__help)
+            opts="commit-message help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__git__subcmd__help__subcmd__commit__subcmd__message)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__git__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team orchestrator advise server analyze fetch interop anchor toolchain doctor session badge acp engine paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp setup hw history bootstrap tui help"
+            opts="scan config models cache audit advisories deps query memory tasks worktree colab remote computers compete merge team orchestrator advise server analyze fetch interop anchor toolchain doctor session badge acp engine paths migrate verify envcheck agents hotspots impact removal generate mutants cov perf prices test release-notes review replay runs run eval plugin mcp llamacpp setup hw history bootstrap git tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3689,6 +3788,34 @@ _xencode() {
         xencode__subcmd__help__subcmd__generate)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__git)
+            opts="commit-message"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__git__subcmd__commit__subcmd__message)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi

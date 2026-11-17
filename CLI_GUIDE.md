@@ -3653,6 +3653,27 @@ xencode worktree list
 xencode worktree remove ../feature-x
 ```
 
+### `xencode git commit-message [--model NAME] [--commit]`
+Suggest a commit message for the changes currently staged in the repository at
+the current directory. It runs a real `git diff --cached`, sends that diff to
+the model as the prompt, and prints the message the model returns. Nothing is
+committed unless `--commit` is passed; with no changes staged it says so and
+exits non-zero. `--model` names a model instead of the configured default.
+
+**This needs a working local model** (Ollama, or another provider reachable
+through the configured stack). If the model cannot answer, the command fails
+with that reason rather than making up a message. Stage first with `git add`.
+
+```bash
+git add src/parser.rs                     # stage the change you want described
+xencode git commit-message                # print a suggested message only
+xencode git commit-message --model qwen2.5:7b --commit   # commit staged changes with it
+```
+
+The `--commit` form runs `git commit -m <suggested message>` over the staged
+changes only, passing through the signing environment the TUI's git commit
+panel uses, so a signed-commit setup keeps working.
+
 ### `xencode advise [FILTER] [--json] [--limit 40]`
 Repository insights from the `.xencode` snapshot written by the TUI's
 `/init`: broken imports, import cycles, hub files and orphans.
