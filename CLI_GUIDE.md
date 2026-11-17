@@ -1920,6 +1920,51 @@ xencode scan . --max-depth 2
 xencode scan . --format json | jq '.[].path'
 ```
 
+### `xencode setup`
+Bring up a local llama.cpp model from an empty config in one command. It runs
+four steps in order and prints each before it starts:
+
+```bash
+xencode setup                                   # choose a model from this machine's memory
+xencode setup --model ~/models/model.gguf --yes # choose the GGUF, skip the download prompt
+```
+
+1. **Detect and recommend.** With no `--model`, the largest tier of the advice
+   table that this machine's biggest single memory pool can hold is chosen — the
+   same answer `xencode models advice` prints, from the machine's memory and the
+   `llama-server` device list. A model id or GGUF path passed to `--model` wins;
+   when the config already names both a GGUF path and a URL, that pair is used.
+2. **Download if needed.** If the GGUF file is not on disk, the same resumable,
+   checksum-checking downloader used by `llamacpp start` fetches it from the
+   configured URL. An existing file is left alone. With no URL and no file, the
+   step fails rather than inventing one. Without `--yes`, a terminal prompt asks
+   before a download; when standard input is not a terminal it proceeds and says
+   so.
+3. **Start llama.cpp.** The chosen path, URL, checksum and
+   `default_model = "llamacpp:<alias>"` are saved to the config, so a later
+   `xencode query` routes to this server. A free local port is requested from
+   the OS, the real `xencode llamacpp start` launcher is run, and setup waits for
+   the server to answer before continuing.
+4. **Verify.** One real `xencode query` is asked against `llamacpp:<alias>`.
+   Its answer is the proof the server works.
+
+Every step is reported. If one returns an error, setup prints a message naming
+that step, returns a non-zero exit, and never prints the success line — a failed
+download, a missing `llama-server`, or a query that cannot be answered is a
+failure, not a partial success. This is also true of the parts that cannot be
+exercised here: fetching a model needs network access, starting the server needs
+a `llama-server` binary and a machine with room for the weights, and the final
+query needs that server to be up. None of those are simulated. In the run
+recorded here the machine had network, so steps 1 and 2 really ran — a GGUF was
+recommended and a 1.9 GiB file was downloaded and checksum-verified — but there
+is no `llama-server` on this machine, so step 3 failed and was named as the
+failure. The server and query steps are therefore left to a machine that has a
+server binary; the tests cover the command's registration and the ordering and
+failure reporting of all four steps with boundaries that record real calls, not
+fake network or GPU results.
+
+Stop the server when finished with `xencode llamacpp stop`.
+
 ### `xencode models <action>`
 Local model management.
 

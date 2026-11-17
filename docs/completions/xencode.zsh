@@ -2485,6 +2485,15 @@ esac
     ;;
 esac
 ;;
+(setup)
+_arguments "${_arguments_options[@]}" : \
+'-m+[Model to use\: a path to a GGUF file, or a model id. With no value, the machine'\''s memory picks one from the advice table (same answer as \`xencode models advice\`)]:MODEL:_default' \
+'--model=[Model to use\: a path to a GGUF file, or a model id. With no value, the machine'\''s memory picks one from the advice table (same answer as \`xencode models advice\`)]:MODEL:_default' \
+'--yes[Skip the confirmation prompt before downloading a model]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (hw)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -3548,6 +3557,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(setup)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (hw)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__help__subcmd__hw_commands" \
@@ -3673,6 +3686,7 @@ _xencode_commands() {
 'plugin:Manage plugins' \
 'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
 'llamacpp:llama.cpp server management (status/start/stop/load/unload)' \
+'setup:Bring up a local llama.cpp model from an empty config in one command\: recommend a GGUF, download it if missing, start llama-server, then answer one real query. Each step is reported; a failed step is never reported as success' \
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
 'bootstrap:Write the files a project xencode has never seen is missing' \
@@ -4271,6 +4285,7 @@ _xencode__subcmd__help_commands() {
 'plugin:Manage plugins' \
 'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
 'llamacpp:llama.cpp server management (status/start/stop/load/unload)' \
+'setup:Bring up a local llama.cpp model from an empty config in one command\: recommend a GGUF, download it if missing, start llama-server, then answer one real query. Each step is reported; a failed step is never reported as success' \
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
 'bootstrap:Write the files a project xencode has never seen is missing' \
@@ -5102,6 +5117,11 @@ _xencode__subcmd__help__subcmd__session__subcmd__name_commands() {
 _xencode__subcmd__help__subcmd__session__subcmd__resolve_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help session resolve commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__setup_commands] )) ||
+_xencode__subcmd__help__subcmd__setup_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help setup commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__tasks_commands] )) ||
 _xencode__subcmd__help__subcmd__tasks_commands() {
@@ -6373,6 +6393,11 @@ _xencode__subcmd__session__subcmd__name_commands() {
 _xencode__subcmd__session__subcmd__resolve_commands() {
     local commands; commands=()
     _describe -t commands 'xencode session resolve commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__setup_commands] )) ||
+_xencode__subcmd__setup_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode setup commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__tasks_commands] )) ||
 _xencode__subcmd__tasks_commands() {
