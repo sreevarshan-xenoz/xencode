@@ -67,7 +67,7 @@ pub(crate) fn megabytes_label(bytes: u64) -> String {
 
 /// Score the agent against defects that were put there on purpose.
 ///
-/// The command measures; it does not gate. A pass rate of one in eight is a
+/// The command measures; it does not gate. A pass rate of one in ten is a
 /// correct answer and exits successfully, because the number is the product.
 /// Only a run that reached no verdict at all — every case failed before a
 /// grader could be consulted — is reported as an error.

@@ -2187,11 +2187,11 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (run)
 _arguments "${_arguments_options[@]}" : \
-'*-c+[Which defect to seed (repeatable; default\: all eight)]:CASES:_default' \
-'*--case=[Which defect to seed (repeatable; default\: all eight)]:CASES:_default' \
+'*-c+[Which defect to seed (repeatable; default\: all ten)]:CASES:_default' \
+'*--case=[Which defect to seed (repeatable; default\: all ten)]:CASES:_default' \
 '-m+[Model to score, in the form the router understands\: a plain name for Ollama, \`llamacpp\:<name>\`, or \`remote\:<name>\` (default\: the config'\''s)]:MODEL:_default' \
 '--model=[Model to score, in the form the router understands\: a plain name for Ollama, \`llamacpp\:<name>\`, or \`remote\:<name>\` (default\: the config'\''s)]:MODEL:_default' \
-'--repeats=[How many times to run each defect. Eight shapes three times is twenty-four cases, which is the smallest sample worth reading]:REPEATS:_default' \
+'--repeats=[How many times to run each defect. Ten shapes three times is thirty cases, which is the smallest sample worth reading]:REPEATS:_default' \
 '--max-rounds=[Tool rounds a single case gets before the loop has to answer]:MAX_ROUNDS:_default' \
 '--out=[Where the seeded repositories and their diffs go (default\: a stamped directory under the system temporary directory)]:OUT:_files' \
 '--ollama-url=[Where an Ollama server is, for a model id with no prefix]:OLLAMA_URL:_default' \

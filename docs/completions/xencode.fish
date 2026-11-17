@@ -725,9 +725,9 @@ complete -c xencode -n "__fish_xencode_using_subcommand eval; and not __fish_see
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and not __fish_seen_subcommand_from list run help" -f -a "run" -d 'Seed the defects, let the agent work on them, and grade what it changed'
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and not __fish_seen_subcommand_from list run help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from list" -s h -l help -d 'Print help'
-complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -s c -l case -d 'Which defect to seed (repeatable; default: all eight)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -s c -l case -d 'Which defect to seed (repeatable; default: all ten)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -s m -l model -d 'Model to score, in the form the router understands: a plain name for Ollama, `llamacpp:<name>`, or `remote:<name>` (default: the config\'s)' -r
-complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -l repeats -d 'How many times to run each defect. Eight shapes three times is twenty-four cases, which is the smallest sample worth reading' -r
+complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -l repeats -d 'How many times to run each defect. Ten shapes three times is thirty cases, which is the smallest sample worth reading' -r
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -l max-rounds -d 'Tool rounds a single case gets before the loop has to answer' -r
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -l out -d 'Where the seeded repositories and their diffs go (default: a stamped directory under the system temporary directory)' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand eval; and __fish_seen_subcommand_from run" -l ollama-url -d 'Where an Ollama server is, for a model id with no prefix' -r
