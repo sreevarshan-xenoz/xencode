@@ -3395,7 +3395,7 @@ rewrite.
 
 ### `xencode eval <action>`
 Score the agent against defects that were seeded on purpose. `list` prints the
-eight shapes and every run recorded so far; `run` writes each selected shape into
+ten shapes and every run recorded so far; `run` writes each selected shape into
 its own fresh git repository, hands the real agent loop the `task.md` that
 describes the bug, and then grades what the run left on disk.
 
@@ -3414,7 +3414,9 @@ changes. A green grader reached by editing `tests/behaviour.rs` is reported as
 `changed its own test` and is never a pass. Every run appends one line to
 `.xencode/cache/task_eval.jsonl` with its model, prompt digest, permission
 posture, sampling pins and per-case verdicts, so a rate is only ever printed next
-to a previous rate taken under the same rules. A case whose model request failed
+to a previous rate taken under the same rules — including the same number of
+cases and the same set of shapes, so an eight-case rate is never printed beside
+a ten-case one. A case whose model request failed
 is `not run` and stays out of the denominator — an unreachable server is not
 evidence about a model.
 
@@ -3451,10 +3453,10 @@ from a model big enough to compare two diffs. A judged run prints the version of
 ranking instruction it used, and adding it moved the digest `xencode eval list`
 shows for every run, so a score from before it is not offered as a comparison.
 
-What this number is *not*: it is one model, one set of instructions and eight
-shapes of defect. Eight cases is below the ten-to-thirty the plan asked for, and
-`--repeats 3` reaches twenty-four by running the same eight more often, which is
-not the same as twenty-four different defects. The agent works in a repository
+What this number is *not*: it is one model, one set of instructions and ten
+shapes of defect. Ten cases is the low end of the ten-to-thirty the plan asked
+for, and `--repeats 3` reaches thirty by running the same ten more often, which
+is not the same as thirty different defects. The agent works in a repository
 that contains its own grader, so the expected values are readable by it; nothing
 here stops a model from reading them, and the diff check is what notices.
 

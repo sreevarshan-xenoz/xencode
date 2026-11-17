@@ -505,14 +505,34 @@ pub fn read_task_eval_runs(xencode_dir: &Path) -> Vec<TaskEvalRecord> {
     xencode_core_rs::read_jsonl_tolerant(&task_eval_log_path(xencode_dir)).rows
 }
 
-/// The newest run recorded with the same instructions, model, sampling and
-/// permission posture — the only previous number worth printing next to this one.
-/// The caller hands over the log as it stood before this run was appended.
+/// The set of shapes a record graded, read from its `shape:outcome` verdicts.
+/// Comparing sets rather than the order of verdicts keeps two runs of the same
+/// suite comparable when a case was rerun in a different position.
+fn verdict_shapes(verdicts: &[String]) -> std::collections::BTreeSet<&str> {
+    verdicts
+        .iter()
+        .map(|verdict| {
+            verdict
+                .split_once(':')
+                .map(|(shape, _)| shape)
+                .unwrap_or(verdict.as_str())
+        })
+        .collect()
+}
+
+/// The newest run recorded with the same instructions, model, sampling,
+/// permission posture and case set — the only previous number worth printing
+/// next to this one. The number of cases and the shapes in them are part of
+/// what a rate describes: an eight-case rate from before the suite grew is not
+/// the same measurement as a ten-case rate, however identical the prompt, model
+/// and seed were. The caller hands over the log as it stood before this run was
+/// appended.
 pub fn comparable_previous_run(
     runs: &[TaskEvalRecord],
     report: &TaskEvalReport,
 ) -> Option<TaskEvalRecord> {
     let record = TaskEvalRecord::of(report);
+    let shapes = verdict_shapes(&record.verdicts);
     runs.iter()
         .rev()
         .find(|run| {
@@ -521,6 +541,8 @@ pub fn comparable_previous_run(
                 && run.approval == record.approval
                 && run.seed == record.seed
                 && run.max_tokens == record.max_tokens
+                && run.cases == record.cases
+                && verdict_shapes(&run.verdicts) == shapes
         })
         .cloned()
 }
@@ -1189,7 +1211,7 @@ mod tests {
             max_tokens: Some(1024),
             out_dir: PathBuf::new(),
             results: PathBuf::new(),
-            cases: Vec::new(),
+            cases: vec![test_case("off-by-one", 1, &[], "")],
             judge: None,
         };
         let older = TaskEvalRecord {
@@ -1201,10 +1223,10 @@ mod tests {
             temperature: Some(0.0),
             seed: Some(42),
             max_tokens: Some(1024),
-            cases: 8,
-            graded: 8,
-            passed: 3,
-            verdicts: Vec::new(),
+            cases: 1,
+            graded: 1,
+            passed: 1,
+            verdicts: vec!["off-by-one:pass".to_string()],
             out_dir: String::new(),
             judge_model: None,
             judge_ranking: Vec::new(),
@@ -1248,6 +1270,86 @@ mod tests {
         )
         .is_none());
         assert!(comparable_previous_run(&[], &report).is_none());
+    }
+
+    /// A pass rate describes a set of cases. A rate measured before the suite
+    /// grew from eight shapes to ten must never be printed beside a ten-case
+    /// rate as though the two answered the same question — not even when the
+    /// prompt, model and seed match exactly.
+    #[test]
+    fn a_rate_from_before_the_case_set_grew_is_not_comparable() {
+        let shapes = BugShape::all();
+        let report = TaskEvalReport {
+            model: "dolphin".to_string(),
+            server: "http://127.0.0.1:11434".to_string(),
+            prompt_version: "abc".to_string(),
+            approval: "edit-allow".to_string(),
+            temperature: Some(0.0),
+            seed: Some(42),
+            max_tokens: Some(1024),
+            out_dir: PathBuf::new(),
+            results: PathBuf::new(),
+            cases: shapes
+                .iter()
+                .map(|shape| test_case(shape.slug(), 1, &[], ""))
+                .collect(),
+            judge: None,
+        };
+        let ten_verdicts: Vec<String> = shapes
+            .iter()
+            .map(|shape| format!("{}:pass", shape.slug()))
+            .collect();
+        let ten = TaskEvalRecord {
+            ts_unix_ms: 1,
+            model: "dolphin".to_string(),
+            server: "http://127.0.0.1:11434".to_string(),
+            prompt_version: "abc".to_string(),
+            approval: "edit-allow".to_string(),
+            temperature: Some(0.0),
+            seed: Some(42),
+            max_tokens: Some(1024),
+            cases: shapes.len(),
+            graded: shapes.len(),
+            passed: shapes.len(),
+            verdicts: ten_verdicts.clone(),
+            out_dir: String::new(),
+            judge_model: None,
+            judge_ranking: Vec::new(),
+        };
+        // The same ten shapes are comparable, in any order.
+        assert!(comparable_previous_run(std::slice::from_ref(&ten), &report).is_some());
+        assert!(comparable_previous_run(
+            &[TaskEvalRecord {
+                verdicts: ten_verdicts.iter().rev().cloned().collect(),
+                ..ten.clone()
+            }],
+            &report
+        )
+        .is_some());
+
+        // Eight cases under the same prompt and model are a different set: the
+        // old 8/8 must not be offered as the previous number for this 10-case run.
+        let eight = TaskEvalRecord {
+            cases: 8,
+            graded: 8,
+            passed: 6,
+            verdicts: shapes
+                .iter()
+                .take(8)
+                .map(|shape| format!("{}:pass", shape.slug()))
+                .collect(),
+            ..ten.clone()
+        };
+        assert!(comparable_previous_run(std::slice::from_ref(&eight), &report).is_none());
+
+        // Ten cases with one shape swapped out are a different set as well.
+        let mut swapped_verdicts = ten_verdicts;
+        swapped_verdicts[0] = "a-retired-shape:pass".to_string();
+        let swapped = TaskEvalRecord {
+            verdicts: swapped_verdicts,
+            ..ten
+        };
+        assert!(comparable_previous_run(std::slice::from_ref(&swapped), &report).is_none());
     }
 
     #[tokio::test]
@@ -1433,6 +1535,62 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].verdicts, vec!["off-by-one:pass".to_string()]);
         assert_eq!(runs[0].prompt_version, report.prompt_version);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The whole harness over every declared shape, end to end. For each shape a
+    /// scripted answer over a real loopback socket asks the real agent loop to
+    /// apply that case's reference change, the real tool edits the seeded
+    /// repository, and the case's own real `cargo test` grades what was left on
+    /// disk. Each shape gets its own output directory so no two cases share a
+    /// repository or a results file. Only the model's words are scripted; the
+    /// loop, the edit, the diff and the grader all run for real.
+    #[tokio::test]
+    async fn every_shape_is_graded_end_to_end_through_the_real_loop() {
+        let dir = scratch("eval-all-shapes");
+        for shape in BugShape::all() {
+            let out = dir.join(shape.slug());
+            std::fs::create_dir_all(&out).unwrap();
+            let case = xencode_context_rs::seed_case(*shape);
+            let edit = &case.edits[0];
+            let (url, server) = scripted(vec![
+                call(
+                    "edit_file",
+                    serde_json::json!({"path": &edit.path, "old": &edit.find, "new": &edit.replace}),
+                ),
+                said("the reference change has been applied"),
+            ])
+            .await;
+
+            let report = run_task_eval(&TaskEvalOptions {
+                out_dir: out.clone(),
+                model: "scripted-agent".to_string(),
+                shapes: vec![*shape],
+                ollama_url: Some(url),
+                ..Default::default()
+            })
+            .await
+            .expect("the eval ran");
+            let _ = server.await;
+
+            assert_eq!(report.cases.len(), 1, "{shape:?}");
+            let outcome = &report.cases[0];
+            assert_eq!(outcome.error, None, "{shape:?}: {:?}", outcome.error);
+            assert!(outcome.grader_passed, "{shape:?}: {}", outcome.grader_tail);
+            assert_eq!(outcome.changed, vec!["src/lib.rs".to_string()], "{shape:?}");
+            assert!(
+                outcome.missing.is_empty() && outcome.unexpected.is_empty(),
+                "{shape:?}: {}",
+                outcome.line()
+            );
+            assert!(!outcome.edited_grader, "{shape:?}");
+            assert!(outcome.passed, "{shape:?}: {}", outcome.line());
+            assert_eq!(report.pass_rate(), Some(1.0), "{shape:?}");
+            assert!(
+                out.join("results.jsonl").exists(),
+                "{shape:?} has no report of its own"
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -9,7 +9,7 @@
 //! here is data in this file, which means a measurement taken twice is taken
 //! against the same code.
 //!
-//! Eight shapes, chosen because they are the ones an agent gets wrong in
+//! Ten shapes, chosen because they are the ones an agent gets wrong in
 //! practice and an exit code can tell apart:
 //!
 //! - [`BugShape::OffByOne`] — a loop stops one short
@@ -20,6 +20,8 @@
 //! - [`BugShape::IgnoredResult`] — a result that says whether it worked is dropped
 //! - [`BugShape::LostUpdate`] — two workers read the same value and one write is eaten
 //! - [`BugShape::StaleCache`] — a remembered value outlives the thing it came from
+//! - [`BugShape::NegativeFloor`] — a maximum starts at zero, so all-negative input loses
+//! - [`BugShape::Utf8Boundary`] — text is cut mid-character, so a multi-byte cut panics
 //!
 //! Two rules the generator exists to keep:
 //!
@@ -57,10 +59,12 @@ pub enum BugShape {
     IgnoredResult,
     LostUpdate,
     StaleCache,
+    NegativeFloor,
+    Utf8Boundary,
 }
 
 /// Every shape, in the order a suite walks them.
-pub const SEED_SHAPES: [BugShape; 8] = [
+pub const SEED_SHAPES: [BugShape; 10] = [
     BugShape::OffByOne,
     BugShape::MissingValue,
     BugShape::EarlyReturn,
@@ -69,10 +73,12 @@ pub const SEED_SHAPES: [BugShape; 8] = [
     BugShape::IgnoredResult,
     BugShape::LostUpdate,
     BugShape::StaleCache,
+    BugShape::NegativeFloor,
+    BugShape::Utf8Boundary,
 ];
 
 impl BugShape {
-    /// All eight, as a slice for callers that want to iterate.
+    /// All ten, as a slice for callers that want to iterate.
     pub fn all() -> &'static [BugShape] {
         &SEED_SHAPES
     }
@@ -88,6 +94,8 @@ impl BugShape {
             BugShape::IgnoredResult => "ignored-result",
             BugShape::LostUpdate => "lost-update",
             BugShape::StaleCache => "stale-cache",
+            BugShape::NegativeFloor => "negative-floor",
+            BugShape::Utf8Boundary => "utf8-boundary",
         }
     }
 
@@ -103,6 +111,8 @@ impl BugShape {
             BugShape::IgnoredResult => "a rejected name is counted as added",
             BugShape::LostUpdate => "two workers, one of the additions lost",
             BugShape::StaleCache => "a renamed report still shows the old title",
+            BugShape::NegativeFloor => "an all-negative set reports a zero maximum",
+            BugShape::Utf8Boundary => "cutting text mid-character panics",
         }
     }
 }
@@ -544,6 +554,94 @@ fn rendering_the_same_title_twice_still_agrees_with_itself() {
                 "        *self.title.borrow_mut() = title.to_string();\n        *self.cached.borrow_mut() = None;",
             )],
         ),
+        BugShape::NegativeFloor => (
+            "The largest reading comes back as zero when every reading is negative, \
+             and an empty set also reports zero instead of the smallest possible value. \
+             Sets with a positive reading are fine. Make the answer right in all three \
+             cases, without changing what a reading means."
+                .to_string(),
+            r#"//! The largest reading in a set.
+
+/// The largest reading, or the smallest possible value when there are none.
+pub fn highest(readings: &[i32]) -> i32 {
+    let mut best = 0;
+    for &value in readings {
+        if value > best {
+            best = value;
+        }
+    }
+    best
+}
+"#
+            .to_string(),
+            r#"use __CRATE__::highest;
+
+#[test]
+fn the_highest_of_positive_readings() {
+    assert_eq!(highest(&[3, 9, 4]), 9);
+}
+
+#[test]
+fn the_highest_of_all_negative_readings() {
+    assert_eq!(highest(&[-5, -2, -9]), -2);
+}
+
+#[test]
+fn an_empty_set_is_the_smallest_possible_value() {
+    assert_eq!(highest(&[]), i32::MIN);
+}
+"#
+            .to_string(),
+            vec![(
+                "src/lib.rs",
+                "    let mut best = 0;",
+                "    let mut best = i32::MIN;",
+            )],
+        ),
+        BugShape::Utf8Boundary => (
+            "Cutting text down to a byte limit panics when the cut lands in the middle \
+             of a multi-byte character, so shortening names with accents or emoji crashes \
+             the job. Plain ASCII cuts work. Make the cut land on a character boundary \
+             without changing what a cut of plain ASCII does."
+                .to_string(),
+            r#"//! Shorten text to a byte budget.
+
+/// The first `limit` bytes of the text, or all of it when it is shorter.
+pub fn shorten(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    &text[..limit]
+}
+"#
+            .to_string(),
+            r#"use __CRATE__::shorten;
+
+#[test]
+fn ascii_text_is_cut_at_the_byte_limit() {
+    assert_eq!(shorten("abcdef", 3), "abc");
+}
+
+#[test]
+fn a_limit_past_the_end_returns_all_of_the_text() {
+    assert_eq!(shorten("abc", 10), "abc");
+}
+
+#[test]
+fn a_cut_inside_a_multibyte_character_walks_back_to_a_boundary() {
+    // "é" is two bytes, so a limit of one lands inside it.
+    assert_eq!(shorten("aéz", 2), "a");
+    // "🙂" is four bytes, so a limit of two lands inside it.
+    assert_eq!(shorten("🙂", 2), "");
+}
+"#
+            .to_string(),
+            vec![(
+                "src/lib.rs",
+                "    &text[..limit]\n}",
+                "    let mut end = limit;\n    while !text.is_char_boundary(end) {\n        end -= 1;\n    }\n    &text[..end]\n}",
+            )],
+        ),
     };
 
     let manifest = format!(
@@ -665,6 +763,11 @@ impl SeededTask {
             .current_dir(&self.path)
             .env("CARGO_NET_OFFLINE", "true")
             .env("CARGO_TERM_COLOR", "never")
+            // Each case compiles into its own repository. A shared build
+            // directory lets two graders for the same-named crate reuse each
+            // other's test binary, so a green edit can be graded against a stale
+            // copy of the seeded code. The directory goes away with the case.
+            .env("CARGO_TARGET_DIR", self.path.join("target"))
             .output()
             .map_err(|e| format!("the grader could not be started: {e}"))?;
         let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -774,12 +877,12 @@ mod tests {
     }
 
     /// Every shape has a task, files, a change that applies exactly once, and a
-    /// grader — the generator is one code path for all eight, so a shape that
+    /// grader — the generator is one code path for all ten, so a shape that
     /// was wired up wrong would otherwise sit unnoticed in a report.
     #[test]
     fn every_shape_declares_a_case_the_generator_can_write() {
         let cases = all_seed_cases();
-        assert_eq!(cases.len(), 8, "the eight shapes the plan named");
+        assert_eq!(cases.len(), 10, "the ten shapes the plan named");
         let mut slugs = std::collections::HashSet::new();
         for case in &cases {
             assert!(!case.task.is_empty(), "{:?} has nothing to say", case.shape);
@@ -889,7 +992,7 @@ mod tests {
 
     /// The measurement itself: the seeded case fails its grader, and the case
     /// with the reference change applied passes it. Runs the real toolchain, so
-    /// it is the slowest thing here and covers two shapes rather than eight;
+    /// it is the slowest thing here and covers two shapes rather than all ten;
     /// `all_cases_pass_their_grader_once_fixed` walks the rest on demand.
     #[test]
     fn a_seeded_case_fails_and_the_same_case_with_the_change_applied_passes() {
@@ -913,11 +1016,11 @@ mod tests {
         }
     }
 
-    /// All eight, graded both ways. Ignored because it compiles sixteen small
+    /// All ten, graded both ways. Ignored because it compiles twenty small
     /// crates; run it with
     /// `cargo test -p xencode-context-rs --lib seeds::tests::all_cases -- --ignored --nocapture`.
     #[test]
-    #[ignore = "compiles all eight seeded cases twice; run it when a case definition changes"]
+    #[ignore = "compiles all ten seeded cases twice; run it when a case definition changes"]
     fn all_cases_pass_their_grader_once_fixed() {
         let dir = scratch_dir("all");
         for shape in BugShape::all() {

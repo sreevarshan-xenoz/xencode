@@ -960,7 +960,7 @@ pub(crate) enum EvalAction {
     List,
     /// Seed the defects, let the agent work on them, and grade what it changed
     Run {
-        /// Which defect to seed (repeatable; default: all eight)
+        /// Which defect to seed (repeatable; default: all ten)
         #[arg(short = 'c', long = "case")]
         cases: Vec<String>,
 
@@ -969,8 +969,8 @@ pub(crate) enum EvalAction {
         #[arg(short = 'm', long)]
         model: Option<String>,
 
-        /// How many times to run each defect. Eight shapes three times is
-        /// twenty-four cases, which is the smallest sample worth reading.
+        /// How many times to run each defect. Ten shapes three times is
+        /// thirty cases, which is the smallest sample worth reading.
         #[arg(long, default_value_t = 1)]
         repeats: usize,
 
