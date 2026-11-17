@@ -27,6 +27,9 @@ the URL.
 - Bearer token required (`Authorization: Bearer xencode_...`):
   - `POST /sessions/create`
   - `GET /sessions/{id}` — 200 for known, 404 for unknown
+  - `DELETE /sessions/{id}/members/{username}` — 204 when an admin removes a
+    member (or a member leaves), 403 when the caller is neither or the session
+    does not exist. This is the recovery path when a session has ten members.
   - `POST /auth/verify` — returns `{username, expires_at}` of the presented token
   - `POST /api/llamacpp/load` · `POST /api/llamacpp/unload`
 - WebSocket, first-frame auth:
