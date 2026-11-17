@@ -36,6 +36,8 @@ pub enum AuthError {
     Unauthorized,
     /// The request was structurally fine but used a mechanism we don't have.
     BadRequest(String),
+    /// Too many logins in the window, or the token store is at its hard limit.
+    RateLimited(&'static str),
 }
 
 impl AuthError {
@@ -43,6 +45,7 @@ impl AuthError {
         match self {
             AuthError::Unauthorized => ("unauthorized", "Authentication failed".to_string()),
             AuthError::BadRequest(msg) => ("bad_request", msg.clone()),
+            AuthError::RateLimited(msg) => ("rate_limited", msg.to_string()),
         }
     }
 }
@@ -53,6 +56,7 @@ impl IntoResponse for AuthError {
         let status = match self {
             AuthError::Unauthorized => StatusCode::UNAUTHORIZED,
             AuthError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AuthError::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
         };
         (
             status,
@@ -83,7 +87,18 @@ pub async fn login(
             "username must not be empty".to_string(),
         ));
     }
-    let principal = state.tokens.lock().await.issue(&req.username);
+    let mut tokens = state.tokens.lock().await;
+    if !tokens.allow_login() {
+        return Err(AuthError::RateLimited(
+            "too many logins right now; try again shortly",
+        ));
+    }
+    if tokens.at_capacity() {
+        return Err(AuthError::RateLimited(
+            "the server has no free session slots; try again later",
+        ));
+    }
+    let principal = tokens.issue(&req.username);
     Ok(axum::Json(LoginResponse {
         token: principal.token,
         username: principal.username,
@@ -177,6 +192,46 @@ mod tests {
         )
         .await;
         assert!(matches!(result, Err(AuthError::Unauthorized)));
+    }
+
+    #[tokio::test]
+    async fn a_login_flood_is_rate_limited() {
+        let state = state();
+        for i in 0..crate::tokens::LOGIN_BURST {
+            login_as(&state, &format!("user-{i}")).await;
+        }
+        let err = login(
+            State(state),
+            axum::Json(LoginRequest {
+                username: "one-too-many".to_string(),
+                api_key: None,
+            }),
+        )
+        .await
+        .expect_err("a login past the burst must be refused");
+        assert!(matches!(err, AuthError::RateLimited(_)));
+        assert_eq!(err.into_response().status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn a_full_token_store_refuses_logins() {
+        let state = state();
+        {
+            let mut tokens = state.tokens.lock().await;
+            for i in 0..crate::tokens::MAX_TOKENS {
+                tokens.issue(&format!("user-{i}"));
+            }
+        }
+        let err = login(
+            State(state),
+            axum::Json(LoginRequest {
+                username: "late".to_string(),
+                api_key: None,
+            }),
+        )
+        .await
+        .expect_err("a full store must refuse a new session");
+        assert!(matches!(err, AuthError::RateLimited(_)));
     }
 
     #[tokio::test]

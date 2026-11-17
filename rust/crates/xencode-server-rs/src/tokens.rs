@@ -5,8 +5,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration as StdDuration, Instant};
 
 use crate::ws::AppState;
 
@@ -26,14 +27,49 @@ pub struct Principal {
 /// (see the CLI's `--host`/`--cert` refusal rule); tokens stop a stranger on
 /// the same network from impersonating a peer, not the person who owns the
 /// account the server runs under.
+/// A store cannot grow past this many live tokens. Login is an identity claim
+/// with no password, so without a cap anyone who can reach the server could
+/// issue tokens forever and make every later request walk a longer store.
+pub const MAX_TOKENS: usize = 4096;
+/// At most this many logins in [`LOGIN_WINDOW`], counted process-wide. The
+/// window is short and the buffer is fixed-size: neither grows with traffic.
+pub const LOGIN_BURST: usize = 120;
+pub const LOGIN_WINDOW: StdDuration = StdDuration::from_secs(60);
+
 #[derive(Default)]
 pub struct TokenStore {
     by_token: HashMap<String, Principal>,
+    recent_logins: VecDeque<Instant>,
 }
 
 impl TokenStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether another login is allowed right now. Old timestamps are dropped
+    /// first, so a quiet server accepts a fresh burst.
+    pub fn allow_login(&mut self) -> bool {
+        let now = Instant::now();
+        while self
+            .recent_logins
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= LOGIN_WINDOW)
+        {
+            self.recent_logins.pop_front();
+        }
+        if self.recent_logins.len() >= LOGIN_BURST {
+            return false;
+        }
+        self.recent_logins.push_back(now);
+        true
+    }
+
+    /// Whether the store is at its hard size limit. Expired tokens are removed
+    /// before the count, so a stalled server recovers without a restart.
+    pub fn at_capacity(&mut self) -> bool {
+        self.prune_expired();
+        self.by_token.len() >= MAX_TOKENS
     }
 
     /// Issue a token for `username` with the default 24 h TTL.
@@ -55,23 +91,27 @@ impl TokenStore {
     }
 
     /// Return the principal for a presented token, or None if unknown or
-    /// expired. An expired entry is dropped here rather than left to rot.
-    ///
-    /// Lookup folds over all stored keys instead of `HashMap::get` so a
-    /// guessed token does not leak prefix-match timing. Defence-in-depth, not
-    /// the perimeter — see the trust note on TokenStore.
+    /// expired. The found entry is removed if it has expired, but a lookup no
+    /// longer sweeps the whole store: that made every authenticated request as
+    /// slow as the number of tokens ever issued. The single candidate is still
+    /// compared in constant time against a fixed dummy, so a hit and a miss of
+    /// the same length cost the same in the comparison itself.
     pub fn lookup(&mut self, token: &str) -> Option<Principal> {
-        self.prune_expired();
-        if !token.starts_with("xencode_") || token.len() <= "xencode_".len() {
+        let well_formed = token.starts_with("xencode_") && token.len() > "xencode_".len();
+        let found = if well_formed {
+            self.by_token.get(token).cloned()
+        } else {
+            None
+        };
+        let dummy = "xencode_00000000000000000000000000000000";
+        let candidate = found.as_ref().map(|p| p.token.as_str()).unwrap_or(dummy);
+        let _ = constant_time_eq(candidate.as_bytes(), token.as_bytes());
+        let principal = found?;
+        if principal.expires_at <= Utc::now() {
+            self.by_token.remove(token);
             return None;
         }
-        let mut found = None;
-        for (candidate, principal) in self.by_token.iter() {
-            if constant_time_eq(candidate.as_bytes(), token.as_bytes()) {
-                found = Some(principal.clone());
-            }
-        }
-        found
+        Some(principal)
     }
 
     pub fn revoke(&mut self, token: &str) -> bool {
@@ -180,6 +220,28 @@ mod tests {
             store.by_token.is_empty(),
             "expired entry was left in the store"
         );
+    }
+
+    #[test]
+    fn lookup_removes_an_expired_token_without_sweeping_the_store() {
+        let mut store = TokenStore::new();
+        let live = store.issue("alice");
+        let stale = store.issue_with_ttl("bob", Duration::seconds(-1));
+        assert!(store.lookup(&stale.token).is_none());
+        assert!(
+            store.by_token.contains_key(&live.token),
+            "an unrelated token was dropped by a single lookup"
+        );
+    }
+
+    #[test]
+    fn login_burst_is_bounded() {
+        let mut store = TokenStore::new();
+        for _ in 0..LOGIN_BURST {
+            assert!(store.allow_login());
+        }
+        assert!(!store.allow_login(), "an unlimited burst was accepted");
+        assert!(store.recent_logins.len() <= LOGIN_BURST);
     }
 
     #[test]
