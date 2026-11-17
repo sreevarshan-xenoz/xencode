@@ -58,6 +58,21 @@ pub struct ToolTrace {
     pub tail: Option<String>,
 }
 
+/// One "you changed no file" note fed back to the model on a turn (SM-2).
+/// Kept apart from [`ToolTrace`] on purpose: no tool was called, so putting a
+/// note there would invent a call and inflate a run's tool-call count.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContinuationNote {
+    /// `claimed_change` when the answer said it made an edit, `task_no_edit`
+    /// when task mode prompted an answer that ended without claiming one.
+    pub kind: String,
+    /// Zero-based loop round the note was fed back in.
+    pub round: u32,
+    /// Whether a real edit finished later in this same turn. The note fires
+    /// only before any edit, so a later edit is genuinely after the note.
+    pub edit_followed: bool,
+}
+
 /// Argument keys whose value *is* the payload of the call rather than a
 /// reference to it. Their text is the conversation's content — a file body, a
 /// search-and-replace pair, a list of steps — which is what the omissions above
@@ -136,6 +151,11 @@ pub struct TurnTrace {
     /// `None` when the turn edited nothing or no check applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checks: Option<ChecksVerdict>,
+    /// "You changed no file" notes fed back to the model this turn (SM-2).
+    /// A row written before this field existed reads as none, which is right:
+    /// that build did not keep them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_change_notes: Vec<ContinuationNote>,
 }
 
 /// The checks-ran verdict (EVd-3), in JUnit's terms: a check that did not run
@@ -203,6 +223,7 @@ impl TurnTrace {
             is_decision: false,
             prompt_version: Some(crate::prompts::set_version().to_string()),
             checks: None,
+            no_change_notes: Vec::new(),
         }
     }
 
@@ -814,6 +835,34 @@ second line echoing the prompt";
         // they existed can say, not a claim that the turn had none.
         assert!(rows[0].retrieved_files.is_empty());
         assert!(!rows[0].is_decision);
+        // A row from before continuation notes were kept reads as none.
+        assert!(rows[0].no_change_notes.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_turn_with_a_no_change_note_round_trips_and_an_empty_one_leaves_no_field() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut trace = TurnTrace::new(900, 4);
+        trace.no_change_notes.push(ContinuationNote {
+            kind: "task_no_edit".to_string(),
+            round: 3,
+            edit_followed: false,
+        });
+        append_trace(&xencode, &trace).unwrap();
+
+        let rows = read_recent_traces(&xencode, 50);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].no_change_notes.len(), 1);
+        let note = &rows[0].no_change_notes[0];
+        assert_eq!(note.kind, "task_no_edit");
+        assert_eq!(note.round, 3);
+        assert!(!note.edit_followed, "no edit finished after this note");
+
+        // A turn with no note does not grow an empty field on disk.
+        let line = serde_json::to_string(&TurnTrace::new(1, 1)).unwrap();
+        assert!(!line.contains("no_change_notes"), "{line}");
         fs::remove_dir_all(dir).unwrap();
     }
 
