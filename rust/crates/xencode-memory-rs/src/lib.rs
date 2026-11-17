@@ -168,18 +168,35 @@ pub fn read_events_tolerant<P: AsRef<std::path::Path>>(
     if !p.exists() {
         return Ok((Vec::new(), None));
     }
-    let text = std::fs::read_to_string(p).map_err(MemoryError::Io)?;
+    let bytes = std::fs::read(p).map_err(MemoryError::Io)?;
     let mut events = Vec::new();
     let mut torn_tail = None;
-    let ends_with_newline = text.ends_with('\n');
-    let total = if text.is_empty() {
-        0
-    } else {
-        text.lines().count()
-    };
+    let ends_with_newline = bytes.last() == Some(&b'\n');
+    // Parse each line's bytes separately: a torn append can cut a multibyte
+    // character, and decoding the whole file first would lose every earlier
+    // complete event with it.
+    let segments: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    let total = segments.len();
 
-    for (i, line) in text.lines().enumerate() {
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            continue;
+        }
         let is_last = i + 1 == total;
+        let line = match std::str::from_utf8(segment) {
+            Ok(line) => line,
+            Err(_) => {
+                if is_last && !ends_with_newline {
+                    torn_tail = Some(String::from_utf8_lossy(segment).into_owned());
+                } else {
+                    return Err(MemoryError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "event log line is not UTF-8",
+                    )));
+                }
+                continue;
+            }
+        };
         if line.trim().is_empty() {
             continue;
         }
@@ -877,6 +894,25 @@ mod tests {
         assert_eq!(events[1].id, 2);
         assert!(torn.is_some(), "torn tail should be captured and discarded");
         assert!(torn.unwrap().contains("torn"));
+
+        // A crash between the bytes of a multibyte character must not lose the
+        // two complete events that came before it.
+        let mut bytes = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&ev1).unwrap(),
+            serde_json::to_string(&ev2).unwrap()
+        )
+        .into_bytes();
+        bytes.extend_from_slice(b"{\"id\":3,\"session_id\":\"s1\",\"timestamp\":\"\xE2");
+        fs::write(&events_path, &bytes).unwrap();
+        let (events, torn) =
+            read_events_tolerant(&events_path).expect("a torn UTF-8 tail is not fatal");
+        assert_eq!(
+            events.len(),
+            2,
+            "earlier events were lost with the torn tail"
+        );
+        assert!(torn.is_some(), "the torn UTF-8 tail was not reported");
 
         // A malformed line in the middle of whole lines must return an error
         file_content = format!(
