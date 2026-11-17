@@ -60,13 +60,12 @@ jobs:
       working-directory: .
 
   coverage:
-    # Line coverage of the whole workspace. The same command run locally reports
-    # ~82%. CI reported ~53% because the cache restored an older cargo-llvm-cov
-    # binary and the install step accepted it instead of the pinned 0.9.1; that
-    # version attributed macro-generated code to the CLI source and inflated the
-    # line count. The binary is no longer cached and the pinned version is
-    # installed explicitly. Coverage artifacts are still cleaned before each
-    # measurement so a stale coverage map cannot skew the result.
+    # Line coverage of the whole workspace. CI's ~53% was not reproducible
+    # locally: with pinned rustc 1.100.0 and cargo-llvm-cov 0.9.1 a clean run
+    # reads ~82.70%. Which cached artifact caused CI's 53% cannot be proven from
+    # this repo, so both plausible causes were removed: the workflow pins the
+    # toolchain, the llvm-cov binary is no longer cached and is force-installed
+    # at 0.9.1, and coverage artifacts are cleaned before each measurement.
     runs-on: ubuntu-latest
 
     steps:
