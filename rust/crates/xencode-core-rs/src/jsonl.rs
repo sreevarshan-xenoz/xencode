@@ -48,27 +48,35 @@ pub fn read_jsonl_tolerant<T: DeserializeOwned>(path: &Path) -> JsonlRead<T> {
     }
 
     let ends_with_newline = bytes[bytes.len() - 1] == b'\n';
-    let Ok(text) = String::from_utf8(bytes) else {
-        // Not text at all: treat the whole file as unusable rather than
-        // inventing records out of binary.
-        return JsonlRead {
-            rows: Vec::new(),
-            torn_tail: false,
-            bad_lines: 1,
-        };
-    };
-
     let mut read = JsonlRead::empty();
-    let mut lines = text.lines().peekable();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim();
+    // Decode one line at a time. Decoding the whole file first meant a torn
+    // trailing append that split a multibyte character made every earlier,
+    // complete record vanish along with it.
+    let segments: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    let total = segments.len();
+    for (index, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            continue;
+        }
+        let is_last = index + 1 == total;
+        let text = match std::str::from_utf8(segment) {
+            Ok(text) => text,
+            Err(_) => {
+                if is_last && !ends_with_newline {
+                    read.torn_tail = true;
+                } else {
+                    read.bad_lines += 1;
+                }
+                continue;
+            }
+        };
+        let trimmed = text.trim();
         if trimmed.is_empty() {
             continue;
         }
         match serde_json::from_str::<T>(trimmed) {
             Ok(row) => read.rows.push(row),
             Err(_) => {
-                let is_last = lines.peek().is_none();
                 if is_last && !ends_with_newline {
                     read.torn_tail = true;
                 } else {
@@ -131,6 +139,21 @@ mod tests {
         let read = read_jsonl_tolerant::<Row>(&path);
         assert_eq!(read.rows, vec![Row { seq: 1 }, Row { seq: 2 }]);
         assert!(read.torn_tail);
+        assert_eq!(read.bad_lines, 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_torn_multibyte_tail_does_not_lose_earlier_records() {
+        let dir = temp_dir();
+        let path = dir.join("log.jsonl");
+        // The last append stopped between the bytes of a three-byte character.
+        let mut bytes = b"{\"seq\":1}\n{\"seq\":2}\n{\"seq\":3,\"x\":\"".to_vec();
+        bytes.extend_from_slice(&[0xE2]);
+        write_raw(&path, &bytes);
+        let read = read_jsonl_tolerant::<Row>(&path);
+        assert_eq!(read.rows, vec![Row { seq: 1 }, Row { seq: 2 }]);
+        assert!(read.torn_tail, "the torn UTF-8 tail was not reported");
         assert_eq!(read.bad_lines, 0);
         std::fs::remove_dir_all(dir).unwrap();
     }
