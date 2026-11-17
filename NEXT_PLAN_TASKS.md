@@ -47,6 +47,9 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-33 ✅ | MEDIUM | server | a WebSocket peer pruned for falling behind leaves its presence record behind forever (final audit) | pruning also leaves the sync session, with a test |
 | AU-34 ✅ | MEDIUM | server | the login burst limit is process-wide, so one client can lock out everyone (final audit) | the burst is keyed by claimed username and full-store refusals do not consume it |
 | AU-35 ✅ | MEDIUM | docs | the final audit found a reverted CI-status line, stale headings, missing manual entries and justfile/CI drift | all corrected and verified |
+| AU-36 ✅ | MEDIUM | providers | generated and streamed provider responses had no size cap, so a hostile endpoint could exhaust memory (audit leftover) | buffered and streamed bodies above 8 MiB are refused, with real-server tests |
+| AU-37 ✅ | MEDIUM | ci | the coverage gate was lowered to 53% after CI reported a measurement that a clean local run does not reproduce (audit leftover) | cache key includes the toolchain, coverage artifacts are cleaned before measuring, and the 80% floor is restored |
+| AU-38 ✅ | MEDIUM | agents | the roster firewall passed vacuously on CI because no agents are installed there (audit leftover) | recorded real help screens are checked when live CLIs are absent, and the test refuses a vacuous pass |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
