@@ -258,8 +258,10 @@ pub const ROSTER: &[AgentSpec] = &[
         // they behave as advertised.
         one_shot: "agy --print {prompt}",
         stream_flag: Some("--output-format stream-json"),
-        advertises_daemon: true,   // `--remote-control`, `agy remote-control`
-        advertises_acp: false,     // not in help
+        advertises_daemon: true, // `--remote-control`, `agy remote-control`
+        // `agy acp` is in help by 2026-11-17. The earlier "not in help" reading
+        // was from 2026-10-02; the live-help probe caught the drift.
+        advertises_acp: true,
         advertises_mcp: true,      // `agy mcp`
         advertises_resume: true,   // `--conversation`, `--continue`
         advertises_approval: true, // `--mode`, `--dangerously-skip-permissions`

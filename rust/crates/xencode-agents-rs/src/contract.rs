@@ -118,7 +118,7 @@ fn markers(agent: &str, claim: &str) -> &'static [&'static str] {
         ("opencode", "stream") => &["--format"],
         ("opencode", "acp") => &["acp"],
         ("opencode", "mcp") => &["mcp"],
-        ("opencode", "resume") => &["session", "export"],
+        ("opencode", "resume") => &["session", "--session", "--continue"],
         ("opencode", "daemon") => &["serve", "attach"],
         ("opencode", "approval") => &["--auto", "auto-approve"],
         ("cline", "stream") => &["--json"],
@@ -714,9 +714,16 @@ mod tests {
     fn the_roster_matches_live_help() {
         // The firewall: every installed agent's claims are re-read from its
         // own `--help` output, and a stale cell fails the build. On a machine
-        // with no roster agents installed this passes vacuously — there is
-        // nothing to contradict.
-        for result in probe_contract() {
+        // with no roster agents installed there is nothing to contradict, so
+        // say so in the log instead of appearing to have verified the roster.
+        let results = probe_contract();
+        if results
+            .iter()
+            .all(|result| matches!(result.verdict, Verdict::Untestable(_)))
+        {
+            eprintln!("note: no roster agent could be probed; the agent contract was not verified");
+        }
+        for result in results {
             assert!(
                 !matches!(result.verdict, Verdict::Contradicted(_)),
                 "{} {}: {:?}",
