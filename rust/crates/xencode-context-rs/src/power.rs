@@ -546,11 +546,17 @@ mod tests {
                     "a positive counter difference must be a positive watt-hour figure"
                 );
             }
-            None => assert_eq!(
-                package_domain(Path::new(POWERCAP_ROOT)),
-                None,
-                "no reading came with a package domain present"
-            ),
+            None => {
+                // A package domain can exist while its `energy_uj` counter is
+                // root-only, unreadable in a container, or simply unchanged
+                // over a quarter second. Absence of a reading is the honest
+                // result in all those cases; what must not happen is reporting
+                // an energy figure that was never measured.
+                assert!(
+                    use_.cpu_watt_hours().is_none(),
+                    "no energy reading must not produce a watt-hour figure"
+                );
+            }
         }
     }
 
