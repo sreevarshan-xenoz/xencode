@@ -379,6 +379,13 @@ pub fn fold_state_from_reply(reply: &str) -> Result<(ContextState, FoldReport), 
     while state.present()
         && STATE_FILE_CAP_TOKENS < crate::budget::est_tokens(state.to_markdown().len(), false)
     {
+        if ordered.is_empty() {
+            // Only the task sentence is left and it alone exceeds the cap. As in
+            // `enforce_state_caps`, clearing the person's own line to make an
+            // arithmetic fit is not this function's call to make. Popping an
+            // empty vector would loop forever.
+            break;
+        }
         ordered.pop();
         report.over_cap_dropped += 1;
         state = with_lines(&working_on, &ordered);
@@ -1578,6 +1585,19 @@ assistant: hello";
         assert_eq!(state.completed[0], "done 0");
         assert_eq!(state.decisions[0], "chose 0 [d]");
         assert!(state.unresolved.is_empty());
+    }
+
+    #[test]
+    fn an_over_cap_working_on_line_alone_does_not_hang_the_fold() {
+        let reply = format!(
+            "## working-on\n{}\n\n## completed\n- one fact\n",
+            "x".repeat(20_000)
+        );
+        let (state, report) = fold_state_from_reply(&reply)
+            .expect("an over-cap task sentence is still a well-shaped fold");
+        assert_eq!(state.working_on, "x".repeat(20_000));
+        assert!(state.completed.is_empty(), "the fact was dropped to fit");
+        assert_eq!(report.over_cap_dropped, 1);
     }
 
     #[test]

@@ -40,8 +40,6 @@ by inspection. Severity is about user impact, not effort.
 | AU-25 | MED-HIGH | docs | `PLAN_STATUS.md` is stale: all 165 referenced commit hashes no longer exist and `--check` fails (verified) | `scripts/plan-status.sh --check` passes on a freshly generated file |
 | AU-26 | MED | docs | `NEXT_PLAN_TASKS.md:5` and `NEXT_PLAN.md:26` still say "workspace gates not green" in the present tense | both headers reflect the 2026-10-10 green state |
 | AU-27 | LOW | docs | `NEXT_PLAN.md:26` says 16 crates (there are 20); CHANGELOG Unreleased omits RH-12/13/14/16-25 and OM-6 | crate count is 20 and recent IDs are in Unreleased |
-| AU-28 | HIGH | ci | `.github/workflows/release.yml:78-83`: `dist plan` runs at the repo root, where there is no Cargo.toml or dist.toml, so the `plan` check fails on every PR and the release workflow has never worked for this workspace | the plan job resolves the Cargo workspace under `rust/` and its check passes |
-| AU-29 | HIGH | ci | `.github/workflows/ci.yml:94`: the 80% coverage floor fails on every PR because the current compiler instruments generated CLI code differently (same 3141 tests pass as in the last green run, but the report counts ~53%) | the gate measures the same thing again or is honestly recalibrated with the reason recorded |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
