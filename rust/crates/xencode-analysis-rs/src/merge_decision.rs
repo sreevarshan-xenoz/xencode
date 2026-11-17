@@ -524,7 +524,10 @@ mod tests {
                 .expect("git setup failed");
             assert!(status.success());
         };
-        run(&["init"]);
+        // The branch helpers below check out `master` by name. Pin it at init
+        // instead of inheriting the machine's `init.defaultBranch`, which is
+        // `main` on many developers' machines and on current git defaults.
+        run(&["init", "-b", "master"]);
         run(&["config", "user.email", "merger@example.com"]);
         run(&["config", "user.name", "Merger"]);
         fs::write(path.join("base.txt"), "base file\n").unwrap();
