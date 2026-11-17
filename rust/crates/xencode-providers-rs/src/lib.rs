@@ -1258,16 +1258,16 @@ impl ProviderManager {
                 done = ingest_ollama_line(line, &mut full_response, None, &mut callback);
             });
         }
+        // A final NDJSON line may lack its trailing newline. Flush it before
+        // deciding the stream was cut short.
+        lines.finish(&mut |line| {
+            if done {
+                return;
+            }
+            done = ingest_ollama_line(line, &mut full_response, None, &mut callback);
+        });
         if !done {
             return Err(compatible::cut_off("Ollama"));
-        }
-        if !done {
-            lines.finish(&mut |line| {
-                if done {
-                    return;
-                }
-                done = ingest_ollama_line(line, &mut full_response, None, &mut callback);
-            });
         }
 
         Ok(full_response)
@@ -1337,16 +1337,14 @@ impl ProviderManager {
                 done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
             });
         }
+        lines.finish(&mut |line| {
+            if done {
+                return;
+            }
+            done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
+        });
         if !done {
             return Err(compatible::cut_off("Ollama"));
-        }
-        if !done {
-            lines.finish(&mut |line| {
-                if done {
-                    return;
-                }
-                done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
-            });
         }
 
         if let Some(recorder) = self.traffic.as_ref() {
