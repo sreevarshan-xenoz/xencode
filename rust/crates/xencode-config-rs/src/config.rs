@@ -29,7 +29,10 @@ fn declared_version(value: &serde_json::Value) -> u32 {
     value
         .get("config_version")
         .and_then(serde_json::Value::as_u64)
-        .map(|found| found as u32)
+        // Saturate instead of truncating: a far-future version must still be
+        // greater than the current one, not wrap around to a legacy value and
+        // get migrated down (and eventually overwritten).
+        .map(|found| u32::try_from(found).unwrap_or(u32::MAX))
         .unwrap_or(LEGACY_CONFIG_VERSION)
 }
 
@@ -2492,6 +2495,31 @@ mod tests {
         assert!(matches!(
             XencodeConfig::default().force_save_to(&newer),
             Err(ConfigError::NewerFile { found: 9, .. })
+        ));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_version_that_does_not_fit_u32_is_still_refused_as_newer() {
+        let dir =
+            std::env::temp_dir().join(format!("xencode-future-version-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("future.json");
+        // 2^32 truncates to 0 under a plain `as u32`, which used to treat this
+        // file as legacy and rewrite it.
+        fs::write(&path, br#"{"config_version":4294967296}"#).unwrap();
+        assert_eq!(
+            declared_version(&serde_json::json!({"config_version": 4294967296u64})),
+            u32::MAX
+        );
+        assert!(matches!(
+            XencodeConfig::load_from(&path),
+            Err(ConfigError::NewerFile { .. })
+        ));
+        assert!(matches!(
+            XencodeConfig::default().force_save_to(&path),
+            Err(ConfigError::NewerFile { .. })
         ));
         fs::remove_dir_all(&dir).unwrap();
     }
