@@ -666,6 +666,78 @@ pub(crate) async fn fetch_model(
     Ok(())
 }
 
+/// A port nothing is listening on right now.
+///
+/// A literal default is a collision waiting to happen: on a Steam machine 8080
+/// is usually already taken, and llama-server then dies on bind with a message
+/// about an address in use. Binding `:0` asks the OS for a port that is free at
+/// this instant, and dropping the listener hands it back before the server
+/// starts a moment later. An explicit `--port` still wins, so anyone who pins
+/// one keeps that behavior.
+fn free_port() -> Result<u16, String> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("could not ask the OS for a free local port: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("could not read the port the OS assigned: {e}"))?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+/// The name the running server will report for its one model.
+///
+/// This is used twice: as `--alias` on the command line, and as the
+/// `llamacpp:<alias>` default written to the config so a following `xencode
+/// query` names the same model the server actually serves. A `--alias` the
+/// person already put in `llama_cpp_args` is the effective one, because those
+/// flags are appended after the one xencode adds and llama-server runs with
+/// the last value it is given. Otherwise the GGUF's file name is the choice —
+/// stable and deterministic: no clock, no counter, no reading of the file.
+fn server_alias(model_path: &str, user_args: &[String]) -> String {
+    if let Some(pos) = user_args.iter().position(|a| a == "--alias") {
+        if let Some(name) = user_args.get(pos + 1) {
+            if !name.trim().is_empty() {
+                return name.trim().to_string();
+            }
+        }
+    }
+    let stem = std::path::Path::new(model_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let alias: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let alias = alias.trim_matches(|c| c == '-' || c == '.');
+    if alias.is_empty() {
+        "model".to_string()
+    } else {
+        alias.to_string()
+    }
+}
+
+/// Save the address, path and model id of the server that just came up, so a
+/// following `xencode query` finds it without extra flags.
+fn remember_started_server(
+    config: &mut XencodeConfig,
+    base_url: &str,
+    model_path: &str,
+    alias: &str,
+) -> Result<(), String> {
+    config.llama_cpp_url = base_url.to_string();
+    config.llama_cpp_model_path = model_path.to_string();
+    config.default_model = format!("llamacpp:{alias}");
+    config.save().map_err(|e| e.to_string())
+}
+
 pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
     fn pid_file() -> std::path::PathBuf {
         xencode_config_rs::paths::state_dir()
@@ -756,6 +828,12 @@ pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
                         .to_string(),
                 );
             }
+            // An omitted --port picks a port nothing holds right now instead of
+            // a fixed number another local program may already own.
+            let port = match port {
+                Some(port) => port,
+                None => free_port()?,
+            };
             // Nothing below this line means anything without a model on disk, so
             // the fetch comes first: it is the longest step of a bring-up and the
             // only one that can be interrupted and picked up again.
@@ -868,9 +946,10 @@ pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             )?;
             let mut preset = profile.profile.llama_cpp_args();
             preset.extend_from_slice(&reasoning);
+            let alias = server_alias(&model_path, &config.llama_cpp_args);
             let mut args = xencode_models_rs::llamacpp::server_launch_args(
                 &preset,
-                None,
+                Some(&alias),
                 &config.llama_cpp_args,
             );
 
@@ -934,9 +1013,7 @@ pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             let _ = write_pid_file(&pid_file(), server.pid());
             let client = LlamaCppClient::new(&server.base_url, 5);
 
-            config.llama_cpp_url = server.base_url.clone();
-            config.llama_cpp_model_path = model_path.clone();
-            config.save().map_err(|e| e.to_string())?;
+            remember_started_server(&mut config, &server.base_url, &model_path, &alias)?;
 
             println!("llama-server ready at {}", server.base_url);
             println!("Model loaded: {}", model_path);
@@ -1022,5 +1099,90 @@ pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             println!("llama_cpp_model_path = {path}");
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    /// The helper really asks the OS for a port, and the port it names is free
+    /// again by the time it returns — which is what lets llama-server bind it.
+    /// Holding the first port makes the second call's different answer
+    /// deterministic instead of a matter of allocator luck.
+    #[test]
+    fn free_port_names_a_real_port_that_is_free_after_the_helper_returns() {
+        let first = free_port().expect("a free local port");
+        assert_ne!(first, 0, "the OS must assign a port, not leave it at 0");
+
+        let held = TcpListener::bind(("127.0.0.1", first))
+            .expect("the port free_port named is free once the helper drops its listener");
+
+        let second = free_port().expect("a second free local port");
+        assert_ne!(second, 0);
+        assert_ne!(second, first, "a held port must not be handed out again");
+
+        drop(held);
+    }
+
+    /// The alias comes only from the path, so starting the same model twice
+    /// gives the same name and therefore the same `llamacpp:` model id.
+    #[test]
+    fn server_alias_is_stable_and_uses_the_gguf_name() {
+        let path = "/models/Qwen3-0.6B-Q4_K_M.gguf";
+        let args: Vec<String> = Vec::new();
+        assert_eq!(server_alias(path, &args), "Qwen3-0.6B-Q4_K_M");
+        assert_eq!(server_alias(path, &args), server_alias(path, &args));
+
+        // Characters that cannot go in a model id are replaced, and a path
+        // with no usable file name still gets a name instead of an empty alias.
+        assert_eq!(server_alias("/models/my model.gguf", &args), "my-model");
+        assert_eq!(server_alias("/", &args), "model");
+    }
+
+    /// An alias already in the user's flags wins, matching the value
+    /// llama-server actually runs with when the user's flags come last.
+    #[test]
+    fn server_alias_respects_an_explicit_alias_in_the_user_flags() {
+        let args = vec![
+            "--ctx-size".to_string(),
+            "4096".to_string(),
+            "--alias".to_string(),
+            " local-llama ".to_string(),
+        ];
+        assert_eq!(
+            server_alias("/models/Qwen3-0.6B-Q4_K_M.gguf", &args),
+            "local-llama"
+        );
+    }
+
+    /// A started server is recorded as the default model, so the next
+    /// `xencode query` routes to it without `--model` or `--llama-url`.
+    #[test]
+    fn remembering_a_server_writes_the_llamacpp_default_model() {
+        let dir = tempfile::tempdir().expect("a temporary config directory");
+        let previous = std::env::var_os("XCODE_CONFIG_DIR");
+        std::env::set_var("XCODE_CONFIG_DIR", dir.path());
+
+        let mut config = XencodeConfig::default();
+        let result = remember_started_server(
+            &mut config,
+            "http://127.0.0.1:41234",
+            "/models/tiny.gguf",
+            "tiny",
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+            None => std::env::remove_var("XCODE_CONFIG_DIR"),
+        }
+        result.expect("the config saves into the temporary directory");
+
+        let saved = XencodeConfig::load_from(dir.path().join("config.json"))
+            .expect("the config written by the helper loads back");
+        assert_eq!(saved.llama_cpp_url, "http://127.0.0.1:41234");
+        assert_eq!(saved.llama_cpp_model_path, "/models/tiny.gguf");
+        assert_eq!(saved.default_model, "llamacpp:tiny");
     }
 }

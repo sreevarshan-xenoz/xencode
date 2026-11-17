@@ -777,7 +777,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and not __fish
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and not __fish_seen_subcommand_from status start stop load unload list set-path help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from start" -l model -d 'GGUF model path (overrides config llama_cpp_model_path)' -r
-complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from start" -l port -d 'Port to bind (defaults to 8080)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from start" -l port -d 'Port to bind (defaults to a free local port)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from start" -l exec -d 'llama-server executable path (overrides config / PATH lookup)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from start" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from stop" -s h -l help -d 'Print help'
