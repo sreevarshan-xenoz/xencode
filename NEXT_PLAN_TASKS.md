@@ -20,12 +20,7 @@ The full gap list behind these phases, in priority order:
 | Priority | Missing thing | Why it hurts | Phase |
 |---|---|---|---|
 | P0 | Small model edit reliability | product does not work on free models | 0 |
-| P0 | One-command setup (`xencode setup`) | new users bounce | 0 |
-| P0 | Easy install / pre-built binaries | friction for everyone | 0–1 |
 | P1 | Better context + more language servers | agent is weak on real codebases | 1 |
-| P1 | Multi-agent polish | powerful feature feels half-baked | 1 |
-| P1 | Official skills + plugin growth | ecosystem feels empty | 1 |
-| P1 | AI commit messages + git depth | daily workflow gap | 1–2 |
 | P2 | Multimodal, Windows parity, broader eval | noticeable but not blocking | 2 |
 | P3 | Ambient autonomy, deeper editor integration, collaboration, cost/privacy | later | 3 |
 
@@ -87,7 +82,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | MM-12 ✅ | MED | providers+cli | images were attached and sent with no check that the selected model could see them; a llama.cpp `/props` answer already carries `modalities.vision` and a per-launch `media_marker`, and Ollama `/api/show` carries a `vision` capability, but none of it was read | the reported values are parsed into `ModelCapabilities::supports_vision`; `xencode query` refuses an image turn before any provider call with `model X does not report vision support; use --model with a vision-capable model`; captured `/props` shape and text-only refusal tested; a positive image answer is not verified here because no vision model is installed |
 | EV-12 ✅ | MED | context+docs | the seeded eval measured only eight bug shapes, so a pass rate could not report the negative-maximum or multi-byte-cut defects the phase-2 expansion asked for | two new standard-library-only shapes, `negative-floor` (a maximum initialised to zero loses all-negative input) and `utf8-boundary` (a byte cut inside a multi-byte character panics), are declared in `seeds.rs`; each ships a seeded case that fails its grader and a reference change that makes it pass, verified by the real fail-then-pass run over all ten shapes; commands, help, completions and manuals now say ten | done; all ten cases fail as seeded and pass with the reference change |
 | EV-13 ✅ | MED | tui+context+docs | the end-to-end harness proved only one shape, a previous rate was called comparable on prompt, model and seed alone (so an old eight-case pass rate could be printed beside a ten-case one), and concurrent graders for same-named seeds reused each other's test binaries through a shared build directory | a scripted test now drives all ten shapes through the real loopback provider, real tool edits and real cargo grader with a separate output directory each, and asserts a 1.0 pass rate; the previous-run comparison also requires the same case count and the same set of shape slugs, with a test covering the old-eight-case and swapped-shape cases; each grader builds into its own case repository so a green edit is never graded against a stale binary | done; all ten shapes pass end to end, parallel runs are stable, and a rate from a different case set is refused as a comparison |
-| EC-1 ✅ | MED | analysis+tui | a failing command's raw output was handed to the model with no targeted next step, so small models re-read the wall of text instead of acting | a pure classifier maps real Rust/cargo output to file:line, severity, category and a short suggested fix, attached to failed `run_command` results; tests use captured output for compile errors, a test failure with panic, permission and I/O errors, and a bare panic; Rust/cargo shapes only, not other languages or providers | attached to failed command results |
+| FP-1 ✅ | LOW | cli | the free-port test asserted a port could be rebound immediately after the helper returned, which races under CI load | the test now checks only the helper's contract: a nonzero port that differs from one the test holds open |
 | MM-13 ✅ | MED | analysis+cli | there was no one-action way to capture the screen and send it; attaching a picture required a separate screenshot tool and a `--image` path | `xencode query --screenshot` captures with grim on Wayland, import/scrot on X11, screencapture on macOS or PowerShell on Windows, verifies a real PNG, and reuses the existing `--image` resize and base64 path; a missing tool names what to install, with `XENCODE_SCREENSHOT_TOOL` as an override; real grim captures and a loopback server prove the image reaches the request, while a model reading it still needs a vision-capable model and remains unverified here | attached to failed command results |
 | PI-1 ✅ | LOW | plugin+cli | `plugin update` swaps the installed copy through a dot-prefixed backup named with the process id; a process killed between moving the old copy aside and deleting the backup left that full copy on disk forever, and a later process reusing the id could not rename over it, so the update failed with "directory not empty" | the update now removes leftover `.<name>.old-<digits>` backups for the plugin it is replacing before the swap, and only that exact shape — other dot-prefixed names and other plugins' backups are untouched; real `file://` git tests show the regression failing without the change and passing with it | done; two new plugin-crate tests cover a reused-id collision and a foreign-id orphan, the plugin crate (70 tests) and CLI consumer tests pass, fmt and clippy clean; orphans for plugins that are never updated again are still not collected |
 
@@ -299,7 +294,6 @@ A read-only review of the TUI as a first-time user meets it (`ui.rs`, `keymap.rs
 the code. These sit beside `SM-2` in the current order: they cost no GPU time, and every
 one of them is a reason a new user leaves in the first five minutes. Quick wins first.
 
-| ID | Problem (evidence) | Fix |
 |---|---|---|
 | **TX-1** ✅ | A failed model call ends a chat turn silently: the provider error goes to the trace and ByteBot only, the chat gets `[DONE]` and the spinner just disappears (`app.rs` agent loop, `stop_error`) | send the chat one line naming the model, the error, and what to do (start the server / `m` to pick a model) |
 | **TX-2** ✅ | In Normal mode on an empty screen, typing a sentence fires global keys — `q` quits, `s` opens Settings, `m` Models — before the user has pressed `i` (`keymap.rs` `global_chord`) | start in the composer when the transcript is empty; a bare `q` asks once |
@@ -4901,14 +4895,7 @@ Three ground rules for reading it:
 
 ### P-0 — Disposition of the eighteen
 
-| # | Proposal | Disposition | Where it actually lives |
 |---|---|---|---|
-| 1 | `AgentGraph` multi-agent orchestration | plumbing ships, graph rejected | `/spawn` worktree subagents + per-spawn checkpoints exist (`app.rs:2866-2950`); the survivable shape is **MA-2** (serial pipeline) + **MA-1** (clean-context reviewer), not a user-authored DAG |
-| 2 | Repository memory / project knowledge graph | rename of planned work + an empty slot it never noticed | **EV-4** (expiry/review) + **EV-7** (promotion gate) already are this feature; its intended home `state.md` turns out to have **no writer at all** (§P-1 fact 6) → **MEM-1…MEM-3** |
-| 3 | Semantic code intelligence (AST) | already planned | **CI-1…CI-7** (Milestone N) |
-| 4 | LSP integration | planned above the current tier, and unbuildable as casually as it reads | **CI-2/CI-3** already own it; the new findings are that the layer under it is four regexes (fact 16) and that **no maintained Rust LSP client exists** → **LSP-1…LSP-5** |
-| 5 | `VerificationEngine` | already planned, and blocked | **VF-\*** (O) + **EV-1**; honest blocker: nothing verifies anything today (facts 7 and 11) — a `VerificationEngine` crate before the ledger is ceremony |
-| 6 | Evidence-based state ("never say done without evidence") | **genuinely new substrate** | **EVd-1…EVd-7**; this is the review's best idea and the tree's biggest hole |
 | 7 | Long-running autonomous goals | already planned, wrapped | **L-7** (exit-code gate) + **LF-4** (detached queue); **GL-1…GL-3** add the record, the anchor and resume-by-re-verify |
 | 8 | Background/ambient agent | already planned, and already rejected as a daemon | **AM-1…AM-6**; O-8 rejects an in-binary cron daemon and autonomous commit/push from triggers |
 | 9 | Skills | already planned | Milestone **M** (SKILL.md compat) |
@@ -5754,7 +5741,6 @@ pass found something the whole plan has been quietly assuming.
 
 ### P-10 — Do-not-build register (additions only; the N and O registers still stand)
 
-| Rejected | Because |
 |---|---|
 | A general `AgentGraph` + scheduler | No shipped system demonstrates graph edges beating an LLM-led loop or a hardcoded chain; at 15 GiB / 8 cores / one KV slot it degenerates to a pipeline anyway |
 | Six named agent roles, each with own context/tools/model/worktree | The review's framing, not a measured need; MA-2's 3–4 stages cover the explorer/reviewer value |
@@ -6028,26 +6014,7 @@ Verdicts: **planned** = an existing L–P ID already covers it; **new** = adds a
 option not otherwise in the tree; **narrowed** = survives only in a reduced,
 evidence-supported form; **reject** = do-not-build (§Q-12).
 
-| # | Proposal | Verdict | Lands as / why not |
 |---|---|---|---|
-| 1 | Intent Engine | reject | No literature that a structured-intent stage improves coding-agent outcomes (PlanBench). Costs the scarcest resource. QI-1 A/B-tests the premise instead |
-| 2 | Project Constitution | narrowed | QB-3 = EV-5 scoped instruction files, human-authored, under their own nested-instruction cap |
-| 3 | Architecture Map | planned | AC-6 symbol-only repo-map tier (+CI-2, LSP-4) |
-| 4 | Architecture Drift Detection | new | QB-1 — declared-layer conformance over a human-written rule file; auto-inferred layers are circular |
-| 5 | Dependency Health Engine | planned | SE-6 `deps` + RS-5 `lookup_advisory` + DB-6 `doctor`; QO-1 is their composition, not a new engine |
-| 6 | Change Impact Simulator | planned | CI-6 `what_breaks`; QD-1 = CI-6 + `cargo metadata` reverse-deps + churn |
-| 7 | Blast-Radius Visualization | new | QD-2 — TUI fan-out over QD-1; needs WF-1's event stream, and the word "simulation" is dropped |
-| 8 | Code Ownership Intelligence | reject | Measured: 735 of 760 commits (96.7%) are one human under three name spellings; no `CODEOWNERS`. The only other contributors are two humans and an automated agent. The output would be "you" |
-| 9 | Change Risk Prediction | narrowed | Churn ranking inside QD-1. Published defect prediction does not reliably beat churn or LOC baselines |
-| 10 | Repository Time Machine | narrowed | QT-2 `--timeline` per path. History stays out of the KV head (GH-1's digest is the tier) |
-| 11 | Causal Code History | reject | Measured linkage here: 73/760 = 9.6% of commit messages reference an issue; 0 reverts. The missing edges would be hallucinated. GH-8 is the honest half |
-| 12 | Dead Architecture Detection | reject | rustc `dead_code` deliberately skips `pub` items in libs (rust#74970); flag-branch deadness needs runtime telemetry this box cannot produce |
-| 13 | Duplicate Architecture Detection | narrowed | QB-2 lexical + shared-neighbour advisories only. No published precision exists for type-4 (conceptual) clones |
-| 14 | Concept Graph | reject | Already in the do-not-build register (`:3465`); EV-4 covers concept retrieval |
-| 15 | Semantic Search That Understands Questions | narrowed | QN-2 (index real text) + QN-3 (RRF) + QN-4 (candidate-then-verify loop); QN-5 embeddings only if the eval loses to a dense arm |
-| 16 | Cross-Language Intelligence | reject | Needs per-language indexers; CI-2's tree-sitter budget is already spent on Rust |
-| 17 | Runtime-Aware Code Intelligence | reject | No substrate: `perf_event_paranoid=2`, `unprivileged_bpf_disabled=2`, `perf`/`bpftrace` not installed |
-| 18 | Production ↔ Code Correlation | reject | xencode ships no telemetry and has no deployed surface; OTel `code.*` needs traces that do not exist |
 | 19 | Performance Observatory | narrowed | QO-4 (+CX-8's CI gate). Tree has **zero `[[bench]]` targets** — there is no history to be observant about |
 | 20 | Resource Intelligence | narrowed | QO-5, and it is L-5 `hw probe` + L-6 budget preflight. "Adapt execution strategy per machine" is unverifiable on one machine |
 | 21 | Cost Intelligence | planned | CX-1…CX-5 and L-9 |
@@ -7425,7 +7392,6 @@ effort/impact ranking across the pool has deliberately not been computed.
 
 No dependencies. Everything downstream inherits its honesty: do not put a dashboard, a score or a manual claim on top of W0’s measurements.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AM-3** | Debounce hardening as a prerequisite to both | core | debounce + un-swallow the watcher spawn error (owner, W0 item 8) |
 | **DB-1** | An atomic write helper | core | atomic write; file says "DB-1 and SE-1 are one change, not two" |
@@ -7690,7 +7656,6 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
 
 Needs W0, which is complete. A trace of a run whose config could leak, and whose scanner reported the word `input` as High severity, was not evidence — both are fixed in W0.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CX-1** | An aggregator over `metrics.jsonl` | core | aggregator over metrics.jsonl (absorbs L-9, "cost metering over metrics that exist") |
 | **CX-2** | Schema extension — add `model`, `provider`, `session_id` | core | schema extension: model, provider, session_id (absorbs QO-3) |
@@ -10008,7 +9973,6 @@ done-when is met, and the commit that does it names the IDs.
 
 Independent of W1. MI-1 gates every later tool-call; the O appendix calls MI-1…MI-4 the cheapest cluster in the whole corpus, and this pass agrees.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AC-1** | Read the window the server actually has: `n_ctx` from the `/props` | core | read n_ctx from /props (= MI-2/MI-3 relabel per P row 14) |
 | **AC-2** | Replace the hardcoded `Balanced` with real selection: total-RAM | core | replace the hardcoded Balanced |
@@ -10030,7 +9994,6 @@ Independent of W1. MI-1 gates every later tool-call; the O appendix calls MI-1�
 
 LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstream of every “understands my project” feature.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CI-1** | `ast_edit` agent tool via ast-grep as a subprocess | capability | ast_edit over ast-grep |
 | **CI-2** | tree-sitter symbol extraction replacing the `symbols.rs` regexes | core | tree-sitter symbol extraction replacing symbols.rs |
@@ -10153,7 +10116,6 @@ LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstre
 
 CI-2/CI-6 (W3) supply the structural terms. The git-history terms (GH-1, GH-3, GH-9) need no new substrate and can start alongside.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AC-6** | Symbol-only repo-map tier for LOW/4k budgets, ranked by existing | capability | symbol-only repo-map tier for LOW/4k budgets |
 | **GH-1** | A ~250-token history digest per edited file | capability | history digest per edited file |
@@ -10172,7 +10134,6 @@ CI-2/CI-6 (W3) supply the structural terms. The git-history terms (GH-1, GH-3, G
 
 WF-4 first, always — deciding what “run the tests” means is the decision VF-1/VF-3/VF-5 all depend on. No mutation testing before autodiscovery.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CU-1** | A verifier seam: evidence-shaped pass/fail plus an artifact, feeding | capability | verifier seam feeding EVd-3 |
 | **L-7** | test/lint auto-repair loop with an exit-code "done" gate | capability | test/lint auto-repair loop with the exit-code done gate |
@@ -10194,7 +10155,6 @@ WF-4 first, always — deciding what “run the tests” means is the decision V
 
 EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); EVd-3 needs W5 to have actually run something; EVd-8 joins the three (see §Y-3).
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **EVd-1** | Session run-ledger | core | session run-ledger — as the owner put it, "EVd-1 + EVd-2 first" |
 | **EVd-2** | A session key on `RequestMetrics` (`metrics.rs:22-42` has none) | core | session key on RequestMetrics |
@@ -10211,7 +10171,6 @@ EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); E
 
 Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). This is the gate in front of all of W8.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CAP-1** | Capabilities as the *vocabulary* of the gate: `filesystem.read` | core | capability vocabulary for the gate |
 | **CAP-2** | Make `permissions` real for plugins (fact 9): refuse to load | core | fold into QTR-1 — done, see QTR-1's note |
@@ -10231,7 +10190,6 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-5** | secret *content* scanning | capability | secret content scanning; done 2026-10-04 — see the note |
 | **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5); done 2026-10-04 — see the note |
 | **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper); done 2026-10-04 — see the note |
-| **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement; done 2026-10-04 as `/gate` + `reproduce_bug` — see the note |
 
 #### W7 progress
 
@@ -10646,7 +10604,6 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 
 Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate change, or network-returned content enters the exact path SE-4 is supposed to control.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CU-2** | Browser verification as a Playwright-MCP recipe (MM-11) | capability | browser verification as a Playwright-MCP recipe (= MM-11) |
 | **L-11** | free hosted inference routes (`groq:…`, `nvidia:…`) | capability | free hosted inference routes, behind the PR-2 opt-in |
@@ -10805,7 +10762,6 @@ Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate chang
 
 Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph before any of it is worth rendering.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **GH-2** | `/why <file>:<line>` as an explicit, opt-in-cost query | capability | why <file>:<line> |
 | **GH-4** | `xencode hotspots --json` | capability | hotspots: churn x size, bus factor |
@@ -10833,7 +10789,6 @@ Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph 
 
 Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — done 2026-10-06: the store got its own two ceilings (`STATE_FILE_FACT_CAP` 60 lines, `STATE_FILE_CAP_TOKENS` 4,000) so a fact promoted in March still exists, and `factrank` now chooses which of them the *turn* pays 800 tokens for, on retrieval's own signals; the eval-style done-when is `tests/state_relevance.rs`, see the W10 progress note |
 | **EV-5** | sub-directory instruction files | capability | sub-directory instruction files — done 2026-10-05, the walk is read-only and lands below the stable-prefix marker, see the W10 progress note |
@@ -11658,7 +11613,6 @@ can prove; `EV-9` stays blocked while the Anthropic provider stays parked.
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CX-3** | Honest local cost as time plus watt-hours | capability | local cost as time + watt-hours; done 2026-10-03 |
 | **CX-4** | Cloud price lookup, never a vendored table | capability | cloud price lookup, never a vendored table; done 2026-10-03 — the TTL refuses the listing rather than trusting it a little, see the note |
@@ -11677,7 +11631,6 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **QO-5** | `xencode doctor --env` | capability | doctor --env probe and display; done 2026-09-28 |
 | **QO-6** | Release notes as a draft generator | capability | release-notes draft generator; done 2026-10-03 — see the note below |
 | **QO-7** | `doctor` as the self-debug slice | capability | doctor as the self-debug slice; done 2026-10-03 — see the note below |
-| **U-3** | The `doctor` surface for configuration drift | capability | from U — the W3 entry builds the graph; this is where its result is shown, alongside QO-5's machine probe; done 2026-09-28 as `xencode envcheck` and one `config_drift` row in `doctor --json` |
 | **U-5** | Dependency impact report: transitive delta and duplicate versions | capability | from U — a report into QO-1's composition, after SE-6; asks, never blocks; done 2026-09-28 — see §U-5 |
 | **V-8** | Event-driven render: stop the unconditional 30 fps redraw | capability | from V — `app.rs:8111` polls at 33 ms and draws every frame; no dependencies, so it can be pulled forward; done 2026-09-29 — see the note below |
   **Done 2026-09-29** — the loop draws only when a `FrameSignals` report says
@@ -11789,7 +11742,6 @@ the listing's unclear terms that this project can give without a lawyer.
 
 Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal order is settled in the plan: LF-4 → LF-2 → GL-3/GL-5.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AM-5** | Inbound-trigger work | core | fold into LF-2 |
 | **GH-7** | A bisect driver over the existing worktree + background-task | capability | bisect driver over worktrees + background tasks |
@@ -11846,7 +11798,6 @@ Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal or
 
 Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores / 15 GiB is what keeps this a pipeline rather than a graph.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **MA-1** | Clean-context reviewer as a consumer of existing `/spawn` | capability | clean-context reviewer over existing /spawn |
 | **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
@@ -11862,7 +11813,6 @@ from, and two of the research findings that led to them were thrown out on check
 one named a ratatui API this build does not have (`UX-24`'s corrected premise), and one
 proposed an accessibility mode the shipped `UX-12` already covers.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AM-1** | Watch-triggered *checks*, not writes | ecology | watch-triggered checks (needs AM-3 from W0) |
 | **AM-2** | Idle-gated agent turn | ecology | idle-gated agent turn |
@@ -12223,7 +12173,6 @@ advertised flag is not a behaviour. `AR-1` is the gate — until its matrix exis
 `OR-` item below is a commitment (§S-7, and the Milestone K rule that green unit tests
 prove nothing about a remote connection).
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AR-1** | Headless interop probe across the installed agent CLIs | core | the gate for all of W16/W17; needs the user's own logged-in accounts and a real (tiny, read-only) spend |
 | **AR-2** | Discover installed agents, versions, and how each was installed | core | PATH + `mise` reality; never installs, never upgrades |
@@ -12256,7 +12205,6 @@ from W14 because `OR-3` cannot exist without it: it is the only measured
 seam (`--permission-prompt-tool` → an MCP tool) by which xencode can answer a worker's
 approval request instead of pre-granting one.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **AR-4** | Launch one worker headless, normalise its events into our schema | core | one event shape; unprobed fields marked as xencode's, not theirs |
 | **AR-5** | Worker identity, and what xencode owns versus the vendor | core | id into ledger + metrics; task state only, never a session mirror |
@@ -12271,7 +12219,6 @@ approval request instead of pre-granting one.
 | **OR-15** | The task contract: done means what xencode said it means | core | `QI-3`'s machine-checkable slots in a real launch path; enforced by the lease and `SE-4`, not by asking |
 | **OR-16** | The result envelope, claims separated from evidence | core | `EVd-3`'s verdict extended, not a second ledger; the only thing a reviewer agent reads |
 | **M-5** | `xencode mcp serve` | ecology | moved up from W14: the broker's only seam (§S-3) |
-| **V-10** | Worker-event to window bridge | capability | after V-1 and AR-1/AR-4/AR-5/AR-6/AR-9; consumes observed state without controlling layout |
 
 #### W17 — Many workers at once — 15 items
 
@@ -12281,7 +12228,6 @@ scoped form (§R-2 item 8). Deliberately the last construction wave: the first t
 makes possible is also the first thing that can spend real money across five autonomous
 processes at once.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **OR-4** | Leases, not shared checkouts | capability | one worktree per worker + a declared file set; conflict refused at scheduling |
 | **OR-5** | The merge decision, with a human gate | capability | `GH-6`'s detection + `WF-9`; never silent, never auto-resolved by a worker |
@@ -12303,7 +12249,6 @@ processes at once.
 
 Declined once already, or genuinely contested. Recorded here so nobody re-proposes one of these inside a wave.
 
-| ID | item | bucket | placement note |
 |---|---|---|---|
 | **CAP-3** | Multi-role `[agent.reviewer]` TOML | park | REJECT-tier: multi-role reviewer TOML spawns without a verifier |
 | **MA-4** | Raise `--parallel` for real concurrency | park | REJECT-or-park: raising --parallel pays in wall-clock on 8c/15GiB |
@@ -12384,8 +12329,6 @@ the shape of the program.
 
 | item | status | the question |
 |---|---|---|
-| **MI-5** | parked, needs an owner decision | Does L’s rejection of speculative decoding cover the rented-VRAM case, or was it about consumer hardware being the bottleneck? If the latter, MI-5 belongs in W2 beside CX-5/CX-6, which the plan already says must ship with it or not at all. |
-| **QN-5** | conditional, inside W10 | A dense retrieval arm only if QN-4’s verify-pattern work proves the gap. The register declines embeddings/vector indexes until then. |
 | **MA-4, MA-5** | still parked; un-rejected only in scoped form | The hardware reason that parked them is true for local subagents and false for cloud workers, so the graph survives as `OR-2` in W16 (§R-2 item 8). The open question is no longer whether they can run at once — it is whether one machine can verify what they produce at once, which `AR-1`’s cost figure and W5’s throughput answer |
 | **MD-3, MD-4, MEM-4, MEM-5, CAP-3** | not scheduled | Already dispositioned as REJECT-or-park in P; the wave order does not reopen them. |
 
@@ -12617,46 +12560,7 @@ Verdicts as in Q: **planned** = an existing L–R ID already covers it; **new** 
 option not otherwise in the tree; **narrowed** = survives only in a reduced form;
 **reject** = do not build (§S-8).
 
-| # | Proposal | Verdict | Lands as / why not |
 |---|---|---|---|
-| 1 | `/orchestrator` is a mode, not a separate product | new | `OR-14` — the command surface. The framing is adopted wholesale; "normal xencode is unchanged" is the design constraint that keeps this cheap |
-| 2 | `AgentAdapter` with 12 methods | narrowed | `AR-1`, `AR-4`, `AR-6`. Twelve methods measured down to four (launch/stream/interrupt/session); `pause()`/`resume()`/`install()` dropped — no vendor has them (S-1) |
-| 3 | Auto-discover installed agents | new | `AR-2` — PATH discovery + version read. On this box five are `mise`-managed and two are `~/.local/bin`, so discovery must read the toolchain manager, not guess it |
-| 4 | Settings becomes an Agent Control Center | narrowed | No new settings tree. Two sections on the existing `SettingRow`/`FocusArea` enums + `UX-6`'s palette; any config shape change pays `DB-2`'s version ladder first |
-| 5 | Agent marketplace | reject | Same decision Milestone M already made for plugins: "distribution that already works is a git repo plus a manifest". Also: these are third-party binaries we do not own and must not resell a catalogue of (§S-8) |
-| 6 | Agent capability detection | narrowed | `AR-3` — a probe of each CLI's advertised flags, not an inferred capability table. The S-0 table *is* the output format; it is 20 minutes of `--help`, and it never claims a capability a probe did not see |
-| 7 | Agent profiles (Architect/Implementer/Researcher…) | planned | `MI-7` task-shaped model profiles, `AC-3` rule-based task-shape router. `MD-3`'s rejection (per-mode prompts void KV reuse) does not apply — a worker's prompt is not in our KV cache, which is the one place profiles are free |
-| 8 | Task decomposition into a master task tree | new | `OR-1`, **gated on `EV-1`** — decomposition quality must be measured on a real task before anything downstream trusts it (S-4.2). The gate ran 2026-10-08 and the local planner did not clear it: three blind splits, best one owning 2 of 7 files and stating 1 of 2 build-forced orders, all refused |
-| 9 | Dependency-aware scheduling over the graph | new | `OR-2`. Revives `MA-5`'s scheduling for external workers only; §R-2's correction records that the `--parallel 1` reason for rejecting it does not apply to cloud workers |
-| 10 | Agents communicate only through Xencode, as structured events | planned | `WF-1`'s NDJSON stream + `EVd-1`'s ledger; new only in that `AR-4` must normalise vendor events into that schema first |
-| 11 | Shared project memory all workers read and challenge | planned | `EV-4`, `MEM-1`, `MEM-2`, `QM-1`, with `QK-3`'s source classes in front. One new consequence: memory written for one worker and read by another is a **wider injection surface** than our own context, and `SE-2`'s marking has to be per-worker (`OR-8`) |
-| 12 | Git/worktree isolation, one branch per worker | planned | Already shipped in part: `/spawn` runs a subagent in a worktree (`app.rs:2905-2955`), `worktree.rs`, `WF-10`'s stacked diffs. New: `AR-5` — a vendor CLI keeps its own state outside our worktree (session files, logs, `~/.codex`), so isolation needs an env/root contract, not just a branch |
-| 13 | Automatic merge manager | narrowed | `GH-6`'s conflict assistant + `WF-9` + `OR-5`. **Never silent** (the proposal says this itself and it is the rule): `git merge-tree` to detect, a human gate to land. And item 13's "Conflict resolution task → Reviewer: Claude" is a re-ask, not a resolution — see §S-8 |
-| 14 | Per-agent permission profiles, first-class | narrowed | `CAP-1`'s capability vocabulary is already the plan for this. The word "control" is wrong: brokering is real for one vendor and pre-grant-only for the rest (S-3) |
-| 15 | One approval controls everything (Approval Center) | planned | `LF-2`'s round-trip + `MD-1`'s modes + a queue in `OR-3`. Real today for Claude via `--permission-prompt-tool` over `M-5`; a queue over nothing-but-launch-flags is a display, and is honest only if it says so |
-| 16 | Agent dashboard | new | `OR-12` — a `FocusArea` panel over `AR-6`'s state and `EVd-1`'s rows. The mock in the proposal renders five states xencode cannot yet observe; `AR-6` is the item, the panel is its report |
-| 17 | Agent timeline / flight recorder | shipped | `EV-2`'s turn trace + `QA-3`'s decision markers, both built 2026-09-24. The proposal's own closing table already identified this overlap correctly |
-| 18 | Agent-to-agent review loops (planner → implementer → reviewer → verifier → fixer) | planned | `MA-2`'s serial pipeline + `MA-1`'s clean-context reviewer + `L-7`'s exit-code done-gate. New only in that the roles can now be filled by external workers (`AR-7`) |
-| 19 | Agent voting; expose disagreement, never majority-rule | planned | `QM-4` — "report disagreement, never resolve". The proposal independently restates a rule the plan already committed to, which is the best possible sign for it |
-| 20 | Specialist swarms (`/orchestrator team security\|feature\|debugging\|…`) | narrowed | `OR-9` — named recipes as TOML data over `OR-2`, which is exactly `MA-2`'s shape. A recipe is data; a team engine is `MA-5` returning by the side door |
-| 21 | Agent budgets (tokens, wall-clock, tasks, $/day) | planned | `CX-7` (budgets that act), `CX-5` (spend ledger), `CX-4` (price lookup, never a vendored table). New: `AR-6`'s per-worker wall-clock and interrupt, which is the only budget xencode can actually enforce on someone else's process |
-| 22 | Agent fallback (worker dies → hand the task to another) | narrowed | Provider-side fallback and retriability already exist (`retry.rs`, the Provider Health panel, `QTR-2`'s fix). `OR-7`: a worker's *crash* is observable and re-dispatchable; "can another agent do this?" is not — nobody asks the model that question truthfully |
-| 23 | Agent health monitoring (installed / authenticated / responsive / rate-limited) | new | `AR-8` — cheap and real: binary present, version, auth state, last-error. `codex doctor` and `claude doctor` exist and could be read as a signal, but they are interactive TUIs today; `DB-6`'s `xencode doctor` is the aggregation point |
-| 24 | Provider-aware installer (detect OS, package manager, install, verify, authenticate) | reject | Two independent reasons: the user manages this box with `mise` and the tree has `WF-5`/`binstall` for its own distribution, so a second installer is a toolchain-manager conflict; and "authenticate accounts" is not a step xencode may ever take, whatever the item number says |
-| 25 | Configuration profiles (Local Only / Maximum Intelligence / Secure Repository) | planned | `MI-7` + `CAP-1`. "Local Only" is this project's default posture (`PR-2`, `LF-8`) and gets stated as a profile; the other two are the same policy set with the egress gate opened by name |
-| 26 | Cost intelligence per agent + cost-aware routing | planned | `CX-1`…`CX-7`. Per-worker attribution needs one field on `CX-2`'s schema extension, which is where `AR-5`'s identity lands |
-| 27 | "Ask Xencode" routing: the user names the task, not the agent | planned | `AC-3` + `OR-1` + `OR-11`. This is the UX the whole proposal is for, and it is also the one that fails loudest when `EV-1` has not measured anything |
-| 28 | Explicit control commands (`assign`, `pause`, `stop`, `retry`, `inspect`, `status`, `graph`, `logs`, `permissions`, `costs`) | new | `OR-14`. `pause` again has no vendor primitive; the rest map onto `AR-6`/`EVd-1` |
-| 29 | Manual take-over: `/orchestrator attach codex`, `Ctrl+]` back | narrowed | `OR-10`. xencode's TUI is one ratatui surface and cannot host a rival TUI in-process; measured alternatives are the vendor's own (`claude attach <id>`, `opencode attach <url>`, `codex agents --remote`) so take-over means *suspend ours, hand the terminal over*, which is doable and is not what the mock implies |
-| 30 | Session handoff with progress, failure reason, changed files, tests | new | `AR-7`. The "Progress: 72%" in the proposal is the part to drop: no worker reports a truthful percentage, so the handoff is built only from what xencode can observe — the diff, the tests it ran itself, the last events, and the fact that the process stopped |
-| 31 | `.xencode/agents/…` + `.xencode/orchestrator/{agents,tasks,graph,permissions}.json`, `events.jsonl` | narrowed | `AR-5`. Mirror task state only — **never** copy vendor session stores, which are theirs, undocumented, and full of transcripts we did not write. Every new file inherits `DB-1`'s atomic write, `DB-5`'s torn-line discard, `SE-1`'s `0600` and `SE-5`'s secret scanning, because `events.jsonl` from five vendors *will* contain their API keys and their users' pastes |
-| 32 | Dry run: `/orchestrator plan` shows agents, tasks, cost, then asks | new | `OR-10`'s default render. Cheapest trust feature in the list, no new substrate, and it should be the way every run starts |
-| 33 | Simulation mode: build the graph without running agents | narrowed | Fold into `OR-10` — plan and simulate are one thing here, since neither runs a worker. `QD-5` is the actual simulator and it is about the code graph, not the task graph |
-| 34 | A YAML policy file per project | narrowed | `CAP-1` supplies the vocabulary and the enforcement point; the syntax should be the existing TOML config, not a fourth format (Milestone M's "do not invent a dialect" rule applies verbatim) |
-| 35 | Agent sandboxing under xencode's permission layer | planned | `SE-7` / `QTR-3` — and it is honest only after those ship (S-3). Until then the isolation story is a worktree, a lexical path check and the vendor's own sandbox, and the UI must say that |
-| 36 | "Why did Xencode choose this agent?" | new | `OR-11` — print the routing reasons next to every decision. Small, and the difference between a control plane and a surprise box |
-| 37 | Agent performance history by language/task/repo | narrowed | `QM-5` (per-model aggregates with `n` printed) + `QO-4`'s harness. The same objection the Q pass measured for ownership applies here: one author, one machine, a corpus this small cannot fill a per-language table with numbers that mean anything — print `n` or do not print the rate |
-| 38 | The final architecture and the name "Xencode Agent Runtime (XAR)" | narrowed | `S-11`. The component list maps onto `AR-*`/`OR-*` almost one-to-one; the name does not survive contact with the tree (§S-11) |
 
 Totals: **38 proposals → 13 planned, 13 narrowed, 10 new, 2 rejected**, and **22 new
 IDs** (`AR-1…AR-8`, `OR-1…OR-14`) — before §S-12's revision, which adds four more. Thirteen of the 38 were already in the tree under an
@@ -14337,13 +14241,7 @@ second job.
 Seven items are scheduled and one is deferred. Nothing here renumbers an existing
 item; provenance stays with the appendix letter, per §R-0's rule.
 
-| wave | what it is | after U | before U |
 |---|---|---|---|
-| W3 | Code intelligence: replace the regex tier | 15 | 13 |
-| W5 | The verification engine | 15 | 12 |
-| W7 | Trust architecture | 19 | 18 |
-| W11 | Self-diagnosis, cost and operations | 19 | 17 |
-| W14 | Product surface and ecosystem | 58 | 57 |
 
 These are U's own deltas, not the live totals — Milestone V added rows to W1,
 W11 and W14 the next day, and §R-0 carries the current figures. W6 is
@@ -14354,16 +14252,7 @@ in **EVd-3**'s `{ran, skipped, failed, evidence-ref}`, which is a shape change t
 an existing W6 item rather than a ninth thing to build. Doing that before either
 lands is the reason to read W6 first.
 
-| ID | item | wave | bucket | depends on |
 |---|---|---|---|---|
-| **U-1** | Cargo feature matrix: static `cfg` coverage first, compile matrix second | W5 | capability | CI-1, CI-2, RS-6, WF-4 |
-| **U-2** | Runtime hazard analysis (`RuntimeHazard { class, span, consequence, remedies }`) | W3 | capability | CI-1 |
-| **U-3** | Configuration intelligence: code ↔ template ↔ deployment drift | W3 + W11 | capability | CI-1 (graph half only; the `unwrap` check needs nothing) |
-| **U-4** | Flaky test isolation by differential base-tree run | W5 | capability | VF-5, WF-4, GH-7, `worktree.rs` |
-| **U-5** | Dependency impact report (transitive delta, duplicate versions) | W11 | capability | SE-6, QO-1, CX-8 |
-| **U-6** | Red-to-green reproduction gate as a capability gate | W5 + W7 | core | CU-1, EVd-3, CAP-1, MD-2 |
-| **U-7** | Structural three-way merge resolution | W14 | ecology | GH-6, CI-1, RS-6, OR-5's rule |
-| **U-8** | Atomic commit slicing | — | park | deferred behind CI-6/QD-1 |
 
 Ordering inside the appendix: **U-2 and U-3's graph half first** (they are W3 and
 they unblock nothing but cost nothing), then **U-6** (highest behavioural value,
@@ -15304,26 +15193,9 @@ that exists, the register stands.
 
 Ten items are scheduled and one is parked. Nothing renumbers an existing item.
 
-| wave | what it is | after V | before V |
 |---|---|---|---|
-| W1 | Make the agent observable | 16 | 15 |
-| W11 | Self-diagnosis, cost and operations | 20 | 19 |
-| W14 | Product surface and ecosystem | 66 | 58 |
-| W16 | One worker at a time, then brokered | 13 | 12 |
 
-| ID | item | wave | bucket | depends on |
 |---|---|---|---|---|
-| **V-1** | Layout tree and window model, additive to `compute_layout` | W14 | core | nothing; gates V-2…V-7 |
-| **V-2** | Tabbed and stacked windows (`Stack` first) | W14 | capability | V-1 |
-| **V-3** | Split and resize on a tree | W14 | capability | V-1, UX-1 |
-| **V-4** | Named views, saved and recalled | W14 | capability | V-1, V-6 |
-| **V-5** | Layout templates as data, refining the shipped presets | W14 | capability | V-1, H1-01, H1-05, DB-2 |
-| **V-6** | Persist the arrangement, not the work | W14 | capability | V-1, DB-1, DB-2, SE-1 |
-| **V-7** | Pane-boundary mouse, split from UX-9 | W14 | capability | V-1, UX-9 |
-| **V-8** | Event-driven render, no 30 fps unconditional redraw | W11 | capability | nothing — pull forward |
-| **V-9** | Layout transition inspector, not replay | W1 | capability | V-1, EV-2, QA-3 |
-| **V-10** | Worker-event to window bridge | W16 | capability | V-1, WF-1 (done), EVd-1, AR-1, AR-4, AR-5, AR-6, AR-9 |
-| **V-11** | Layout that rearranges itself | — | park | declined in §V-3 |
 
 **Order.** **V-8 first**, because it has no dependencies and is not an argument
 about layout. Then **V-1**, which is the substrate and the only `core` item here.
@@ -15450,18 +15322,14 @@ was launched, no credentials were used, nothing was spent. `kilo` is **not
 installed**, so every claim about it below is UNVERIFIED and is not recorded as
 fact.
 
-| | codex | claude | gemini | **cline** | opencode | crush |
 |---|---|---|---|---|---|---|
 | version | 0.157.1 | 2.1.283 | 0.61.0 | **3.0.62** | 1.18.31 | **v0.96.1** |
 | was (2026-09-23) | 0.156.1 | 2.1.280 | 0.60.0 | *absent* | 1.18.31 | *printed none* |
-| headless one-shot | `codex exec` | `-p/--print` | `-p/--prompt` | `cline "…"` | `opencode run` | `crush run` |
 | machine-readable stream | `--json` (JSONL) | stream-json | stream-json | **`--json` (NDJSON)** | `--format json` | not seen |
-| **ACP** | not seen | not seen | **`--acp`** | **`--acp`** | `opencode acp` | not seen |
 | vendor daemon | `app-server daemon`, `agents`, `remote-control` | `--bg`, `claude attach/logs/stop/rm/agents` | not seen | **`cline hub`, `-z/--zen`** | `opencode serve` + `attach <url>` | not seen |
 | MCP client | `codex mcp` | `claude mcp` | `gemini mcp` | `cline mcp`, `cline config mcp` | `opencode mcp` | not seen |
 | **per-request tool approval** | not seen | not seen | not seen | **`CLINE_TOOL_APPROVAL_MODE=desktop` + `CLINE_TOOL_APPROVAL_DIR`** (file IPC) | not seen | not seen |
 | worktree isolation | not seen | not seen | **`--worktree`** | `--data-dir` (implicit sandbox) | per-session project | `--cwd` |
-| approval ladder | `--sandbox`, `--ask-for-approval` | `--permission-mode`, `--allowed-tools` | **`--approval-mode default\|auto_edit\|yolo\|plan`** | `--auto-approve [true\|false]`, `--yolo`, `-p/--plan` | not in `run --help` | `--yolo` |
 | policy files | `-c key=value` | `--settings` | **`--policy`, `--admin-policy`** (Policy Engine; `--allowed-tools` deprecated) | `--config`, `--hooks-dir` | `opencode.json` | `--data-dir` |
 | hooks | `HooksList` in schema | hooks | `gemini hooks` | **`--hooks-dir`, `cline hook`** | plugins | not seen |
 | vendor session store + resume | `resume`, `fork`, `queue`, `archive` | `--resume`, `--fork-session` | `--resume`, `--session-id`, `--session-file` | **`--id <session-id>`, `cline history`** | `session list/delete`, `export`/`import` | `--session`, `--continue` |
@@ -16251,7 +16119,6 @@ not quietly reorder tiers.
 
 ### Z-5 New items, with the trap each one names
 
-| ID | item | effort | placement and trap |
 |---|---|---|---|
 | **LA-1** | Read the capability report the server already gives instead of inferring it from the model id: parse `chat_template_caps`, `modalities` and `media_marker` from `/props`, refuse tools or images when the reported flag is false, and use the marker the server names rather than a constant. | S–M | Joins W12; `MM-3` and `MI-2` are its customers and neither should ship a gate before it. Trap: `total_slots` and `n_ctx` are already read from this response, so the parse is not new machinery — the trap is treating `supports_tools: true` as "these calls will be useful", which is a different question and one `/props` cannot answer. |
 | **LA-2** | Per-request thinking control for mechanical turns, with the launch flag kept as the fallback. | S | Depends on `LA-1` for the precondition (it is `supports_reasoning_effort` versus `chat_template_kwargs` that decides the mechanism). Trap: §Z-2 measured one model on one launch. Correctness must be re-checked on a real task, because `MI-4` already measured that truncating a chain of thought changes the *answer*, not just the length. |
@@ -16268,7 +16135,6 @@ out of that commit on purpose: it is a notice that was missing next to damage
 reproduction until the fix was driven live. Each is one commit, and they are listed
 in the order they should be fixed, cheapest-blast-radius last rather than first.
 
-| ID | defect | observed, not inferred |
 |---|---|---|
 | **DF-1** | **A malformed `config.json` was silently replaced by defaults — fixed 2026-10-05.** | 21 call sites read `XencodeConfig::load().unwrap_or_default()` — 14 in `xencode-cli/src/main.rs`, 5 in `xencode-server-rs/src/routes.rs`, one each in `xencode-tui-rs/src/app.rs` and `detached.rs` — but the row first wrote that all of them then `save()`, and that is wrong: **three** can write. `xencode llamacpp start`, `xencode llamacpp set-path`, and the Settings panel (`App::new()` → `save_config()`). The five server routes only read the config, and `detached.rs` sets `persist_config = false`, so neither could destroy anything. Reproduced before the fix: a config holding `"default_model": "llamacpp:MYMARKERMODEL"` written as deliberately broken JSON, then `xencode llamacpp set-path /tmp/some.gguf` printed `llama_cpp_model_path = /tmp/some.gguf` and rewrote the file as the full default block with `"default_model": "qwen2.5:7b"`. The command succeeded and nothing said the file had been unreadable. Two things soften what was recorded on the first pass, and both are true: `save_to()` already refused a config from a *newer* xencode for exactly this reason, and `keep_backup_if_changed()` had copied the damaged bytes to `config.json.bak.<time>` first — so the settings were recoverable by hand, and the defect is a successful-looking command that reset everything without a word, not an unrecoverable loss. What landed: a `ConfigError::Corrupt` that names the file and where the parser gave up, the write-side refusal the version check already had extended to bytes that are not readable JSON or not an object (which covers all three writers, the Settings panel included, without touching its code), propagation at the two CLI sites, and `xencode config reset` allowed past the guard through `force_save_to()` — refusing there would leave no way out, and reset still keeps the broken bytes. An empty or whitespace-only file reads as "no settings yet" rather than damage: there is nothing in it to protect. |
 | **DF-2** | **`xencode analyze` panicked on a non-ASCII character that straddled the line-length cap — fixed 2026-10-05.** | `xencode-analysis-rs/src/analyzer.rs:89` sliced `&line[..100.min(line.len())]` and `:270` sliced `&line[..120.min(line.len())]` — byte indices, not char boundaries. Reproduced twice: a 141-byte `.py` line whose `é` occupies bytes 99–100 exited **101** with `end byte index 100 is not a char boundary; it is inside 'é' (bytes 99..101 of string)`; the same shape at byte 119 in a `.txt` file panicked at `:270` the same way. Any project with a `# -*- coding: utf-8 -*-`-style comment, an em-dash in prose, or a source file with accented identifiers made the analysis command crash rather than report. What landed is one helper, `over_long_line(line, max)`, which returns the line cut to `max` **characters** or `None` when it is not longer, so neither site indexes by byte again. That is a second change on purpose, not only a panic fix: the caps were byte tests wearing a "chars" label, so a 90-character line of CJK text — 270 bytes — was reported as too long, and no longer is. Re-proved after the fix on the crashing shape (`"x"×99 + é + "bbb"`, 104 bytes): the old expression still panics with the message above, and `xencode analyze` over a directory holding that file plus a `.txt` line straddling byte 119 exits **0** with both findings. |
@@ -16921,7 +16787,6 @@ Three corrections the brief did not carry, each of which changes what should be 
 
 ### The disposition
 
-| the brief asks for | already recorded as | state |
 |---|---|---|
 | A `Coworker` object with role, prompt, model policy, tool policy, memory scope, permissions | **rejected as written** in the P-10 register ("six named agent roles, each with own context/tools/model/worktree — the review's framing, not a measured need") and "`[agent.role]` policy tables — CAP-3: no role exists today that can act without the human"; `14 per-agent permission profiles` narrowed to `CAP-1`; recipes as data at `OR-9`; memory scope at `OR-8` | the role is a prompt and a policy, not a new type; only the **computer binding** and the **schedule** are missing → **AF-4** |
 | Persistent conversations, background work, activity history | Milestone `D`, `tasks_file.rs`, `run --detach`, `OR-2` (done), `AR-4`, `Session` naming/resume (`main.rs:487`) | shipped or planned as-is |
@@ -17474,7 +17339,6 @@ itself, because this file already carries four rejection registers (§P-10, §Q-
 said no is not a new idea — it is the same one with better marketing. Second the market, over the
 GitHub API, crates.io, npm and arXiv. The result is lopsided in a way worth stating up front:
 
-| bucket | count | what it means |
 |---|---|---|
 | already in this plan under another name | **28 of 51** | the idea is `EVd-*`, `QD-*`, `GL-*`, `AR-*`/`OR-*`, `LF-*`, `AM-*`, `QO-*`, `MEM-*`, `CAP-*`, `UX-*` or shipped (`voice.rs`, `/rewind`, `EV-2`+`QA-3`, `OR-11`) |
 | already rejected here, with a reason on the record | **16 of 51** | the register said no and measured why; re-listing them as vision would be the plan arguing with itself |
