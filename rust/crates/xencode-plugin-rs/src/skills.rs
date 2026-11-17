@@ -489,6 +489,28 @@ pub fn project_skills_dir(workspace: &Path) -> PathBuf {
     workspace.join(".xencode").join("skills")
 }
 
+/// The directory of official skills shipped with this repository, at
+/// `<repo>/skills`. It is a normal skills root (`*/SKILL.md`), so pointing
+/// `$XCODE_SKILLS_DIR` at it — or copying its subdirectories into the settings
+/// skills directory — is all that is needed to make the shipped skills load.
+///
+/// `$XENCODE_OFFICIAL_SKILLS_DIR` overrides the location for a packaged install
+/// that lays the directory out somewhere else. The default is resolved from
+/// this crate's manifest so it works from any working directory in a source
+/// checkout.
+pub fn official_skills_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("XENCODE_OFFICIAL_SKILLS_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("skills")
+}
+
 fn config_home() -> PathBuf {
     xencode_config_rs::paths::settings_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
@@ -767,5 +789,119 @@ mod tests {
             dir.parent().unwrap(),
             xencode_config_rs::paths::settings_dir().unwrap().as_path()
         );
+    }
+
+    /// The tool names the agent can be offered, mirrored from the
+    /// `xencode-providers-rs` tool definitions. This crate must not depend on
+    /// the provider crate, so a skill's declared `allowed-tools` are checked
+    /// against this list here.
+    const KNOWN_TOOLS: &[&str] = &[
+        "background_start",
+        "background_poll",
+        "background_stop",
+        "repo_advise",
+        "what_breaks",
+        "find_refs",
+        "callers",
+        "read_file",
+        "list_dir",
+        "search_files",
+        "read_docs",
+        "lookup_advisory",
+        "write_file",
+        "edit_file",
+        "edit_symbol",
+        "ast_edit",
+        "codemod",
+        "rename",
+        "run_command",
+        "debug_test",
+        "reproduce_bug",
+        "web_fetch",
+        "web_search",
+        "ask_user",
+        "update_plan",
+        "write_note",
+        "load_skill",
+    ];
+
+    /// Load every shipped official skill through the real loader and check the
+    /// contract the menu relies on: a non-empty name, description and body, no
+    /// borrowed summary, no rejected files, and permissions that name real
+    /// tools. A missing or broken skill file fails this test.
+    #[test]
+    fn official_skills_load_through_the_real_loader() {
+        let dir = official_skills_dir();
+        assert!(
+            dir.is_dir(),
+            "shipped skills directory is missing: {}",
+            dir.display()
+        );
+        let runtime = SkillRuntime::load(&dir, Path::new("/nonexistent-project"));
+        let expected = [
+            "commit-message",
+            "explain-diff",
+            "find-dead-code",
+            "fix-clippy-warnings",
+            "rust-refactor",
+            "security-pass",
+            "write-docs",
+            "write-tests",
+        ];
+        assert_eq!(
+            runtime.len(),
+            expected.len(),
+            "every shipped skill must load: {:?}",
+            runtime.rejected()
+        );
+        assert!(
+            runtime.rejected().is_empty(),
+            "a shipped skill was refused: {:?}",
+            runtime.rejected()
+        );
+        for name in expected {
+            let skill = runtime
+                .get(name)
+                .unwrap_or_else(|| panic!("official skill {name:?} was not loaded"));
+            assert!(!skill.name.trim().is_empty(), "{name}: empty name");
+            assert!(
+                !skill.description.trim().is_empty(),
+                "{name}: empty description"
+            );
+            assert!(
+                !skill.instructions.trim().is_empty(),
+                "{name}: empty instructions"
+            );
+            assert!(
+                !skill.description_inferred,
+                "{name}: description must be declared in frontmatter"
+            );
+            assert_eq!(skill.scope, SkillScope::Home);
+            let text = std::fs::read_to_string(&skill.file).unwrap();
+            let (fields, _, _) = parse_frontmatter(&text);
+            let allowed = fields
+                .get("allowed_tools")
+                .unwrap_or_else(|| panic!("{name}: no allowed-tools declared"));
+            let tools: Vec<&str> = allowed
+                .split(',')
+                .map(str::trim)
+                .filter(|tool| !tool.is_empty())
+                .collect();
+            assert!(!tools.is_empty(), "{name}: empty allowed-tools");
+            for tool in tools {
+                assert!(
+                    KNOWN_TOOLS.contains(&tool),
+                    "{name}: unknown tool {tool:?} in allowed-tools"
+                );
+            }
+        }
+        let menu = runtime.menu().expect("shipped skills produce a menu");
+        for name in expected {
+            let skill = runtime.get(name).unwrap();
+            assert!(
+                menu.contains(&menu_line(skill)),
+                "{name} is missing from the menu"
+            );
+        }
     }
 }
