@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FP-1`: the free-port helper test no longer assumes the OS-assigned port stays free after the helper returns; it checks a nonzero, distinct port instead.
 
 
+### Added — screenshot capture (MM-13)
 ### Fixed — plugin update backup cleanup (PI-1)
 
 - `PI-1`: `xencode plugin update` could be blocked by one of its own interrupted predecessors. An update replaces the installed copy by moving the old one to a dot-prefixed backup named with the process id, then copying the new one in and deleting the backup. A process killed between those steps left the backup on disk; the loader never loads it, but process ids are reused, so a later update could find a non-empty directory where it wanted to place its own backup and fail with `Directory not empty (os error 39)`. The update now removes leftover `.<name>.old-<digits>` backups for the plugin it is replacing before starting the swap. Only that exact shape is touched — other dot-prefixed names and other plugins' backups are left alone. Verified against real `file://` git repositories: the regression test fails with the previous behaviour and passes with the fix, and companion tests confirm the new manifest is installed and that unrelated directories survive. Backups belonging to plugins that are never updated again are still not collected.
@@ -42,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grader now builds into its own repository instead of a shared build directory:
   concurrent graders for same-named seed crates were reusing each other's test
   binaries and grading an edit against stale seeded code.
+
+- `MM-13`: `xencode query --screenshot` captures the screen and attaches the
 
 - `DI-3`: `install.sh` and `install.ps1` can now install from a published GitHub Release with `--release`/`-r` (`-Release` in PowerShell). The host OS and architecture are mapped to the exact archive name from the verified dist plan, the matching `.sha256` file is downloaded and checked with `sha256sum -c` or PowerShell's `Get-FileHash` before extraction, and the binary is installed to the same location with the same PATH shim and smoke test. Source build remains the default and `--source` selects it explicitly. `--version` (or `XENCODE_RELEASE_VERSION`) picks the release version, and `--dry-run` prints the derived archive name and URLs without making any network request. No release has been tagged yet, so release mode currently fails with HTTP 404 — the download half is blocked until a `v0.1.0` tag is pushed. An offline test checks the asset and URL derivation against the captured dist plan and exercises checksum verification with real local files.
 ### Added — Phase 1 distribution

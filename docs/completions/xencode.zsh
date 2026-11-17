@@ -427,6 +427,7 @@ _arguments "${_arguments_options[@]}" : \
 '*--image=[Image to send with the prompt (repeatable); needs a vision-capable model]:PATH:_default' \
 '--format=[How to write the answer\: plain words, or one JSON event per line]:FORMAT:(text ndjson)' \
 '--no-cache[Do not use cached responses]' \
+'--screenshot[Capture the screen and attach it in one action; needs an OS capture tool]' \
 '-h[Print help]' \
 '--help[Print help]' \
 ':prompt -- The prompt to send:_default' \

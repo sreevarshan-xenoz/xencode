@@ -15,6 +15,7 @@ pub mod property_eval;
 #[cfg(test)]
 pub mod property_eval_intersect;
 pub mod runtime_hazards;
+pub mod screenshot;
 pub mod search;
 pub mod security;
 pub mod toolchain;
@@ -48,6 +49,7 @@ pub use images::{
 pub use issues::{
     AnalysisReport, AnalysisSummary, CodeIssue, IssueType, SecurityFinding, Severity,
 };
+pub use screenshot::{capture_screenshot, ScreenshotError, PNG_MAGIC, SCREENSHOT_TOOL_ENV};
 pub use search::{
     search as search_web, Hit as SearchHit, Provider as SearchProvider, SearchError,
     MAX_RESULTS as MAX_SEARCH_RESULTS,

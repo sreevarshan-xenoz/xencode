@@ -132,6 +132,10 @@ pub(crate) enum Commands {
         #[arg(long = "image", value_name = "PATH")]
         images: Vec<String>,
 
+        /// Capture the screen and attach it in one action; needs an OS capture tool
+        #[arg(long)]
+        screenshot: bool,
+
         /// How to write the answer: plain words, or one JSON event per line
         #[arg(long, default_value = "text")]
         format: QueryFormat,
