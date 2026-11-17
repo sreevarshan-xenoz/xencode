@@ -262,7 +262,7 @@ impl SetupSteps for RealSetup {
         let base_url = format!("http://127.0.0.1:{port}");
         let mut launcher = tokio::spawn(run_llamacpp(LlamacppAction::Start {
             model: Some(plan.model_path.clone()),
-            port,
+            port: Some(port),
             exec: None,
         }));
         let client = LlamaCppClient::new(&base_url, 2);
