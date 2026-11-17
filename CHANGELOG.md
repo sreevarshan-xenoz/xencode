@@ -49,6 +49,7 @@ tests or real runs; no placeholder implementations were used.
 - `AU-34`: the login burst limit is per identity instead of process-wide, and the token lookup no longer claims a constant-time comparison it does not make.
 - `AU-35`: the reverted CI-status line, stale headings, missing manual entries and justfile/CI drift were corrected.
 - `AU-36`: provider answers and streams are refused once they exceed 8 MiB, so a misbehaving endpoint cannot exhaust memory.
+- `AU-39`: the old handover section is marked historical, and the pre-rewrite items with no naming commit are explained instead of being given artificial commits.
 
 ### Documentation and maintenance — 2026-10-26 and 2026-10-12
 
