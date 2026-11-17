@@ -288,6 +288,17 @@ script before running it.
 .\install.ps1
 ```
 
+A published release can be installed instead of building: pass `--release`
+(`-r`) to `install.sh`, or `-Release` to `install.ps1`. The script maps its host
+OS and architecture to the exact archive cargo-dist publishes, downloads that
+archive's `.sha256`, verifies it before extracting, and installs to the same
+location with the same PATH shim and smoke test. Source build stays the default;
+`--source` selects it explicitly. `--version 0.1.0` (or
+`XENCODE_RELEASE_VERSION`) picks the release version, and `--dry-run` prints the
+derived archive name and URLs without making a request. No release has been
+tagged yet, so release mode returns HTTP 404 today — the download path exists
+but cannot be exercised until a `v0.1.0` tag is pushed.
+
 ### Option C: Dev container
 
 For working on xencode without installing Rust yourself,

@@ -2,8 +2,90 @@
 
 set -e  # Exit on any error
 
+# "source" keeps the original behaviour (build from a checkout).
+# "release" downloads a published cargo-dist archive and verifies its checksum.
+INSTALL_MODE="${XENCODE_INSTALL_MODE:-source}"
+RELEASE_VERSION="${XENCODE_RELEASE_VERSION:-0.1.0}"
+DRY_RUN=0
+
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [options]
+
+Options:
+  -r, --release          Download a published release archive from GitHub
+                         Releases instead of building from source.
+      --source           Build from source (the default).
+  -V, --version VERSION  Release version to download (default: 0.1.0).
+                         Also settable with XENCODE_RELEASE_VERSION.
+  -n, --dry-run          Show the derived asset name, download URL and the
+                         not-published-yet warning, then stop before any
+                         network request. Implies --release.
+  -h, --help             Show this help.
+
+Environment:
+  XENCODE_INSTALL_MODE     "source" or "release", same as --source/--release.
+  XENCODE_RELEASE_VERSION  Version used in release mode (default: 0.1.0).
+
+No GitHub Release exists yet: the v0.1.0 tag has not been pushed, so release
+mode currently fails with HTTP 404 until that release is published.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -r|--release)
+            INSTALL_MODE="release"
+            shift
+            ;;
+        --source)
+            INSTALL_MODE="source"
+            shift
+            ;;
+        -n|--dry-run)
+            DRY_RUN=1
+            INSTALL_MODE="release"
+            shift
+            ;;
+        -V|--version)
+            if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+                echo "❌ $1 needs a version argument." >&2
+                exit 1
+            fi
+            RELEASE_VERSION="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "❌ Unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+case "$INSTALL_MODE" in
+    source|release) ;;
+    *) echo "❌ XENCODE_INSTALL_MODE must be 'source' or 'release'." >&2; exit 1 ;;
+esac
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "$SCRIPT_DIR/scripts/release-assets.sh" ]; then
+    echo "❌ Missing $SCRIPT_DIR/scripts/release-assets.sh — run install.sh from a clone of this repository." >&2
+    exit 1
+fi
+# shellcheck source=scripts/release-assets.sh
+source "$SCRIPT_DIR/scripts/release-assets.sh"
+
 echo "🚀 Installing Xencode (Rust) - Comprehensive Setup"
 echo "=================================================="
+echo "📦 Mode: $INSTALL_MODE"
+if [ "$INSTALL_MODE" = "release" ]; then
+    echo "🏷️  Release version: v$RELEASE_VERSION"
+fi
 
 # Detect system
 DISTRO=""
@@ -73,47 +155,163 @@ else
     echo "✅ curl: Available"
 fi
 
-# Check for git
-if ! command -v git &> /dev/null; then
-    echo "❌ git not found, installing..."
-    install_system_package "git" "git" "git" "git"
+if [ "$INSTALL_MODE" = "source" ]; then
+    # Check for git
+    if ! command -v git &> /dev/null; then
+        echo "❌ git not found, installing..."
+        install_system_package "git" "git" "git" "git"
+    else
+        echo "✅ git: Available"
+    fi
+
+    # Check for Rust toolchain (needed to build xencode)
+    if ! command -v cargo &> /dev/null; then
+        echo "❌ cargo not found, installing Rust via rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        # shellcheck disable=SC1091
+        source "$HOME/.cargo/env"
+    else
+        echo "✅ cargo: $(cargo --version)"
+    fi
+
+    if ! command -v rustc &> /dev/null; then
+        echo "❌ rustc missing after rustup install — is ~/.cargo/bin on PATH?"
+        exit 1
+    fi
 else
-    echo "✅ git: Available"
+    # Release mode needs a checksum verifier and an archive extractor, not a
+    # Rust toolchain.
+    if command -v sha256sum &> /dev/null; then
+        echo "✅ sha256sum: Available"
+    elif command -v shasum &> /dev/null; then
+        echo "✅ shasum: Available"
+    else
+        echo "❌ No SHA-256 checksum tool found (sha256sum or shasum)." >&2
+        exit 1
+    fi
+    if ! command -v tar &> /dev/null; then
+        echo "❌ tar is required to extract a release archive." >&2
+        exit 1
+    fi
 fi
 
-# Check for Rust toolchain (needed to build xencode)
-if ! command -v cargo &> /dev/null; then
-    echo "❌ cargo not found, installing Rust via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # shellcheck disable=SC1091
-    source "$HOME/.cargo/env"
-else
-    echo "✅ cargo: $(cargo --version)"
-fi
+gather_release_plan() {
+    RELEASE_HOST_OS="$(xencode_host_os)"
+    RELEASE_HOST_ARCH="$(xencode_host_arch)"
+    echo "🖥️  Host: $RELEASE_HOST_OS / $RELEASE_HOST_ARCH"
 
-if ! command -v rustc &> /dev/null; then
-    echo "❌ rustc missing after rustup install — is ~/.cargo/bin on PATH?"
-    exit 1
-fi
+    if ! RELEASE_ASSET="$(xencode_release_asset "$RELEASE_HOST_OS" "$RELEASE_HOST_ARCH")"; then
+        echo "❌ No prebuilt release archive exists for '$RELEASE_HOST_OS / $RELEASE_HOST_ARCH'." >&2
+        echo "   Published archives cover x86_64/aarch64 Linux, x86_64/aarch64 macOS" >&2
+        echo "   and x86_64 Windows." >&2
+        echo "💡 Re-run without --release to build from source." >&2
+        return 1
+    fi
+    RELEASE_ASSET_URL="$(xencode_release_asset_url "$RELEASE_HOST_OS" "$RELEASE_HOST_ARCH" "$RELEASE_VERSION")"
+    RELEASE_CHECKSUM_URL="$(xencode_release_checksum_url "$RELEASE_HOST_OS" "$RELEASE_HOST_ARCH" "$RELEASE_VERSION")"
+}
+
+print_release_plan() {
+    echo "📄 Archive:  $RELEASE_ASSET"
+    echo "🔗 Download: $RELEASE_ASSET_URL"
+    echo "🔐 Checksum: $RELEASE_CHECKSUM_URL"
+    echo ""
+    echo "⚠️  There is no GitHub Release yet: the v$RELEASE_VERSION tag has not been"
+    echo "   pushed, so these URLs return 404 until the release is published."
+    echo "   Nothing is fetched from a mirror or a fabricated release."
+    echo ""
+}
+
+download_release_binary() {
+    local hash
+    if ! gather_release_plan; then
+        return 1
+    fi
+    print_release_plan
+
+    RELEASE_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/xencode-release.XXXXXX")"
+    trap 'rm -rf "$RELEASE_WORK_DIR"' EXIT
+
+    echo "⏳ Fetching the archive and its .sha256 checksum..."
+    curl --proto '=https' --tlsv1.2 -fL --retry 3 \
+        -o "$RELEASE_WORK_DIR/$RELEASE_ASSET" "$RELEASE_ASSET_URL"
+    curl --proto '=https' --tlsv1.2 -fL --retry 3 \
+        -o "$RELEASE_WORK_DIR/$RELEASE_ASSET.sha256" "$RELEASE_CHECKSUM_URL"
+
+    # A dist .sha256 file is either "<hash>" or "<hash>  <filename>". Use the
+    # first field only so a renamed local archive still verifies correctly.
+    hash="$(awk 'NF { print $1; exit }' "$RELEASE_WORK_DIR/$RELEASE_ASSET.sha256")"
+    if ! [[ "$hash" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        echo "❌ Checksum file did not contain a 64-character SHA-256 digest." >&2
+        return 1
+    fi
+    printf '%s  %s\n' "$hash" "$RELEASE_ASSET" > "$RELEASE_WORK_DIR/$RELEASE_ASSET.sha256sum"
+
+    echo "🔍 Verifying the SHA-256 checksum..."
+    xencode_verify_checksum "$RELEASE_WORK_DIR" "$RELEASE_ASSET"
+
+    echo "📂 Extracting $RELEASE_ASSET..."
+    case "$RELEASE_ASSET" in
+        *.tar.xz)
+            tar -xJf "$RELEASE_WORK_DIR/$RELEASE_ASSET" -C "$RELEASE_WORK_DIR"
+            ;;
+        *.zip)
+            if ! command -v unzip &> /dev/null; then
+                echo "❌ unzip is required to extract the Windows archive." >&2
+                return 1
+            fi
+            unzip -q "$RELEASE_WORK_DIR/$RELEASE_ASSET" -d "$RELEASE_WORK_DIR"
+            ;;
+        *)
+            echo "❌ Unrecognised archive type: $RELEASE_ASSET" >&2
+            return 1
+            ;;
+    esac
+
+    BIN="$RELEASE_WORK_DIR/xencode"
+    if [ ! -x "$BIN" ]; then
+        echo "❌ The archive did not contain an executable named 'xencode'." >&2
+        return 1
+    fi
+    echo "✅ Verified and extracted: $BIN"
+}
+
+build_release_binary() {
+    echo "⏳ cargo build --release -p xencode-cli (first build takes a few minutes)..."
+    cargo build --release -p xencode-cli --manifest-path rust/Cargo.toml
+
+    BIN="rust/target/release/xencode"
+    if [ ! -x "$BIN" ]; then
+        echo "❌ Build failed: $BIN not found."
+        return 1
+    fi
+    echo "✅ Build succeeded: $BIN"
+}
 
 echo ""
-echo "2. 🏗️  Building Xencode (release)"
-echo "----------------------------------"
-
-if [ ! -f "rust/Cargo.toml" ]; then
-    echo "❌ rust/Cargo.toml not found — run install.sh from the repo root."
-    exit 1
+if [ "$INSTALL_MODE" = "release" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "2. 🔎 Release plan (dry run)"
+        echo "----------------------------"
+        if gather_release_plan; then
+            print_release_plan
+            echo "🔎 Dry run: no network request was made."
+            exit 0
+        fi
+        exit 1
+    fi
+    echo "2. 📥 Downloading Xencode (release v$RELEASE_VERSION)"
+    echo "-------------------------------------------------------"
+    download_release_binary
+else
+    echo "2. 🏗️  Building Xencode (release)"
+    echo "----------------------------------"
+    if [ ! -f "rust/Cargo.toml" ]; then
+        echo "❌ rust/Cargo.toml not found — run install.sh from the repo root."
+        exit 1
+    fi
+    build_release_binary
 fi
-
-echo "⏳ cargo build --release -p xencode-cli (first build takes a few minutes)..."
-cargo build --release -p xencode-cli --manifest-path rust/Cargo.toml
-
-BIN="rust/target/release/xencode"
-if [ ! -x "$BIN" ]; then
-    echo "❌ Build failed: $BIN not found."
-    exit 1
-fi
-echo "✅ Build succeeded: $BIN"
 
 echo ""
 echo "3. 🤖 Checking Ollama Installation"
@@ -284,7 +482,7 @@ chmod +x scripts/smoke-test.sh
 
 # Smoke-test the freshly built binary
 echo "🔍 Smoke-testing the release binary..."
-if ./scripts/smoke-test.sh "./$BIN" > /tmp/xencode_test.log 2>&1; then
+if ./scripts/smoke-test.sh "$BIN" > /tmp/xencode_test.log 2>&1; then
     echo "✅ Smoke test: PASSED"
 else
     echo "❌ Smoke test: FAILED"
@@ -356,8 +554,13 @@ echo "🎉 INSTALLATION COMPLETE!"
 echo "========================="
 echo ""
 echo "📋 Installation Summary:"
-echo "  • Rust toolchain: ✅ Available"
-echo "  • Release binary: ✅ Built"
+if [ "$INSTALL_MODE" = "release" ]; then
+    echo "  • Install mode: release (v$RELEASE_VERSION from GitHub Releases)"
+    echo "  • Release binary: ✅ Downloaded and checksum-verified"
+else
+    echo "  • Install mode: source build"
+    echo "  • Release binary: ✅ Built"
+fi
 echo "  • Ollama service: ✅ Running"
 echo "  • AI models: ✅ Available"
 echo "  • Terminal integration: $([ ${#TERMINALS_FOUND[@]} -gt 0 ] && echo '✅ Ready' || echo '⚠️  Limited')"
@@ -380,7 +583,7 @@ echo "  • README.md - Complete usage guide"
 echo "  • docs/INSTALL_MANUAL.md - Manual installation steps"
 echo ""
 echo "🆘 Troubleshooting:"
-echo "  • Run: ./scripts/smoke-test.sh ./rust/target/release/xencode"
+echo "  • Run: ./scripts/smoke-test.sh \"$BIN\""
 echo "  • Test command: xencode query \"hello\""
 echo "  • Check: systemctl status ollama"
 echo "  • Logs: journalctl -u ollama -f"
