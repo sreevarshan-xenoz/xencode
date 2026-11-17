@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed — visibility of what waits on the person (OM-7)
+
+- `OM-7`: the orchestrator Inbox and the window title now show the same, complete list of what waits on the person. Previously a pending question or a ByteBot task waiting for review could be outstanding while the Inbox and title showed nothing. One pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review, and every terminal agent calling for attention; the Inbox renders from it and the title counts from it, so the two cannot disagree. The Inbox still folds further approvals into a `+N` on the first row. Unit tests cover each source of waiting work, the empty case and the attention count.
+
 ### Fixed — screenshot test capability report (SC-1)
 
 - `SC-1`: the screenshot end-to-end test now serves a real /api/show vision capability, so it exercises capture and attach rather than the MM-12 refusal.

@@ -103,24 +103,16 @@ pub fn egress_label(app: &App) -> &'static str {
 /// kitty show as a desktop notification and other terminals ignore.
 pub const NOTIFY_SEQUENCE: &str = "\x1b]9;xencode needs you\x1b\\";
 
-/// Everything waiting on the person, one key each: every approval, and
-/// every terminal agent that rang or sent a notification (OM-4). A new key
-/// is what a notification is sent for.
+/// Everything waiting on the person, one key each: the question, every
+/// approval, a ByteBot task waiting for review, and every terminal agent that
+/// rang or sent a notification (OM-7). This reads the same list the
+/// orchestrator Inbox draws, so the title and the Inbox cannot disagree. A
+/// new key is what a notification is sent for.
 pub fn waiting_keys(app: &App) -> std::collections::BTreeSet<String> {
-    let mut keys = std::collections::BTreeSet::new();
-    for id in &app.approval_ids {
-        keys.insert(format!("approval {id}"));
-    }
-    for (id, _) in &app.remote_approvals {
-        keys.insert(format!("approval {id}"));
-    }
-    if app.pending_approval().is_some() && keys.is_empty() {
-        keys.insert("approval".to_string());
-    }
-    for tile in app.term_tiles.iter().filter(|t| t.state == "needs_you") {
-        keys.insert(format!("tile {}", tile.id));
-    }
-    keys
+    crate::orchestrator_view::waiting_on_user(app)
+        .iter()
+        .map(|w| w.key())
+        .collect()
 }
 
 /// The window title: the project, or a call for the person while something
