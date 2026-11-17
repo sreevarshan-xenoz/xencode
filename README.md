@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (20 crates, 3,165 tests at
+At its core is a fast, single-file **Rust** binary (20 crates, 3,172 tests at
 the last full workspace run) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -87,7 +87,7 @@ does not yet:
 
 ## ✨ Highlights in detail
 
-- **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Google Colab GPU you bring up when you need one, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
+- **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Google Colab GPU you bring up when you need one, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model. `xencode setup` strings that recommendation, the resumable download, the llama.cpp launch and one real `xencode query` into a single command that names whichever step failed instead of claiming a success it did not verify.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind` — and a git-backed record of those turns that stops the rewind from overwriting a file you edited yourself. A bug fix can be *earned*: `/gate bugfix` supervises one, and until a reproduction test has been run and actually seen failing against code nobody has touched yet, every write to a production file is refused — not asked about, refused — and the test that reproduced it is frozen once its failure is on record so it cannot be edited into proving the fix. A call whose arguments do not match the description that tool was offered with is answered back to the model instead of being run — including one whose arguments arrived as text that stopped halfway, which used to look like a call that asked for nothing. When a turn edited files, the model's claim of completion is not the gate: the workspace's own `cargo test` and `cargo clippy` run over the same approval gate and only exit `0` finishes the turn; failures come back to the model for up to `agent_repair_max_iters` repair rounds and past that the turn reports the task incomplete. A non-Rust workspace is not left unchecked: when there is no `Cargo.toml` but the turn edited files a language server covers, real diagnostics are pulled from that server (`clangd` for C and C++) and gate the turn the same way — an error feeds back for a repair round, a clean answer verifies it, and a workspace with no supported server is left untouched rather than given an unearned pass.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists. A candidate that would send the conversation somewhere the primary would not — a cloud API standing in for a local model, or the other way round — is skipped by design and named in the transcript.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 19 panels in seven views (the `Ctrl+P` command palette, also on `Ctrl+X`, reaches every view, panel, command and setting at any level): agent, git, models, and more.
@@ -310,22 +310,33 @@ xencode --help
 # 2) Check your local model health
 xencode models list
 
-# 3) Launch the immersive terminal UI (the default experience — needs a terminal)
+# 3) Bring up a local llama.cpp model from an empty config in one command
+xencode setup                       # recommend → download → start llama.cpp → one real query
+# xencode setup --model /path/to/model.gguf --yes   # choose the GGUF, skip the download prompt
+
+# 4) Launch the immersive terminal UI (the default experience — needs a terminal)
 xencode tui
 
-# 4) Run a quick query without leaving your shell
+# 5) Run a quick query without leaving your shell
 xencode query "Explain clean architecture briefly"
 
-# 5) Analyze code for issues and vulnerabilities
+# 6) Analyze code for issues and vulnerabilities
 xencode analyze src/
 
-# 6) Collaborate with your team
+# 7) Collaborate with your team
 xencode server           # local-first: http://127.0.0.1:8765, ws://
 
-# 7) Install a plugin from a git repository, then see what it contributes
+# 8) Install a plugin from a git repository, then see what it contributes
 xencode plugin install <git-url>   # shows what it declares, and the commit it pinned
 xencode plugin list                # the TUI's /plugin reports the same load
 ```
+
+`xencode setup` only completes where the machine can actually serve a model:
+it needs enough free memory, a `llama-server` binary on `PATH`, and network
+access to fetch a GGUF that is not already on disk. It reports which of its four
+steps failed and exits non-zero; it never reports success for a step it could
+not verify. On a machine without those things it stops at the failing step. See
+[the CLI guide](CLI_GUIDE.md#xencode-setup).
 
 **TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+P` (or `Ctrl+X`) opens the command palette (every view, panel, slash command and setting, by typing a few words).
 
@@ -403,6 +414,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | --- | --- | --- |
 | **General** | `xencode` | Launch Rust TUI (default experience) |
 | **General** | `xencode --version` | Show installed version |
+| **Setup** | `xencode setup [--model <gguf-path\|model-id>] [--yes]` | Recommend a local GGUF from this machine's memory, download it if missing, start llama.cpp on a free port, and verify with one real query; reports the failed step and never fakes success |
 | **Query** | `xencode query "…"` | Run a one-shot query |
 | **Query** | `xencode query "…" --temperature 0.2 --max-tokens 512` | llama.cpp sampling per call: also `--top-k`, `--min-p`, `--mirostat`, `--seed`, `--grammar`, `--json-schema`, `--no-cache`, `--session`, `--model` |
 | **Query** | `xencode query "…" --format ndjson \| jq -r .type` | One JSON event per line for scripts: `start`, `token`, then `done` or `error` — every field in the CLI guide |
@@ -808,7 +820,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (3,165 tests at the last run)
+cargo test                          # Full workspace suite (3,172 tests at the last run)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

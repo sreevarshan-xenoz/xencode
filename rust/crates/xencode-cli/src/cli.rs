@@ -880,6 +880,22 @@ pub(crate) enum Commands {
         action: LlamacppAction,
     },
 
+    /// Bring up a local llama.cpp model from an empty config in one command:
+    /// recommend a GGUF, download it if missing, start llama-server, then
+    /// answer one real query. Each step is reported; a failed step is never
+    /// reported as success.
+    Setup {
+        /// Model to use: a path to a GGUF file, or a model id. With no value,
+        /// the machine's memory picks one from the advice table (same answer
+        /// as `xencode models advice`).
+        #[arg(short = 'm', long)]
+        model: Option<String>,
+
+        /// Skip the confirmation prompt before downloading a model
+        #[arg(long)]
+        yes: bool,
+    },
+
     /// What this machine can serve, read from the machine
     Hw {
         #[command(subcommand)]
