@@ -3,6 +3,7 @@ use std::fmt;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
+use crate::bodies::limited_text;
 use crate::{split_data_url, ChatMessage, ContentPart, MessageContent, ProviderError};
 
 /// Anthropic (Claude) model provider using the Messages API.
@@ -200,7 +201,9 @@ impl AnthropicProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body_text = response.text().await.unwrap_or_default();
+            let body_text = limited_text(response, "Anthropic")
+                .await
+                .unwrap_or_default();
 
             // Try to extract a structured error message
             let detail = serde_json::from_str::<AnthropicErrorResponse>(&body_text)
@@ -212,9 +215,8 @@ impl AnthropicProvider {
             return Err(ProviderError::api("Anthropic", status, detail));
         }
 
-        let body: AnthropicResponse = response
-            .json()
-            .await
+        let bytes = limited_text(response, "Anthropic").await?.into_bytes();
+        let body: AnthropicResponse = serde_json::from_slice(&bytes)
             .map_err(|e| ProviderError::Parse(format!("Anthropic response parse: {e}")))?;
 
         // Extract text from all content blocks
@@ -267,7 +269,9 @@ impl AnthropicProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = limited_text(response, "Anthropic")
+                .await
+                .unwrap_or_default();
             return Err(ProviderError::api("Anthropic", status, body));
         }
 
@@ -276,9 +280,11 @@ impl AnthropicProvider {
         let mut event_type = String::new();
         let mut ended = false;
         let mut lines = crate::frames::FrameLines::default();
+        let mut budget = crate::bodies::ByteBudget::new();
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            budget.charge(chunk.len(), "Anthropic")?;
             lines.feed(&chunk, &mut |line| {
                 ingest_line(
                     line,

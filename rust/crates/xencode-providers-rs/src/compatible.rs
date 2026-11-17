@@ -11,6 +11,7 @@
 
 use futures_util::StreamExt;
 
+use crate::bodies::limited_text;
 use crate::tools::{self, ToolCallAccumulator};
 use crate::{AgentStep, ProviderError, ToolDefinition};
 
@@ -157,12 +158,11 @@ impl OpenAICompatibleProvider {
             .map_err(|e| ProviderError::Network(format!("{label} request failed: {e}")))?;
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = limited_text(response, label).await.unwrap_or_default();
             return Err(ProviderError::api(label, status, body));
         }
-        let value: serde_json::Value = response
-            .json()
-            .await
+        let bytes = limited_text(response, label).await?.into_bytes();
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|e| ProviderError::Parse(format!("{label} response: {e}")))?;
         Ok(first_choice_text(&value))
     }
@@ -230,7 +230,7 @@ where
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = limited_text(response, label).await.unwrap_or_default();
         return Err(ProviderError::api(label, status, body));
     }
 
@@ -246,6 +246,7 @@ where
     let mut usage = UsageCounts::default();
     let mut acc = ToolCallAccumulator::default();
     let mut ended = false;
+    let mut budget = crate::bodies::ByteBudget::new();
     let mut lines = crate::frames::FrameLines::default();
     // Kept only for a recording: the bytes as they arrived, before the frame
     // reader had anything to say about where a line begins.
@@ -255,6 +256,7 @@ where
     // over two reads, and one read can hold several. See `frames`.
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+        budget.charge(chunk.len(), label)?;
         if recorder.is_some() {
             raw.extend_from_slice(&chunk);
         }
