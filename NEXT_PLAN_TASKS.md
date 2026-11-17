@@ -48,6 +48,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-34 ✅ | MEDIUM | server | the login burst limit is process-wide, so one client can lock out everyone (final audit) | the burst is keyed by claimed username and full-store refusals do not consume it |
 | AU-35 ✅ | MEDIUM | docs | the final audit found a reverted CI-status line, stale headings, missing manual entries and justfile/CI drift | all corrected and verified |
 | AU-36 ✅ | MEDIUM | providers | generated and streamed provider responses had no size cap, so a hostile endpoint could exhaust memory (audit leftover) | buffered and streamed bodies above 8 MiB are refused, with real-server tests |
+| AU-37 ✅ | MEDIUM | ci | the coverage gate was lowered to 53% after CI reused an old cached llvm-cov binary that inflated the line count (audit leftover) | pinned llvm-cov is always installed, stale coverage artifacts are cleaned, the toolchain pin is restored, and the 80% floor is back |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 

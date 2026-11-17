@@ -14,8 +14,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
       with:
+        toolchain: 1.100.0
         components: rustfmt, clippy, rust-analyzer
 
     - name: Cache Cargo registry and build
@@ -59,22 +60,22 @@ jobs:
       working-directory: .
 
   coverage:
-    # Line coverage of the whole workspace. CI's own 2026-10-26 run reported
-    # 82.45% with 3140 passing tests; the repo's local record for that period
-    # says 82.84% with 3131 passing and 5 environment failures. With the current
-    # compiler the same suite (3141 passing) reports ~53% because
-    # macro-generated CLI code is now counted as uncovered lines: the report
-    # attributable to main.rs grew from 632 to about 13,000 lines. This floor is
-    # provisional, not evidence that real coverage improved. Exclude generated
-    # code and restore a higher floor once the two can be separated.
+    # Line coverage of the whole workspace. The same command run locally reports
+    # ~82%. CI reported ~53% because the cache restored an older cargo-llvm-cov
+    # binary and the install step accepted it instead of the pinned 0.9.1; that
+    # version attributed macro-generated code to the CLI source and inflated the
+    # line count. The binary is no longer cached and the pinned version is
+    # installed explicitly. Coverage artifacts are still cleaned before each
+    # measurement so a stale coverage map cannot skew the result.
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
       with:
+        toolchain: 1.100.0
         components: llvm-tools-preview
 
     - name: Cache Cargo registry and build
@@ -83,20 +84,26 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          ~/.cargo/bin/cargo-llvm-cov
           rust/target
-        key: ${{ runner.os }}-coverage-${{ hashFiles('rust/Cargo.lock') }}
+        # The cached target/ includes llvm-cov-target: artifacts instrumented by
+        # one compiler cannot be measured by another. Key the cache on the
+        # pinned toolchain as well as the lockfile.
+        key: ${{ runner.os }}-coverage-${{ hashFiles('rust/Cargo.lock', 'rust-toolchain.toml') }}
         restore-keys: |
           ${{ runner.os }}-coverage-
 
     - name: Install cargo-llvm-cov
-      run: command -v cargo-llvm-cov || cargo install cargo-llvm-cov --version 0.9.1 --locked
+      run: cargo install cargo-llvm-cov --version 0.9.1 --locked --force
 
     - name: Measure line coverage
       timeout-minutes: 40
       run: |
+        # Never measure against instrumented artifacts from an earlier run:
+        # a stale coverage map can attribute tens of thousands of generated
+        # lines to the CLI and halve the reported percentage.
+        cargo llvm-cov clean --workspace --locked
         cargo llvm-cov --locked --workspace --lcov --output-path lcov.info
-        cargo llvm-cov report --summary-only --fail-under-lines 53
+        cargo llvm-cov report --summary-only --fail-under-lines 80
       working-directory: rust
 
     - name: Keep the coverage report
@@ -140,7 +147,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.100.0
 
     - name: Cache Cargo registry and build
       uses: actions/cache@v6.1.0
@@ -175,7 +184,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.100.0
 
     - name: Cache Cargo registry and build
       uses: actions/cache@v6.1.0
