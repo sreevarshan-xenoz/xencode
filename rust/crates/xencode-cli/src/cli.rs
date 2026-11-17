@@ -923,12 +923,34 @@ pub(crate) enum Commands {
         format: OutputFormat,
     },
 
+    /// Suggest a commit message from the real staged diff, using the local model
+    Git {
+        #[command(subcommand)]
+        action: GitAction,
+    },
+
     /// Launch the Terminal User Interface
     Tui {
         /// Run the agent work inside this terminal instead of in the
         /// project's engine process
         #[arg(long)]
         in_process: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum GitAction {
+    /// Read the staged diff, ask the configured model for a commit message, and
+    /// print it. Nothing is committed unless `--commit` is passed.
+    CommitMessage {
+        /// Model to use instead of the configured default
+        #[arg(long, short)]
+        model: Option<String>,
+
+        /// Commit the staged changes using the suggested message. Without this
+        /// flag the command only prints a suggestion.
+        #[arg(long)]
+        commit: bool,
     },
 }
 

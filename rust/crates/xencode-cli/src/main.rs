@@ -77,6 +77,8 @@ mod cmd_maintenance;
 use cmd_maintenance::*;
 mod cmd_query;
 use cmd_query::*;
+mod cmd_git;
+use cmd_git::*;
 mod cmd_memory;
 use cmd_memory::*;
 mod cmd_serve;
@@ -427,6 +429,11 @@ async fn async_main() {
             check,
             format,
         } => run_bootstrap(&path, check, format),
+        Commands::Git { action } => match action {
+            GitAction::CommitMessage { model, commit } => {
+                run_git_commit_message(model, commit).await
+            }
+        },
         Commands::Tui { in_process } => run_tui(in_process).await,
     };
 

@@ -2630,6 +2630,57 @@ _arguments "${_arguments_options[@]}" : \
 '::path -- The project to write into (defaults to the current directory):_files' \
 && ret=0
 ;;
+(git)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__git_commands" \
+"*::: :->git" \
+&& ret=0
+
+    case $state in
+    (git)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-git-command-$line[1]:"
+        case $line[1] in
+            (commit-message)
+_arguments "${_arguments_options[@]}" : \
+'-m+[Model to use instead of the configured default]:MODEL:_default' \
+'--model=[Model to use instead of the configured default]:MODEL:_default' \
+'--commit[Commit the staged changes using the suggested message. Without this flag the command only prints a suggestion]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__git__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-git-help-command-$line[1]:"
+        case $line[1] in
+            (commit-message)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (tui)
 _arguments "${_arguments_options[@]}" : \
 '--in-process[Run the agent work inside this terminal instead of in the project'\''s engine process]' \
@@ -3613,6 +3664,26 @@ esac
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(git)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__git_commands" \
+"*::: :->git" \
+&& ret=0
+
+    case $state in
+    (git)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-git-command-$line[1]:"
+        case $line[1] in
+            (commit-message)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (tui)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3690,6 +3761,7 @@ _xencode_commands() {
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
 'bootstrap:Write the files a project xencode has never seen is missing' \
+'git:Suggest a commit message from the real staged diff, using the local model' \
 'tui:Launch the Terminal User Interface' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -4229,6 +4301,37 @@ _xencode__subcmd__generate_commands() {
     local commands; commands=()
     _describe -t commands 'xencode generate commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__git_commands] )) ||
+_xencode__subcmd__git_commands() {
+    local commands; commands=(
+'commit-message:Read the staged diff, ask the configured model for a commit message, and print it. Nothing is committed unless \`--commit\` is passed' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode git commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__git__subcmd__commit-message_commands] )) ||
+_xencode__subcmd__git__subcmd__commit-message_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode git commit-message commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__git__subcmd__help_commands] )) ||
+_xencode__subcmd__git__subcmd__help_commands() {
+    local commands; commands=(
+'commit-message:Read the staged diff, ask the configured model for a commit message, and print it. Nothing is committed unless \`--commit\` is passed' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode git help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__git__subcmd__help__subcmd__commit-message_commands] )) ||
+_xencode__subcmd__git__subcmd__help__subcmd__commit-message_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode git help commit-message commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__git__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__git__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode git help help commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__help_commands] )) ||
 _xencode__subcmd__help_commands() {
     local commands; commands=(
@@ -4289,6 +4392,7 @@ _xencode__subcmd__help_commands() {
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
 'bootstrap:Write the files a project xencode has never seen is missing' \
+'git:Suggest a commit message from the real staged diff, using the local model' \
 'tui:Launch the Terminal User Interface' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -4567,6 +4671,18 @@ _xencode__subcmd__help__subcmd__fetch_commands() {
 _xencode__subcmd__help__subcmd__generate_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help generate commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__git_commands] )) ||
+_xencode__subcmd__help__subcmd__git_commands() {
+    local commands; commands=(
+'commit-message:Read the staged diff, ask the configured model for a commit message, and print it. Nothing is committed unless \`--commit\` is passed' \
+    )
+    _describe -t commands 'xencode help git commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__git__subcmd__commit-message_commands] )) ||
+_xencode__subcmd__help__subcmd__git__subcmd__commit-message_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help git commit-message commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__help__subcmd__help_commands() {
