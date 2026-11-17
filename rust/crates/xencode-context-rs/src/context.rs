@@ -830,15 +830,22 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
     // secret repeated across tiers collapses to one placeholder.
     let history_kept = kept.len();
     let mut redactor = Redactor::new();
+    // Placeholders can be longer than the secret they replace. Track the extra
+    // bytes so the reported token total describes what is actually sent, rather
+    // than the text the budget was computed from.
+    let mut redaction_growth: usize = 0;
     let mut turns = Vec::with_capacity(history_kept + 2);
     turns.push(ChatTurn {
         role: "system".to_string(),
         content: stable.prefix,
     });
     for (role, content) in kept {
+        let redacted = redactor.redact(&content);
+        redaction_growth =
+            redaction_growth.saturating_add(redacted.len().saturating_sub(content.len()));
         turns.push(ChatTurn {
             role,
-            content: redactor.redact(&content),
+            content: redacted,
         });
     }
     let mut user_turn = String::new();
@@ -882,7 +889,10 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         user_turn.push_str("\n\n");
     }
     user_turn.push_str(input.prompt);
-    let user_turn = redactor.redact(&user_turn);
+    let redacted_user = redactor.redact(&user_turn);
+    redaction_growth =
+        redaction_growth.saturating_add(redacted_user.len().saturating_sub(user_turn.len()));
+    let user_turn = redacted_user;
     turns.push(ChatTurn {
         role: "user".to_string(),
         content: user_turn,
@@ -890,7 +900,9 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
 
     let vault = redactor.into_vault();
 
-    let total_tokens = target.saturating_sub(remaining);
+    let total_tokens = target
+        .saturating_sub(remaining)
+        .saturating_add(est_tokens(redaction_growth, false));
     // Compaction is actionable only when real history was lost: unlike the
     // text preview (where a short `recent_text` trips the 40-token floor on
     // every fresh conversation), dropping zero turns must never suggest it.
@@ -1896,6 +1908,22 @@ mod tests {
             .unwrap()
             .content
             .contains(&format!("File: {trimmed}")));
+    }
+
+    #[test]
+    fn redaction_growth_is_counted_in_the_reported_tokens() {
+        let mut with_secret = sample_chat_input(Vec::new(), &[]);
+        with_secret.prompt = "token=abc";
+        let mut plain = sample_chat_input(Vec::new(), &[]);
+        plain.prompt = "abcdefghi";
+        let secret = assemble_chat(with_secret);
+        let plain = assemble_chat(plain);
+        assert!(
+            secret.total_tokens > plain.total_tokens,
+            "the longer placeholder was not counted: {} vs {}",
+            secret.total_tokens,
+            plain.total_tokens
+        );
     }
 
     #[test]
