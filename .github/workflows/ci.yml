@@ -59,12 +59,14 @@ jobs:
       working-directory: .
 
   coverage:
-    # Line coverage of the whole workspace. The compiler used by CI changed how
-    # it instruments macro-expanded CLI code: the 2026-10-26 run reported 82.45%
-    # with 3140 passing tests; the current toolchain reports ~53% with the same
-    # 3141 tests passing, because clap-generated code now counts as uncovered
-    # lines. The floor is reset to the measured 53% until the measurement can be
-    # separated from generated code; raise it once that is done.
+    # Line coverage of the whole workspace. CI's own 2026-10-26 run reported
+    # 82.45% with 3140 passing tests; the repo's local record for that period
+    # says 82.84% with 3131 passing and 5 environment failures. With the current
+    # compiler the same suite (3141 passing) reports ~53% because
+    # macro-generated CLI code is now counted as uncovered lines: the report
+    # attributable to main.rs grew from 632 to about 13,000 lines. This floor is
+    # provisional, not evidence that real coverage improved. Exclude generated
+    # code and restore a higher floor once the two can be separated.
     runs-on: ubuntu-latest
 
     steps:

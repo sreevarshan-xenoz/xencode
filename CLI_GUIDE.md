@@ -2918,7 +2918,11 @@ whose `tool_input.path` is `.env` is stopped before anything is written, and not
 about the event is passed in the command line itself.
 
 ### `xencode cache <action>`
-Response cache management: `stats`, `clear`, `gc`.
+Response cache management: `stats`, `clear`, `gc`. `stats` and `clear` fail with
+an error if the cache directory cannot be read or opened; they do not print an
+all-zero report or "No cache to clear" and exit successfully when nothing was
+actually checked. A cache that has not been written yet is an ordinary empty
+cache, not an error.
 
 ```bash
 xencode cache stats
@@ -4178,6 +4182,10 @@ index/git/metrics/cache rows, every endpoint the config would dial, whether the
 server behind the default model actually knows that model by name, each declared
 MCP server, the Colab bridge, and whether the project's stored facts still agree
 with the code beside them.
+
+`--env`, `--deps` and `--selfcheck` each select a narrower report, and they are
+mutually exclusive: passing two of them fails with an error instead of quietly
+dropping one.
 
 The rows are the same structure in both formats. `--format json` serialises
 `SelfCheck { name, state, detail, fix }` as it is, and the text listing prints
