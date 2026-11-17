@@ -3157,6 +3157,121 @@ async fn a_claimed_edit_that_never_happened_is_answered_once() {
     ));
 }
 
+/// SM-2: the continuation note is recorded on the turn trace, not as a tool
+/// call. A claimed change followed by a real edit shows one note with
+/// edit_followed true, while the tool list holds only the call that ran.
+#[tokio::test]
+async fn a_no_change_note_is_in_the_trace_but_not_in_tools() {
+    let dir = std::env::temp_dir().join(format!(
+        "xencode-note-trace-{}-{}",
+        std::process::id(),
+        std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(super::serve_scripted_answers(
+        listener,
+        vec![
+            serde_json::json!({"message": {"role": "assistant", "content": "I have fixed the bug."}, "done": true}),
+            serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments": {"path": "fix.txt", "content": "fixed\n"}}}
+                ]}, "done": true}),
+            serde_json::json!({"message": {"role": "assistant", "content": "Now it is fixed."}, "done": true}),
+        ],
+    ));
+    let mut app = App::for_tests();
+    app.config.agent_approval = "all-allow".to_string();
+    app.approval_rx = None;
+    let mut run = app.agent_run(
+        LoopSink::Chat,
+        vec![xencode_providers_rs::ChatMessage {
+            role: "user".to_string(),
+            content: "fix it".into(),
+        }],
+        "fix it",
+    );
+    run.ollama_url = format!("http://{addr}");
+    run.tool_root = dir.clone();
+    run.trace_dir = dir.join(".xencode");
+    run.max_repair_iters = 0;
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    super::agent_rounds(run, tx).await;
+    while rx.try_recv().is_ok() {}
+    server.abort();
+    let traces = xencode_context_rs::read_recent_traces(&dir.join(".xencode"), 10);
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let trace = traces.last().expect("the turn wrote a trace");
+    assert_eq!(
+        trace.tools.len(),
+        1,
+        "only the real call is traced: {trace:?}"
+    );
+    assert_eq!(trace.tools[0].name, "write_file");
+    assert!(
+        trace.tools.iter().all(|call| call.name != "changed_files"),
+        "the synthetic note carrier is never a traced tool"
+    );
+    assert_eq!(trace.no_change_notes.len(), 1, "{trace:?}");
+    let note = &trace.no_change_notes[0];
+    assert_eq!(note.kind, "claimed_change");
+    assert!(
+        note.edit_followed,
+        "the write_file edit came after the note"
+    );
+}
+
+/// SM-2: in task mode an answer that announces a change without editing gets
+/// one task note. When no edit ever follows, the trace says so and has no tools.
+#[tokio::test]
+async fn a_task_note_with_no_later_edit_records_that_no_edit_followed() {
+    let dir = std::env::temp_dir().join(format!(
+        "xencode-task-note-{}-{}",
+        std::process::id(),
+        std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(super::serve_scripted_answers(
+        listener,
+        vec![
+            serde_json::json!({"message": {"role": "assistant", "content": "Let's modify the function to handle these cases."}, "done": true}),
+            serde_json::json!({"message": {"role": "assistant", "content": "I will now edit the file."}, "done": true}),
+        ],
+    ));
+    let mut app = App::for_tests();
+    app.config.agent_approval = "all-allow".to_string();
+    app.approval_rx = None;
+    let mut run = app.agent_run(
+        LoopSink::Chat,
+        vec![xencode_providers_rs::ChatMessage {
+            role: "user".to_string(),
+            content: "fix it".into(),
+        }],
+        "fix it",
+    );
+    run.expect_edit = true;
+    run.ollama_url = format!("http://{addr}");
+    run.tool_root = dir.clone();
+    run.trace_dir = dir.join(".xencode");
+    run.max_repair_iters = 0;
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    super::agent_rounds(run, tx).await;
+    while rx.try_recv().is_ok() {}
+    server.abort();
+    let traces = xencode_context_rs::read_recent_traces(&dir.join(".xencode"), 10);
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let trace = traces.last().expect("the turn wrote a trace");
+    assert!(trace.tools.is_empty(), "no real tool was called: {trace:?}");
+    assert_eq!(trace.no_change_notes.len(), 1, "{trace:?}");
+    let note = &trace.no_change_notes[0];
+    assert_eq!(note.kind, "task_no_edit");
+    assert!(!note.edit_followed, "no edit finished after the note");
+}
+
 /// SM-2: steps that only update the plan do not spend the round budget, so
 /// a model that plans twice still has its rounds for the edit — and the cap
 /// keeps a model that only plans from looping.

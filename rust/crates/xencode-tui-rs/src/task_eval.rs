@@ -38,8 +38,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use xencode_context_rs::{
-    prompts::subagent_brief, read_recent_traces, write_seed, BugShape, SeededTask, TurnTrace,
-    XENCODE_DIR,
+    prompts::subagent_brief, read_recent_traces, write_seed, BugShape, ContinuationNote,
+    SeededTask, TurnTrace, XENCODE_DIR,
 };
 
 use crate::app::{agent_rounds, App, LoopSink};
@@ -169,6 +169,11 @@ pub struct CaseResult {
     /// the tool calls (SM-1). `None` in results written before this existed.
     #[serde(default)]
     pub final_answer: Option<String>,
+    /// "You changed no file" notes fed back to the model in this case's turn
+    /// (SM-2), with whether an edit followed each. Kept separate from
+    /// `tool_calls` so a synthetic note never inflates the tool-call count.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_change_notes: Vec<ContinuationNote>,
 }
 
 /// Longest final answer kept on a case's result.
@@ -231,6 +236,7 @@ impl CaseResult {
             error: Some(error),
             diff: String::new(),
             final_answer: None,
+            no_change_notes: Vec::new(),
         }
     }
 
@@ -269,17 +275,30 @@ impl CaseResult {
         } else {
             "calls"
         };
+        let mut detail = if why.is_empty() {
+            "grader green, diff as expected".to_string()
+        } else {
+            why.join(" · ")
+        };
+        for note in &self.no_change_notes {
+            detail.push_str(&format!(
+                " · no-change note ({}) in round {}, {}",
+                note.kind,
+                note.round,
+                if note.edit_followed {
+                    "edit followed"
+                } else {
+                    "no edit followed"
+                }
+            ));
+        }
         format!(
             "{:<20} {:<4} {} {round_word}, {} tool {call_word} · {}",
             self.shape,
             if self.passed { "pass" } else { "fail" },
             self.rounds,
             self.tool_calls,
-            if why.is_empty() {
-                "grader green, diff as expected".to_string()
-            } else {
-                why.join(" · ")
-            }
+            detail
         )
     }
 }
@@ -810,6 +829,9 @@ fn grade(
         error,
         diff,
         final_answer: None,
+        no_change_notes: row
+            .map(|row| row.no_change_notes.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -934,6 +956,7 @@ pub(crate) fn test_case(shape: &str, attempt: usize, changed: &[&str], diff: &st
         error: None,
         diff: diff.to_string(),
         final_answer: None,
+        no_change_notes: Vec::new(),
     }
 }
 
@@ -1059,6 +1082,7 @@ mod tests {
                     error: None,
                     diff: "-for i in 0..n-1\n+for i in 0..n".to_string(),
                     final_answer: None,
+                    no_change_notes: Vec::new(),
                 },
                 CaseResult {
                     shape: "swallowed-error".to_string(),
@@ -1083,6 +1107,7 @@ mod tests {
                     error: Some("the model answered nothing".to_string()),
                     diff: String::new(),
                     final_answer: None,
+                    no_change_notes: Vec::new(),
                 },
             ],
             judge: None,
@@ -1140,6 +1165,7 @@ mod tests {
             error: None,
             diff: "+#[test] fn always_passes() {}".to_string(),
             final_answer: None,
+            no_change_notes: Vec::new(),
         };
         let line = case.line();
         assert!(line.contains("fail"), "{line}");
@@ -1261,6 +1287,7 @@ mod tests {
                 error: None,
                 diff: "-n - 1\n+n".to_string(),
                 final_answer: None,
+                no_change_notes: Vec::new(),
             }],
             judge: None,
         };
@@ -1381,6 +1408,14 @@ mod tests {
         assert!(outcome.passed);
         assert_eq!(outcome.rounds, 2, "the tool round and the answer");
         assert_eq!(outcome.tool_calls, 1);
+        assert!(
+            outcome.no_change_notes.is_empty(),
+            "a run that edits on the first answer gets no continuation note"
+        );
+        assert!(
+            !report.lines().join("\n").contains("no-change note"),
+            "no note means the report mentions none"
+        );
         assert_eq!(outcome.calls_refused, 0);
         assert_eq!(report.passed(), 1);
         assert_eq!(report.graded(), 1);
@@ -1398,6 +1433,63 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].verdicts, vec!["off-by-one:pass".to_string()]);
         assert_eq!(runs[0].prompt_version, report.prompt_version);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// SM-2: a continuation note reaches the eval result with how often it
+    /// fired and whether an edit followed, without inflating tool_calls. It
+    /// survives the results.jsonl round trip and shows up in the report line.
+    #[tokio::test]
+    async fn the_eval_result_records_how_often_the_note_fired_and_whether_an_edit_followed() {
+        let dir = scratch("eval-note");
+        let case = xencode_context_rs::seed_case(BugShape::OffByOne);
+        let edit = &case.edits[0];
+        let (url, server) = scripted(vec![
+            said("Let's fix the loop bound now."),
+            call(
+                "edit_file",
+                serde_json::json!({"path": &edit.path, "old": &edit.find, "new": &edit.replace}),
+            ),
+            said("the loop now adds every reading"),
+        ])
+        .await;
+
+        let report = run_task_eval(&TaskEvalOptions {
+            out_dir: dir.clone(),
+            model: "scripted-agent".to_string(),
+            shapes: vec![BugShape::OffByOne],
+            ollama_url: Some(url.clone()),
+            history_dir: Some(dir.join(XENCODE_DIR)),
+            ..Default::default()
+        })
+        .await
+        .expect("the eval ran");
+        let _ = server.await;
+
+        let outcome = &report.cases[0];
+        assert_eq!(outcome.error, None, "{:?}", outcome.error);
+        assert_eq!(outcome.no_change_notes.len(), 1, "{outcome:?}");
+        let note = &outcome.no_change_notes[0];
+        assert_eq!(note.kind, "task_no_edit");
+        assert_eq!(note.round, 0);
+        assert!(note.edit_followed, "the edit_file call came after the note");
+        // The synthetic note carrier is not counted as a tool call.
+        assert_eq!(outcome.tool_calls, 1, "only the real edit is a tool call");
+
+        // results.jsonl round-trips the notes exactly.
+        let lines = std::fs::read_to_string(&report.results).unwrap();
+        let written: Vec<CaseResult> = lines
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("one JSON line per case"))
+            .collect();
+        assert_eq!(written, report.cases);
+        assert_eq!(written[0].no_change_notes, report.cases[0].no_change_notes);
+
+        // The report line says how often the note fired and whether an edit followed.
+        let line = outcome.line();
+        assert!(line.contains("no-change note (task_no_edit)"), "{line}");
+        assert!(line.contains("edit followed"), "{line}");
+        assert!(!line.contains("no edit followed"), "{line}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

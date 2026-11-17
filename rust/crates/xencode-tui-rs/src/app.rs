@@ -11904,6 +11904,10 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     let mut turn_edited = false;
     // The "you changed no file" note is given once per turn (SM-2).
     let mut claim_checked = false;
+    // Notes fed back to the model this turn, kept apart from real tool calls so
+    // a run's tool-call count stays honest. `edit_followed` is filled in when the
+    // turn ends, from whether an edit actually finished after the note.
+    let mut no_change_notes: Vec<xencode_context_rs::ContinuationNote> = Vec::new();
     // The workspace-relative paths a finished Edit-class call wrote, so a
     // non-cargo workspace can hand just those files to a language server (L-12).
     let mut edited_paths: Vec<String> = Vec::new();
@@ -12128,6 +12132,19 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                 &step.text,
             ) {
                 claim_checked = true;
+                // Record the note itself, not a fake tool call: the synthetic
+                // `changed_files` below only carries the note into the model's
+                // history, and must not appear in the trace's tools (SM-2).
+                let kind = if note == NO_CHANGE_NOTE {
+                    "claimed_change"
+                } else {
+                    "task_no_edit"
+                };
+                no_change_notes.push(xencode_context_rs::ContinuationNote {
+                    kind: kind.to_string(),
+                    round: round as u32,
+                    edit_followed: false,
+                });
                 let call = xencode_providers_rs::ToolCall {
                     id: format!("no-change-{rounds}"),
                     name: "changed_files".to_string(),
@@ -12493,6 +12510,12 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     trace.completion_tokens = reported_tokens;
     trace.retrieved_files = retrieved_files;
     trace.is_decision = is_decision;
+    // A note only fires before any edit, so the turn's final edit state says
+    // for every note whether a real edit followed it (SM-2).
+    for note in &mut no_change_notes {
+        note.edit_followed = turn_edited;
+    }
+    trace.no_change_notes = no_change_notes;
     let _ = xencode_context_rs::append_trace(&trace_dir, &trace);
     // One row per run in `.xencode/cache/runs.jsonl` (QTR-5): the run's own
     // id, the model that answered it, and the questions a person answered
