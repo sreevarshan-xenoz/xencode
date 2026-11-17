@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Phase 1 distribution
+
+- `DI-2`: a test pins the release shape verified by `dist plan` — the v0.1.0
+  download path derived from the repository URL and crate version, the five
+  platform archives, both installers, and the generated workflow's tag,
+  trigger and working-directory rules. Exact-string comparisons make a wrong
+  URL or artifact name fail the build.
+
 ### Added — Phase 0: local-model reliability and one-command setup
 
 - `SM-2`: no-file-changed continuation notes are recorded in turn traces and eval results, with whether an edit followed. Tool counts and `/trace` output are unchanged; the eval pass-rate gate remains open and needs a GPU to measure.

@@ -207,6 +207,23 @@ fn the_release_pipeline_is_dist_generated_not_hand_written() {
     assert!(!workflow.contains("GPG"), "no signing keys in CI");
 }
 
+/// Read a `key = "value"` string field out of a Cargo manifest, without a
+/// TOML dependency: only the handful of flat package fields matter here.
+fn manifest_field(manifest: &str, key: &str) -> String {
+    let prefix = format!("{key} = \"");
+    let line = manifest
+        .lines()
+        .find(|line| line.trim_start().starts_with(&prefix))
+        .unwrap_or_else(|| panic!("manifest has no {key} field"));
+    line.split_once(&prefix)
+        .expect("quoted manifest field")
+        .1
+        .split('"')
+        .next()
+        .expect("closing quote")
+        .to_string()
+}
+
 #[test]
 fn dist_config_names_targets_installers_and_repository() {
     let config =
@@ -220,6 +237,152 @@ fn dist_config_names_targets_installers_and_repository() {
     assert!(
         manifest.contains("repository = \"https://github.com/"),
         "dist needs a repository URL and will not guess one"
+    );
+}
+
+#[test]
+fn dist_plan_pins_the_verified_release_shape() {
+    // The fixture is the real stdout of `dist plan --output-format=json` with
+    // cargo-dist 0.32.0, captured 2026-11-18. dist computes artifact names and
+    // host paths when a tag is pushed, so the checked-in CI workflow cannot
+    // pin them: this snapshot is the source the other files are checked against.
+    let plan_text = std::fs::read_to_string(
+        repo_root().join("rust/crates/xencode-cli/tests/fixtures/dist-plan.json"),
+    )
+    .expect("captured dist plan");
+    let plan: serde_json::Value = serde_json::from_str(&plan_text).expect("parse dist plan");
+
+    // Derive the expected release path from the repository URL and crate
+    // version, never from a literal copy of the path in the plan. A changed
+    // owner, repo or version must fail this exact-string comparison.
+    let manifest = std::fs::read_to_string(repo_root().join("rust/crates/xencode-cli/Cargo.toml"))
+        .expect("cli manifest");
+    let repository = manifest_field(&manifest, "repository");
+    let version = manifest_field(&manifest, "version");
+    let (owner, repo) = repository
+        .strip_prefix("https://github.com/")
+        .expect("repository must be a GitHub URL")
+        .split_once('/')
+        .expect("repository must be owner/repo");
+    let expected_path = format!("/{owner}/{repo}/releases/download/v{version}");
+
+    let release = &plan["releases"][0];
+    let github = &release["hosting"]["github"];
+    assert_eq!(
+        github["artifact_download_path"].as_str().unwrap(),
+        expected_path,
+        "plan download path must match the manifest repository and version"
+    );
+    assert_eq!(github["owner"].as_str().unwrap(), owner, "wrong owner");
+    assert_eq!(github["repo"].as_str().unwrap(), repo, "wrong repository");
+    assert_eq!(
+        github["artifact_base_url"].as_str().unwrap(),
+        "https://github.com"
+    );
+    assert_eq!(
+        plan["announcement_tag"].as_str().unwrap(),
+        format!("v{version}"),
+        "announced tag must match the crate version"
+    );
+
+    // The five platform archives and the two installers are read from the
+    // plan's own `kind` fields, then compared as whole sorted lists. A missing,
+    // extra or misspelled name fails - a bare `contains` would not.
+    let artifacts = plan["artifacts"].as_object().expect("artifacts object");
+    let names_of_kind = |kind: &str| {
+        let mut names: Vec<String> = artifacts
+            .iter()
+            .filter(|(_, value)| value["kind"].as_str() == Some(kind))
+            .map(|(name, _)| name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+    let archives = names_of_kind("executable-zip");
+    let installers = names_of_kind("installer");
+    assert_eq!(
+        archives,
+        [
+            "xencode-cli-aarch64-apple-darwin.tar.xz",
+            "xencode-cli-aarch64-unknown-linux-gnu.tar.xz",
+            "xencode-cli-x86_64-apple-darwin.tar.xz",
+            "xencode-cli-x86_64-pc-windows-msvc.zip",
+            "xencode-cli-x86_64-unknown-linux-gnu.tar.xz",
+        ],
+        "unexpected set of release archives"
+    );
+    assert_eq!(
+        installers,
+        ["xencode-cli-installer.ps1", "xencode-cli-installer.sh"],
+        "unexpected set of installers"
+    );
+
+    // Each name must be wired into the announcement the host step publishes,
+    // using the exact download URL derived above - not just a name substring.
+    let body = plan["announcement_github_body"].as_str().unwrap();
+    let base_url = format!(
+        "{}{}",
+        github["artifact_base_url"].as_str().unwrap(),
+        expected_path
+    );
+    for name in &archives {
+        let url = format!("{base_url}/{name}");
+        assert!(
+            body.contains(&format!("[{name}]({url})")),
+            "announcement omits the exact download link {url}"
+        );
+    }
+    for name in &installers {
+        let url = format!("{base_url}/{name}");
+        assert!(
+            body.contains(&url),
+            "announcement omits the installer URL {url}"
+        );
+    }
+    let listed = release["artifacts"]
+        .as_array()
+        .expect("release artifact list");
+    for name in archives.iter().chain(installers.iter()) {
+        assert!(
+            listed
+                .iter()
+                .any(|value| value.as_str() == Some(name.as_str())),
+            "release artifact list omits {name}"
+        );
+    }
+
+    // The generated workflow delegates naming to dist: it consumes the
+    // announcement body above and creates the release from whatever dist
+    // produced. It must not carry a manual trigger, a hand-added working
+    // directory, or a tag filter looser than major.minor.patch.
+    let workflow = std::fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
+        .expect("release workflow");
+    assert!(
+        workflow.contains("autogenerated by dist"),
+        "release.yml must remain dist's output"
+    );
+    assert!(
+        workflow.contains("'**[0-9]+.[0-9]+.[0-9]+*'"),
+        "tag filter must require major.minor.patch"
+    );
+    assert!(
+        workflow.contains("announcement_github_body"),
+        "release must publish dist's announcement, which names the artifacts"
+    );
+    assert!(
+        !workflow.contains("workflow_dispatch"),
+        "a dist-generated release workflow has no manual trigger"
+    );
+    let plan_step = workflow
+        .split("- id: plan")
+        .nth(1)
+        .expect("plan step")
+        .split("- name:")
+        .next()
+        .expect("end of plan step");
+    assert!(
+        !plan_step.contains("working-directory:"),
+        "the dist plan step must not set a working directory by hand"
     );
 }
 
