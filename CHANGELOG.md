@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation and maintenance — 2026-10-26 and 2026-10-12
+
+- `OM-6`: the README and quick start describe orchestrator mode.
+- `RH-12`: the README states what kind of project xencode is.
+- `RH-13`: the Linux test jobs run on ubuntu-latest again, with a time limit so a stuck test leaves its log.
+- `RH-14`: the record that the personal-data cleanup of the history is complete was refreshed after history rewrites, and the secret scan's list of checked findings was updated.
+- `RH-16`: the GitHub Actions used by the Docker pipeline were updated.
+- `RH-17` to `RH-22`: Dependabot's minor and patch updates for the Rust workspace, four major dependency updates that needed no code changes, the TOML parser at version 1, SHA-256 hashing on sha2 0.11, windows-sys 0.61 in xencode-core-rs, and serde_json 1.0.154 in the badge workspace.
+- `RH-23`: tokio stays on 1.53.1 because 1.54.1 stalled the web fetcher's requests.
+- `RH-24`: a justfile runs the common tasks from the repository root, and a leftover empty code block was removed from CONTRIBUTING.
+- `RH-25`: the command line's main.rs is split by subcommand.
+
 ### Fixed — `RH-15`: stopping a terminal tile could kill every process you own
 
 - On Linux and macOS, stopping an orchestrator tile ran `kill -KILL -<pid>`
