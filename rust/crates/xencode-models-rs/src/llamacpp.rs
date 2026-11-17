@@ -1853,6 +1853,34 @@ mod tests {
         );
     }
 
+    /// A name handed in as the alias reaches the server as `--alias <name>`,
+    /// which is the id it reports and the one a `llamacpp:<name>` model id in
+    /// the config has to match.
+    #[test]
+    fn a_given_alias_becomes_the_server_model_name_flag() {
+        let args = server_launch_args(&[], Some("qwen3-0.6b"), &[]);
+        assert_eq!(args, ["--alias", "qwen3-0.6b"]);
+
+        // The same holds with a preset present: the alias is added to it, not
+        // lost, and appears before the user's own flags.
+        let with_preset = server_launch_args(
+            &["--ctx-size".to_string(), "4096".to_string()],
+            Some("qwen3-0.6b"),
+            &["--flash-attn".to_string(), "on".to_string()],
+        );
+        assert_eq!(
+            with_preset,
+            [
+                "--ctx-size",
+                "4096",
+                "--alias",
+                "qwen3-0.6b",
+                "--flash-attn",
+                "on",
+            ]
+        );
+    }
+
     /// An alias already in the preset is not said a second time, and a blank one
     /// is not said at all — `llama-server` takes `--alias` to mean "the next
     /// argument is the name", so a bare one would swallow the flag after it.

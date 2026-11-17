@@ -2395,7 +2395,7 @@ _arguments "${_arguments_options[@]}" : \
 (start)
 _arguments "${_arguments_options[@]}" : \
 '--model=[GGUF model path (overrides config llama_cpp_model_path)]:MODEL:_default' \
-'--port=[Port to bind (defaults to 8080)]:PORT:_default' \
+'--port=[Port to bind (defaults to a free local port)]:PORT:_default' \
 '--exec=[llama-server executable path (overrides config / PATH lookup)]:EXEC:_default' \
 '-h[Print help]' \
 '--help[Print help]' \

@@ -1645,9 +1645,9 @@ pub(crate) enum LlamacppAction {
         /// GGUF model path (overrides config llama_cpp_model_path)
         #[arg(long)]
         model: Option<String>,
-        /// Port to bind (defaults to 8080)
-        #[arg(long, default_value = "8080")]
-        port: u16,
+        /// Port to bind (defaults to a free local port)
+        #[arg(long)]
+        port: Option<u16>,
         /// llama-server executable path (overrides config / PATH lookup)
         #[arg(long)]
         exec: Option<String>,
