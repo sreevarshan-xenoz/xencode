@@ -3864,7 +3864,7 @@ prompt prefix, its hooks, or its permissions is shown as a unified manifest diff
 and marked `NOT APPLIED` — it changes what reaches the agent on every turn, so
 it is only installed when acknowledged with `--yes`. `--rev <ref>` moves the
 plugin to that branch, tag or commit; without it, a plugin pinned to a specific
-commit stays there even when its branch moves on.
+commit stays there even when its branch moves on. The swap also clears any dot-prefixed backup copies that earlier, interrupted updates of that same plugin left beside it — those are never loaded, but a leftover can block a later update — while leaving other plugins' backups and other dot-prefixed names alone.
 
 `remove <name>` lists the prompt lines the plugin was contributing, then deletes
 only that one directory; a name containing a path separator or `..` is rejected

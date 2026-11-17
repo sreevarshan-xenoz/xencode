@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added — screenshot capture (MM-13)
+### Fixed — plugin update backup cleanup (PI-1)
+
+- `PI-1`: `xencode plugin update` could be blocked by one of its own interrupted predecessors. An update replaces the installed copy by moving the old one to a dot-prefixed backup named with the process id, then copying the new one in and deleting the backup. A process killed between those steps left the backup on disk; the loader never loads it, but process ids are reused, so a later update could find a non-empty directory where it wanted to place its own backup and fail with `Directory not empty (os error 39)`. The update now removes leftover `.<name>.old-<digits>` backups for the plugin it is replacing before starting the swap. Only that exact shape is touched — other dot-prefixed names and other plugins' backups are left alone. Verified against real `file://` git repositories: the regression test fails with the previous behaviour and passes with the fix, and companion tests confirm the new manifest is installed and that unrelated directories survive. Backups belonging to plugins that are never updated again are still not collected.
 
 ### Added — expanded eval and vision gate
 

@@ -641,6 +641,17 @@ impl UpdatePlan {
     /// Replace the installed copy with the fetched one and re-pin it.
     pub fn apply(self) -> Result<PluginSource, InstallError> {
         let backup = backup_path(&self.destination);
+        // An update killed between moving the old copy aside and deleting the
+        // backup leaves a full extra copy of the plugin on disk. The loader
+        // skips it, but if the process id is reused the next rename lands on
+        // that directory and fails. Clear the leftovers of earlier updates of
+        // this plugin before making this one.
+        cleanup_stale_backups(&self.destination).map_err(|e| {
+            InstallError::Install(format!(
+                "could not clear old update backups beside {}: {e}",
+                self.destination.display()
+            ))
+        })?;
         std::fs::rename(&self.destination, &backup).map_err(|e| {
             InstallError::Install(format!(
                 "could not move {} aside to replace it: {e}",
@@ -677,6 +688,37 @@ fn backup_path(destination: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(format!(".{name}.old-{}", std::process::id()))
+}
+
+/// Remove the backup siblings an interrupted update of this plugin left behind.
+///
+/// Only the exact `.<name>.old-<digits>` shape `backup_path` creates is touched:
+/// a dot-prefixed directory with any other name may be somebody's own file and
+/// is left alone. Files of that shape are removed too, because `rename` cannot
+/// land on them any more than it can on a directory.
+fn cleanup_stale_backups(destination: &Path) -> io::Result<()> {
+    let Some(name) = destination.file_name() else {
+        return Ok(());
+    };
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let prefix = format!(".{}.old-", name.to_string_lossy());
+    for entry in std::fs::read_dir(parent)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let Some(suffix) = file_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// Fetch what the plugin's own source record points at and compare it with what
@@ -1053,6 +1095,78 @@ mod tests {
         assert!(plan.current, "{:?}", plan.changes);
         assert!(plan.changes.is_empty(), "{:?}", plan.changes);
         assert!(plan.diff.is_empty(), "{}", plan.diff);
+    }
+
+    #[test]
+    fn an_update_clears_a_backup_left_by_an_interrupted_update() {
+        let (_tmp, repo) = repo_with(GOOD);
+        let plugins = tempfile::tempdir().unwrap();
+        prepare_git(plugins.path(), &url_of(&repo), None, "0.1.0")
+            .expect("prepare")
+            .apply()
+            .expect("apply");
+
+        // A previous update was killed after moving the old copy aside. The
+        // leftover has this process's id, so the next rename would land on it
+        // and fail with "directory not empty".
+        let stale = plugins
+            .path()
+            .join(format!(".guardrails.old-{}", std::process::id()));
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("plugin.json"), "left over").unwrap();
+
+        std::fs::write(repo.join("plugin.json"), GOOD.replace("1.0.0", "1.0.1")).unwrap();
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-qm", "bump"]);
+
+        prepare_update(plugins.path(), "guardrails", None, "0.1.0")
+            .expect("prepare")
+            .apply()
+            .expect("an interrupted predecessor must not block this update");
+
+        assert!(installed_json(plugins.path()).contains("1.0.1"));
+        assert!(!stale.exists(), "the stale backup is still on disk");
+        let leftovers: Vec<String> = std::fs::read_dir(plugins.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with(".guardrails.old-"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn an_update_clears_other_processes_backups_but_leaves_other_names_alone() {
+        let (_tmp, repo) = repo_with(GOOD);
+        let plugins = tempfile::tempdir().unwrap();
+        prepare_git(plugins.path(), &url_of(&repo), None, "0.1.0")
+            .expect("prepare")
+            .apply()
+            .expect("apply");
+
+        let other_pid = plugins.path().join(".guardrails.old-101");
+        std::fs::create_dir_all(&other_pid).unwrap();
+        std::fs::write(other_pid.join("plugin.json"), "old").unwrap();
+        let not_a_backup = plugins.path().join(".guardrails.old-not-a-pid");
+        std::fs::create_dir_all(&not_a_backup).unwrap();
+        let other_plugin = plugins.path().join(".other-plugin.old-202");
+        std::fs::create_dir_all(&other_plugin).unwrap();
+
+        std::fs::write(repo.join("plugin.json"), GOOD.replace("1.0.0", "1.0.1")).unwrap();
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-qm", "bump"]);
+
+        prepare_update(plugins.path(), "guardrails", None, "0.1.0")
+            .expect("prepare")
+            .apply()
+            .expect("apply");
+
+        assert!(
+            !other_pid.exists(),
+            "an orphan from another process remained"
+        );
+        assert!(not_a_backup.exists(), "a non-backup name was deleted");
+        assert!(other_plugin.exists(), "another plugin's backup was deleted");
     }
 
     #[test]
