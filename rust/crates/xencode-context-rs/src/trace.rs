@@ -237,12 +237,12 @@ static PEM_KEY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 /// a shell line: `AWS_SECRET_ACCESS_KEY='…'`, `"api_key": "…"`, `password: …`.
 /// The name is matched as one whole identifier and then checked for a
 /// secret-shaped word, because `SECRET` inside such a name is not followed by
-/// a word boundary and would escape a keyword-only pattern. The value may lead
-/// with a scheme word so `Authorization: Bearer <jwt>` loses the token, not
-/// just the word "Bearer".
+/// a word boundary and would escape a keyword-only pattern. An unquoted value
+/// runs to the end of the line (or a comma or semicolon), so every word of a
+/// passphrase is hidden, not just its first token.
 static KEYED_VALUE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     pattern(
-        r#"(?i)\b([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|(?:[a-z][a-z0-9-]* )?[^\s,;]{3,})"#,
+        r#"(?i)\b([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\n,;]{3,})"#,
     )
 });
 static BEARER_RE: LazyLock<regex::Regex> =
@@ -927,6 +927,21 @@ second line echoing the prompt";
             redact_secrets("password=hunter2hunter2"),
             "password=\"[redacted]\""
         );
+    }
+
+    #[test]
+    fn an_unquoted_multi_word_secret_is_redacted_whole() {
+        let text = "password: horse battery staple correct";
+        let out = redact_secrets(text);
+        assert!(!out.contains("horse"), "{out}");
+        assert!(!out.contains("battery"), "{out}");
+        assert!(!out.contains("staple"), "{out}");
+        assert!(!out.contains("correct"), "{out}");
+        assert!(out.starts_with("password:"), "{out}");
+        let spans = secret_spans(text);
+        assert!(!spans.is_empty(), "no secret span was found");
+        let (start, end) = spans[0];
+        assert_eq!(&text[start..end], "horse battery staple correct");
     }
 
     #[test]
