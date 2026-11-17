@@ -58,6 +58,8 @@ struct GeminiStreamChunk {
 #[derive(Debug, Deserialize)]
 struct StreamCandidate {
     content: Option<StreamContent>,
+    #[serde(rename = "finishReason")]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,23 +268,32 @@ impl GeminiProvider {
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
+        let mut ended = false;
 
         let mut lines = crate::frames::FrameLines::default();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
             lines.feed(&chunk, &mut |line| {
-                ingest_line(line, &mut full_response, &mut callback)
+                ingest_line(line, &mut full_response, &mut callback, &mut ended)
             });
         }
-        lines.finish(&mut |line| ingest_line(line, &mut full_response, &mut callback));
+        lines.finish(&mut |line| ingest_line(line, &mut full_response, &mut callback, &mut ended));
 
+        if !ended {
+            return Err(crate::compatible::cut_off("Gemini"));
+        }
         Ok(full_response)
     }
 }
 
 /// One Gemini SSE frame: `data: {"candidates": [...]}`, whose text lives in
 /// every part of every candidate's content.
-fn ingest_line<F: FnMut(&str)>(line: &str, full_response: &mut String, callback: &mut F) {
+fn ingest_line<F: FnMut(&str)>(
+    line: &str,
+    full_response: &mut String,
+    callback: &mut F,
+    ended: &mut bool,
+) {
     let line = line.trim();
     if line.is_empty() {
         return;
@@ -297,6 +308,12 @@ fn ingest_line<F: FnMut(&str)>(line: &str, full_response: &mut String, callback:
     let Some(candidates) = parsed.candidates else {
         return;
     };
+    if candidates
+        .iter()
+        .any(|candidate| candidate.finish_reason.is_some())
+    {
+        *ended = true;
+    }
     for candidate in &candidates {
         let Some(content) = &candidate.content else {
             continue;

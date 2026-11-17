@@ -150,6 +150,12 @@ pub(crate) async fn run_doctor(
         // pastes into an issue. It is the superset, not a fourth thing.
         return run_bug_report(format).await;
     }
+    if usize::from(env) + usize::from(deps) + usize::from(selfcheck) > 1 {
+        return Err(
+            "--env, --deps and --selfcheck each select a different report; use one at a time"
+                .to_string(),
+        );
+    }
     if selfcheck {
         return run_selfcheck(format).await;
     }

@@ -2,7 +2,44 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
-> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates are not green as of 2026-10-08; see "Workspace gates" below.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Both CI workflows were green on `main` as of 2026-10-10; the dependency updates that followed have not been measured again. See "Workspace gates" below for the history.
+
+## Audit 2026-11-17 — findings and fixes (`AU-*`)
+
+Six parallel reviewers audited the whole repository on 2026-11-17. Every item below is
+one logical change: one commit naming its ID, one branch, one pull request, merged only
+after CI is green. "Verified" means reproduced by running code; "reading" means found
+by inspection. Severity is about user impact, not effort.
+
+| ID | Sev | Area | Finding (evidence) | Done when |
+|---|---|---|---|---|
+| AU-1 | HIGH | context | `xencode-context-rs/src/compact.rs:378-385`: `fold_state_from_reply` loops forever when one folded `working_on` line alone exceeds the 4,000-token cap (verified hang) | regression test with an over-cap line returns instead of hanging |
+| AU-2 | HIGH | tui | `xencode-tui-rs/src/keymap.rs:1023,1392,1506`: a byte-index cursor is advanced by 1 per char and passed to `String::insert`/`remove`, so any non-ASCII input panics the TUI (verified primitive) | cursor advances by UTF-8 char boundaries in all three fields, with a test |
+| AU-3 | HIGH | server | `xencode-server-rs`: `/auth/login` has no rate limit or token cap and `tokens.rs` lookup is O(n) (4.8 ms at 100k tokens, measured); anyone can degrade every authenticated request | login is rate-limited/capped and token lookup is O(1), with a test |
+| AU-4 | MED-HIGH | providers | `xencode-providers-rs/src/lib.rs:962-1083`: the agent-tool stream path bypasses the configured request timeout, so a silent provider hangs the turn forever | a stalled local server through `generate_stream_with_tools` times out in a test |
+| AU-5 | MED | providers | `anthropic.rs`, `gemini.rs`, `qwen.rs`: a clean mid-stream close is returned as a complete answer; only Ollama/OpenAI paths detect truncation | unterminated SSE is rejected by all three providers, with tests |
+| AU-6 | MED | core+memory | `xencode-core-rs/src/jsonl.rs:50-59` and `xencode-memory-rs`: decoding the whole file before splitting drops every good row when a torn tail splits a UTF-8 char (verified) | tolerant reader keeps all complete rows and discards only the torn tail, with a test |
+| AU-7 | MED | context | `xencode-context-rs/src/trace.rs:243-247,306-324`: an unquoted multi-word secret value is only partly redacted (`password: horse battery staple` keeps two words, verified) | the whole value to end-of-line is redacted, with a test |
+| AU-8 | MED | server | `xencode-server-rs/src/ws.rs:400-427`: a slow peer is removed from the broadcast map but its socket is never closed, so it stays connected and keeps injecting traffic | pruning a full peer also terminates its connection, with a test |
+| AU-9 | MED | server | `xencode-server-rs`: workspace membership is never released on disconnect and cannot be removed via the API, so a session is permanently full after 10 lifetime joins | concurrent connections are capped and membership is removable, with a test |
+| AU-10 | MED | cli | `xencode-cli/src/cmd_maintenance.rs:15-32`: `cache stats`/`cache clear` swallow read errors and print fabricated success (verified) | read errors are reported and the command fails, with a test |
+| AU-11 | LOW-MED | providers | `xencode-providers-rs/src/lib.rs:1261-1271,1340-1350`: the `lines.finish()` call is unreachable after an early return, losing a final unterminated Ollama line | `finish()` runs before the cut-off check, with a test |
+| AU-12 | LOW | cli | `xencode-cli/src/cmd_doctor.rs:147-158`: combined narrowing flags are silently dropped (verified) | conflicting flags are rejected or all slices are reported, with a test |
+| AU-13 | LOW | cli | `xencode-cli/src/main.rs:572-581`: raw mode/alternate screen are not restored if setup or teardown partially fails | teardown always restores every mode, with a test |
+| AU-14 | LOW | config | `xencode-config-rs/src/config.rs:28-34`: `declared_version` truncates `u64` to `u32`, so a future version is read as legacy | version is compared as `u64` and out-of-range values are rejected, with a test |
+| AU-15 | LOW | config | `xencode-config-rs/src/secrets.rs:352-390`: killing a helper does not close pipes inherited by a grandchild, so the timeout hangs | pipe reads are bounded, with a test |
+| AU-16 | LOW | context | `xencode-context-rs/src/context.rs:838-893`: tokens are counted before redaction, so longer placeholders undercount | redaction precedes token accounting, with a test |
+| AU-17 | HIGH | analysis | `xencode-analysis-rs/src/merge_decision.rs:527,545,550`: 8 tests hardcode `git checkout master` and fail on `main`-default machines (verified) | tests init the repo with an explicit branch and pass locally |
+| AU-18 | HIGH | agents | `xencode-agents-rs/src/contract.rs:121`: stale `opencode resume`/`export` marker breaks 3 tests locally, while CI passes vacuously with no agents installed | marker matches live help and CI does not silently pass, with a test |
+| AU-19 | LOW | context | `xencode-context-rs/src/power.rs:549-553`: test asserts a contradiction when a RAPL domain exists but its counter is unreadable (fails locally) | test accepts an unreadable counter and passes locally |
+| AU-20 | LOW | cli | `xencode-cli/tests/engine_cli.rs`: two tests time out under parallel load but pass in isolation | waits are bounded generously and pass under `-j 4` |
+| AU-21 | LOW | repo | no pinned toolchain; local nightly and CI stable diverge (fmt fails on nightly) | `rust-toolchain.toml` pins stable and CI uses it |
+| AU-22 | LOW | ci | CI cargo commands omit `--locked`, so the tracked lockfile is not validated | all CI cargo commands use `--locked` |
+| AU-23 | LOW | ci | `ci.yml` gates PRs to `main` only, so PRs to `develop` skip CI | `develop` is added to `pull_request.branches` |
+| AU-24 | LOW | ci | `ci-cd.yml:114` scans the moving `:latest` tag, not the commit that was built | Trivy scans the commit-specific tag |
+| AU-25 | MED-HIGH | docs | `PLAN_STATUS.md` is stale: all 165 referenced commit hashes no longer exist and `--check` fails (verified) | `scripts/plan-status.sh --check` passes on a freshly generated file |
+| AU-26 | MED | docs | `NEXT_PLAN_TASKS.md:5` and `NEXT_PLAN.md:26` still say "workspace gates not green" in the present tense | both headers reflect the 2026-10-10 green state |
+| AU-27 | LOW | docs | `NEXT_PLAN.md:26` says 16 crates (there are 20); CHANGELOG Unreleased omits RH-12/13/14/16-25 and OM-6 | crate count is 20 and recent IDs are in Unreleased |
 
 ## Audit 2026-11-17 — findings and fixes (`AU-*`)
 

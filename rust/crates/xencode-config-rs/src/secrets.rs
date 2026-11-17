@@ -347,52 +347,59 @@ fn run_command_reference(command: &str) -> Result<Option<String>, SecretProblem>
     };
     // Both pipes are drained on their own threads, whether the helper finishes or
     // is stopped, so a program that writes more than a pipe buffer cannot block on
-    // the write while this side waits for it to exit. The scope ends by joining
-    // them, including on the paths that give up.
-    let outcome = std::thread::scope(
-        |scope| -> Result<(Option<std::process::ExitStatus>, Vec<u8>), SecretProblem> {
-            let out = scope.spawn(|| {
-                let mut buffer = Vec::new();
-                let _ = stdout.read_to_end(&mut buffer);
-                buffer
-            });
-            let errors = scope.spawn(|| {
-                let mut buffer = Vec::new();
-                let _ = stderr.read_to_end(&mut buffer);
-                buffer
-            });
-            let deadline = Instant::now() + SECRET_HELPER_TIMEOUT;
-            let mut stopped_by_deadline = false;
-            let status = loop {
-                match child.try_wait() {
-                    Ok(Some(found)) => break Some(found),
-                    Ok(None) if Instant::now() >= deadline => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        stopped_by_deadline = true;
-                        break None;
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                    Err(problem) => return Err(failed(problem)),
-                }
-            };
-            let output = out.join().unwrap_or_default();
-            // Read and then dropped: what the helper complained about is not shown,
-            // because a program that prints the credential on its way out would
-            // otherwise put it on the terminal.
-            drop(errors.join().unwrap_or_default());
-            if stopped_by_deadline {
-                return Err(SecretProblem::TimedOut {
-                    command: command.to_string(),
-                });
+    // the write while this side waits for it to exit. The readers hand their bytes
+    // back over channels rather than being joined: a helper that spawned a child
+    // keeping those pipes open would otherwise hold the join past the deadline.
+    let (out_tx, out_rx) = std::sync::mpsc::channel();
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stdout.read_to_end(&mut buffer);
+        let _ = out_tx.send(buffer);
+    });
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stderr.read_to_end(&mut buffer);
+        let _ = err_tx.send(buffer);
+    });
+    let deadline = Instant::now() + SECRET_HELPER_TIMEOUT;
+    let mut stopped_by_deadline = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(found)) => break Some(found),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                stopped_by_deadline = true;
+                break None;
             }
-            Ok((status, output))
-        },
-    )?;
-
-    let (status, output) = match outcome {
-        (Some(status), output) => (status, output),
-        (None, _) => {
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(problem) => return Err(failed(problem)),
+        }
+    };
+    // The helper may be gone while a process it started still holds the pipes.
+    // Give the readers a short, bounded chance to deliver, then give up rather
+    // than waiting for a grandchild we cannot see or stop.
+    let output = match out_rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Err(SecretProblem::TimedOut {
+                command: command.to_string(),
+            })
+        }
+    };
+    // Read and then dropped: what the helper complained about is not shown,
+    // because a program that prints the credential on its way out would
+    // otherwise put it on the terminal.
+    let _ = err_rx.recv_timeout(Duration::from_secs(1));
+    if stopped_by_deadline {
+        return Err(SecretProblem::TimedOut {
+            command: command.to_string(),
+        });
+    }
+    let status = match status {
+        Some(status) => status,
+        None => {
             return Err(SecretProblem::TimedOut {
                 command: command.to_string(),
             })
@@ -680,6 +687,28 @@ mod tests {
             elapsed < SECRET_HELPER_TIMEOUT + Duration::from_secs(5),
             "gave up at the deadline rather than waiting out the helper's own 30s: {}s",
             elapsed.as_secs()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_helper_that_leaves_a_child_holding_stdout_is_bounded() {
+        let dir = temp_dir();
+        // The helper exits at once, but the background sleep inherits stdout and
+        // keeps the pipe open for 30s. Joining the reader used to wait that long.
+        let reference = helper(&dir, "grandchild", "#!/bin/sh\nsleep 30 &\nexit 0\n");
+        let started = Instant::now();
+        let problem = resolve(Some(&reference), &[])
+            .expect_err("an answer that never closes must not be accepted");
+        assert!(
+            matches!(problem, SecretProblem::TimedOut { .. }),
+            "an inherited pipe must not hold the caller: {problem}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "the helper exited immediately, so this should not take 10s: {:?}",
+            started.elapsed()
         );
         let _ = fs::remove_dir_all(&dir);
     }

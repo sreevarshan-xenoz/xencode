@@ -6,30 +6,19 @@ use super::*;
 pub(crate) fn run_cache(action: CacheAction) -> Result<(), String> {
     match action {
         CacheAction::Stats => {
-            match ResponseCache::with_persistence(100, 3600.0) {
-                Ok(cache) => {
-                    let stats = cache.stats();
-                    println!("Cache Statistics:");
-                    println!("  {stats}");
-                }
-                Err(_) => {
-                    // Fall back to reporting empty stats
-                    println!("Cache Statistics:");
-                    println!("  entries: 0, hits: 0, misses: 0, hit_rate: 0.0%, evictions: 0");
-                }
-            }
+            // An unreadable cache is not an empty cache. Reporting zeros here
+            // used to hide a read-only directory or a corrupt on-disk state.
+            let cache = ResponseCache::with_persistence(100, 3600.0).map_err(|e| e.to_string())?;
+            let stats = cache.stats();
+            println!("Cache Statistics:");
+            println!("  {stats}");
             Ok(())
         }
         CacheAction::Clear => {
-            match ResponseCache::with_persistence(100, 3600.0) {
-                Ok(mut cache) => {
-                    cache.clear().map_err(|e| e.to_string())?;
-                    println!("Cache cleared successfully");
-                }
-                Err(_) => {
-                    println!("No cache to clear");
-                }
-            }
+            let mut cache =
+                ResponseCache::with_persistence(100, 3600.0).map_err(|e| e.to_string())?;
+            cache.clear().map_err(|e| e.to_string())?;
+            println!("Cache cleared successfully");
             Ok(())
         }
         CacheAction::Gc { max_mb } => {

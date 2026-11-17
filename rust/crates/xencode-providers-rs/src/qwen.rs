@@ -50,9 +50,18 @@ struct QwenStreamChoice {
 
 /// One Qwen SSE frame: `data: {"choices": [...]}` with the new text in
 /// `delta.content`, terminated by a bare `data: [DONE]`.
-fn ingest_line<F: FnMut(&str)>(line: &str, full_response: &mut String, callback: &mut F) {
+fn ingest_line<F: FnMut(&str)>(
+    line: &str,
+    full_response: &mut String,
+    callback: &mut F,
+    ended: &mut bool,
+) {
     let line = line.trim();
-    if line.is_empty() || line == "data: [DONE]" {
+    if line == "data: [DONE]" {
+        *ended = true;
+        return;
+    }
+    if line.is_empty() {
         return;
     }
     let Some(data) = line.strip_prefix("data: ") else {
@@ -157,16 +166,20 @@ impl QwenProvider {
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
+        let mut ended = false;
 
         let mut lines = crate::frames::FrameLines::default();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
             lines.feed(&chunk, &mut |line| {
-                ingest_line(line, &mut full_response, &mut callback)
+                ingest_line(line, &mut full_response, &mut callback, &mut ended)
             });
         }
-        lines.finish(&mut |line| ingest_line(line, &mut full_response, &mut callback));
+        lines.finish(&mut |line| ingest_line(line, &mut full_response, &mut callback, &mut ended));
 
+        if !ended {
+            return Err(crate::compatible::cut_off("Qwen"));
+        }
         Ok(full_response)
     }
 

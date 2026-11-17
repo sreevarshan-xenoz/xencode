@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 use tracing::{info, warn};
 use xencode_collaboration_rs::wire::{
     ClientFrame, MemberInfo, ServerFrame, CLOSE_BAD_TOKEN, CLOSE_NO_SESSION, CLOSE_RBAC_DENIED,
@@ -50,6 +50,9 @@ pub struct Peer {
     /// The `SyncCoordinator` presence record for this connection.
     pub sync_id: String,
     tx: mpsc::Sender<Message>,
+    /// Set when the connection is pruned for falling behind, so the owning
+    /// handler and writer stop instead of holding an open, silent socket.
+    shutdown: watch::Sender<bool>,
 }
 
 /// Each peer is addressed through its own channel, drained by a dedicated
@@ -163,9 +166,24 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
     let username = principal.username;
 
     // RBAC gate: the session must exist, and admitting a new identity must
-    // not exceed the shared size cap. Joining is idempotent — a reconnect
+    // not exceed the shared size cap. The cap counts identities *connected
+    // right now*: workspace membership also records roles that outlive a
+    // disconnect, so counting membership here made a session permanently full
+    // after ten people had ever joined. Joining is idempotent — a reconnect
     // keeps its role. Every refusal here is by an *authenticated* identity,
     // so it earns a Denied audit entry.
+    let connected: Vec<String> = {
+        let peers = state.peers.lock().await;
+        let mut names: Vec<String> = Vec::new();
+        if let Some(session_peers) = peers.get(&session_id) {
+            for peer in session_peers {
+                if !names.contains(&peer.username) {
+                    names.push(peer.username.clone());
+                }
+            }
+        }
+        names
+    };
     let role = {
         let mut workspaces = state.workspaces.lock().await;
         if workspaces.get_workspace(&session_id).is_none() {
@@ -175,8 +193,7 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
             reject(&mut sink, CLOSE_NO_SESSION, "no such session").await;
             return;
         }
-        let known = workspaces.role_of(&session_id, &username).is_some();
-        if !known && workspaces.member_count(&session_id) >= MAX_SESSION_MEMBERS {
+        if session_is_full(&connected, &username) {
             workspaces.log_denied(&username, &session_id, "join (session full)", None);
             state.audit.sync_from(&workspaces);
             drop(workspaces);
@@ -199,6 +216,8 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
 
     // ---- peer phase ----
     let (tx, mut rx) = mpsc::channel::<Message>(PEER_SEND_BUFFER);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let mut writer_shutdown = shutdown_rx.clone();
     let sync_id = state
         .sync
         .lock()
@@ -213,16 +232,25 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
             username: username.clone(),
             sync_id: sync_id.clone(),
             tx: tx.clone(),
+            shutdown: shutdown_tx,
         });
     }
 
-    // The writer task owns the sink from here on; the auth phase is over.
+    // The writer task owns the sink from here on; the auth phase is over. A
+    // shutdown signal ends it even if a socket write is in flight, so a peer
+    // pruned for falling behind cannot keep a silent connection alive.
     tokio::spawn(async move {
         use futures_util::SinkExt;
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = sink.send(msg).await {
-                warn!("Failed to send to peer: {e}");
-                break;
+        loop {
+            tokio::select! {
+                _ = writer_shutdown.changed() => break,
+                msg = rx.recv() => {
+                    let Some(msg) = msg else { break; };
+                    if let Err(e) = sink.send(msg).await {
+                        warn!("Failed to send to peer: {e}");
+                        break;
+                    }
+                }
             }
         }
         let _ = sink.close().await;
@@ -250,7 +278,15 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
     .await;
 
     // ---- message loop ----
-    while let Some(Ok(msg)) = receiver.next().await {
+    let mut handler_shutdown = shutdown_rx;
+    loop {
+        let incoming = tokio::select! {
+            _ = handler_shutdown.changed() => break,
+            incoming = receiver.next() => incoming,
+        };
+        let Some(Ok(msg)) = incoming else {
+            break;
+        };
         let Message::Text(text) = msg else {
             continue;
         };
@@ -329,6 +365,13 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
     broadcast_frame(&state, &session_id, &ServerFrame::Members { members }, None).await;
 }
 
+/// Whether a new identity should be refused because ten distinct identities
+/// are connected right now. A repeat connection from someone already present
+/// does not make the session fuller.
+fn session_is_full(connected: &[String], username: &str) -> bool {
+    !connected.contains(&username.to_string()) && connected.len() >= MAX_SESSION_MEMBERS
+}
+
 /// Remove one connection (not the whole identity) from the peer and presence
 /// maps. Dropping its sender ends the writer task.
 async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) {
@@ -340,7 +383,7 @@ async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) 
         let mut removed = None;
         session_peers.retain(|p| {
             if p.id == peer_id {
-                removed = Some(p.sync_id.clone());
+                removed = Some((p.sync_id.clone(), p.shutdown.clone()));
                 false
             } else {
                 true
@@ -351,7 +394,8 @@ async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) 
         }
         removed
     };
-    if let Some(sync_id) = sync_id {
+    if let Some((sync_id, shutdown)) = sync_id {
+        let _ = shutdown.send(true);
         state.sync.lock().await.leave_session(session_id, &sync_id);
     }
 }
@@ -418,6 +462,11 @@ async fn broadcast_to_session(
                 Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     warn!("Dropping peer in session {session_id}: send buffer full");
+                    // De-listing alone only drops the cloned sender in this map;
+                    // the handler and writer still held one each, so the socket
+                    // stayed open and the client kept injecting activity. Signal
+                    // them to stop and close.
+                    let _ = peer.shutdown.send(true);
                     false
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => false,
@@ -429,6 +478,20 @@ async fn broadcast_to_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_session_cap_counts_connections_not_past_membership() {
+        let ten: Vec<String> = (0..MAX_SESSION_MEMBERS)
+            .map(|i| format!("member{i}"))
+            .collect();
+        assert!(session_is_full(&ten, "newcomer"));
+        assert!(
+            !session_is_full(&ten, "member3"),
+            "a second tab of a present identity is not a new member"
+        );
+        let empty: Vec<String> = Vec::new();
+        assert!(!session_is_full(&empty, "newcomer"));
+    }
 
     #[tokio::test]
     async fn test_app_state_new() {
@@ -450,11 +513,13 @@ mod tests {
     /// A peer with its own id, plus the receiver its writer task would drain.
     fn test_peer(capacity: usize) -> (Peer, mpsc::Receiver<Message>) {
         let (tx, rx) = mpsc::channel(capacity);
+        let (shutdown, _signal) = watch::channel(false);
         let peer = Peer {
             id: PeerId::next(),
             username: "tester".to_string(),
             sync_id: uuid::Uuid::new_v4().to_string(),
             tx,
+            shutdown,
         };
         (peer, rx)
     }
@@ -523,6 +588,39 @@ mod tests {
     /// get it pruned. (A test that merely checks an excluded peer survives a
     /// broadcast would pass without the fix too, since a peer with room is
     /// never pruned either way; the full buffer is what makes this discriminate.)
+    #[tokio::test]
+    async fn a_peer_pruned_for_falling_behind_is_told_to_close() {
+        let state = Arc::new(AppState::new());
+        let (tx, _rx) = mpsc::channel(1);
+        let (shutdown, mut signal) = watch::channel(false);
+        let stalled = Peer {
+            id: PeerId::next(),
+            username: "slow".to_string(),
+            sync_id: uuid::Uuid::new_v4().to_string(),
+            tx,
+            shutdown,
+        };
+        stalled
+            .tx
+            .send(Message::Text("filler".into()))
+            .await
+            .unwrap();
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![stalled]);
+
+        broadcast_to_session(&state, "s", "hello", None).await;
+
+        assert!(state.peers.lock().await["s"].is_empty());
+        signal
+            .changed()
+            .await
+            .expect("the removed peer was not signalled");
+        assert!(*signal.borrow(), "the shutdown signal was not set");
+    }
+
     #[tokio::test]
     async fn an_excluded_peer_with_a_full_buffer_is_kept() {
         let state = Arc::new(AppState::new());

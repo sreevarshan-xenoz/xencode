@@ -577,26 +577,41 @@ async fn run_tui(in_process: bool) -> Result<(), String> {
     // `mouse_capture` setting on its first frame, so a user who handed the
     // mouse back to the terminal never gets it taken (`V-7`). The cleanup below
     // still disables it, which is correct whether or not it was ever enabled.
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)
-        .map_err(|e| e.to_string())?;
+    // Terminal modes survive the process. If entering the alternate screen
+    // fails, undo raw mode before returning or the shell is left unusable.
+    if let Err(error) = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen) {
+        let _ = crossterm::terminal::disable_raw_mode();
+        return Err(error.to_string());
+    }
 
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
     let res = xencode_tui_rs::run_app(&mut terminal, in_process).await;
 
-    // Restore terminal
-    crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
-    crossterm::execute!(
+    // Restore every mode even if an earlier restore step fails: returning on
+    // the first error could leave the shell in raw mode or on the alternate
+    // screen, which is worse than losing a cleanup error.
+    let mut restore_error = None;
+    if let Err(error) = crossterm::terminal::disable_raw_mode() {
+        restore_error = Some(error.to_string());
+    }
+    if let Err(error) = crossterm::execute!(
         terminal.backend_mut(),
         crossterm::terminal::LeaveAlternateScreen,
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableFocusChange,
-    )
-    .map_err(|e| e.to_string())?;
-    terminal.show_cursor().map_err(|e| e.to_string())?;
+    ) {
+        restore_error = Some(error.to_string());
+    }
+    if let Err(error) = terminal.show_cursor() {
+        restore_error = Some(error.to_string());
+    }
 
-    res.map_err(|e| e.to_string())
+    match res {
+        Err(error) => Err(error.to_string()),
+        Ok(()) => restore_error.map_or(Ok(()), Err),
+    }
 }
 
 #[cfg(test)]
