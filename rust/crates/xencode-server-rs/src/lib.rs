@@ -82,6 +82,7 @@ mod tests {
     };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+    use xencode_collaboration_rs::Role;
 
     /// A router plus a freshly-issued token for its state, so auth-gated
     /// routes can be exercised end-to-end.
@@ -206,6 +207,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn an_admin_can_remove_a_member_to_recover_a_full_session() {
+        let state = Arc::new(ws::AppState::new());
+        let owner_token = state.tokens.lock().await.issue("owner").token;
+        {
+            let mut workspaces = state.workspaces.lock().await;
+            workspaces.create_workspace_with_id("s1", "session", "owner");
+            workspaces
+                .add_member("s1", "owner", "guest", Role::Editor)
+                .unwrap();
+        }
+        let app = build_app_with_state(state.clone());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/sessions/s1/members/guest")
+                    .header("Authorization", format!("Bearer {owner_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let workspaces = state.workspaces.lock().await;
+        assert_eq!(workspaces.member_count("s1"), 1);
+        assert!(workspaces.role_of("s1", "guest").is_none());
     }
 
     #[tokio::test]
