@@ -1787,6 +1787,24 @@ fn the_image_flag_parses_and_repeats() {
     assert!(image_paths(&["xencode", "query", "hello"]).is_empty());
 }
 
+/// The one-action capture flag is off unless asked for.
+#[test]
+fn the_screenshot_flag_parses() {
+    let screenshot = |args: &[&str]| -> bool {
+        match Cli::parse_from(args.iter().copied()).command {
+            Some(Commands::Query { screenshot, .. }) => screenshot,
+            _ => panic!("expected a query command"),
+        }
+    };
+    assert!(screenshot(&[
+        "xencode",
+        "query",
+        "--screenshot",
+        "what is this?"
+    ]));
+    assert!(!screenshot(&["xencode", "query", "what is this?"]));
+}
+
 /// A file that is not an image, or cannot be read, is named and refused
 /// before any request goes out.
 #[test]

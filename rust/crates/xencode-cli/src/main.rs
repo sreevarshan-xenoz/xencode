@@ -165,6 +165,7 @@ async fn async_main() {
             grammar,
             json_schema,
             images,
+            screenshot,
             format,
         } => {
             run_query(
@@ -181,6 +182,7 @@ async fn async_main() {
                 grammar,
                 json_schema,
                 images,
+                screenshot,
                 format,
             )
             .await

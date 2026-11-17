@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — screenshot capture (MM-13)
+
 ### Added — expanded eval and vision gate
 
 
@@ -34,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grader now builds into its own repository instead of a shared build directory:
   concurrent graders for same-named seed crates were reusing each other's test
   binaries and grading an edit against stale seeded code.
+
+- `MM-13`: `xencode query --screenshot` captures the screen and attaches the
 
 - `DI-3`: `install.sh` and `install.ps1` can now install from a published GitHub Release with `--release`/`-r` (`-Release` in PowerShell). The host OS and architecture are mapped to the exact archive name from the verified dist plan, the matching `.sha256` file is downloaded and checked with `sha256sum -c` or PowerShell's `Get-FileHash` before extraction, and the binary is installed to the same location with the same PATH shim and smoke test. Source build remains the default and `--source` selects it explicitly. `--version` (or `XENCODE_RELEASE_VERSION`) picks the release version, and `--dry-run` prints the derived archive name and URLs without making any network request. No release has been tagged yet, so release mode currently fails with HTTP 404 — the download half is blocked until a `v0.1.0` tag is pushed. An offline test checks the asset and URL derivation against the captured dist plan and exercises checksum verification with real local files.
 ### Added — Phase 1 distribution

@@ -41,8 +41,36 @@ pub(crate) async fn run_query(
     grammar: Option<String>,
     json_schema: Option<String>,
     images: Vec<String>,
+    screenshot: bool,
     format: QueryFormat,
 ) -> Result<(), String> {
+    // `--screenshot` is one action: capture a real PNG, then hand its path to
+    // the very same intake `--image` uses (read, cap, verify, resize, base64).
+    // A capture failure is an outcome, not an early return, so the NDJSON error
+    // line below is printed for it just as it is for a failed request.
+    let images = if screenshot {
+        match xencode_analysis_rs::capture_screenshot() {
+            Ok(path) => {
+                eprintln!(
+                    "screenshot: {} (attached; reading it needs a vision-capable model)",
+                    path.display()
+                );
+                let mut all = images;
+                all.push(path.display().to_string());
+                all
+            }
+            Err(error) => {
+                let outcome = Err(error.to_string());
+                if let (Err(message), QueryFormat::Ndjson) = (&outcome, format) {
+                    println!("{}", query_stream::error(message));
+                    let _ = io::stdout().flush();
+                }
+                return outcome;
+            }
+        }
+    } else {
+        images
+    };
     let outcome = run_query_once(
         prompt,
         model_override,
