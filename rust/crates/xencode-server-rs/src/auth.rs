@@ -88,14 +88,16 @@ pub async fn login(
         ));
     }
     let mut tokens = state.tokens.lock().await;
-    if !tokens.allow_login() {
-        return Err(AuthError::RateLimited(
-            "too many logins right now; try again shortly",
-        ));
-    }
+    // Check capacity first: a refusal for a full store must not also consume
+    // the caller's burst allowance.
     if tokens.at_capacity() {
         return Err(AuthError::RateLimited(
             "the server has no free session slots; try again later",
+        ));
+    }
+    if !tokens.allow_login(&req.username) {
+        return Err(AuthError::RateLimited(
+            "too many logins for this identity; try again shortly",
         ));
     }
     let principal = tokens.issue(&req.username);
@@ -197,13 +199,13 @@ mod tests {
     #[tokio::test]
     async fn a_login_flood_is_rate_limited() {
         let state = state();
-        for i in 0..crate::tokens::LOGIN_BURST {
-            login_as(&state, &format!("user-{i}")).await;
+        for _ in 0..crate::tokens::LOGIN_BURST {
+            login_as(&state, "flooder").await;
         }
         let err = login(
             State(state),
             axum::Json(LoginRequest {
-                username: "one-too-many".to_string(),
+                username: "flooder".to_string(),
                 api_key: None,
             }),
         )

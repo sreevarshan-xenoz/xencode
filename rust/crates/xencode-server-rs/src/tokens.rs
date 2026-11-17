@@ -31,15 +31,18 @@ pub struct Principal {
 /// with no password, so without a cap anyone who can reach the server could
 /// issue tokens forever and make every later request walk a longer store.
 pub const MAX_TOKENS: usize = 4096;
-/// At most this many logins in [`LOGIN_WINDOW`], counted process-wide. The
-/// window is short and the buffer is fixed-size: neither grows with traffic.
+/// At most this many logins in [`LOGIN_WINDOW`] for one claimed username. A
+/// shared counter would let a single client exhaust it and lock out everyone.
 pub const LOGIN_BURST: usize = 120;
 pub const LOGIN_WINDOW: StdDuration = StdDuration::from_secs(60);
 
 #[derive(Default)]
 pub struct TokenStore {
     by_token: HashMap<String, Principal>,
-    recent_logins: VecDeque<Instant>,
+    recent_logins: HashMap<String, VecDeque<Instant>>,
+    /// Insertion order of tracked names, so the map stays bounded even when
+    /// callers invent a new identity on every login.
+    login_order: VecDeque<String>,
 }
 
 impl TokenStore {
@@ -47,21 +50,50 @@ impl TokenStore {
         Self::default()
     }
 
-    /// Whether another login is allowed right now. Old timestamps are dropped
-    /// first, so a quiet server accepts a fresh burst.
-    pub fn allow_login(&mut self) -> bool {
+    /// Whether `username` may log in right now. Old timestamps are dropped
+    /// first, so a quiet client gets a fresh burst. The number of tracked
+    /// names is bounded, so inventing identities cannot grow this map forever.
+    pub fn allow_login(&mut self, username: &str) -> bool {
         let now = Instant::now();
-        while self
-            .recent_logins
-            .front()
-            .is_some_and(|at| now.duration_since(*at) >= LOGIN_WINDOW)
-        {
-            self.recent_logins.pop_front();
+        for times in self.recent_logins.values_mut() {
+            while times
+                .front()
+                .is_some_and(|at| now.duration_since(*at) >= LOGIN_WINDOW)
+            {
+                times.pop_front();
+            }
         }
-        if self.recent_logins.len() >= LOGIN_BURST {
+        let inactive: Vec<String> = self
+            .recent_logins
+            .iter()
+            .filter(|(_, times)| times.is_empty())
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in inactive {
+            self.recent_logins.remove(&name);
+            self.login_order.retain(|entry| entry != &name);
+        }
+        if !self.recent_logins.contains_key(username) {
+            while self.recent_logins.len() >= MAX_TOKENS {
+                match self.login_order.pop_front() {
+                    Some(oldest) => {
+                        self.recent_logins.remove(&oldest);
+                    }
+                    None => break,
+                }
+            }
+            self.login_order.push_back(username.to_string());
+            self.recent_logins
+                .insert(username.to_string(), VecDeque::new());
+        }
+        let times = self
+            .recent_logins
+            .get_mut(username)
+            .expect("the name was added above");
+        if times.len() >= LOGIN_BURST {
             return false;
         }
-        self.recent_logins.push_back(now);
+        times.push_back(now);
         true
     }
 
@@ -91,11 +123,11 @@ impl TokenStore {
     }
 
     /// Return the principal for a presented token, or None if unknown or
-    /// expired. The found entry is removed if it has expired, but a lookup no
-    /// longer sweeps the whole store: that made every authenticated request as
-    /// slow as the number of tokens ever issued. The single candidate is still
-    /// compared in constant time against a fixed dummy, so a hit and a miss of
-    /// the same length cost the same in the comparison itself.
+    /// expired. A lookup is a single hash-map probe; it no longer sweeps the
+    /// whole store, which made every authenticated request as slow as the
+    /// number of tokens ever issued. There is no constant-time comparison to
+    /// lean on here: the result of the map lookup decides the answer directly,
+    /// and claiming otherwise would be misleading.
     pub fn lookup(&mut self, token: &str) -> Option<Principal> {
         let well_formed = token.starts_with("xencode_") && token.len() > "xencode_".len();
         let found = if well_formed {
@@ -103,9 +135,6 @@ impl TokenStore {
         } else {
             None
         };
-        let dummy = "xencode_00000000000000000000000000000000";
-        let candidate = found.as_ref().map(|p| p.token.as_str()).unwrap_or(dummy);
-        let _ = constant_time_eq(candidate.as_bytes(), token.as_bytes());
         let principal = found?;
         if principal.expires_at <= Utc::now() {
             self.by_token.remove(token);
@@ -122,17 +151,6 @@ impl TokenStore {
         let now = Utc::now();
         self.by_token.retain(|_, p| p.expires_at > now);
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 /// An extractor that rejects unauthenticated requests before the handler runs.
@@ -238,10 +256,14 @@ mod tests {
     fn login_burst_is_bounded() {
         let mut store = TokenStore::new();
         for _ in 0..LOGIN_BURST {
-            assert!(store.allow_login());
+            assert!(store.allow_login("alice"));
         }
-        assert!(!store.allow_login(), "an unlimited burst was accepted");
-        assert!(store.recent_logins.len() <= LOGIN_BURST);
+        assert!(
+            !store.allow_login("alice"),
+            "an unlimited burst was accepted"
+        );
+        assert!(store.allow_login("bob"), "one client locked out another");
+        assert!(store.recent_logins.len() <= MAX_TOKENS);
     }
 
     #[test]
