@@ -355,25 +355,35 @@ impl WorkspaceManager {
         actor: &str,
         user_id: &str,
     ) -> Result<(), WorkspaceError> {
-        let actor_role = self.role_of(workspace_id, actor);
-        let is_self = actor == user_id;
+        // Check the workspace before deciding who is allowed to act. The route
+        // that reaches this method takes both names from the request, so a
+        // missing workspace must be an error, not a panic on the unwrap below.
+        let (actor_role, target_role, admin_count) = {
+            let Some(ws) = self.workspaces.get(workspace_id) else {
+                return Err(WorkspaceError::NotFound(workspace_id.to_string()));
+            };
+            (
+                ws.members.get(actor).cloned(),
+                ws.members.get(user_id).cloned(),
+                Self::admin_count(ws),
+            )
+        };
+        // "Anyone may remove themselves" only applies to an actual member:
+        // otherwise a caller could claim somebody else's identity in a session
+        // they never joined.
+        let is_self = actor == user_id && actor_role.is_some();
         let permitted = actor_role.as_ref().is_some_and(|r| r.can(&Role::Admin)) || is_self;
         if !permitted {
-            if self.workspaces.contains_key(workspace_id) {
-                return Err(self.deny(
-                    actor,
-                    workspace_id,
-                    "remove_member",
-                    &Role::Admin,
-                    actor_role.as_ref(),
-                ));
-            }
-            return Err(WorkspaceError::NotFound(workspace_id.to_string()));
+            return Err(self.deny(
+                actor,
+                workspace_id,
+                "remove_member",
+                &Role::Admin,
+                actor_role.as_ref(),
+            ));
         }
-        let ws = self.workspaces.get(workspace_id).unwrap();
-        let target_role = ws.members.get(user_id).cloned();
-        if target_role == Some(Role::Admin) && Self::admin_count(ws) == 1 {
-            let id = ws.id.clone();
+        if target_role == Some(Role::Admin) && admin_count == 1 {
+            let id = workspace_id.to_string();
             self.log(
                 actor,
                 AuditAction::Denied,
@@ -382,7 +392,11 @@ impl WorkspaceManager {
             );
             return Err(WorkspaceError::LastAdmin(id));
         }
-        let ws = self.workspaces.get_mut(workspace_id).unwrap();
+        // Existence was checked above and nothing has removed the workspace.
+        let ws = self
+            .workspaces
+            .get_mut(workspace_id)
+            .expect("workspace checked above");
         ws.members.remove(user_id);
         let id = ws.id.clone();
         self.log(
@@ -520,6 +534,23 @@ mod tests {
             .unwrap();
         assert!(manager.remove_member(&ws.id, "carol", "alice").is_err());
         manager.remove_member(&ws.id, "carol", "carol").unwrap();
+        assert_eq!(manager.member_count(&ws.id), 1);
+    }
+
+    #[test]
+    fn removing_a_member_from_a_missing_session_is_an_error_not_a_panic() {
+        let mut manager = WorkspaceManager::new();
+        assert!(matches!(
+            manager.remove_member("no-such-session", "alice", "alice"),
+            Err(WorkspaceError::NotFound(_))
+        ));
+        // A caller who is not a member cannot use self-removal to enter a
+        // workspace they were never part of.
+        let ws = manager.create_workspace("test", "alice");
+        assert!(matches!(
+            manager.remove_member(&ws.id, "stranger", "stranger"),
+            Err(WorkspaceError::Forbidden { .. })
+        ));
         assert_eq!(manager.member_count(&ws.id), 1);
     }
 
