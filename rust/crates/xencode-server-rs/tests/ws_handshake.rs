@@ -190,9 +190,9 @@ async fn an_unknown_session_closes_4404() {
 }
 
 #[tokio::test]
-async fn a_full_session_closes_4409_for_new_identities() {
+async fn past_membership_does_not_keep_a_session_full_forever() {
     let (state, owner_token, guest_token) = state_with_session().await;
-    // Fill the session to the cap with distinct identities.
+    // Ten identities belonged in the past but none is connected now.
     {
         let mut workspaces = state.workspaces.lock().await;
         for i in 0..MAX_SESSION_MEMBERS - 1 {
@@ -203,15 +203,39 @@ async fn a_full_session_closes_4409_for_new_identities() {
         assert_eq!(workspaces.member_count("s1"), MAX_SESSION_MEMBERS);
     }
     let app = build_app_with_state(state.clone());
-    let mut ws = connect(app, "s1").await;
+    let mut guest = connect(app.clone(), "s1").await;
+    let (user, _, _) = authenticate(&mut guest, &guest_token).await;
+    assert_eq!(
+        user, "guest",
+        "a new identity was locked out by old members"
+    );
 
-    send(&mut ws, &ClientFrame::Auth { token: guest_token }).await;
-    expect_rejection(&mut ws, "session_full", CLOSE_SESSION_FULL).await;
-
-    // An identity that already belongs may still reconnect to a full session.
-    let mut ws = connect(build_app_with_state(state), "s1").await;
-    let (_user, role, _) = authenticate(&mut ws, &owner_token).await;
+    let mut owner = connect(app, "s1").await;
+    let (_user, role, _) = authenticate(&mut owner, &owner_token).await;
     assert_eq!(role, "admin");
+}
+
+#[tokio::test]
+async fn a_full_session_closes_4409_for_new_identities() {
+    let (state, owner_token, _guest_token) = state_with_session().await;
+    let app = build_app_with_state(state.clone());
+    let mut live = Vec::new();
+
+    let mut owner = connect(app.clone(), "s1").await;
+    let _ = authenticate(&mut owner, &owner_token).await;
+    live.push(owner);
+    for i in 0..MAX_SESSION_MEMBERS - 1 {
+        let token = state.tokens.lock().await.issue(&format!("live{i}")).token;
+        let mut ws = connect(app.clone(), "s1").await;
+        let _ = authenticate(&mut ws, &token).await;
+        live.push(ws);
+    }
+
+    let late_token = state.tokens.lock().await.issue("late").token;
+    let mut late = connect(app, "s1").await;
+    send(&mut late, &ClientFrame::Auth { token: late_token }).await;
+    expect_rejection(&mut late, "session_full", CLOSE_SESSION_FULL).await;
+    assert_eq!(live.len(), MAX_SESSION_MEMBERS);
 }
 
 #[tokio::test]

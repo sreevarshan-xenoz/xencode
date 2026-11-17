@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, State, WebSocketUpgrade},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -104,6 +104,27 @@ async fn get_session(
         None => Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "no such session"})),
+        )),
+    }
+}
+
+/// Remove a member so a full session can be recovered without a restart.
+/// Only an admin (or the member themselves) may do this; the workspace manager
+/// enforces both and refuses to remove the last admin.
+async fn remove_member(
+    State(state): State<Arc<AppState>>,
+    auth: Authed,
+    Path((id, username)): Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    let mut workspaces = state.workspaces.lock().await;
+    match workspaces.remove_member(&id, &auth.0.username, &username) {
+        Ok(()) => {
+            state.audit.sync_from(&workspaces);
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(_) => Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "member could not be removed"})),
         )),
     }
 }
@@ -250,6 +271,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/health", get(health_check))
         .route("/sessions/create", post(create_session))
         .route("/sessions/{id}", get(get_session))
+        .route("/sessions/{id}/members/{username}", delete(remove_member))
         .route("/ws/{session_id}", get(ws_handler))
         .route("/auth/login", post(crate::auth::login))
         .route("/auth/verify", post(crate::auth::verify_token))

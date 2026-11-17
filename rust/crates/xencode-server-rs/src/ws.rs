@@ -163,9 +163,24 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
     let username = principal.username;
 
     // RBAC gate: the session must exist, and admitting a new identity must
-    // not exceed the shared size cap. Joining is idempotent — a reconnect
+    // not exceed the shared size cap. The cap counts identities *connected
+    // right now*: workspace membership also records roles that outlive a
+    // disconnect, so counting membership here made a session permanently full
+    // after ten people had ever joined. Joining is idempotent — a reconnect
     // keeps its role. Every refusal here is by an *authenticated* identity,
     // so it earns a Denied audit entry.
+    let connected: Vec<String> = {
+        let peers = state.peers.lock().await;
+        let mut names: Vec<String> = Vec::new();
+        if let Some(session_peers) = peers.get(&session_id) {
+            for peer in session_peers {
+                if !names.contains(&peer.username) {
+                    names.push(peer.username.clone());
+                }
+            }
+        }
+        names
+    };
     let role = {
         let mut workspaces = state.workspaces.lock().await;
         if workspaces.get_workspace(&session_id).is_none() {
@@ -175,8 +190,7 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
             reject(&mut sink, CLOSE_NO_SESSION, "no such session").await;
             return;
         }
-        let known = workspaces.role_of(&session_id, &username).is_some();
-        if !known && workspaces.member_count(&session_id) >= MAX_SESSION_MEMBERS {
+        if session_is_full(&connected, &username) {
             workspaces.log_denied(&username, &session_id, "join (session full)", None);
             state.audit.sync_from(&workspaces);
             drop(workspaces);
@@ -329,6 +343,13 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
     broadcast_frame(&state, &session_id, &ServerFrame::Members { members }, None).await;
 }
 
+/// Whether a new identity should be refused because ten distinct identities
+/// are connected right now. A repeat connection from someone already present
+/// does not make the session fuller.
+fn session_is_full(connected: &[String], username: &str) -> bool {
+    !connected.contains(&username.to_string()) && connected.len() >= MAX_SESSION_MEMBERS
+}
+
 /// Remove one connection (not the whole identity) from the peer and presence
 /// maps. Dropping its sender ends the writer task.
 async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) {
@@ -429,6 +450,20 @@ async fn broadcast_to_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_session_cap_counts_connections_not_past_membership() {
+        let ten: Vec<String> = (0..MAX_SESSION_MEMBERS)
+            .map(|i| format!("member{i}"))
+            .collect();
+        assert!(session_is_full(&ten, "newcomer"));
+        assert!(
+            !session_is_full(&ten, "member3"),
+            "a second tab of a present identity is not a new member"
+        );
+        let empty: Vec<String> = Vec::new();
+        assert!(!session_is_full(&empty, "newcomer"));
+    }
 
     #[tokio::test]
     async fn test_app_state_new() {
