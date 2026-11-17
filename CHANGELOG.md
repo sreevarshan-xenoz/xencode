@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trigger and working-directory rules. Exact-string comparisons make a wrong
   URL or artifact name fail the build.
 
+### Added — official skills (SK-1)
+
+- `SK-1`: eight official skills now ship in the repository's `skills/` directory,
+  in the same `name`/`description` frontmatter plus instructions format the
+  loader already reads: `rust-refactor`, `write-tests`, `security-pass`,
+  `commit-message`, `explain-diff`, `find-dead-code`, `fix-clippy-warnings` and
+  `write-docs`. Each gives the model concrete steps and a real verification
+  command; none is a placeholder. A real loader test reads the shipped directory
+  from disk and asserts every skill has a non-empty name, description and body,
+  a declared summary, and `allowed-tools` naming only known tools. To use them,
+  point `XCODE_SKILLS_DIR` at the shipped directory or copy the subdirectories
+  into your settings skills directory or `<workspace>/.xencode/skills`, as
+  described in `skills/README.md`. Instructions for the model only: using them
+  needs a working local model that can call `load_skill`.
+
 ### Added — Phase 0: local-model reliability and one-command setup
 
 - `SM-2`: no-file-changed continuation notes are recorded in turn traces and eval results, with whether an edit followed. Tool counts and `/trace` output are unchanged; the eval pass-rate gate remains open and needs a GPU to measure.

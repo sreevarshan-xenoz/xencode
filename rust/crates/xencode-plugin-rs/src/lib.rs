@@ -16,8 +16,8 @@ pub use plugin_trait::{PluginError, PluginEvent, PluginHost, PluginResponse, Xen
 pub use registry::PluginRegistry;
 pub use runtime::{LoadReport, ManifestPlugin, PluginRuntime};
 pub use skills::{
-    cut_description, default_home_dir as default_skills_dir, project_skills_dir, RejectedSkill,
-    Skill, SkillRuntime, SkillScope,
+    cut_description, default_home_dir as default_skills_dir, official_skills_dir,
+    project_skills_dir, RejectedSkill, Skill, SkillRuntime, SkillScope,
 };
 
 /// The directory installed plugins live in: `$XCODE_PLUGIN_DIR` when set (tests
