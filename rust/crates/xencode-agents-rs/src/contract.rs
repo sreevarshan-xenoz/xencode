@@ -290,34 +290,48 @@ fn contains_token(help: &str, token: &str) -> bool {
 
 /// Probe every claim of every installed agent.
 pub fn probe_contract() -> Vec<ClaimResult> {
-    let mut out = Vec::new();
-    for spec in ROSTER {
+    probe_from(|spec| {
         let Some(path) = spec.binaries.iter().find_map(|b| which(b)) else {
-            continue;
+            return Vec::new();
         };
-        let sub = oneshot_subcommand(spec);
         let mut helps = Vec::new();
-        let mut sources = Vec::new();
         if let Some(top) = help_text(&path, None) {
-            helps.push(top);
-            sources.push("--help".to_string());
+            helps.push(("--help".to_string(), top));
         }
-        if let Some(sub) = sub {
+        if let Some(sub) = oneshot_subcommand(spec) {
             if let Some(text) = help_text(&path, Some(sub)) {
-                helps.push(text);
-                sources.push(format!("{sub} --help"));
+                helps.push((format!("{sub} --help"), text));
             }
         }
+        helps
+    })
+}
+
+/// Turn help screens into verdicts against the roster. Both the live probe and
+/// the recorded-fixture probe go through here, so a cell cannot be checked by
+/// one path and reported by another.
+fn probe_from<F>(mut help_for: F) -> Vec<ClaimResult>
+where
+    F: FnMut(&AgentSpec) -> Vec<(String, String)>,
+{
+    let mut out = Vec::new();
+    for spec in ROSTER {
+        let help_screens = help_for(spec);
+        let mut sources: Vec<String> = help_screens.iter().map(|(s, _)| s.clone()).collect();
+        sources.dedup();
+        let helps: Vec<String> = help_screens.into_iter().map(|(_, text)| text).collect();
         if helps.is_empty() {
-            out.push(ClaimResult {
-                agent: spec.name,
-                claim: "(help unreadable)",
-                expected: true,
-                found: Vec::new(),
-                missing: Vec::new(),
-                sources,
-                verdict: Verdict::Untestable("`--help` produced nothing usable".to_string()),
-            });
+            if spec.binaries.iter().any(|b| which(b).is_some()) {
+                out.push(ClaimResult {
+                    agent: spec.name,
+                    claim: "(help unreadable)",
+                    expected: true,
+                    found: Vec::new(),
+                    missing: Vec::new(),
+                    sources,
+                    verdict: Verdict::Untestable("`--help` produced nothing usable".to_string()),
+                });
+            }
             continue;
         }
         let combined: String = helps.join("\n");
@@ -442,6 +456,34 @@ pub fn evidence_by_agent(claims: &[ClaimResult]) -> BTreeMap<String, BTreeMap<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Help screens captured from the real CLIs on 2026-11-17, with their
+    /// versions recorded next to them. A machine without these agents still
+    /// checks the roster against real output instead of passing vacuously.
+    fn recorded_help(spec: &AgentSpec) -> Vec<(String, String)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/help");
+        let mut out = Vec::new();
+        for (source, name) in [
+            ("--help (recorded)".to_string(), spec.name.to_string()),
+            oneshot_subcommand(spec)
+                .map(|sub| {
+                    (
+                        format!("{sub} --help (recorded)"),
+                        format!("{}--{}", spec.name, sub),
+                    )
+                })
+                .unwrap_or_default(),
+        ] {
+            if name.is_empty() {
+                continue;
+            }
+            let path = dir.join(format!("{name}.txt"));
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push((source, text));
+            }
+        }
+        out
+    }
 
     #[test]
     fn an_evidence_line_names_the_screen_the_claim_was_read_from() {
@@ -716,13 +758,24 @@ mod tests {
         // own `--help` output, and a stale cell fails the build. On a machine
         // with no roster agents installed there is nothing to contradict, so
         // say so in the log instead of appearing to have verified the roster.
-        let results = probe_contract();
-        if results
+        // On a machine with the agents installed this uses live help. On CI,
+        // where none are installed, it uses recorded output from the real CLIs,
+        // so the roster is still checked rather than passing vacuously.
+        let live = probe_contract();
+        let results = if live
             .iter()
-            .all(|result| matches!(result.verdict, Verdict::Untestable(_)))
+            .any(|result| !matches!(result.verdict, Verdict::Untestable(_)))
         {
-            eprintln!("note: no roster agent could be probed; the agent contract was not verified");
-        }
+            live
+        } else {
+            probe_from(recorded_help)
+        };
+        assert!(
+            results
+                .iter()
+                .any(|result| !matches!(result.verdict, Verdict::Untestable(_))),
+            "no agent help, live or recorded, could be used to check the roster"
+        );
         for result in results {
             assert!(
                 !matches!(result.verdict, Verdict::Contradicted(_)),
