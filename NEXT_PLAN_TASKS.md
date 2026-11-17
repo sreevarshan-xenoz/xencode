@@ -106,6 +106,16 @@ keeps its IDs and history; nothing is renumbered.
 > to 4/8) and `SU-1` (one-command setup) remain open. The 2026-11-17 audit items
 > at the top of this file were separate hardening work.
 >
+> **Phase 0 progress, 2026-11-18.** `SM-2` gained the measurement surface it was
+> missing: no-file-changed continuation notes are now recorded in turn traces and
+> eval results, without inventing tool calls. The eval pass-rate gate (≥4/8)
+> is still open and cannot be measured here: this machine has a 2 GB GPU and no
+> `llama-server`. `SU-1` now has a free-port/alias/default-model launch path and
+> a thin `xencode setup` command that recommends, downloads, starts and verifies
+> with one real query. The download step was exercised for real (1.9 GiB, verified
+> SHA-256); starting the server and the final query are blocked here for the same
+> GPU/`llama-server` reason, so SU-1's done-when is not claimed met.⟩
+>
 > The script that generates `PLAN_STATUS.md` reports fifteen IDs as done with no
 > commit naming them: `AM-3`, `DB-1`, `DB-5`, `DB-7`, `QN-1`, `QO-2`, `QTR-6`,
 > `QX-4`, `SE-1`, `AC-1`, `AC-2`, `AC-5`, `L-6`, `MI-1` and `RS-3`. Their work is

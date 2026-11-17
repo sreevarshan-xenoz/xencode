@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Phase 0: local-model reliability and one-command setup
+
+- `SM-2`: no-file-changed continuation notes are recorded in turn traces and eval results, with whether an edit followed. Tool counts and `/trace` output are unchanged; the eval pass-rate gate remains open and needs a GPU to measure.
+- `SU-1`: `xencode llamacpp start` picks a free port, passes a stable alias and writes `default_model`; a new `xencode setup` command recommends a model, downloads it with checksum verification, starts the server and verifies with one query, naming the step that failed. The real download was exercised here; server start and final query remain blocked on this machine (no `llama-server`, 2 GB GPU).
+
 ### Fixed — 2026-11-17 full audit and final verification (AU-1 to AU-35)
 
 Six parallel reviewers audited the repository and the findings were fixed one at
