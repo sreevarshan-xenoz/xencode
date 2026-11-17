@@ -999,6 +999,7 @@ pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             let asked = xencode_models_rs::llamacpp::ServerReport {
                 context_tokens: Some(profile.profile.ctx_tokens() as u32),
                 slots: Some(1),
+                ..Default::default()
             };
             let reasoning = xencode_models_rs::llamacpp::reasoning_launch_args(
                 config.llama_cpp_reasoning.as_deref(),
@@ -1085,8 +1086,8 @@ pub(crate) async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
                 "{}",
                 xencode_models_rs::llamacpp::settings_check_line(
                     &format!("{} preset", profile.profile.name()),
-                    asked,
-                    report
+                    &asked,
+                    &report
                 )
             );
             println!("Server will keep running; use `xencode llamacpp stop` to terminate.");

@@ -10219,6 +10219,7 @@ impl<'a> App<'a> {
             // Every profile asks for one slot; `llama-server` divides the window
             // between slots, and the budget fills the whole one.
             slots: Some(1),
+            ..Default::default()
         };
         let (mut args, reasoning_warning) = self.llama_launch_plan(alias.as_deref());
         if let Some(problem) = reasoning_warning {
@@ -10499,7 +10500,7 @@ impl<'a> App<'a> {
             ));
             let _ = ok_tx.send(format!(
                 "[LLAMACPP_MSG]ℹ️ {}",
-                xencode_models_rs::llamacpp::settings_check_line(&label, asked, report)
+                xencode_models_rs::llamacpp::settings_check_line(&label, &asked, &report)
             ));
             let _ = ok_tx.send("[HEALTH]llamacpp|healthy|0|auto-started".to_string());
             // A new model just came online — refresh the picker so

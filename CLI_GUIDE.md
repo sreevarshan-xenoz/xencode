@@ -776,6 +776,22 @@ A turn that has no user message to attach them to is refused as well
 alternative is a request answered from the prompt alone that looks like the
 model ignored the picture.
 
+The model must also report that it can see. For a llama.cpp server this is read
+from `modalities.vision` in its `/props` answer, and for Ollama from the
+`vision` capability in `/api/show`. If the selected model has not positively
+reported vision support, the turn is refused before anything is sent:
+
+```
+error: model llamacpp:qwen3-4b does not report vision support; use --model with a vision-capable model
+```
+
+This is deliberately conservative: a server that does not answer, a build too
+old to report modalities, and a text-only model all get the same refusal, and a
+cached answer from an earlier text-only run is not reused for a turn that now
+carries an image. The manuals were verified on a machine with no vision model
+installed, so the refusal is the path that was actually tested here — seeing a
+picture through a successful answer has not been verified in this environment.
+
 #### What `--json-schema` guarantees, and what it does not
 
 The schema is sent to a llama.cpp server as `response_format` of type

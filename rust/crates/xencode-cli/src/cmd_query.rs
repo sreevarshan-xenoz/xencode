@@ -201,30 +201,37 @@ pub(crate) async fn run_query_once(
         let _ = io::stdout().flush();
     }
 
-    if let Some(ref mut c) = cache {
-        if let Some(cached_resp) = c.get(&prompt, &model) {
-            // A cached reply was written against whatever was asked the first
-            // time, so it is only this run's answer if it still fits the schema
-            // being declared now. If it does not, the model is asked again.
-            if structured_answer_fits(&cached_resp, schema.as_ref()) {
-                if ndjson {
-                    // The answer travels as a `token` line too, so a script that
-                    // concatenates tokens always has the whole reply — cached or
-                    // not. Nothing was generated, so there are no token counts.
-                    println!("{}", query_stream::token(&cached_resp));
-                    println!(
-                        "{}",
-                        query_stream::done(&cached_resp, true, elapsed_ms(started), None, None,)
-                    );
-                } else {
-                    println!("{}", cached_resp);
-                }
+    // A cached answer was produced from the prompt text alone: the cache key is
+    // (prompt, model) and carries no images. Reusing it for a turn that does carry
+    // them would answer from text the pictures were never part of, and would
+    // also skip the vision gate below. Skip the cache on image turns so the
+    // gate always gets the last word before anything is sent.
+    if image_data_urls.is_empty() {
+        if let Some(ref mut c) = cache {
+            if let Some(cached_resp) = c.get(&prompt, &model) {
+                // A cached reply was written against whatever was asked the first
+                // time, so it is only this run's answer if it still fits the schema
+                // being declared now. If it does not, the model is asked again.
+                if structured_answer_fits(&cached_resp, schema.as_ref()) {
+                    if ndjson {
+                        // The answer travels as a `token` line too, so a script that
+                        // concatenates tokens always has the whole reply — cached or
+                        // not. Nothing was generated, so there are no token counts.
+                        println!("{}", query_stream::token(&cached_resp));
+                        println!(
+                            "{}",
+                            query_stream::done(&cached_resp, true, elapsed_ms(started), None, None,)
+                        );
+                    } else {
+                        println!("{}", cached_resp);
+                    }
 
-                if let Some(ref mut mem) = memory {
-                    mem.add_message("user", &prompt, None);
-                    mem.add_message("assistant", &cached_resp, Some(model.clone()));
+                    if let Some(ref mut mem) = memory {
+                        mem.add_message("user", &prompt, None);
+                        mem.add_message("assistant", &cached_resp, Some(model.clone()));
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
     }
@@ -273,10 +280,14 @@ pub(crate) async fn run_query_once(
     // every other route keeps the table's answer.
     let probe = xencode_providers_rs::routes_to_llamacpp(&model)
         .then(|| LlamaCppClient::new(&config.llama_cpp_url, 3));
-    let server_window = match &probe {
-        Some(client) => client.context_window().await.unwrap_or(None),
+    // One `/props` answer gives both the window this server was started with
+    // and what its loaded model can see. Read it once so the two come from the
+    // same process, and keep the whole report for the image gate below.
+    let llama_report = match &probe {
+        Some(client) => client.report().await.ok(),
         None => None,
     };
+    let server_window = llama_report.as_ref().and_then(|r| r.context_tokens);
     if let Some(tokens) = server_window {
         eprintln!(
             "context: {tokens}-token window reported by the server at {}",
@@ -298,6 +309,18 @@ pub(crate) async fn run_query_once(
     } else {
         None
     };
+
+    // The last chance to refuse before a provider is built and a request goes
+    // out: an image is only sent to a model that has positively reported vision
+    // support. A server that stayed silent, an older build with no such field,
+    // and a text-only model all land on the same named refusal.
+    let vision_caps = xencode_providers_rs::capabilities_with_report(
+        &model,
+        llama_report.as_ref(),
+        ollama_show.as_ref().map(|show| show.can_vision()),
+    );
+    vision_gate(&model, !image_data_urls.is_empty(), &vision_caps)?;
+
     let mut ollama_request = xencode_providers_rs::OllamaRequest::from_settings(
         config.ollama_reasoning.as_deref(),
         config.ollama_keep_alive.as_deref(),
@@ -518,6 +541,21 @@ pub(crate) async fn run_query_once(
             Ok(())
         }
         Err(e) => Err(format!("Query failed: {}", e)),
+    }
+}
+
+/// Refuse an image-bearing turn before a provider exists, naming the model and
+/// the way to choose one that can see. Kept separate from the async run path so
+/// a test can prove the refusal carries the named reason without any provider
+/// call — the check is pure, so nothing can be sent from inside it.
+pub(crate) fn vision_gate(
+    model: &str,
+    has_images: bool,
+    caps: &xencode_providers_rs::ModelCapabilities,
+) -> Result<(), String> {
+    match xencode_providers_rs::image_vision_refusal(model, caps.supports_vision, has_images) {
+        Some(reason) => Err(reason),
+        None => Ok(()),
     }
 }
 

@@ -29,7 +29,8 @@ pub mod traffic;
 use retry::RetryConfig;
 
 pub use capabilities::{
-    capabilities_for, effective_context_window, ollama_window_asked, ModelCapabilities,
+    capabilities_for, capabilities_with_report, effective_context_window, image_vision_refusal,
+    ollama_window_asked, ModelCapabilities,
 };
 pub use compatible::OpenAICompatibleProvider;
 pub use egress::{chain_for, classify, provider_for, url_host, Egress, EgressPolicy, RoutingFacts};
