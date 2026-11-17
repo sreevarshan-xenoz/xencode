@@ -3,6 +3,7 @@ use std::fmt;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
+use crate::bodies::limited_text;
 use crate::{split_data_url, ChatMessage, ContentPart, MessageContent, ProviderError};
 
 /// Google Gemini model provider.
@@ -196,13 +197,12 @@ impl GeminiProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = limited_text(response, "Gemini").await.unwrap_or_default();
             return Err(ProviderError::api("Gemini", status, body));
         }
 
-        let body: GeminiResponse = response
-            .json()
-            .await
+        let bytes = limited_text(response, "Gemini").await?.into_bytes();
+        let body: GeminiResponse = serde_json::from_slice(&bytes)
             .map_err(|e| ProviderError::Parse(format!("Gemini response parse: {e}")))?;
 
         // Check for blocking
@@ -262,7 +262,7 @@ impl GeminiProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = limited_text(response, "Gemini").await.unwrap_or_default();
             return Err(ProviderError::api("Gemini", status, body));
         }
 
@@ -271,8 +271,10 @@ impl GeminiProvider {
         let mut ended = false;
 
         let mut lines = crate::frames::FrameLines::default();
+        let mut budget = crate::bodies::ByteBudget::new();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            budget.charge(chunk.len(), "Gemini")?;
             lines.feed(&chunk, &mut |line| {
                 ingest_line(line, &mut full_response, &mut callback, &mut ended)
             });
