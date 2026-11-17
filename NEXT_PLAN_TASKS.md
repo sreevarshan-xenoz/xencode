@@ -50,6 +50,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-36 ✅ | MEDIUM | providers | generated and streamed provider responses had no size cap, so a hostile endpoint could exhaust memory (audit leftover) | buffered and streamed bodies above 8 MiB are refused, with real-server tests |
 | AU-37 ✅ | MEDIUM | ci | the coverage gate was lowered to 53% after CI reused an old cached llvm-cov binary that inflated the line count (audit leftover) | pinned llvm-cov is always installed, stale coverage artifacts are cleaned, the toolchain pin is restored, and the 80% floor is back |
 | AU-38 ✅ | MEDIUM | agents | the roster firewall passed vacuously on CI because no agents are installed there (audit leftover) | recorded real help screens are checked when live CLIs are absent, and the test refuses a vacuous pass |
+| AU-39 ✅ | LOW | docs | the 2026-10-08 handover section read as a live queue and fifteen pre-rewrite IDs had no naming commit (audit leftover) | handover marked historical with current status; pre-rewrite IDs explained without fabricated commits |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
@@ -70,6 +71,19 @@ keeps its IDs and history; nothing is renumbered.
 | 4 | **SU-1** | `xencode setup`: detect the GPU and free memory, pick a GGUF that fits (or one already on disk), download it, pick a free port, start llama-server with `--alias`, write `llama_cpp_url` and `default_model` | an hour to first answer loses every new user | from an empty config to a working `xencode query` in one command, on this machine |
 | 5 | **PS-1** ✅ | `PLAN_STATUS.md`: one row per ID — wave, status, gate, commit — generated from this file by a script, so counts cannot drift | this file is 17,000 lines and status lives in prose | the script's output matches the wave tables and is committed |
 | 6 | — | Back to wave order: `QA-6` (W5), then W6 | | |
+
+> **Status of this handover, 2026-11-17.** This section is the owner's 2026-10-08
+> direction, kept for context, not a live queue. Steps 0, 1 and 5 are done and
+> step 2 (`SM-1`) produced the diagnosis below. `SM-2` (raise the eval from 0/8
+> to 4/8) and `SU-1` (one-command setup) remain open. The 2026-11-17 audit items
+> at the top of this file were separate hardening work.
+>
+> The script that generates `PLAN_STATUS.md` reports fifteen IDs as done with no
+> commit naming them: `AM-3`, `DB-1`, `DB-5`, `DB-7`, `QN-1`, `QO-2`, `QTR-6`,
+> `QX-4`, `SE-1`, `AC-1`, `AC-2`, `AC-5`, `L-6`, `MI-1` and `RS-3`. Their work is
+> in the tree and covered by tests; their original commits predate the
+> 2026-10 history rewrite, so the hashes no longer resolve. No artificial
+> "naming" commit is made for them — that would record a commit that did no work.
 
 **Step 0 done 2026-10-08:** both workflows green on `d62843e4`, the first clean run since
 2026-09-27. **Step 1 (`RT-1`) done** in `9dd52897`.

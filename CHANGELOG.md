@@ -51,6 +51,7 @@ tests or real runs; no placeholder implementations were used.
 - `AU-36`: provider answers and streams are refused once they exceed 8 MiB, so a misbehaving endpoint cannot exhaust memory.
 - `AU-37`: the coverage gate keeps its 80% floor; CI always installs the pinned coverage tool, cleans stale artifacts before measuring, and uses the pinned Rust toolchain.
 - `AU-38`: the agent roster is checked against recorded real help screens on machines without installed agents, so the firewall cannot pass vacuously.
+- `AU-39`: the old handover section is marked historical, and the pre-rewrite items with no naming commit are explained instead of being given artificial commits.
 
 ### Documentation and maintenance — 2026-10-26 and 2026-10-12
 
