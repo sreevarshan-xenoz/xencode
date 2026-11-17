@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-const MODEL: &str = "xencode/vision-test";
+const MODEL: &str = "llava-vision-test";
 const ANSWER: &str = "the screenshot was attached";
 
 struct Fixture {
@@ -71,7 +71,18 @@ impl Fixture {
 /// Answer one Ollama `/api/chat` request in NDJSON, recording the body verbatim
 /// so the attached image can be checked as bytes that crossed the network.
 async fn serve_once(listener: TcpListener, captured: Arc<Mutex<String>>) {
-    let (mut sock, _) = listener.accept().await.unwrap();
+    // The query path first asks /api/show whether the model reports vision;
+    // answer that from the same loopback server, then answer /api/chat.
+    loop {
+        let (mut sock, _) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(_) => break,
+        };
+        serve_one(&mut sock, captured.clone()).await;
+    }
+}
+
+async fn serve_one(sock: &mut tokio::net::TcpStream, captured: Arc<Mutex<String>>) {
     let mut head = Vec::new();
     let mut buf = [0u8; 4096];
     let mut header_end = None;
@@ -103,17 +114,25 @@ async fn serve_once(listener: TcpListener, captured: Arc<Mutex<String>>) {
     }
     *captured.lock().unwrap() = String::from_utf8_lossy(&head[header_end..]).into_owned();
 
-    let line = format!(
-        "{}\n",
-        serde_json::json!({
+    let request_line = header.lines().next().unwrap_or("");
+    let (body, content_type) = if request_line.contains("/api/show") {
+        (
+            serde_json::json!({"capabilities": ["vision", "completion"]}).to_string(),
+            "application/json",
+        )
+    } else {
+        let line = serde_json::json!({
             "message": {"role": "assistant", "content": ANSWER},
             "done": true
         })
-    );
+        .to_string();
+        (line, "application/x-ndjson")
+    };
     let reply = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        line.len(),
-        line
+        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        content_type,
+        body.len(),
+        body
     );
     sock.write_all(reply.as_bytes()).await.unwrap();
     let _ = sock.shutdown().await;
