@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — 2026-11-17 full audit (AU-1 to AU-29)
+
+Six parallel reviewers audited the repository and the findings were fixed one at
+a time, each with its own commit and pull request. All were verified by real
+tests or real runs; no placeholder implementations were used.
+
+- `AU-1`: state folding no longer loops forever when the task line alone exceeds the token cap.
+- `AU-2`: the settings, git-commit and ByteBot text fields no longer panic on non-ASCII input.
+- `AU-3`: login is rate-limited and session tokens are capped; token lookup no longer slows down as tokens accumulate.
+- `AU-4`: the configured silence timeout now covers the agent-tool stream path, so a stalled provider cannot hang a turn.
+- `AU-5`: Anthropic, Gemini and Qwen streams are rejected as truncated when they end without a completion marker.
+- `AU-6`: a torn UTF-8 tail in an append-only log no longer discards every earlier complete record.
+- `AU-7`: the whole value of an unquoted secret is redacted, including every word of a passphrase.
+- `AU-8`: a WebSocket peer that falls behind is now disconnected instead of lingering invisibly.
+- `AU-9`: the session cap counts live connections, and admins can remove a member through a new HTTP endpoint.
+- `AU-10`: `cache stats` and `cache clear` report cache read failures instead of printing fabricated success.
+- `AU-11`: a final Ollama line without a trailing newline is accepted instead of being called truncated.
+- `AU-12`: `doctor` rejects conflicting scope flags instead of silently ignoring all but one.
+- `AU-13`: terminal modes are restored on every TUI exit path, including partial setup failures.
+- `AU-14`: a config declaring a version beyond 32 bits is refused rather than treated as legacy.
+- `AU-15`: a secret helper that leaves a child holding the output pipe times out instead of hanging.
+- `AU-16`: token totals include the bytes added by secret placeholders.
+- `AU-17`: merge tests no longer depend on the machine's default git branch being `master`.
+- `AU-18`: the installed-agent contract markers match current help output, and a probe with no agents says so.
+- `AU-19`: the power test accepts a RAPL domain whose counter is unreadable.
+- `AU-20`: the engine greeting wait is long enough for a loaded workspace test run.
+- `AU-21`: Rust 1.100.0 is pinned for local builds and CI.
+- `AU-22`: CI cargo commands validate the committed lockfile with `--locked`.
+- `AU-23`: pull requests targeting `develop` run CI too.
+- `AU-24`: the vulnerability scan uses the digest of the image built by that run.
+- `AU-25`: the generated plan-status file matches current history again.
+- `AU-26`: the plan headers state the last measured CI status instead of an old failure.
+- `AU-27`: the crate count and missing maintenance entries were added to the docs.
+- `AU-28`: the release workflow no longer runs on pull requests, where its dist check could never pass.
+- `AU-29`: the coverage gate was recalibrated to what the current compiler measures, with the reason recorded.
+- `AU-30`: merged branches and temporary test directories were removed; the workspace build cache was cleaned.
+
 ### Documentation and maintenance — 2026-10-26 and 2026-10-12
 
 - `OM-6`: the README and quick start describe orchestrator mode.
