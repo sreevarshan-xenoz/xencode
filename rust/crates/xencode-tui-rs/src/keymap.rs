@@ -18,6 +18,51 @@ use crate::theme::ThemeColors;
 
 type Tx = mpsc::UnboundedSender<String>;
 
+// Text-field cursors are byte offsets into a UTF-8 String. Advancing one by one
+// per key lands inside multi-byte characters, where String::insert/remove panic
+// and kill the session. Every cursor movement therefore stops on a character
+// boundary (AU-2).
+fn previous_boundary(text: &str, mut at: usize) -> usize {
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+fn next_boundary(text: &str, mut at: usize) -> usize {
+    while at < text.len() && !text.is_char_boundary(at) {
+        at += 1;
+    }
+    at
+}
+
+fn insert_char(text: &mut String, cursor: &mut usize, c: char) {
+    let at = *cursor;
+    text.insert(at, c);
+    *cursor = at + c.len_utf8();
+}
+
+fn backspace_char(text: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    let at = previous_boundary(text, *cursor - 1);
+    text.remove(at);
+    *cursor = at;
+}
+
+fn move_cursor_left(text: &str, cursor: &mut usize) {
+    if *cursor > 0 {
+        *cursor = previous_boundary(text, *cursor - 1);
+    }
+}
+
+fn move_cursor_right(text: &str, cursor: &mut usize) {
+    if *cursor < text.len() {
+        *cursor = next_boundary(text, *cursor + 1);
+    }
+}
+
 /// What the event loop should do after a key was handled.
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyFlow {
@@ -1021,12 +1066,14 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     if app.settings_url_editing {
         match key.code {
             KeyCode::Char(c) => {
-                app.settings_url_buffer.insert(app.settings_url_cursor, c);
-                app.settings_url_cursor += 1;
+                insert_char(
+                    &mut app.settings_url_buffer,
+                    &mut app.settings_url_cursor,
+                    c,
+                );
             }
             KeyCode::Backspace if app.settings_url_cursor > 0 => {
-                app.settings_url_cursor -= 1;
-                app.settings_url_buffer.remove(app.settings_url_cursor);
+                backspace_char(&mut app.settings_url_buffer, &mut app.settings_url_cursor);
             }
             KeyCode::Up => {
                 // Moving rows abandons the uncommitted edit: the buffer
@@ -1047,13 +1094,13 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
                 }
             }
             KeyCode::Left if settings_row_typable(app) && app.settings_url_cursor > 0 => {
-                app.settings_url_cursor -= 1;
+                move_cursor_left(&app.settings_url_buffer, &mut app.settings_url_cursor);
             }
             KeyCode::Right
                 if settings_row_typable(app)
                     && app.settings_url_cursor < app.settings_url_buffer.len() =>
             {
-                app.settings_url_cursor += 1;
+                move_cursor_right(&app.settings_url_buffer, &mut app.settings_url_cursor);
             }
             KeyCode::Enter => settings_enter(app, tx),
             _ => return false,
@@ -1391,19 +1438,17 @@ fn key_git_commit(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         }
         KeyCode::Char(c) => {
             // All characters, j/k included, go into the message (E6-01).
-            app.commit_message.insert(app.commit_cursor, c);
-            app.commit_cursor += 1;
+            insert_char(&mut app.commit_message, &mut app.commit_cursor, c);
         }
         KeyCode::Backspace if app.commit_cursor > 0 => {
-            app.commit_cursor -= 1;
-            app.commit_message.remove(app.commit_cursor);
+            backspace_char(&mut app.commit_message, &mut app.commit_cursor);
         }
         KeyCode::Left if app.commit_cursor > 0 => {
             // Move cursor left; Backspace is the delete key.
-            app.commit_cursor -= 1;
+            move_cursor_left(&app.commit_message, &mut app.commit_cursor);
         }
         KeyCode::Right if app.commit_cursor < app.commit_message.len() => {
-            app.commit_cursor += 1;
+            move_cursor_right(&app.commit_message, &mut app.commit_cursor);
         }
         _ => return false,
     }
@@ -1504,18 +1549,16 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             }
         }
         KeyCode::Char(c) => {
-            app.bytebot_command.insert(app.bytebot_cursor, c);
-            app.bytebot_cursor += 1;
+            insert_char(&mut app.bytebot_command, &mut app.bytebot_cursor, c);
         }
         KeyCode::Backspace if app.bytebot_cursor > 0 => {
-            app.bytebot_cursor -= 1;
-            app.bytebot_command.remove(app.bytebot_cursor);
+            backspace_char(&mut app.bytebot_command, &mut app.bytebot_cursor);
         }
         KeyCode::Left if app.bytebot_cursor > 0 => {
-            app.bytebot_cursor -= 1;
+            move_cursor_left(&app.bytebot_command, &mut app.bytebot_cursor);
         }
         KeyCode::Right if app.bytebot_cursor < app.bytebot_command.len() => {
-            app.bytebot_cursor += 1;
+            move_cursor_right(&app.bytebot_command, &mut app.bytebot_cursor);
         }
         _ => return false,
     }
@@ -2979,6 +3022,45 @@ mod tests {
         press(&mut app, KeyCode::Right);
         press(&mut app, KeyCode::Backspace);
         assert_eq!(app.commit_message, "jail/m ");
+    }
+
+    #[test]
+    fn non_ascii_text_fields_stay_on_character_boundaries() {
+        let mut app = app_with(FocusArea::GitCommit);
+        for c in "café 🐈".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.commit_message, "café 🐈");
+        assert!(app.commit_message.is_char_boundary(app.commit_cursor));
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.commit_message, "café ");
+        press(&mut app, KeyCode::Left);
+        assert!(app.commit_message.is_char_boundary(app.commit_cursor));
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.commit_message, "caf ");
+        press(&mut app, KeyCode::Right);
+        assert!(app.commit_message.is_char_boundary(app.commit_cursor));
+
+        let mut app = app_with(FocusArea::ByteBotPanel);
+        for c in "naïve".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.bytebot_command, "naïv");
+        assert!(app.bytebot_command.is_char_boundary(app.bytebot_cursor));
+
+        let mut app = app_with(FocusArea::Settings);
+        app.settings_cursor = crate::focus::settings_row_index("Ollama URL");
+        app.settings_url_editing = true;
+        app.settings_url_buffer = "é".to_string();
+        app.settings_url_cursor = app.settings_url_buffer.len();
+        press(&mut app, KeyCode::Char('x'));
+        assert_eq!(app.settings_url_buffer, "éx");
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.settings_url_buffer, "é");
+        assert!(app
+            .settings_url_buffer
+            .is_char_boundary(app.settings_url_cursor));
     }
 
     #[test]
