@@ -1,0 +1,6 @@
+# The toolchain CI builds with, pinned so local `cargo` and GitHub Actions
+# compile with the same compiler. Without this file a local nightly could pass
+# checks that stable rejects (or the other way round).
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]

@@ -14,8 +14,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
       with:
+        toolchain: 1.100.0
         components: rustfmt, clippy, rust-analyzer
 
     - name: Cache Cargo registry and build
@@ -68,8 +69,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
       with:
+        toolchain: 1.100.0
         components: llvm-tools-preview
 
     - name: Cache Cargo registry and build
@@ -135,7 +137,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.100.0
 
     - name: Cache Cargo registry and build
       uses: actions/cache@v6.1.0
@@ -170,7 +174,9 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.100.0
 
     - name: Cache Cargo registry and build
       uses: actions/cache@v6.1.0
