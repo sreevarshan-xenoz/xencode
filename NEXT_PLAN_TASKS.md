@@ -79,6 +79,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-38 ✅ | MEDIUM | agents | the roster firewall passed vacuously on CI because no agents are installed there (audit leftover) | recorded real help screens are checked when live CLIs are absent, and the test refuses a vacuous pass |
 | AU-39 ✅ | LOW | docs | the 2026-10-08 handover section read as a live queue and fifteen pre-rewrite IDs had no naming commit (audit leftover) | handover marked historical with current status; pre-rewrite IDs explained without fabricated commits |
 | AU-40 ✅ | LOW | docs | the adopted four-phase roadmap and full gap list were not visible in the plan or memory | master plan section recorded in NEXT_PLAN_TASKS.md and a Work memory saved |
+| DI-2 ✅ | LOW | release | the verified dist release shape was not pinned, so a wrong download URL or artifact name could reach a tagged release unnoticed | a test cross-checks the captured plan against the manifest and the generated workflow, with exact-string comparisons |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
