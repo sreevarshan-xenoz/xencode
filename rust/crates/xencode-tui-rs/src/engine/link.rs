@@ -14,7 +14,11 @@ use super::view::{self, View};
 use crate::app::App;
 
 /// How long a window waits for an engine it started to answer.
-pub const START_WAIT: Duration = Duration::from_secs(5);
+/// How long to wait for the engine's greeting. A workspace test run can keep
+/// several CPUs busy compiling other crates while an engine process starts, so
+/// five seconds proved too short under parallel load; a dead engine is still
+/// reported after this bound.
+pub const START_WAIT: Duration = Duration::from_secs(15);
 
 /// Commands that change agent state, and so run in the engine. Plain chat
 /// does too. Every other command changes only the window and runs there.
