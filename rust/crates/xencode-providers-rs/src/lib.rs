@@ -10,7 +10,10 @@ use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, LlamaCppTimings, Ollama
 pub use xencode_models_rs::ModelShow;
 
 pub mod anthropic;
+mod bodies;
 pub mod capabilities;
+
+use bodies::{limited_text, ByteBudget};
 pub mod compatible;
 pub mod egress;
 mod frames;
@@ -839,10 +842,9 @@ impl ProviderManager {
             .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
 
-        let body: OllamaResponse = response
-            .json()
-            .await
-            .map_err(|e| ProviderError::Parse(e.to_string()))?;
+        let bytes = limited_text(response, "Ollama").await?.into_bytes();
+        let body: OllamaResponse =
+            serde_json::from_slice(&bytes).map_err(|e| ProviderError::Parse(e.to_string()))?;
 
         Ok(body.message.text_content())
     }
@@ -1273,17 +1275,19 @@ impl ProviderManager {
         // is silently swallowed as an empty success, defeating the retry layer.
         if !response.status().is_success() {
             let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
+            let msg = limited_text(response, "Ollama").await.unwrap_or_default();
             return Err(ProviderError::api("Ollama", status, msg));
         }
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
         let mut lines = frames::FrameLines::default();
+        let mut budget = ByteBudget::new();
         let mut done = false;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            budget.charge(chunk.len(), "Ollama")?;
             lines.feed(&chunk, &mut |line| {
                 if done {
                     return;
@@ -1344,7 +1348,7 @@ impl ProviderManager {
 
         if !response.status().is_success() {
             let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
+            let msg = limited_text(response, "Ollama").await.unwrap_or_default();
             return Err(ProviderError::api("Ollama", status, msg));
         }
 
@@ -1352,6 +1356,7 @@ impl ProviderManager {
         let started = Instant::now();
         let mut stream = response.bytes_stream();
         let mut text = String::new();
+        let mut budget = ByteBudget::new();
         let mut calls: Vec<ToolCall> = Vec::new();
         let mut lines = frames::FrameLines::default();
         let mut done = false;
@@ -1360,6 +1365,7 @@ impl ProviderManager {
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            budget.charge(chunk.len(), "Ollama")?;
             if self.traffic.is_some() {
                 raw.extend_from_slice(&chunk);
             }
@@ -1429,7 +1435,9 @@ impl ProviderManager {
 
         if !response.status().is_success() {
             let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
+            let msg = limited_text(response, "OpenRouter")
+                .await
+                .unwrap_or_default();
             return Err(ProviderError::api("OpenRouter", status, msg));
         }
 
@@ -1446,10 +1454,9 @@ impl ProviderManager {
             content: String,
         }
 
-        let body: OpenRouterNonStreamResponse = response
-            .json()
-            .await
-            .map_err(|e| ProviderError::Parse(e.to_string()))?;
+        let bytes = limited_text(response, "OpenRouter").await?.into_bytes();
+        let body: OpenRouterNonStreamResponse =
+            serde_json::from_slice(&bytes).map_err(|e| ProviderError::Parse(e.to_string()))?;
 
         body.choices
             .first()
@@ -1488,7 +1495,9 @@ impl ProviderManager {
 
         if !response.status().is_success() {
             let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
+            let msg = limited_text(response, "OpenRouter")
+                .await
+                .unwrap_or_default();
             return Err(ProviderError::api("OpenRouter", status, msg));
         }
 
@@ -1496,8 +1505,10 @@ impl ProviderManager {
         let mut full_response = String::new();
 
         let mut lines = crate::frames::FrameLines::default();
+        let mut budget = ByteBudget::new();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            budget.charge(chunk.len(), "OpenRouter")?;
             lines.feed(&chunk, &mut |line| {
                 ingest_openrouter_line(line, &mut full_response, &mut callback)
             });
@@ -1543,7 +1554,9 @@ impl ProviderManager {
 
         if !response.status().is_success() {
             let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
+            let msg = limited_text(response, "llama.cpp")
+                .await
+                .unwrap_or_default();
             return Err(ProviderError::api("llama.cpp", status, msg));
         }
 
@@ -1572,9 +1585,8 @@ impl ProviderManager {
             cached_tokens: u64,
         }
 
-        let body: LlamaCppResponse = response
-            .json()
-            .await
+        let bytes = limited_text(response, "llama.cpp").await?.into_bytes();
+        let body: LlamaCppResponse = serde_json::from_slice(&bytes)
             .map_err(|e| ProviderError::Parse(format!("llama.cpp parse error: {e}")))?;
 
         let counts = body
@@ -1639,13 +1651,16 @@ impl ProviderManager {
 
         if !response.status().is_success() {
             let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
+            let msg = limited_text(response, "llama.cpp")
+                .await
+                .unwrap_or_default();
             return Err(ProviderError::api("llama.cpp", status, msg));
         }
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
         let mut usage = compatible::UsageCounts::default();
+        let mut budget = ByteBudget::new();
         let mut acc = tools::ToolCallAccumulator::default();
         let mut ended = false;
         let mut lines = frames::FrameLines::default();
@@ -1653,6 +1668,7 @@ impl ProviderManager {
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result
                 .map_err(|e| ProviderError::Network(format!("llama.cpp stream error: {e}")))?;
+            budget.charge(chunk.len(), "llama.cpp")?;
             lines.feed(&chunk, &mut |line| {
                 ended |= compatible::ingest_line(
                     line,
