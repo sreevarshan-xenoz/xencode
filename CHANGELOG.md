@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 - `DI-3`: `install.sh` and `install.ps1` can now install from a published GitHub Release with `--release`/`-r` (`-Release` in PowerShell). The host OS and architecture are mapped to the exact archive name from the verified dist plan, the matching `.sha256` file is downloaded and checked with `sha256sum -c` or PowerShell's `Get-FileHash` before extraction, and the binary is installed to the same location with the same PATH shim and smoke test. Source build remains the default and `--source` selects it explicitly. `--version` (or `XENCODE_RELEASE_VERSION`) picks the release version, and `--dry-run` prints the derived archive name and URLs without making any network request. No release has been tagged yet, so release mode currently fails with HTTP 404 — the download half is blocked until a `v0.1.0` tag is pushed. An offline test checks the asset and URL derivation against the captured dist plan and exercises checksum verification with real local files.
+### Added — Phase 1 distribution
+### Added — error classification for failed commands (EC-1)
+
+- `EC-1`: a failing command's result now carries a short, classified next step
+  beside the raw output. A pure classifier in `xencode-analysis-rs` reads the
+  real stdout/stderr the model sees and reports a file and line, a severity, a
+  category (compile error, test failure, panic, I/O or permission) and a short
+  suggested action, derived from the compiler's hint or the failure message.
+  It is attached to failed `run_command` results, prints nothing when it cannot
+  recognise the output, and deliberately covers Rust/cargo shapes only — not
+  every language or provider. Tests use output captured from real cargo runs.
+
 
 - `DI-2`: a test pins the release shape verified by `dist plan` — the v0.1.0
   download path derived from the repository URL and crate version, the five

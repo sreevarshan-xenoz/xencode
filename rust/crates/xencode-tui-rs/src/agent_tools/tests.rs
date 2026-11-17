@@ -5506,6 +5506,40 @@ async fn check_verdict_reads_the_exit_code_of_real_runs() {
 }
 
 #[tokio::test]
+async fn a_failing_command_result_carries_a_classified_suggestion() {
+    let root = temp_root("ec1-suggestion");
+    // A real `cat` on a path that does not exist prints "No such file or
+    // directory" and exits non-zero — a genuine command failure, not a canned
+    // string. The classifier should turn that into an I/O suggestion.
+    let missing = root.join("definitely-absent-file");
+    let command = format!("cat {}", missing.display());
+    let failed = run_foreground(
+        &root,
+        &command,
+        10,
+        &crate::sandbox::Sandbox::disabled(),
+        false,
+    )
+    .await;
+    assert!(failed.contains("exit"), "{failed}");
+    assert!(failed.contains("suggested fix:"), "no suggestion: {failed}");
+    assert!(failed.contains("[I/O error]"), "{failed}");
+    assert!(failed.contains("exists"), "{failed}");
+
+    // A command that succeeds has no failure to explain and gets no block.
+    let passed = run_foreground(
+        &root,
+        "true",
+        10,
+        &crate::sandbox::Sandbox::disabled(),
+        false,
+    )
+    .await;
+    assert!(!passed.contains("suggested fix:"), "{passed}");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[tokio::test]
 async fn check_verdict_refuses_to_guess_when_no_exit_code_arrives() {
     let root = temp_root("verdict-blind");
     // A denied call carries no exit code — that is "not verified", which

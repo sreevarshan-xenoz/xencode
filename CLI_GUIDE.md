@@ -699,6 +699,17 @@ word, anything after `--` belongs to rustc rather than cargo, and a command that
 already chose a format is left alone — those, `cargo test`, and a build started
 with `background_start` behave exactly as before.
 
+Whatever the command, a **failure** now also gets a short `suggested fix:` block
+appended to its result. It names the recognised category (compile error, test
+failure, panic, I/O or permission), the file and line when the output gives one,
+and a next step taken from the compiler's own hint or from the failure message.
+A real rustc `E0308` at `src/lib.rs:7`, for example, produces a line beginning
+`[compile error] src/lib.rs:7` and repeating rustc's hint about converting the
+type. Nothing is added when the output is not a Rust/cargo failure shape the
+classifier recognises, so a passing command and an unrelated failing one are
+left exactly as they were. This covers Rust and cargo output only; it is not a
+general error parser for other languages or providers.
+
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.
 
