@@ -15,11 +15,18 @@ Windows (PowerShell): `.\install.ps1`
 
 ### Prebuilt binaries (from the first tagged release on)
 
-Releases are built by cargo-dist for five targets with checksums, plus shell
-and PowerShell installers — nothing here exists until a `v*` tag is pushed:
+cargo-dist builds archives for five targets with checksums, plus shell and
+PowerShell installers. Nothing here exists yet: no version tag has been pushed
+and no release has been published, so there is no prebuilt binary to download
+and the installer URL below returns 404 today. These instructions only become
+usable once a real `v0.1.0` tag is pushed and the Release workflow publishes the
+artifacts.
+
+Xencode is not published to crates.io and ships no binstall metadata, so
+`cargo binstall xencode-cli` does not resolve. Build from source with the
+installer above, or use the release installer below once a release exists:
 
 ```bash
-cargo binstall xencode-cli
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sreevarshan-xenoz/xencode/releases/latest/download/xencode-cli-installer.sh | sh
 ```
 
@@ -218,6 +225,31 @@ Memory, cores, the compute devices `llama-server` itself reports — not the one
 PCI pretends to hold — what the model file's cache costs per token, and the flags
 to start a local server with. It prints the `config set` line that keeps them and
 changes nothing.
+
+### Bring up a local model in one command
+```bash
+xencode setup
+# xencode setup --model ~/models/Qwen3-0.6B-Q4_K_M.gguf --yes
+```
+This reads the machine's memory, picks a GGUF that fits from the same advice
+table `xencode models advice` prints, downloads it if it is not already on disk,
+starts `llama-server` on a free local port, and asks one real `xencode query` to
+prove the server answers. It reports each of those four steps and stops at the
+first one it cannot do, naming it — a download that cannot reach the host, a
+server binary that is missing, or a query that gets no answer are all failures,
+not a green result.
+
+It needs a machine that can actually serve a model: enough free memory, a
+`llama-server` executable on `PATH`, and network access if the GGUF is not
+cached. Without those it reports the failing step and exits non-zero; it never
+marks a step it could not verify as done. In the run recorded here the machine
+had network, so the recommendation and a real 1.9 GiB download with a verified
+checksum completed, but it has no `llama-server`, so setup stopped at step 3 and
+named it. The server and query steps cannot be finished on this machine; their
+ordering and failure reporting are covered by tests with boundaries that record
+real calls, not simulated GPU or network results. `--model` takes a GGUF path or
+a model id; `--yes` skips the confirmation prompt before a download. Stop the
+server afterwards with `xencode llamacpp stop`.
 
 ### Time this repository's git history
 ```bash

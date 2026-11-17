@@ -400,8 +400,31 @@ fn completions_name_real_subcommands() {
         "envcheck",
         "paths",
         "migrate",
+        "setup",
     ] {
         assert!(fish.contains(subcommand), "completions omit {subcommand}");
+    }
+}
+
+#[test]
+fn setup_command_parses_with_its_flags() {
+    let cli = Cli::try_parse_from(["xencode", "setup"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Setup {
+            model: None,
+            yes: false
+        })
+    ));
+
+    let cli =
+        Cli::try_parse_from(["xencode", "setup", "--model", "/models/tiny.gguf", "--yes"]).unwrap();
+    match cli.command {
+        Some(Commands::Setup { model, yes }) => {
+            assert_eq!(model.as_deref(), Some("/models/tiny.gguf"));
+            assert!(yes);
+        }
+        _ => panic!("setup did not parse into Commands::Setup"),
     }
 }
 

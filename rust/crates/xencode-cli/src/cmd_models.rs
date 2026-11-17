@@ -191,6 +191,65 @@ pub(crate) fn run_models_advice() -> Result<(), String> {
     Ok(())
 }
 
+/// The model `xencode setup` picks when nothing names one: the largest entry
+/// in the advice table that this machine's biggest single memory pool can
+/// hold. This reads the same three sources `models advice` prints — the advice
+/// table, the machine's memory, and the server binary's device list — so the
+/// two commands cannot recommend different models.
+pub(crate) struct RecommendedModel {
+    pub(crate) tier: String,
+    pub(crate) label: String,
+    pub(crate) url: String,
+    pub(crate) sha256: String,
+    pub(crate) path: String,
+    pub(crate) file_name: String,
+}
+
+pub(crate) fn recommend_model() -> Result<RecommendedModel, String> {
+    use xencode_context_rs::hwprobe;
+    use xencode_models_rs::advice;
+
+    let advice = advice::Advice::load(&advice::default_path());
+    let total_kib = xencode_context_rs::budget::total_memory_kib().unwrap_or(0);
+    let available_kib = hwprobe::available_memory_kib().unwrap_or(0);
+    let exe = xencode_models_rs::llamacpp::find_llama_server(None);
+    let devices: Vec<hwprobe::ComputeDevice> = match &exe {
+        Some(exe) => hwprobe::server_devices(exe)
+            .as_deref()
+            .map(hwprobe::parse_llama_devices)
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let pools = hwprobe::memory_pools(&devices, total_kib / 1024, available_kib / 1024);
+    let capacity_bytes = pools
+        .iter()
+        .max_by_key(|pool| pool.usable_mib)
+        .map(|pool| pool.usable_mib * 1024 * 1024)
+        .unwrap_or(0);
+
+    let tier = advice.tier_for(capacity_bytes).ok_or_else(|| {
+        format!(
+            "no model in the advice table fits the {} this machine can give one; run \
+             `xencode models advice` to see the table and the sizes it names",
+            xencode_models_rs::human_bytes(capacity_bytes)
+        )
+    })?;
+    let entry = tier.gguf.first().ok_or_else(|| {
+        format!(
+            "the {} tier in the advice table names no GGUF file",
+            tier.name
+        )
+    })?;
+    Ok(RecommendedModel {
+        tier: tier.name.clone(),
+        label: entry.label.clone(),
+        url: entry.url(),
+        sha256: entry.sha256.clone(),
+        path: default_gguf_path(&entry.file),
+        file_name: entry.file.clone(),
+    })
+}
+
 /// Where a fetched model lands by default: the directory xencode keeps the
 /// things it fetched, which is not the cache — a weight costs a long download to
 /// replace, and a cache cleaner is meant to be able to throw a cache away.

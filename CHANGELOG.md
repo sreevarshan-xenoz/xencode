@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SM-2`: no-file-changed continuation notes are recorded in turn traces and eval results, with whether an edit followed. Tool counts and `/trace` output are unchanged; the eval pass-rate gate remains open and needs a GPU to measure.
 - `SU-1`: `xencode llamacpp start` picks a free port, passes a stable alias and writes `default_model`; a new `xencode setup` command recommends a model, downloads it with checksum verification, starts the server and verifies with one query, naming the step that failed. The real download was exercised here; server start and final query remain blocked on this machine (no `llama-server`, 2 GB GPU).
 
+### Fixed — distribution documentation (DI-1)
+
+- `DI-1`: the installation and release docs now match how releases actually work. The README states the pinned Rust 1.100.0 toolchain instead of an unpinned stable, and describes the dist-generated Release workflow as it is: it needs a pushed tag containing a `major.minor.patch` version, has no manual trigger, and runs `dist build` → `dist host` → `gh release create` with checksums and installers rather than a release smoke-test step. QUICK_START no longer recommends `cargo binstall xencode-cli`, which cannot resolve without a crates.io publication; it points to the release shell installer and states plainly that no release exists yet, so those URLs return 404 today.
+
 ### Fixed — 2026-11-17 full audit and final verification (AU-1 to AU-35)
 
 Six parallel reviewers audited the repository and the findings were fixed one at
