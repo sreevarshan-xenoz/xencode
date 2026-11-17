@@ -18,19 +18,19 @@
 | W4 | 12 | 8 | 0 | 0 | 10 |
 | W5 | 15 | 3 | 0 | 0 | 15 |
 | W6 | 10 | 0 | 0 | 0 | 8 |
-| W7 | 19 | 16 | 0 | 0 | 19 |
+| W7 | 18 | 15 | 0 | 0 | 18 |
 | W8 | 6 | 5 | 1 | 0 | 6 |
 | W9 | 21 | 0 | 0 | 0 | 2 |
 | W10 | 23 | 18 | 0 | 0 | 21 |
-| W11 | 20 | 2 | 0 | 0 | 17 |
+| W11 | 19 | 2 | 0 | 0 | 16 |
 | W12 | 15 | 1 | 3 | 1 | 3 |
 | W13 | 3 | 0 | 0 | 0 | 0 |
 | W14 | 77 | 4 | 0 | 0 | 21 |
 | W15 | 3 | 3 | 0 | 0 | 3 |
-| W16 | 14 | 12 | 0 | 1 | 14 |
+| W16 | 13 | 12 | 0 | 1 | 13 |
 | W17 | 15 | 13 | 1 | 0 | 15 |
 | unscheduled | 10 | 0 | 0 | 0 | 2 |
-| **all** | **324** | **139** | **5** | **2** | **203** |
+| **all** | **321** | **138** | **5** | **2** | **200** |
 
 ## W0
 
@@ -187,7 +187,6 @@
 | SE-5 | secret *content* scanning | capability | done | 1 | b0cb393 (2026-10-04) |
 | SE-6 | `xencode deps` supply-chain report | capability | done | 1 | f3a1e54 (2026-10-04) |
 | SE-7 | Landlock/bubblewrap wrapper for `run_command` | capability | done | 1 | 186840e (2026-10-04) |
-| U-6 | The reproduction gate itself, as a capability gate | core | done | 2 | 806520d (2026-10-08) |
 
 ## W8
 
@@ -275,7 +274,6 @@
 | QO-5 | `xencode doctor --env` | capability | — | 2 | 9b0a5fe (2026-10-03) |
 | QO-6 | Release notes as a draft generator | capability | done | 1 | be673c0 (2026-10-02) |
 | QO-7 | `doctor` as the self-debug slice | capability | done | 2 | d63b08e (2026-10-02) |
-| U-3 | The `doctor` surface for configuration drift | capability | — | 4 | 806520d (2026-10-08) |
 | U-5 | Dependency impact report: transitive delta and duplicate versions | capability | — | 2 | 9b0a5fe (2026-10-03) |
 | V-8 | Event-driven render: stop the unconditional 30 fps redraw | capability | — | 2 | 9b0a5fe (2026-10-03) |
 
@@ -414,7 +412,6 @@
 | OR-15 | The task contract: done means what xencode said it means | core | done | 3 | ae5f235 (2026-10-09) |
 | OR-16 | The result envelope, claims separated from evidence | core | done | 3 | 4bfecba (2026-10-09) |
 | M-5 | `xencode mcp serve` | ecology | done | 1 | f4c9a9f (2026-09-30) |
-| V-10 | Worker-event to window bridge | capability | — | 2 | 89c0466 (2026-10-02) |
 
 ## W17
 
