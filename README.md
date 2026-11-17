@@ -33,8 +33,8 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (20 crates, about 3,000
-tests) wrapped around an agentic coding loop that can plan, edit, test,
+At its core is a fast, single-file **Rust** binary (20 crates, 3,164 tests at
+the last full workspace run) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
 **Project type:** a command-line application and terminal UI, written as a Rust
@@ -808,7 +808,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (about 3,000 tests)
+cargo test                          # Full workspace suite (3,164 tests at the last run)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
