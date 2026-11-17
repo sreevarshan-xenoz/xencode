@@ -61,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: rust
     if: github.event_name == 'push'
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -91,6 +93,7 @@ jobs:
       uses: docker/setup-buildx-action@v4.4.1
 
     - name: Build and push Docker image
+      id: build
       uses: docker/build-push-action@v7.4.0
       with:
         context: .
@@ -111,7 +114,9 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@v0.36.0
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        # Scan the digest built by this run; the latest tag can be replaced by
+        # a concurrent push before this job starts.
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
         format: 'sarif'
         output: 'trivy-results.sarif'
 
