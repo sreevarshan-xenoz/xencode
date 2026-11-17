@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 use tracing::{info, warn};
 use xencode_collaboration_rs::wire::{
     ClientFrame, MemberInfo, ServerFrame, CLOSE_BAD_TOKEN, CLOSE_NO_SESSION, CLOSE_RBAC_DENIED,
@@ -50,6 +50,9 @@ pub struct Peer {
     /// The `SyncCoordinator` presence record for this connection.
     pub sync_id: String,
     tx: mpsc::Sender<Message>,
+    /// Set when the connection is pruned for falling behind, so the owning
+    /// handler and writer stop instead of holding an open, silent socket.
+    shutdown: watch::Sender<bool>,
 }
 
 /// Each peer is addressed through its own channel, drained by a dedicated
@@ -199,6 +202,8 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
 
     // ---- peer phase ----
     let (tx, mut rx) = mpsc::channel::<Message>(PEER_SEND_BUFFER);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let mut writer_shutdown = shutdown_rx.clone();
     let sync_id = state
         .sync
         .lock()
@@ -213,16 +218,25 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
             username: username.clone(),
             sync_id: sync_id.clone(),
             tx: tx.clone(),
+            shutdown: shutdown_tx,
         });
     }
 
-    // The writer task owns the sink from here on; the auth phase is over.
+    // The writer task owns the sink from here on; the auth phase is over. A
+    // shutdown signal ends it even if a socket write is in flight, so a peer
+    // pruned for falling behind cannot keep a silent connection alive.
     tokio::spawn(async move {
         use futures_util::SinkExt;
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = sink.send(msg).await {
-                warn!("Failed to send to peer: {e}");
-                break;
+        loop {
+            tokio::select! {
+                _ = writer_shutdown.changed() => break,
+                msg = rx.recv() => {
+                    let Some(msg) = msg else { break; };
+                    if let Err(e) = sink.send(msg).await {
+                        warn!("Failed to send to peer: {e}");
+                        break;
+                    }
+                }
             }
         }
         let _ = sink.close().await;
@@ -250,7 +264,15 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
     .await;
 
     // ---- message loop ----
-    while let Some(Ok(msg)) = receiver.next().await {
+    let mut handler_shutdown = shutdown_rx;
+    loop {
+        let incoming = tokio::select! {
+            _ = handler_shutdown.changed() => break,
+            incoming = receiver.next() => incoming,
+        };
+        let Some(Ok(msg)) = incoming else {
+            break;
+        };
         let Message::Text(text) = msg else {
             continue;
         };
@@ -340,7 +362,7 @@ async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) 
         let mut removed = None;
         session_peers.retain(|p| {
             if p.id == peer_id {
-                removed = Some(p.sync_id.clone());
+                removed = Some((p.sync_id.clone(), p.shutdown.clone()));
                 false
             } else {
                 true
@@ -351,7 +373,8 @@ async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) 
         }
         removed
     };
-    if let Some(sync_id) = sync_id {
+    if let Some((sync_id, shutdown)) = sync_id {
+        let _ = shutdown.send(true);
         state.sync.lock().await.leave_session(session_id, &sync_id);
     }
 }
@@ -418,6 +441,11 @@ async fn broadcast_to_session(
                 Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     warn!("Dropping peer in session {session_id}: send buffer full");
+                    // De-listing alone only drops the cloned sender in this map;
+                    // the handler and writer still held one each, so the socket
+                    // stayed open and the client kept injecting activity. Signal
+                    // them to stop and close.
+                    let _ = peer.shutdown.send(true);
                     false
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => false,
@@ -450,11 +478,13 @@ mod tests {
     /// A peer with its own id, plus the receiver its writer task would drain.
     fn test_peer(capacity: usize) -> (Peer, mpsc::Receiver<Message>) {
         let (tx, rx) = mpsc::channel(capacity);
+        let (shutdown, _signal) = watch::channel(false);
         let peer = Peer {
             id: PeerId::next(),
             username: "tester".to_string(),
             sync_id: uuid::Uuid::new_v4().to_string(),
             tx,
+            shutdown,
         };
         (peer, rx)
     }
@@ -523,6 +553,39 @@ mod tests {
     /// get it pruned. (A test that merely checks an excluded peer survives a
     /// broadcast would pass without the fix too, since a peer with room is
     /// never pruned either way; the full buffer is what makes this discriminate.)
+    #[tokio::test]
+    async fn a_peer_pruned_for_falling_behind_is_told_to_close() {
+        let state = Arc::new(AppState::new());
+        let (tx, _rx) = mpsc::channel(1);
+        let (shutdown, mut signal) = watch::channel(false);
+        let stalled = Peer {
+            id: PeerId::next(),
+            username: "slow".to_string(),
+            sync_id: uuid::Uuid::new_v4().to_string(),
+            tx,
+            shutdown,
+        };
+        stalled
+            .tx
+            .send(Message::Text("filler".into()))
+            .await
+            .unwrap();
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![stalled]);
+
+        broadcast_to_session(&state, "s", "hello", None).await;
+
+        assert!(state.peers.lock().await["s"].is_empty());
+        signal
+            .changed()
+            .await
+            .expect("the removed peer was not signalled");
+        assert!(*signal.borrow(), "the shutdown signal was not set");
+    }
+
     #[tokio::test]
     async fn an_excluded_peer_with_a_full_buffer_is_kept() {
         let state = Arc::new(AppState::new());
