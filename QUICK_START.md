@@ -15,11 +15,18 @@ Windows (PowerShell): `.\install.ps1`
 
 ### Prebuilt binaries (from the first tagged release on)
 
-Releases are built by cargo-dist for five targets with checksums, plus shell
-and PowerShell installers — nothing here exists until a `v*` tag is pushed:
+cargo-dist builds archives for five targets with checksums, plus shell and
+PowerShell installers. Nothing here exists yet: no version tag has been pushed
+and no release has been published, so there is no prebuilt binary to download
+and the installer URL below returns 404 today. These instructions only become
+usable once a real `v0.1.0` tag is pushed and the Release workflow publishes the
+artifacts.
+
+Xencode is not published to crates.io and ships no binstall metadata, so
+`cargo binstall xencode-cli` does not resolve. Build from source with the
+installer above, or use the release installer below once a release exists:
 
 ```bash
-cargo binstall xencode-cli
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sreevarshan-xenoz/xencode/releases/latest/download/xencode-cli-installer.sh | sh
 ```
 
