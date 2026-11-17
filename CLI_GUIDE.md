@@ -3885,6 +3885,23 @@ It publishes six tools — `read_file`, `list_dir`, `search_files`, `write_file`
 `edit_file`, `run_command` — each with the same JSON Schema the model is given, so
 a client that has never seen xencode can call them.
 
+**Resources and prompts.** The handshake also declares `resources` and `prompts`,
+and the server answers `resources/list`, `resources/read`, `prompts/list` and
+`prompts/get`. `resources/list` names `AGENTS.md` and `task.md` when those files
+are present in the served workspace, plus `xencode://config/summary`, a live
+description of this launch. `resources/read` accepts `xencode://workspace/<path>`
+and returns that file's real bytes as text (or base64 for non-UTF-8 files), and
+accepts `xencode://config/summary` for the launch summary. A URI that resolves
+outside the workspace — including percent-encoded `..` traversal — is refused
+with a clear error, just as a tool's `path` argument is. `prompts/list` offers
+one template, `review-diff`; `prompts/get` takes a `diff` argument and renders
+xencode's shipped explain-diff guidance around it:
+
+```console
+$ # JSON-RPC over the child's stdin/stdout, e.g. from an MCP client:
+{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"review-diff","arguments":{"diff":"--- a/x\n+++ b/x\n..."}}}
+```
+
 A caller on a pipe has no prompt to answer, so nobody can approve a write.
 xencode does not resolve that by auto-approving or by hanging: it starts
 **read-only**. The three reads run; the other three are refused, and the refusal
