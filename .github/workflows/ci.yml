@@ -34,23 +34,23 @@ jobs:
       working-directory: rust
 
     - name: Run clippy lints
-      run: cargo clippy --workspace --all-targets -- -D warnings
+      run: cargo clippy --locked --workspace --all-targets -- -D warnings
       working-directory: rust
 
     - name: Build the tests
-      run: cargo test --workspace --no-run
+      run: cargo test --locked --workspace --no-run
       working-directory: rust
 
     # A time limit, so a stuck test ends this step while the runner is still
     # alive and its log is kept; cargo names a test running over 60 seconds.
     - name: Run cargo test
       timeout-minutes: 20
-      run: cargo test --workspace --no-fail-fast
+      run: cargo test --locked --workspace --no-fail-fast
       working-directory: rust
 
     - name: Check generated completions and man page are current
       run: |
-        cargo build --manifest-path rust/Cargo.toml -p xencode-cli
+        cargo build --locked --manifest-path rust/Cargo.toml -p xencode-cli
         ./rust/target/debug/xencode generate completions --shell fish > docs/completions/xencode.fish
         ./rust/target/debug/xencode generate completions --shell zsh > docs/completions/xencode.zsh
         ./rust/target/debug/xencode generate completions --shell bash > docs/completions/xencode.bash
@@ -93,7 +93,7 @@ jobs:
     - name: Measure line coverage
       timeout-minutes: 40
       run: |
-        cargo llvm-cov --workspace --lcov --output-path lcov.info
+        cargo llvm-cov --locked --workspace --lcov --output-path lcov.info
         cargo llvm-cov report --summary-only --fail-under-lines 53
       working-directory: rust
 
@@ -152,7 +152,7 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Build every target, tests included
-      run: cargo build --workspace --all-targets
+      run: cargo build --locked --workspace --all-targets
       working-directory: rust
       env:
         RUSTFLAGS: -D warnings
@@ -188,6 +188,6 @@ jobs:
 
     - name: Build and test the badge
       run: |
-        cargo build
-        cargo test
+        cargo build --locked
+        cargo test --locked
       working-directory: rust/badge
