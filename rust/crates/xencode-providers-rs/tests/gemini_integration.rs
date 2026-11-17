@@ -251,7 +251,8 @@ async fn gemini_stream_basic() {
         .respond_with(ResponseTemplate::new(200).set_body_string(
             "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Rust\"}]}}]}\n\
                      data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" is\"}]}}]}\n\
-                     data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" fast\"}]}}]}\n",
+                     data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" fast\"}]}}]}\n\
+                     data: {\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"STOP\"}]}\n",
         ))
         .expect(1)
         .mount(&mock_server)
@@ -276,6 +277,27 @@ async fn gemini_stream_basic() {
     );
     assert_eq!(result.unwrap(), "Rust is fast");
     assert_eq!(tokens, vec!["Rust", " is", " fast"]);
+}
+
+#[tokio::test]
+async fn gemini_stream_without_a_finish_reason_is_reported_cut_off() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-pro:streamGenerateContent"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Half\"}]}}]}\n",
+        ))
+        .mount(&mock_server)
+        .await;
+    let provider = GeminiProvider::new(
+        "test-key".to_string(),
+        Some(format!("{}/v1beta", mock_server.uri())),
+    );
+    let err = provider
+        .generate_stream("gemini-pro", &test_messages(), None, None, |_| {})
+        .await
+        .expect_err("a stream with no finish reason must not pass as complete");
+    assert!(err.to_string().contains("before finishing"), "{err}");
 }
 
 #[tokio::test]

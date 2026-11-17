@@ -197,6 +197,28 @@ async fn qwen_stream_basic() {
 }
 
 #[tokio::test]
+async fn qwen_stream_without_the_done_marker_is_reported_cut_off() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("data: {\"choices\":[{\"delta\":{\"content\":\"Half\"}}]}\n"),
+        )
+        .mount(&mock_server)
+        .await;
+    let provider = QwenProvider::new(
+        "test-api-key".to_string(),
+        Some(format!("{}/v1", mock_server.uri())),
+    );
+    let err = provider
+        .generate_stream("qwen2.5:72b", &test_messages(), |_| {})
+        .await
+        .expect_err("a stream with no [DONE] marker must not pass as complete");
+    assert!(err.to_string().contains("before finishing"), "{err}");
+}
+
+#[tokio::test]
 async fn qwen_stream_http_error() {
     let mock_server = MockServer::start().await;
 

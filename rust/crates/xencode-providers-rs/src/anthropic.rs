@@ -274,18 +274,34 @@ impl AnthropicProvider {
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
         let mut event_type = String::new();
+        let mut ended = false;
         let mut lines = crate::frames::FrameLines::default();
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
             lines.feed(&chunk, &mut |line| {
-                ingest_line(line, &mut event_type, &mut full_response, &mut callback)
+                ingest_line(
+                    line,
+                    &mut event_type,
+                    &mut full_response,
+                    &mut callback,
+                    &mut ended,
+                )
             });
         }
         lines.finish(&mut |line| {
-            ingest_line(line, &mut event_type, &mut full_response, &mut callback)
+            ingest_line(
+                line,
+                &mut event_type,
+                &mut full_response,
+                &mut callback,
+                &mut ended,
+            )
         });
 
+        if !ended {
+            return Err(crate::compatible::cut_off("Anthropic"));
+        }
         Ok(full_response)
     }
 }
@@ -297,6 +313,7 @@ fn ingest_line<F: FnMut(&str)>(
     event_type: &mut String,
     full_response: &mut String,
     callback: &mut F,
+    ended: &mut bool,
 ) {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -305,6 +322,9 @@ fn ingest_line<F: FnMut(&str)>(
 
     // Parse SSE event type lines: `event: content_block_delta`
     if let Some(event_name) = trimmed.strip_prefix("event: ") {
+        if event_name == "message_stop" {
+            *ended = true;
+        }
         *event_type = event_name.to_string();
         return;
     }
@@ -349,6 +369,48 @@ mod tests {
         let provider = AnthropicProvider::new("sk-ant-test-123".to_string(), None, None);
         assert_eq!(provider.base_url, "https://api.anthropic.com");
         assert_eq!(provider.anthropic_version, "2023-06-01");
+    }
+
+    #[tokio::test]
+    async fn a_stream_with_message_stop_is_whole_and_without_it_is_cut_off() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let fragment = "event: content_block_delta\n\
+                         data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"Half\"}}\n\n";
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(format!("{fragment}event: message_stop\ndata: {{}}\n\n")),
+            )
+            .mount(&server)
+            .await;
+        let provider =
+            AnthropicProvider::new("sk-ant-test-123".to_string(), Some(server.uri()), None);
+        let messages = [ChatMessage::text("user", "hi")];
+        assert_eq!(
+            provider
+                .generate_stream("claude", &messages, None, |_| {})
+                .await
+                .unwrap(),
+            "Half"
+        );
+
+        let truncated = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(fragment))
+            .mount(&truncated)
+            .await;
+        let provider =
+            AnthropicProvider::new("sk-ant-test-123".to_string(), Some(truncated.uri()), None);
+        let err = provider
+            .generate_stream("claude", &messages, None, |_| {})
+            .await
+            .expect_err("a clean close without message_stop is a truncated answer");
+        assert!(err.to_string().contains("before finishing"), "{err}");
     }
 
     #[test]
