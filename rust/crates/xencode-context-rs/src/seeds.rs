@@ -763,6 +763,11 @@ impl SeededTask {
             .current_dir(&self.path)
             .env("CARGO_NET_OFFLINE", "true")
             .env("CARGO_TERM_COLOR", "never")
+            // Each case compiles into its own repository. A shared build
+            // directory lets two graders for the same-named crate reuse each
+            // other's test binary, so a green edit can be graded against a stale
+            // copy of the seeded code. The directory goes away with the case.
+            .env("CARGO_TARGET_DIR", self.path.join("target"))
             .output()
             .map_err(|e| format!("the grader could not be started: {e}"))?;
         let mut text = String::from_utf8_lossy(&output.stdout).into_owned();

@@ -3414,7 +3414,9 @@ changes. A green grader reached by editing `tests/behaviour.rs` is reported as
 `changed its own test` and is never a pass. Every run appends one line to
 `.xencode/cache/task_eval.jsonl` with its model, prompt digest, permission
 posture, sampling pins and per-case verdicts, so a rate is only ever printed next
-to a previous rate taken under the same rules. A case whose model request failed
+to a previous rate taken under the same rules — including the same number of
+cases and the same set of shapes, so an eight-case rate is never printed beside
+a ten-case one. A case whose model request failed
 is `not run` and stays out of the denominator — an unreachable server is not
 evidence about a model.
 

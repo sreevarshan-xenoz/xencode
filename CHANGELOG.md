@@ -21,6 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated fish and zsh completions, README, CLI guide and this file now say ten;
   the original 0/8 historical measurement is left as it was.
 
+### Fixed — expanded eval harness (EV-13)
+
+- `EV-13`: a scripted end-to-end test now drives all ten seeded shapes through
+  the real agent loop over a loopback socket, real tool edits and each case's own
+  `cargo test` grader, with a separate output directory per shape, and asserts a
+  pass rate of 1.0 for every one. The previous-run comparison also checks the
+  number of cases and the set of shape slugs, not just the prompt, model, seed
+  and permissions: a pass rate from before the suite grew from eight shapes to
+  ten is no longer offered as the comparable previous number. Tests cover the
+  old eight-case rate and a same-size set with one shape swapped. Each case's
+  grader now builds into its own repository instead of a shared build directory:
+  concurrent graders for same-named seed crates were reusing each other's test
+  binaries and grading an edit against stale seeded code.
+
 - `DI-3`: `install.sh` and `install.ps1` can now install from a published GitHub Release with `--release`/`-r` (`-Release` in PowerShell). The host OS and architecture are mapped to the exact archive name from the verified dist plan, the matching `.sha256` file is downloaded and checked with `sha256sum -c` or PowerShell's `Get-FileHash` before extraction, and the binary is installed to the same location with the same PATH shim and smoke test. Source build remains the default and `--source` selects it explicitly. `--version` (or `XENCODE_RELEASE_VERSION`) picks the release version, and `--dry-run` prints the derived archive name and URLs without making any network request. No release has been tagged yet, so release mode currently fails with HTTP 404 — the download half is blocked until a `v0.1.0` tag is pushed. An offline test checks the asset and URL derivation against the captured dist plan and exercises checksum verification with real local files.
 ### Added — Phase 1 distribution
 ### Added — error classification for failed commands (EC-1)
