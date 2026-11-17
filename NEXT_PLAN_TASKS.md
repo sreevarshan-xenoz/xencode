@@ -2,7 +2,7 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
-> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates are not green as of 2026-10-08; see "Workspace gates" below.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Both CI workflows were green on `main` as of 2026-10-10; the dependency updates that followed have not been measured again. See "Workspace gates" below for the history.
 
 ## Audit 2026-11-17 — findings and fixes (`AU-*`)
 
