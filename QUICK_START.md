@@ -13,6 +13,14 @@ cd xencode
 
 Windows (PowerShell): `.\install.ps1`
 
+To install a published release instead of building, run `./install.sh --release`
+(or `.\install.ps1 -Release`). It downloads the archive matching your OS and
+architecture, verifies its `.sha256` checksum before extracting, and installs to
+the same place with the same smoke test. Source build remains the default;
+`./install.sh --dry-run` prints the derived archive name and URLs without a
+download. No release exists yet, so release mode returns HTTP 404 until a
+`v0.1.0` tag is pushed.
+
 ### Prebuilt binaries (from the first tagged release on)
 
 cargo-dist builds archives for five targets with checksums, plus shell and
