@@ -740,6 +740,13 @@ xencode query "What is in this image?" \
   --model nvidia:moonshotai/kimi-k3 \
   --image screenshot.png \
   --image diagram.jpg
+
+# Capture the screen and attach it in one action. Needs an OS capture tool —
+# grim on Wayland, import or scrot on X11, screencapture on macOS, PowerShell
+# on Windows — and a vision-capable model to actually read the result.
+xencode query "What is on my screen?" \
+  --model nvidia:moonshotai/kimi-k3 \
+  --screenshot
 ```
 Sampling flags are read by a model served by llama.cpp, and — except `--grammar`
 and `--mirostat`, which Ollama has no field for — by a model served by Ollama as
@@ -762,6 +769,17 @@ printed on stderr rather than done quietly:
 ```
 image: screenshot.png (sent as image/jpeg (1568×1080, 210 KiB from 2560×1440, 1.2 MiB))
 ```
+
+`--screenshot` does the capture and the attach in one action: it writes a real
+PNG to the system temp directory, verifies the bytes, prints its path, and
+feeds it through the same intake as `--image`. It needs an OS capture tool and
+a graphical display: `grim` on Wayland, `import` (ImageMagick) or `scrot` on
+X11, `screencapture` on macOS, PowerShell with .NET on Windows. Set
+`XENCODE_SCREENSHOT_TOOL` to a program on `PATH` if yours uses another name, or
+to `none` to refuse capture. With no tool available the command says what to
+install; it never presents a missing capture as an empty picture. Capturing the
+image does not make a text-only model able to read it — that still needs a
+vision-capable model.
 
 Problems are refused before the request goes out, naming the file — a path that
 does not exist, or bytes that are not an image:

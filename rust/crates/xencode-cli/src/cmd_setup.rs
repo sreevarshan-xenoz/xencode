@@ -317,6 +317,7 @@ impl SetupSteps for RealSetup {
             None,
             None,
             Vec::new(),
+            false,
             QueryFormat::Text,
         )
         .await

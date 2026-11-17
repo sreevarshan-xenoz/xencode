@@ -182,6 +182,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand query" -l image -d 'Imag
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l format -d 'How to write the answer: plain words, or one JSON event per line' -r -f -a "text\t''
 ndjson\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l no-cache -d 'Do not use cached responses'
+complete -c xencode -n "__fish_xencode_using_subcommand query" -l screenshot -d 'Capture the screen and attach it in one action; needs an OS capture tool'
 complete -c xencode -n "__fish_xencode_using_subcommand query" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand memory; and not __fish_seen_subcommand_from list show fork prune gc evidence publish read policy help" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand memory; and not __fish_seen_subcommand_from list show fork prune gc evidence publish read policy help" -f -a "list" -d 'List all conversation sessions'
