@@ -38,7 +38,7 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to maintain a w
 
 ### Required Dependencies
 
-- Rust (stable toolchain, edition 2021) — `rustup` recommended
+- Rust 1.100.0 (pinned in `rust-toolchain.toml`, edition 2021) — `rustup` recommended
 - Git
 - Ollama and/or llama.cpp (only needed to exercise local model inference)
 
