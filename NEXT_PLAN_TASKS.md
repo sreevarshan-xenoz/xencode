@@ -42,6 +42,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-28 ✅ | HIGH | ci | the release plan job ran dist outside the Cargo workspace and failed on every PR | merged |
 | AU-29 ✅ | HIGH | ci | the coverage gate measured generated code differently and failed on every PR | merged |
 | AU-30 ✅ | LOW | housekeeping | merged branches, test temp directories and the build cache needed cleanup, and the audit work needed a changelog entry | branches/temp removed, cache cleaned, changelog and counts updated |
+| AU-31 ✅ | HIGH | release | the dist config lived under rust/ while cargo-dist expected it at the repository root, so the release plan check failed and tagged releases could not be cut | `dist plan` succeeds from the repository root and the generated release workflow is current |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 

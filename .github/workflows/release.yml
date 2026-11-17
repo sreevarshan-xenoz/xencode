@@ -39,6 +39,7 @@ permissions:
 # If there's a prerelease-style suffix to the version, then the release(s)
 # will be marked as a prerelease.
 on:
+  pull_request:
   push:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
@@ -75,9 +76,6 @@ jobs:
       # (PRs run on the *source* but secrets are usually on the *target* -- that's *good*
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
-        # The Cargo workspace and its dist configuration live under rust/, not
-        # at the repository root where dist looks by default.
-        working-directory: rust
         run: |
           dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
@@ -87,7 +85,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: artifacts-plan-dist-manifest
-          path: rust/plan-dist-manifest.json
+          path: plan-dist-manifest.json
 
   # Build and packages all the platform-specific things
   build-local-artifacts:

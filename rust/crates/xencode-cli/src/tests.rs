@@ -210,7 +210,7 @@ fn the_release_pipeline_is_dist_generated_not_hand_written() {
 #[test]
 fn dist_config_names_targets_installers_and_repository() {
     let config =
-        std::fs::read_to_string(repo_root().join("rust/dist-workspace.toml")).expect("dist config");
+        std::fs::read_to_string(repo_root().join("dist-workspace.toml")).expect("dist config");
     for key in ["cargo-dist-version", "targets", "installers", "hosting"] {
         assert!(config.contains(key), "dist config lacks {key}");
     }
