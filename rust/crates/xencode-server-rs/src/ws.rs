@@ -448,6 +448,7 @@ async fn broadcast_to_session(
     exclude: Option<PeerId>,
 ) {
     let msg = Message::Text(message.to_string().into());
+    let mut pruned = Vec::new();
     let mut peers = state.peers.lock().await;
     if let Some(session_peers) = peers.get_mut(session_id) {
         // `try_send` never waits, so the lock is not held across a socket write.
@@ -465,13 +466,22 @@ async fn broadcast_to_session(
                     // De-listing alone only drops the cloned sender in this map;
                     // the handler and writer still held one each, so the socket
                     // stayed open and the client kept injecting activity. Signal
-                    // them to stop and close.
+                    // them to stop and close, and leave the presence record: the
+                    // handler will no longer find this peer to clean it up.
+                    pruned.push(peer.sync_id.clone());
                     let _ = peer.shutdown.send(true);
                     false
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => false,
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    pruned.push(peer.sync_id.clone());
+                    false
+                }
             }
         });
+    }
+    drop(peers);
+    for sync_id in pruned {
+        state.sync.lock().await.leave_session(session_id, &sync_id);
     }
 }
 
@@ -593,10 +603,11 @@ mod tests {
         let state = Arc::new(AppState::new());
         let (tx, _rx) = mpsc::channel(1);
         let (shutdown, mut signal) = watch::channel(false);
+        let sync_id = state.sync.lock().await.join_session("s", "slow").peer_id;
         let stalled = Peer {
             id: PeerId::next(),
             username: "slow".to_string(),
-            sync_id: uuid::Uuid::new_v4().to_string(),
+            sync_id: sync_id.clone(),
             tx,
             shutdown,
         };
@@ -610,6 +621,7 @@ mod tests {
             .lock()
             .await
             .insert("s".to_string(), vec![stalled]);
+        assert!(state.sync.lock().await.session_has_peers("s"));
 
         broadcast_to_session(&state, "s", "hello", None).await;
 
@@ -619,6 +631,10 @@ mod tests {
             .await
             .expect("the removed peer was not signalled");
         assert!(*signal.borrow(), "the shutdown signal was not set");
+        assert!(
+            !state.sync.lock().await.session_has_peers("s"),
+            "the pruned peer left a phantom presence record"
+        );
     }
 
     #[tokio::test]

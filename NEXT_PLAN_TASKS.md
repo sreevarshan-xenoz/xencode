@@ -43,6 +43,10 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-29 ✅ | HIGH | ci | the coverage gate measured generated code differently and failed on every PR | merged |
 | AU-30 ✅ | LOW | housekeeping | merged branches, test temp directories and the build cache needed cleanup, and the audit work needed a changelog entry | branches/temp removed, cache cleaned, changelog and counts updated |
 | AU-31 ✅ | HIGH | release | the dist config lived under rust/ while cargo-dist expected it at the repository root, so the release plan check failed and tagged releases could not be cut | `dist plan` succeeds from the repository root and the generated release workflow is current |
+| AU-32 ✅ | HIGH | server | `remove_member` unwraps a missing workspace, so the new delete route lets any authenticated caller panic the handler (final audit) | missing sessions and non-member self-removal are refused with an error, with tests |
+| AU-33 ✅ | MEDIUM | server | a WebSocket peer pruned for falling behind leaves its presence record behind forever (final audit) | pruning also leaves the sync session, with a test |
+| AU-34 ✅ | MEDIUM | server | the login burst limit is process-wide, so one client can lock out everyone (final audit) | the burst is keyed by claimed username and full-store refusals do not consume it |
+| AU-35 ✅ | MEDIUM | docs | the final audit found a reverted CI-status line, stale headings, missing manual entries and justfile/CI drift | all corrected and verified |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
