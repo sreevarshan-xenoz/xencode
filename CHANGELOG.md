@@ -49,7 +49,7 @@ tests or real runs; no placeholder implementations were used.
 - `AU-34`: the login burst limit is per identity instead of process-wide, and the token lookup no longer claims a constant-time comparison it does not make.
 - `AU-35`: the reverted CI-status line, stale headings, missing manual entries and justfile/CI drift were corrected.
 - `AU-36`: provider answers and streams are refused once they exceed 8 MiB, so a misbehaving endpoint cannot exhaust memory.
-- `AU-37`: the coverage gate keeps its 80% floor; CI now keys its cache on the pinned toolchain and discards stale instrumented artifacts before measuring.
+- `AU-37`: the coverage gate keeps its 80% floor; CI always installs the pinned coverage tool, cleans stale artifacts before measuring, and uses the pinned Rust toolchain.
 - `AU-38`: the agent roster is checked against recorded real help screens on machines without installed agents, so the firewall cannot pass vacuously.
 
 ### Documentation and maintenance — 2026-10-26 and 2026-10-12
