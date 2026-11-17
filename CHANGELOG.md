@@ -49,9 +49,10 @@ tests or real runs; no placeholder implementations were used.
 - `AU-34`: the login burst limit is per identity instead of process-wide, and the token lookup no longer claims a constant-time comparison it does not make.
 - `AU-35`: the reverted CI-status line, stale headings, missing manual entries and justfile/CI drift were corrected.
 - `AU-36`: provider answers and streams are refused once they exceed 8 MiB, so a misbehaving endpoint cannot exhaust memory.
-- `AU-37`: the coverage gate keeps its 80% floor; CI always installs the pinned coverage tool, cleans stale artifacts before measuring, and uses the pinned Rust toolchain.
+- `AU-37`: CI's ~53% coverage was not reproducible locally (~82.70% with pinned rustc 1.100.0 and cargo-llvm-cov 0.9.1), and the exact cached artifact is not proven from this repo; both plausible causes were removed — the toolchain is pinned, the coverage tool is no longer cached and is force-installed at 0.9.1, and coverage artifacts are cleaned before measuring — with the 80% floor kept.
 - `AU-38`: the agent roster is checked against recorded real help screens on machines without installed agents, so the firewall cannot pass vacuously.
 - `AU-39`: the old handover section is marked historical, and the pre-rewrite items with no naming commit are explained instead of being given artificial commits.
+- `AU-40`: the adopted four-phase roadmap, the full priority gap list, and the execution rules are recorded in the plan and saved to memory.
 
 ### Documentation and maintenance — 2026-10-26 and 2026-10-12
 

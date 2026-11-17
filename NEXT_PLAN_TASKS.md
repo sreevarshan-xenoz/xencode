@@ -4,6 +4,33 @@
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
 > All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Both CI workflows were green on `main` as of 2026-10-10; the dependency updates that followed have not been measured again. See "Workspace gates" below for the history.
 
+## Master plan (2026-11-17)
+
+Adopted phase structure (see conversation / master plan summary):
+
+- **Phase 0** (current): SM-2 + SU-1 + finish remaining audit cleanup
+- **Phase 1**: Daily usability (context intelligence, multi-agent polish, skills/plugins, distribution)
+- **Phase 2**: Multimodal, expanded eval, git depth, Windows parity
+- **Phase 3**: Platform / ecosystem
+
+Phase 0 remains the active ordered backlog until the SM-2 gate (≥4/8, ideally higher with repeats) and SU-1 done-when are met. Everything else stays secondary.
+
+The full gap list behind these phases, in priority order:
+
+| Priority | Missing thing | Why it hurts | Phase |
+|---|---|---|---|
+| P0 | Small model edit reliability | product does not work on free models | 0 |
+| P0 | One-command setup (`xencode setup`) | new users bounce | 0 |
+| P0 | Easy install / pre-built binaries | friction for everyone | 0–1 |
+| P1 | Better context + more language servers | agent is weak on real codebases | 1 |
+| P1 | Multi-agent polish | powerful feature feels half-baked | 1 |
+| P1 | Official skills + plugin growth | ecosystem feels empty | 1 |
+| P1 | AI commit messages + git depth | daily workflow gap | 1–2 |
+| P2 | Multimodal, Windows parity, broader eval | noticeable but not blocking | 2 |
+| P3 | Ambient autonomy, deeper editor integration, collaboration, cost/privacy | later | 3 |
+
+Execution rules: depth over breadth; prefer changes that help 4–8B local models; every major change needs a measurable done-when; ship small vertical slices; keep the honesty bar high and report blocked verification (for example GPU-dependent eval runs) rather than faking green.
+
 ## Audit 2026-11-17 — findings and fixes (`AU-*`)
 
 Six parallel reviewers audited the whole repository on 2026-11-17. Every finding
@@ -48,9 +75,10 @@ All of them are merged; each commit message describes the fix in plain English.
 | AU-34 ✅ | MEDIUM | server | the login burst limit is process-wide, so one client can lock out everyone (final audit) | the burst is keyed by claimed username and full-store refusals do not consume it |
 | AU-35 ✅ | MEDIUM | docs | the final audit found a reverted CI-status line, stale headings, missing manual entries and justfile/CI drift | all corrected and verified |
 | AU-36 ✅ | MEDIUM | providers | generated and streamed provider responses had no size cap, so a hostile endpoint could exhaust memory (audit leftover) | buffered and streamed bodies above 8 MiB are refused, with real-server tests |
-| AU-37 ✅ | MEDIUM | ci | the coverage gate was lowered to 53% after CI reused an old cached llvm-cov binary that inflated the line count (audit leftover) | pinned llvm-cov is always installed, stale coverage artifacts are cleaned, the toolchain pin is restored, and the 80% floor is back |
+| AU-37 ✅ | MEDIUM | ci | CI's ~53% coverage was not reproducible locally (~82.70% with pinned rustc 1.100.0 and cargo-llvm-cov 0.9.1), and the exact cached artifact is not proven from this repo (audit leftover) | both plausible causes removed: toolchain pinned, llvm-cov no longer cached and force-installed at 0.9.1, coverage artifacts cleaned before measuring, 80% floor restored |
 | AU-38 ✅ | MEDIUM | agents | the roster firewall passed vacuously on CI because no agents are installed there (audit leftover) | recorded real help screens are checked when live CLIs are absent, and the test refuses a vacuous pass |
 | AU-39 ✅ | LOW | docs | the 2026-10-08 handover section read as a live queue and fifteen pre-rewrite IDs had no naming commit (audit leftover) | handover marked historical with current status; pre-rewrite IDs explained without fabricated commits |
+| AU-40 ✅ | LOW | docs | the adopted four-phase roadmap and full gap list were not visible in the plan or memory | master plan section recorded in NEXT_PLAN_TASKS.md and a Work memory saved |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
