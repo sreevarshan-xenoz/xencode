@@ -2622,6 +2622,32 @@ Safety rules:
 - Overwriting an existing profile requires `--force`.
 - The active host is a pointer (`remotes/active`), never a duplicate copy.
 
+#### Kaggle: private SSH destinations only
+
+Kaggle notebooks do not run an SSH server. The only transport that ever worked
+here was a reverse tunnel to a private Tailscale address, and that path is
+**parked** (2026-10-09): Kaggle cancels kernels that run a tunnel, so working
+around the block would risk the account. See the `L-14` note in
+`NEXT_PLAN_TASKS.md` for what was observed live and why it stopped. There is no
+`kaggle` computer backend — `xencode computers use kaggle` is **not available**.
+
+What can be recorded today is a profile whose destination is a private SSH
+address you supply yourself; the existing `remote add` command already parses
+that shape, so no dedicated command is needed:
+
+```bash
+xencode remote add kaggle root@100.116.188.53:22
+xencode remote add kaggle work@gpu-abc123.ts.net:2222
+```
+
+The same safety rules apply. In particular a public URL (`http://…` or
+`https://…`) is refused — a public endpoint would expose the model to anyone
+who could reach it, against this project's no-public-URL posture. Rust callers
+can use `xencode_config_rs::remotes::parse_kaggle_connection`, which delegates
+host parsing to `parse_destination` and builds a `kaggle` profile with the
+`llama.cpp` runtime. **No live Kaggle run was performed for this feature:** the
+heavy model is unreachable until a private endpoint exists.
+
 ### `xencode computers <action>`
 Inspect registered execution computer backends (`colab`, `ssh`, `docker`) and bind execution environments (`AF-4`). Each run in the run ledger records the bound computer backend.
 

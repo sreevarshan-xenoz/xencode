@@ -65,10 +65,19 @@ runs cannot be faked here and stay blocked:
 | RG-1 | Google Drive model + binary cache plan for Colab | real Drive-path decision logic tested against a local fake mount; live mount blocked |
 | RG-2 | `colab up --model` advice + session lifetime/status | pure model-for-T4 advice and remaining-time reporting tested; live VM blocked |
 | RG-3 | Unified `setup --remote` / `remote up|status|down` | CLI parse/routing tests with real backend state; live backends blocked |
-| RG-4 | Kaggle backend + notebook template + private dataset cache | notebook template and connection-string handling tested locally; live Kaggle blocked |
+| RG-4 | Kaggle backend + notebook template + private dataset cache | connection-string parsing + `remote add kaggle` tested locally; no notebook (Rust-only, tunnel parked); live Kaggle blocked |
 
 Rules: keep the no-public-URL tunnel posture; never invent a live verification;
 prefer Colab, then Kaggle; local-first egress still applies.
+
+RG-4 status (2026-11-18): the scoped slice is the locally verifiable half only —
+`parse_kaggle_connection` plus a real CLI round-trip for `remote add kaggle
+<private-ssh-destination>`. Kaggle notebooks have no SSH server; the
+reverse-tunnel path is parked 2026-10-09 (see **L-14** below), `computers use
+kaggle` is not available, and no live Kaggle verification was possible because
+the heavy model stays unreachable until a private endpoint exists. A notebook
+template and the private dataset cache remain out of scope while that route is
+parked; adding a notebook would also break the Rust-only rule in `AGENTS.md`.
 
 ## Audit 2026-11-17 — findings and fixes (`AU-*`)
 
