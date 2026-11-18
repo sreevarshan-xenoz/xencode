@@ -413,16 +413,41 @@ fn setup_command_parses_with_its_flags() {
         cli.command,
         Some(Commands::Setup {
             model: None,
-            yes: false
+            yes: false,
+            remote: false,
+            dry_run: false,
         })
     ));
 
     let cli =
         Cli::try_parse_from(["xencode", "setup", "--model", "/models/tiny.gguf", "--yes"]).unwrap();
     match cli.command {
-        Some(Commands::Setup { model, yes }) => {
+        Some(Commands::Setup {
+            model,
+            yes,
+            remote,
+            dry_run,
+        }) => {
             assert_eq!(model.as_deref(), Some("/models/tiny.gguf"));
             assert!(yes);
+            assert!(!remote);
+            assert!(!dry_run);
+        }
+        _ => panic!("setup did not parse into Commands::Setup"),
+    }
+
+    let cli = Cli::try_parse_from(["xencode", "setup", "--remote", "--dry-run"]).unwrap();
+    match cli.command {
+        Some(Commands::Setup {
+            model,
+            yes,
+            remote,
+            dry_run,
+        }) => {
+            assert!(model.is_none());
+            assert!(!yes);
+            assert!(remote);
+            assert!(dry_run);
         }
         _ => panic!("setup did not parse into Commands::Setup"),
     }

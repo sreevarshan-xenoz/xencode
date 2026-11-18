@@ -2500,6 +2500,8 @@ _arguments "${_arguments_options[@]}" : \
 '-m+[Model to use\: a path to a GGUF file, or a model id. With no value, the machine'\''s memory picks one from the advice table (same answer as \`xencode models advice\`)]:MODEL:_default' \
 '--model=[Model to use\: a path to a GGUF file, or a model id. With no value, the machine'\''s memory picks one from the advice table (same answer as \`xencode models advice\`)]:MODEL:_default' \
 '--yes[Skip the confirmation prompt before downloading a model]' \
+'--remote[Let the shared decision pick a remote GPU route when no local model fits this machine\: a local GGUF wins when one fits, otherwise the Colab bridge is used when it is enabled and available. No Kaggle route is chosen here]' \
+'--dry-run[Report what the remote route would start and write to config without creating a VM, opening a forward or making a network call]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0

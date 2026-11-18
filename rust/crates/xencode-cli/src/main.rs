@@ -425,7 +425,12 @@ async fn async_main() {
         Commands::Mcp { action } => run_mcp(action).await,
         Commands::Eval { action } => run_eval(action).await,
         Commands::Llamacpp { action } => run_llamacpp(action).await,
-        Commands::Setup { model, yes } => run_setup(model, yes).await,
+        Commands::Setup {
+            model,
+            yes,
+            remote,
+            dry_run,
+        } => run_setup(model, yes, remote, dry_run).await,
         Commands::Hw { action } => run_hw(action),
         Commands::History { action } => run_history(action),
         Commands::Colab { action } => run_colab(action).await,

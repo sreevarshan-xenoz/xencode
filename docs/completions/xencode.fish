@@ -802,6 +802,8 @@ complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_see
 complete -c xencode -n "__fish_xencode_using_subcommand llamacpp; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand setup" -s m -l model -d 'Model to use: a path to a GGUF file, or a model id. With no value, the machine\'s memory picks one from the advice table (same answer as `xencode models advice`)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand setup" -l yes -d 'Skip the confirmation prompt before downloading a model'
+complete -c xencode -n "__fish_xencode_using_subcommand setup" -l remote -d 'Let the shared decision pick a remote GPU route when no local model fits this machine: a local GGUF wins when one fits, otherwise the Colab bridge is used when it is enabled and available. No Kaggle route is chosen here'
+complete -c xencode -n "__fish_xencode_using_subcommand setup" -l dry-run -d 'Report what the remote route would start and write to config without creating a VM, opening a forward or making a network call'
 complete -c xencode -n "__fish_xencode_using_subcommand setup" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand hw; and not __fish_seen_subcommand_from probe help" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand hw; and not __fish_seen_subcommand_from probe help" -f -a "probe" -d 'Read RAM, cores and compute devices, and recommend launch flags'
