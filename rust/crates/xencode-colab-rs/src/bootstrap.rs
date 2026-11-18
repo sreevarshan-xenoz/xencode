@@ -90,9 +90,16 @@ QUANT={quant}
 FILES=$(curl -fsSL "https://huggingface.co/api/models/$HF_REPO" \
   | python3 -c 'import json,sys;[print(f["rfilename"]) for f in json.load(sys.stdin)["siblings"]]')
 {pick}
+# Optional Drive-backed weight cache — dormant until a real mount exists.
+CACHE={cache}
+{cache_snippet}
 echo "weights: $(printf '%s ' $PARTS)"
 for PART in $PARTS; do
-  curl -fsSL --retry 3 -o "$DIR/$(basename "$PART")" "https://huggingface.co/$HF_REPO/resolve/main/$PART"
+  NAME=$(basename "$PART")
+  # A cached part was symlinked into $DIR above, under its exact name; test -s
+  # follows the link to confirm the Drive file is non-empty before skipping.
+  if test -s "$DIR/$NAME"; then continue; fi
+  curl -fsSL --retry 3 -o "$DIR/$NAME" "https://huggingface.co/$HF_REPO/resolve/main/$PART"
 done
 nohup "$SERVER" -m "$DIR/$FIRST_PART" --host 127.0.0.1 --port {port} -c 4096 $OFFLOAD \
   > "${{HOME}}/xencode-llama.log" 2>&1 &
@@ -133,6 +140,10 @@ echo "READY {port}"
         port = port,
         repo = shell_quote(model),
         quant = shell_quote(quant),
+        cache = shell_quote(
+            &crate::cache::drive_cache_dir(model, quant, LLAMA_CPP_BUILD).to_string_lossy()
+        ),
+        cache_snippet = drive_cache_reuse_snippet(),
         pick = pick_gguf_parts(),
     ))
 }
@@ -158,6 +169,27 @@ else
   PARTS=$GGUF_NAME
 fi
 FIRST_PART=$(basename "$(printf '%s\n' "$PARTS" | head -n1)")"#
+}
+
+/// The shell steps that link already-downloaded parts from a Drive cache into
+/// `$DIR`, keeping each part's exact name. Kept as its own snippet so a test
+/// can hand the real text to `bash` with a temporary stand-in directory —
+/// no product logic is faked, and no Drive mount is claimed to exist.
+///
+/// A bare Colab `bash -s` VM does not mount Drive, so this stays dormant: the
+/// whole block is a no-op unless `$CACHE` exists. A person who saves the GGUFs
+/// under `/content/drive/MyDrive/xencode-models/<model>/<quant>/<build>/` can
+/// then skip a multi-GB fetch on a later bring-up.
+fn drive_cache_reuse_snippet() -> &'static str {
+    r#"if [ -d "$CACHE" ]; then
+  for PART in $PARTS; do
+    NAME=$(basename "$PART")
+    if test -s "$CACHE/$NAME"; then
+      echo "cache hit: $NAME"
+      ln -s "$CACHE/$NAME" "$DIR/$NAME"
+    fi
+  done
+fi"#
 }
 
 /// ollama runtime: the official install script + `ollama serve` bound to the
@@ -373,11 +405,146 @@ qwen2.5-7b-instruct-q8_0-00003-of-00003.gguf";
         assert!(script.contains("READY 11434"));
     }
 
+    #[cfg(unix)]
+    struct DirGuard(std::path::PathBuf);
+    #[cfg(unix)]
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_generated_bootstrap_is_valid_bash() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q4_K_M", 18080)
+            .expect("hf supported");
+        let mut child = Command::new("bash")
+            .arg("-n")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("bash parses the script");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(script.as_bytes())
+            .expect("feed script to bash");
+        assert!(child.wait().expect("wait for bash").success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cache_snippet_links_cached_parts_in_a_real_bash() {
+        use std::fs;
+        use std::process::Command;
+        let cache = crate::testutil::temp_dir("bootstrap-cache");
+        let _cache_guard = DirGuard(cache.clone());
+        let dir = crate::testutil::temp_dir("bootstrap-dir");
+        let _dir_guard = DirGuard(dir.clone());
+
+        let cached = "q4-00001-of-00002.gguf";
+        let absent = "q4-00002-of-00002.gguf";
+        fs::write(cache.join(cached), b"real weights").expect("cached part");
+        // The first part arrives with an HF sub-folder prefix; the shell uses
+        // its basename, exactly as the pure Rust decision does.
+        let parts = format!("subfolder/{cached} {absent}");
+        let script = format!("set -euo pipefail\n{}\n", drive_cache_reuse_snippet());
+        let out = Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .env("CACHE", &cache)
+            .env("DIR", &dir)
+            .env("PARTS", parts)
+            .output()
+            .expect("bash runs the generated snippet");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains(&format!("cache hit: {cached}")),
+            "the present part is reported as a hit: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+
+        let linked = dir.join(cached);
+        assert!(linked.is_symlink(), "the cached part was linked into $DIR");
+        assert_eq!(
+            fs::read(&linked).expect("read through symlink"),
+            b"real weights"
+        );
+        assert!(!dir.join(absent).exists(), "a missing part is not linked");
+        assert_eq!(
+            fs::read_dir(&dir).expect("list $DIR").count(),
+            1,
+            "only the cached part was placed there"
+        );
+    }
+
     #[test]
     fn bootstrap_script_rejects_unknown_runtime() {
         let err = bootstrap_script("kobold", "m", "hf", "Q4_K_M", 18080).expect_err("unknown");
         assert!(err.contains("kobold"));
         assert!(err.contains("llama.cpp"));
         assert!(err.contains("ollama"));
+    }
+
+    #[test]
+    fn bootstrap_reuses_drive_cache_with_exact_part_names() {
+        let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q4_K_M", 18080)
+            .expect("hf supported");
+        // The generated script looks for non-empty parts in the cache and
+        // links them into $DIR under their own names before the curl fallback.
+        assert!(script.contains("test -s \"$CACHE/$NAME\""), "{script}");
+        assert!(
+            script.contains("ln -s \"$CACHE/$NAME\" \"$DIR/$NAME\""),
+            "{script}"
+        );
+        assert!(script.contains("test -s \"$DIR/$NAME\""), "{script}");
+        assert!(
+            script.contains("if test -s \"$DIR/$NAME\"; then continue; fi"),
+            "{script}"
+        );
+        // Split parts keep the exact name llama.cpp expects: the basename of
+        // each HF part, and FIRST_PART unchanged for the `-m` argument.
+        assert!(script.contains("NAME=$(basename \"$PART\")"), "{script}");
+        assert!(script.contains("-o \"$DIR/$NAME\""), "{script}");
+        assert!(script.contains("-m \"$DIR/$FIRST_PART\""), "{script}");
+        assert!(!script.contains("model.gguf"), "{script}");
+        // The cache pass runs before the download pass, which is still there
+        // for a cold or partial cache.
+        let cache_line = script.find("CACHE=").expect("cache path is set");
+        let link = script.find("ln -s \"$CACHE/$NAME\"").expect("cache link");
+        let curl = script
+            .find("curl -fsSL --retry 3 -o")
+            .expect("curl fallback remains");
+        assert!(cache_line < link && link < curl, "{script}");
+        assert!(
+            script.contains(
+                "curl -fsSL --retry 3 -o \"$DIR/$NAME\" \"https://huggingface.co/$HF_REPO/resolve/main/$PART\""
+            ),
+            "{script}"
+        );
+    }
+
+    #[test]
+    fn bootstrap_drive_cache_path_is_scoped_to_model_quant_and_build() {
+        let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q6_K", 18080)
+            .expect("hf supported");
+        let expected =
+            crate::cache::drive_cache_dir("Qwen/Qwen2.5-7B-Instruct-GGUF", "Q6_K", LLAMA_CPP_BUILD);
+        let expected_line = format!("CACHE={}", shell_quote(&expected.to_string_lossy()));
+        assert!(script.contains(&expected_line), "{script}");
+        // A different quant must not reuse the same cache directory.
+        assert!(!script.contains("/Q4_K_M/b"), "{script}");
+        // No claim of a live Drive mount is made in the generated script.
+        assert!(
+            script.contains("dormant until a real mount exists"),
+            "{script}"
+        );
     }
 }
