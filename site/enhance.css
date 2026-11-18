@@ -1,0 +1,101 @@
+/* Motion enhancement layer — loaded after styles.css.
+   Everything here degrades gracefully and is disabled under reduced motion. */
+
+/* animated gradient text */
+.grad {
+  background-size: 220% 220%;
+  animation: gradshift 9s ease-in-out infinite;
+}
+@keyframes gradshift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* parallax layers — JS sets --py (pixels) and --pr (degrees) */
+.hero-copy, .hero-visual, .hero-glow, .hero-grid {
+  will-change: transform;
+  transform: translate3d(0, var(--py, 0px), 0);
+}
+.hero-glow.glow-a { transform: translate3d(0, var(--py, 0px), 0) scale(var(--ps, 1)); }
+.hero-glow.glow-b { transform: translate3d(0, var(--py2, 0px), 0); }
+.hero-grid { transform: translate3d(0, var(--pg, 0px), 0); }
+
+/* word reveal for headings */
+.word {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(0.7em) rotateX(-45deg);
+  transform-origin: 50% 100%;
+  transition: opacity .55s cubic-bezier(.2,.8,.2,1), transform .65s cubic-bezier(.2,.8,.2,1);
+}
+.word.in { opacity: 1; transform: none; }
+h1 .word { transition-duration: .8s; }
+
+/* magnetic buttons */
+.btn, .nav-cta, .copy { will-change: transform; }
+.btn.magnetic, .nav-cta.magnetic { transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .2s, background .2s, border-color .2s; }
+
+/* 3D card tilt */
+.card { transform-style: preserve-3d; will-change: transform; }
+.card.tilting { transition: transform .12s ease-out, border-color .3s; }
+.card .icon, .card h3, .card p { transform: translateZ(var(--tz, 0px)); }
+
+/* cursor glow — desktop pointer devices only */
+.cursor-glow {
+  position: fixed; top: 0; left: 0; width: 460px; height: 460px;
+  margin: -230px 0 0 -230px; border-radius: 50%; pointer-events: none; z-index: 5;
+  background: radial-gradient(circle, rgba(124,108,255,.13), rgba(53,224,200,.05) 40%, transparent 70%);
+  opacity: 0; transition: opacity .4s; will-change: transform;
+}
+.cursor-glow.on { opacity: 1; }
+@media (hover: none), (pointer: coarse) { .cursor-glow { display: none; } }
+
+/* stack connector glow line draws in */
+.stack-node.hero-node { position: relative; }
+.stack-node.hero-node::after {
+  content: ""; position: absolute; left: 50%; bottom: -2px; width: 0; height: 2px;
+  transform: translateX(-50%); background: linear-gradient(90deg, transparent, var(--accent-2), transparent);
+  box-shadow: 0 0 12px var(--accent-2); transition: width .8s ease .3s;
+}
+.stack-node.hero-node.in::after { width: 70%; }
+
+/* section eyebrow slide */
+.eyebrow { transition: transform .5s ease, opacity .5s ease; }
+.section-head .eyebrow { opacity: .35; transform: translateX(-8px); }
+.section-head.visible .eyebrow { opacity: 1; transform: none; }
+
+/* terminal line entrance cascade */
+.terminal-body .line { opacity: 0; transform: translateX(-10px); }
+.terminal.in .line { animation: linein .45s cubic-bezier(.2,.8,.2,1) forwards; }
+.terminal.in .line:nth-child(1) { animation-delay: .05s; }
+.terminal.in .line:nth-child(2) { animation-delay: .15s; }
+.terminal.in .line:nth-child(3) { animation-delay: .25s; }
+.terminal.in .line:nth-child(4) { animation-delay: .35s; }
+.terminal.in .line:nth-child(5) { animation-delay: .45s; }
+.terminal.in .line:nth-child(6) { animation-delay: .55s; }
+.terminal.in .line:nth-child(7) { animation-delay: .65s; }
+.terminal.in .line:nth-child(8) { animation-delay: .75s; }
+@keyframes linein { to { opacity: 1; transform: none; } }
+
+/* hero copy stagger */
+.hero-copy .pill, .hero-copy h1, .hero-copy .lede, .hero-copy .hero-actions, .hero-copy .hero-meta {
+  opacity: 0; transform: translateY(18px);
+}
+.hero-copy.in .pill, .hero-copy.in h1, .hero-copy.in .lede, .hero-copy.in .hero-actions, .hero-copy.in .hero-meta {
+  animation: rise .7s cubic-bezier(.2,.8,.2,1) forwards;
+}
+.hero-copy.in .pill { animation-delay: .05s; }
+.hero-copy.in h1 { animation-delay: .15s; }
+.hero-copy.in .lede { animation-delay: .28s; }
+.hero-copy.in .hero-actions { animation-delay: .4s; }
+.hero-copy.in .hero-meta { animation-delay: .5s; }
+@keyframes rise { to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .word, .terminal-body .line, .hero-copy .pill, .hero-copy h1, .hero-copy .lede,
+  .hero-copy .hero-actions, .hero-copy .hero-meta { opacity: 1 !important; transform: none !important; animation: none !important; }
+  .grad { animation: none; }
+  .cursor-glow { display: none; }
+  .hero-copy, .hero-visual, .hero-glow, .hero-grid { transform: none !important; }
+  .stack-node.hero-node::after { width: 0; }
+}
