@@ -183,7 +183,7 @@
 | QTR-5 | Accountability as trailers + a run ledger | capability | — | 2 | 4cd1e6f (2026-10-09) |
 | SE-2 | untrusted-content marking | core | done | 1 | 21189a9 (2026-10-04) |
 | SE-3 | the `AGENTS.md` trust split (fact 3) | core | done | 1 | fa51a54 (2026-10-04) |
-| SE-4 | lethal-trifecta gate in `classify` | core | done | 1 | ab9e04a (2026-10-03) |
+| SE-4 | lethal-trifecta gate in `classify` | core | done | 2 | 6505854 (2026-11-18) |
 | SE-5 | secret *content* scanning | capability | done | 1 | b0cb393 (2026-10-04) |
 | SE-6 | `xencode deps` supply-chain report | capability | done | 1 | f3a1e54 (2026-10-04) |
 | SE-7 | Landlock/bubblewrap wrapper for `run_command` | capability | done | 1 | 186840e (2026-10-04) |
