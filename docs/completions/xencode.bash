@@ -7940,7 +7940,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__query)
-            opts="-m -h --model --no-cache --session --temperature --top-k --min-p --mirostat --seed --max-tokens --grammar --json-schema --image --screenshot --format --help"
+            opts="-m -h --model --deep-think --no-cache --session --temperature --top-k --min-p --mirostat --seed --max-tokens --grammar --json-schema --image --screenshot --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -7951,6 +7951,10 @@ _xencode() {
                     return 0
                     ;;
                 -m)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --deep-think)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

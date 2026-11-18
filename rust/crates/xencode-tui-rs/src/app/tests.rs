@@ -2791,7 +2791,7 @@ fn taint_is_shared_across_contexts_of_one_session() {
 /// digest, so the trace file cannot become a copy of the conversation.
 #[test]
 fn a_turn_run_carries_its_trace_identity_without_the_prompt_text() {
-    let app = App::for_tests();
+    let mut app = App::for_tests();
     let secret_prompt = "log in as admin with password=hunter2hunter2";
     let run = app.agent_run(LoopSink::Chat, Vec::new(), secret_prompt);
     // The run names itself once (QTR-5), so the ledger row, a recording
@@ -2890,6 +2890,73 @@ fn a_profile_marked_for_a_kind_of_turn_takes_that_turn() {
     let plain = app.agent_run(LoopSink::Chat, Vec::new(), "explain this file");
     assert_eq!(plain.model, "ollama:coder-large:latest");
     assert!(plain.profile_note.is_none());
+}
+
+/// DT-1: the escalation signal is consumed at the turn boundary, so only the
+/// *next* run is routed to the stronger model, never the one in progress. The
+/// trace identity follows the model that will actually answer.
+#[test]
+fn escalation_switches_only_the_next_turn_to_the_configured_model() {
+    let mut app = App::for_tests();
+    app.config.default_model = "small-local-model".to_string();
+    app.config.deep_think_model = Some("remote:strong-reasoner".to_string());
+
+    let normal = app.agent_run(LoopSink::Chat, Vec::new(), "first turn");
+    assert_eq!(normal.model, "small-local-model");
+
+    app.deep_think_pending = true;
+    let escalated = app.agent_run(LoopSink::Chat, Vec::new(), "second turn");
+    assert_eq!(escalated.model, "remote:strong-reasoner");
+    assert_eq!(
+        escalated.trace_identity.model.as_deref(),
+        Some("remote:strong-reasoner"),
+        "the trace is kept under the stronger model that answered"
+    );
+    assert!(
+        !app.deep_think_pending,
+        "the request is one-shot, so the turn after the escalated one is normal again"
+    );
+
+    let after = app.agent_run(LoopSink::Chat, Vec::new(), "third turn");
+    assert_eq!(after.model, "small-local-model");
+}
+
+/// DT-1: the `[DEEP_THINK]` line a finished turn sends both shows the reason
+/// and, when it names a stronger model, arms the next turn. Without a named
+/// model it only explains what the person can configure.
+#[test]
+fn the_deep_think_announcement_arms_the_next_turn() {
+    let mut app = App::for_tests();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    app.apply_token("[DEEP_THINK]3|remote:strong-reasoner", &tx);
+    assert!(app.deep_think_pending, "a named model arms the next turn");
+    let shown = app.messages.last().expect("a system note").content.clone();
+    assert!(shown.contains("3 failed edit attempts"), "{shown}");
+    assert!(shown.contains("remote:strong-reasoner"), "{shown}");
+
+    app.deep_think_pending = false;
+    app.apply_token("[DEEP_THINK]2|", &tx);
+    assert!(
+        !app.deep_think_pending,
+        "no model named: say so, but do not switch"
+    );
+    let shown = app.messages.last().expect("a system note").content.clone();
+    assert!(shown.contains("set deep_think_model"), "{shown}");
+}
+
+/// DT-1: with no stronger model configured, the escalation request is still
+/// consumed and announced, but there is nothing to route to, so the run keeps
+/// its own model. A missing setting is not a reason to change the model.
+#[test]
+fn escalation_without_a_configured_model_keeps_the_current_model() {
+    let mut app = App::for_tests();
+    app.config.default_model = "small-local-model".to_string();
+    assert_eq!(app.config.deep_think_model, None);
+    app.deep_think_pending = true;
+    let run = app.agent_run(LoopSink::Chat, Vec::new(), "next turn");
+    assert_eq!(run.model, "small-local-model");
+    assert!(!app.deep_think_pending);
 }
 
 #[test]

@@ -170,6 +170,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand deps" -l format -r -f -a
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand deps" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand query" -s m -l model -d 'Model to use (overrides config default)' -r
+complete -c xencode -n "__fish_xencode_using_subcommand query" -l deep-think -d 'Use this stronger model for this turn (explicit deep-think override; wins over --model and profile routing; cloud routes still need allow_cloud_models)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l session -d 'Session ID to attach to' -r
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l temperature -d 'llama.cpp sampling: temperature (e.g. 0.7)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l top-k -d 'llama.cpp sampling: top-k' -r

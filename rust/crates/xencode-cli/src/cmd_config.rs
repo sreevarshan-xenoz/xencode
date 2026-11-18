@@ -512,6 +512,10 @@ pub(crate) fn run_config(action: ConfigAction) -> Result<(), String> {
                 // Keep every model call of every run, in the clear, under
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.
+                "deep_think_model" => {
+                    let trimmed = value.trim();
+                    config.deep_think_model = (!trimmed.is_empty()).then(|| trimmed.to_string());
+                }
                 "session_recording" => config.session_recording = parse_bool(&value)?,
                 // Fence each run_command, background_start and shell hook in a
                 // bubblewrap namespace (SE-7). Off by default because it changes

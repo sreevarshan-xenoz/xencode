@@ -306,6 +306,7 @@ impl SetupSteps for RealSetup {
         run_query(
             "Reply with the single word: ready".to_string(),
             Some(format!("llamacpp:{}", plan.alias)),
+            None,
             true,
             None,
             None,

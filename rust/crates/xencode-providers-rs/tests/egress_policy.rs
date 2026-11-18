@@ -99,6 +99,49 @@ async fn allowing_cloud_opens_a_route_the_default_refuses() {
     );
 }
 
+/// DT-1: a deep-think override is still just a model id routed through the
+/// same manager, so a stronger model on an off-machine endpoint is refused
+/// when `allow_cloud_models` is false. The explicit override cannot bypass the
+/// egress gate. `.invalid` never resolves (RFC 2606), so nothing is dialled;
+/// the only question is which error comes back.
+#[tokio::test]
+async fn a_cloud_deep_think_model_is_refused_when_cloud_is_denied() {
+    let denied = manager()
+        .with_remote(
+            "http://deep-think.example.invalid/v1",
+            Some("k".to_string()),
+        )
+        .with_egress_policy(EgressPolicy::new(false));
+    let error = denied
+        .generate("remote:deep-think-70b", &test_messages())
+        .await
+        .expect_err("a cloud deep-think model must be refused before dialling");
+    assert!(
+        matches!(error, ProviderError::Egress(_)),
+        "expected an egress refusal, got {error:?}"
+    );
+    assert!(
+        error.to_string().contains("remote:deep-think-70b")
+            && error.to_string().contains("allow_cloud_models"),
+        "the refusal names the model and the setting: {error}"
+    );
+
+    let allowed = manager()
+        .with_remote(
+            "http://deep-think.example.invalid/v1",
+            Some("k".to_string()),
+        )
+        .with_egress_policy(EgressPolicy::new(true));
+    let error = allowed
+        .generate("remote:deep-think-70b", &test_messages())
+        .await
+        .expect_err("no server is listening at .invalid, so this fails in the network");
+    assert!(
+        !matches!(error, ProviderError::Egress(_)),
+        "an opted-in deep-think model went on and failed where it was going, got {error:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_denied_cloud_route_still_allows_local_models() {
     let manager = manager().with_egress_policy(EgressPolicy { allow_cloud: false });

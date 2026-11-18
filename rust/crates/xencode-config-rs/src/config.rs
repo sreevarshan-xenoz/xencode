@@ -822,6 +822,14 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub focused_tools: bool,
 
+    /// A stronger model to route the next turn to after a turn ends with two or
+    /// more failed edit attempts (DT-1). Usually a remote or OpenAI-compatible
+    /// endpoint — AirLLM is Python and cannot be added to this Rust workspace —
+    /// so the normal `allow_cloud_models` egress rule still applies. Unset means
+    /// the escalation is announced in the trace but no model switch is made.
+    #[serde(default)]
+    pub deep_think_model: Option<String>,
+
     /// Google Colab bridge settings. Opt-in: every field has a safe default,
     /// so a config that predates the block still loads with the bridge off.
     #[serde(default)]
@@ -1127,6 +1135,7 @@ impl Default for XencodeConfig {
             model_profiles: Vec::new(),
             model_routing: false,
             focused_tools: false,
+            deep_think_model: None,
             colab: ColabConfig::default(),
         }
     }
@@ -2062,6 +2071,29 @@ mod tests {
                 "gemini:gemini-2.0-flash",
                 "ollama/deepseek-coder"
             ]
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// DT-1: the escalation target is optional and survives a save/load; a
+    /// config that predates it loads as unset rather than as a blank model.
+    #[test]
+    fn deep_think_model_is_optional_and_roundtrips() {
+        let dir = temp_dir();
+        let path = dir.join("deep.json");
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(XencodeConfig::default().deep_think_model, None);
+        fs::write(&path, "{\"deep_think_model\": \"remote:strong-reasoner\"}").unwrap();
+        let config = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(
+            config.deep_think_model.as_deref(),
+            Some("remote:strong-reasoner")
+        );
+        let out = dir.join("saved.json");
+        config.save_to(&out).unwrap();
+        assert_eq!(
+            XencodeConfig::load_from(&out).unwrap().deep_think_model,
+            config.deep_think_model
         );
         fs::remove_dir_all(&dir).unwrap();
     }

@@ -568,7 +568,7 @@ mod tests {
             "messages": [{"role": "user", "content": "hi"}]
         })
         .to_string();
-        let app = App::for_tests();
+        let mut app = App::for_tests();
         let mut run = app.agent_run(LoopSink::Chat, Vec::new(), "hi");
         let model = endpoint_model(&session, &mut run, "http://127.0.0.1:99".to_string());
         assert_eq!(model, "qwen2.5:7b");

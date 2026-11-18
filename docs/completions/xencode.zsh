@@ -415,6 +415,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-m+[Model to use (overrides config default)]:MODEL:_default' \
 '--model=[Model to use (overrides config default)]:MODEL:_default' \
+'--deep-think=[Use this stronger model for this turn (explicit deep-think override; wins over --model and profile routing; cloud routes still need allow_cloud_models)]:MODEL:_default' \
 '--session=[Session ID to attach to]:SESSION:_default' \
 '--temperature=[llama.cpp sampling\: temperature (e.g. 0.7)]:TEMPERATURE:_default' \
 '--top-k=[llama.cpp sampling\: top-k]:top-k:_default' \
