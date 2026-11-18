@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed — per-session spend in the cost report (CA-1)
+
+- `CA-1`: `xencode orchestrator costs` used to price only per model, even though the rollup already groups recorded tokens by session. It now adds a `SESSIONS` block with one row per recorded session (id, requests, prompt and completion tokens, cost, model count) and a `sessions` array in `--format json`, leaving the per-model output unchanged. A new pure helper prices every session through the same `cost_of` used for the whole project, so a model without a rate stays unknown in that session rather than contributing a made-up number; a session with any unpriced model shows `unpriced` (`micros: null` in JSON). Verified with a hand-summed fixture of three real request rows yielding 486, 90 and 576 micro-dollars, and with a real CLI test that writes a metrics log and a price table into a temporary project, checks both output formats, and compares both input files byte for byte before and after. Prices still come only from the local price table; live catalogue fetching and electricity costs from a power counter are not verified here.
+
 ### Fixed — visibility of what waits on the person (OM-7)
 
 - `OM-7`: the orchestrator Inbox and the window title now show the same, complete list of what waits on the person. Previously a pending question or a ByteBot task waiting for review could be outstanding while the Inbox and title showed nothing. One pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review, and every terminal agent calling for attention; the Inbox renders from it and the title counts from it, so the two cannot disagree. The Inbox still folds further approvals into a `+N` on the first row. Unit tests cover each source of waiting work, the empty case and the attention count.
