@@ -55,7 +55,10 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 - **Voice output (text-to-speech)** — input is real since J-07: the panel records
   through `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a
   WAV, and transcribes with a whisper CLI when one is installed. Nothing speaks,
-  so the panel has no "speaking" state
+  so the panel has no "speaking" state. *(Historical: the voice panel described
+  here was removed in TD-5 along with seven other rarely used panels. This entry
+  is kept as a record of why text-to-speech was parked; there is no voice panel
+  in the product now.)*
 - **Anthropic without OpenRouter** — `xencode-providers-rs` has an Anthropic
   client, but `ApiKeys` has no `anthropic_api_key` and both entry points pass
   `None`, so an `anthropic:…` id cannot authenticate. Deliberately parked: adding

@@ -61,6 +61,20 @@ impl Badge {
             None => Vec::new(),
         };
         self.view = xencode_live_rs::badge::view(&reads, xencode_live_rs::now_secs());
+        // Each project keeps its own eval history. A missing log leaves the row
+        // unlabelled; a torn final write is skipped by the pure parser. Reading
+        // bytes and replacing invalid UTF-8 keeps one broken character at the
+        // end of a log from hiding every earlier, complete run.
+        for row in &mut self.view.rows {
+            let log = PathBuf::from(&row.project)
+                .join(".xencode")
+                .join("cache")
+                .join("task_eval.jsonl");
+            if let Ok(bytes) = std::fs::read(&log) {
+                let text = String::from_utf8_lossy(&bytes);
+                row.eval_label = xencode_live_rs::badge::latest_eval_label(&text);
+            }
+        }
         // A session that is gone, or no longer failed, no longer needs remembering.
         self.seen.retain(|id| {
             self.view
@@ -141,7 +155,7 @@ impl Badge {
         }
         let badge = window.bounds();
         let screen = cx.primary_display().map(|d| d.bounds()).unwrap_or(badge);
-        let height = card::height(self.view.rows.len(), self.view.skipped.len());
+        let height = card::height(&self.view.rows, self.view.skipped.len());
         let badge_x = f32::from(badge.origin.x);
         let screen_mid = f32::from(screen.origin.x) + f32::from(screen.size.width) / 2.0;
         // Open towards the middle of the screen, never over the badge.
@@ -189,7 +203,7 @@ impl Badge {
         if let Some(card) = self.card {
             let rows = self.view.rows.clone();
             let skipped = self.view.skipped.clone();
-            let height = card::height(rows.len(), skipped.len());
+            let height = card::height(&rows, skipped.len());
             let _ = card.update(cx, |card, window, cx| {
                 // Grow or shrink with the sessions, so a session that starts
                 // while the card is open is not cut off.

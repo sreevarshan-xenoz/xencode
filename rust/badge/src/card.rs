@@ -8,15 +8,21 @@ pub const WIDTH: f32 = 380.0;
 const ROW_HEIGHT: f32 = 80.0;
 const CHROME: f32 = 60.0;
 const SKIPPED_HEIGHT: f32 = 20.0;
+/// Room for the extra line showing a project's newest graded eval run.
+const EVAL_HEIGHT: f32 = 16.0;
 
 pub struct Card {
     pub rows: Vec<Row>,
     pub skipped: Vec<String>,
 }
 
-/// The card's height for this many rows and unreadable files.
-pub fn height(rows: usize, skipped: usize) -> f32 {
-    CHROME + ROW_HEIGHT * rows.max(1) as f32 + SKIPPED_HEIGHT * skipped as f32
+/// The card's height for these rows and unreadable files. Only a row with an
+/// eval label needs the extra line, so the card does not grow for every session.
+pub fn height(rows: &[Row], skipped: usize) -> f32 {
+    CHROME
+        + ROW_HEIGHT * rows.len().max(1) as f32
+        + SKIPPED_HEIGHT * skipped as f32
+        + EVAL_HEIGHT * rows.iter().filter(|r| r.eval_label.is_some()).count() as f32
 }
 
 fn state_colour(shown: Shown, responding: bool) -> u32 {
@@ -60,37 +66,44 @@ impl Render for Card {
         }
         for row in &self.rows {
             let colour = state_colour(row.shown, row.responding);
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_0p5()
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::BOLD)
-                                    .truncate()
-                                    .child(row.project.clone()),
-                            )
-                            .child(div().text_color(rgb(colour)).child(row.state_words.clone())),
-                    )
-                    .child(div().truncate().text_color(rgb(0xd1d5db)).child(
-                        if row.headline.is_empty() {
-                            "—".to_string()
-                        } else {
-                            row.headline.clone()
-                        },
-                    ))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x9ca3af))
-                            .child(format!("{} · {}", row.model, row.since)),
-                    ),
-            );
+            let mut line = div()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .truncate()
+                                .child(row.project.clone()),
+                        )
+                        .child(div().text_color(rgb(colour)).child(row.state_words.clone())),
+                )
+                .child(div().truncate().text_color(rgb(0xd1d5db)).child(
+                    if row.headline.is_empty() {
+                        "—".to_string()
+                    } else {
+                        row.headline.clone()
+                    },
+                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x9ca3af))
+                        .child(format!("{} · {}", row.model, row.since)),
+                );
+            if let Some(label) = &row.eval_label {
+                line = line.child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x86efac))
+                        .child(label.clone()),
+                );
+            }
+            body = body.child(line);
         }
         for line in &self.skipped {
             body = body.child(
@@ -102,5 +115,38 @@ impl Render for Card {
             );
         }
         body.w(px(WIDTH))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(label: Option<&str>) -> Row {
+        Row {
+            session_id: "s".into(),
+            project: "E:/project".into(),
+            model: "m".into(),
+            state_words: "working".into(),
+            headline: String::new(),
+            since: "1s ago".into(),
+            responding: true,
+            shown: Shown::Working,
+            eval_label: label.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn the_card_grows_only_for_rows_with_an_eval_label() {
+        let plain = height(&[row(None)], 0);
+        assert_eq!(
+            height(&[row(Some("eval 7/8 (88%)"))], 0) - plain,
+            EVAL_HEIGHT
+        );
+        assert_eq!(
+            height(&[row(None), row(Some("eval 7/8 (88%)"))], 0),
+            height(&[row(None), row(None)], 0) + EVAL_HEIGHT
+        );
+        assert_eq!(height(&[row(None), row(None)], 0), plain + ROW_HEIGHT);
     }
 }

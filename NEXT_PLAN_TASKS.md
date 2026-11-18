@@ -30,7 +30,8 @@ Execution rules: depth over breadth; prefer changes that help 4–8B local model
 
 Six parallel reviewers audited the whole repository on 2026-11-17. Every finding
 became one change, one commit naming its plan ID, one branch and one pull request.
-All of them are merged; each commit message describes the fix in plain English.
+All of the audit findings are merged; each commit message describes the fix in
+plain English. Newer entries in the table state their own status.
 
 | ID | Sev | Area | Finding | Status |
 |---|---|---|---|---|
@@ -88,6 +89,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | PI-1 ✅ | LOW | plugin+cli | `plugin update` swaps the installed copy through a dot-prefixed backup named with the process id; a process killed between moving the old copy aside and deleting the backup left that full copy on disk forever, and a later process reusing the id could not rename over it, so the update failed with "directory not empty" | the update now removes leftover `.<name>.old-<digits>` backups for the plugin it is replacing before the swap, and only that exact shape — other dot-prefixed names and other plugins' backups are untouched; real `file://` git tests show the regression failing without the change and passing with it | done; two new plugin-crate tests cover a reused-id collision and a foreign-id orphan, the plugin crate (70 tests) and CLI consumer tests pass, fmt and clippy clean; orphans for plugins that are never updated again are still not collected |
 | OM-7 ✅ | MED | tui | the orchestrator Inbox and the window title rendered only pending approvals and terminal agents needing attention, so a pending question or a ByteBot task waiting for review could be outstanding while neither view showed anything | one pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review and every terminal agent calling for attention; the Inbox renders from that list and `shell::waiting_keys`/`attention_title` count from it, keeping the `+N` approval summary | done; unit tests cover a question with its text, a review task, approvals and calling tiles with the `+N` summary, the empty case and the attention count; crate tests, fmt and clippy pass; no live agent run needed for this state-to-text change |
 | MS-1 ✅ | MED | cli+tui | `xencode mcp serve` was a real stdio MCP server but published only its six tools, so a client could not read a workspace file or obtain a prompt through it | the handshake now declares resources and prompts and the server implements `resources/list`, `resources/read`, `prompts/list` and `prompts/get`; it publishes real workspace files (`AGENTS.md`, `task.md` when present) plus a live configuration summary, renders a `review-diff` prompt from the shipped explain-diff skill, and refuses URIs outside the workspace or using path traversal | done; a real stdio client test drives initialize, both list methods, a byte-for-byte file read, a prompt render and both raw and encoded traversal refusals over the binary's own pipes; the TUI crate (737 tests) and the stdio test (6 tests) pass, fmt and clippy clean |
+| BD-1 ✅ | MED | badge+live | the hover card showed each session's project, state, model and age but none of that project's eval history, so the newest pass rate was invisible without leaving the desktop | the badge reads `<project>/.xencode/cache/task_eval.jsonl` for each session and shows `eval 7/8 (88%)` on that row; a missing log or a run where nothing graded shows no label rather than `0%`, torn lines are skipped and the newest graded run by timestamp wins | done on branch `fix/bd1-badge-eval`; pure-parser tests, GPUI badge workspace tests, clippy and formatting pass; not merged yet |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
@@ -1231,6 +1233,9 @@ workspace gates green.
   loud, failed capture stops the meter, mute reaches the flag the reader thread
   reads, empty capture, and three panel renders at 160×44).
   **733 tests passed.**
+  *(Historical: the voice panel this item built was removed in TD-5 along with
+  seven other rarely used panels. The entry is kept as the record of what J-07
+  shipped; there is no voice panel in the product now.)*
 - [x] J-08 — **Plugin runtime** (2026-09-21): manifests now load.
   `PluginRuntime::load(dir, version)` discovers `plugin.json` /
   `manifest.json`, skips a manifest whose `xencode_version` does not accept this
@@ -2590,7 +2595,10 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
 9. **Voice is record-only.** `voice.rs` is real — `arecord` subprocess (`:115`),
    16 kHz S16_LE WAV, 15 s cap (`:26`), transcription by shelling to a whisper CLI
    on PATH (`:145-157`). **No TTS anywhere** (zero hits for
-   tts/speak/piper/kokoro/sherpa).
+   tts/speak/piper/kokoro/sherpa). *(Historical: this was the state at the
+   2026-11-17 audit. `voice.rs` and the voice panel were removed in TD-5, so no
+   voice panel exists in the product now; the line is kept as part of the
+   original audit record.)*
 10. **Memory has no cross-session retrieval.** `xencode-memory-rs` stores
     session-keyed raw message lists to `~/.xencode/conversation_memory.json`,
     50-message cap with the oldest drained (`lib.rs:9,176-179`); `xencode memory`
