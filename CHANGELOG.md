@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed — release targets (REL-1)
+
+- `REL-1`: drops `aarch64-apple-darwin` from the dist target list because this account cannot provide the required macOS arm64 runner (the job is cancelled before it starts). The release now builds four real targets: two Linux, Intel macOS and x64 Windows. The captured dist-plan fixture and the release-shape test were regenerated to match; Apple Silicon will be re-added when a runner is available.
+
 ### Added — Kaggle connection-string parsing (RG-4)
 - `RG-4`: added `xencode_config_rs::remotes::parse_kaggle_connection`, which turns a private SSH destination (`[user@]host[:port]`) into a `kaggle` profile with the `llama.cpp` runtime. Host parsing is delegated to `parse_destination`, so the existing refusals for an empty value, two `@` signs, port 0, a non-numeric port and `-oProxyCommand=…` keep their wording; a public URL (`http://…`/`https://…`) is refused separately because a public endpoint would expose the model. Tests parse real-shaped Tailscale addresses, check every refusal, and round-trip a saved `remotes/kaggle.json` at mode 0600 through a scratch settings directory. A real CLI test records the same profile with the existing `xencode remote add kaggle <destination>` path and refuses a public URL. Kaggle notebooks have no SSH server; the reverse-tunnel path is parked (2026-10-09, see the `L-14` note in `NEXT_PLAN_TASKS.md`), there is no `kaggle` computer backend, and no live Kaggle verification was performed — the heavy model is unreachable until a private endpoint exists. No notebook template was added: this repository is Rust-only and the reverse-tunnel route is parked.
 ### Added — setup remote route and dry run (RG-3)

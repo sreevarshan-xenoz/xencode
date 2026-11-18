@@ -303,7 +303,6 @@ fn dist_plan_pins_the_verified_release_shape() {
     assert_eq!(
         archives,
         [
-            "xencode-cli-aarch64-apple-darwin.tar.xz",
             "xencode-cli-aarch64-unknown-linux-gnu.tar.xz",
             "xencode-cli-x86_64-apple-darwin.tar.xz",
             "xencode-cli-x86_64-pc-windows-msvc.zip",
