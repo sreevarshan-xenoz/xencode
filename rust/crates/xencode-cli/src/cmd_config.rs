@@ -238,6 +238,18 @@ pub(crate) fn run_config(action: ConfigAction) -> Result<(), String> {
                     }
                     config.remote_base_url = trimmed.to_string();
                 }
+                "bitnet_url" => {
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty()
+                        && !(trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+                    {
+                        return Err(
+                            "bitnet_url must be an http:// or https:// URL, or empty to unset"
+                                .to_string(),
+                        );
+                    }
+                    config.bitnet_url = trimmed.to_string();
+                }
                 // A credential, for any provider that takes one. Stored and never
                 // echoed back. The value may also be `command:<program> <args>`,
                 // which stores the reference and reads the secret from that

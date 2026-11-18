@@ -33,7 +33,9 @@ pub use capabilities::{
     ollama_window_asked, ModelCapabilities,
 };
 pub use compatible::OpenAICompatibleProvider;
-pub use egress::{chain_for, classify, provider_for, url_host, Egress, EgressPolicy, RoutingFacts};
+pub use egress::{
+    chain_for, classify, host_is_local, provider_for, url_host, Egress, EgressPolicy, RoutingFacts,
+};
 pub use tools::{
     advise_tools, ask_user_tool, background_tools, command_tools, debug_tools, file_tools,
     plan_tools, repro_tools, search_tools, skill_tools, web_tools, AgentStep, AgentTurn, ToolCall,
@@ -331,6 +333,13 @@ fn llamacpp_target(model: &str) -> Option<&str> {
         })
 }
 
+/// Extract the inner model identifier if `model` routes to a local BitNet
+/// server (`bitnet:<model>`). bitnet.cpp serves llama.cpp's HTTP API, so the
+/// route reuses the OpenAI-compatible client with no API key.
+fn bitnet_target(model: &str) -> Option<&str> {
+    model.strip_prefix("bitnet:")
+}
+
 /// Extract the inner model identifier if `model` routes to the custom
 /// OpenAI-compatible endpoint (`remote:<model>`).
 fn remote_target(model: &str) -> Option<&str> {
@@ -355,6 +364,13 @@ pub fn routes_to_llamacpp(model: &str) -> bool {
     matches!(llamacpp_target(model), Some(target) if !target.is_empty())
 }
 
+/// True when `model` is served by the local BitNet b1.58 endpoint, so a caller
+/// does not ask Ollama — or a llama.cpp server — about a model neither of them
+/// serves. Mirrors [`routes_to_llamacpp`] for the other local HTTP server.
+pub fn routes_to_bitnet(model: &str) -> bool {
+    matches!(bitnet_target(model), Some(target) if !target.is_empty())
+}
+
 /// True when `model` is served by the local Ollama, so asking Ollama anything
 /// about it — what it can do, how big a window its weights hold — is worth a
 /// request at all.
@@ -368,6 +384,7 @@ pub fn routes_to_llamacpp(model: &str) -> bool {
 /// involved.
 pub fn routes_to_ollama(model: &str) -> bool {
     !routes_to_llamacpp(model)
+        && !routes_to_bitnet(model)
         && remote_target(model).is_none()
         && nvidia_target(model).is_none()
         && !model.starts_with("anthropic:")
@@ -393,10 +410,10 @@ fn display_url(url: &str) -> String {
 
 /// ProviderManager abstracts over local and cloud models.
 ///
-/// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud),
-/// Gemini (cloud), Anthropic (cloud), and any OpenAI-compatible `/chat/completions`
-/// server the user pointed at (`remote:`, which is also how a Colab GPU reaches
-/// the laptop).
+/// Supports Ollama (local), llama.cpp (local), BitNet via bitnet.cpp (local,
+/// loopback only), OpenRouter (cloud), Qwen (cloud), Gemini (cloud), Anthropic
+/// (cloud), and any OpenAI-compatible `/chat/completions` server the user
+/// pointed at (`remote:`, which is also how a Colab GPU reaches the laptop).
 ///
 /// Features:
 /// - Automatic provider routing based on model prefix
@@ -412,6 +429,10 @@ pub struct ProviderManager {
     /// API root of the `remote:` endpoint; `None` until one is configured.
     remote_base_url: Option<String>,
     remote_api_key: Option<String>,
+    /// API root of the local `bitnet:` endpoint; `None` until one is
+    /// configured. Kept separate from `remote:` so a loopback-only BitNet
+    /// server cannot inherit a cloud endpoint's URL or key.
+    bitnet_base_url: Option<String>,
     /// API root of the `nvidia:` endpoint; `Some` once an NVIDIA key is
     /// configured (the URL itself is fixed — see [`NVIDIA_BASE_URL`]).
     nvidia_base_url: Option<String>,
@@ -454,6 +475,7 @@ impl ProviderManager {
             anthropic_api_key,
             remote_base_url: None,
             remote_api_key: None,
+            bitnet_base_url: None,
             nvidia_base_url: None,
             nvidia_api_key: None,
             retry_config: RetryConfig::default(),
@@ -535,6 +557,18 @@ impl ProviderManager {
         self
     }
 
+    /// Point the `bitnet:` prefix at a local BitNet b1.58 server. An empty or
+    /// whitespace `base_url` leaves the route unconfigured, so a `bitnet:`
+    /// request reports that instead of dialling a guessed host. No API key is
+    /// accepted: bitnet.cpp serves a local llama.cpp HTTP API that needs none.
+    pub fn with_bitnet(mut self, base_url: &str) -> Self {
+        let base_url = base_url.trim();
+        if !base_url.is_empty() {
+            self.bitnet_base_url = Some(base_url.to_string());
+        }
+        self
+    }
+
     /// Point the `nvidia:` prefix at NVIDIA NIM. The key is the whole
     /// configuration — the URL is fixed — so an `nvidia:` request without one
     /// reports that instead of dialling anonymously.
@@ -593,6 +627,7 @@ impl ProviderManager {
     /// - `google_gemini:` → Google Gemini API
     /// - `nvidia:` → NVIDIA NIM (fixed OpenAI-compatible endpoint)
     /// - `llamacpp:` / `llama.cpp:` / `llama:` → llama.cpp server
+    /// - `bitnet:` → the configured local BitNet (bitnet.cpp) server
     /// - `remote:` → the configured OpenAI-compatible endpoint
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
@@ -761,6 +796,30 @@ impl ProviderManager {
         }
     }
 
+    /// The configured BitNet endpoint, or a message saying how to configure
+    /// it. Unlike `remote:`, a host that is not local is refused instead of
+    /// dialled: BitNet is the weak-hardware local fallback, not a cloud route,
+    /// and this slice does not support talking to a remote BitNet server.
+    fn bitnet_provider(&self) -> Result<compatible::OpenAICompatibleProvider, ProviderError> {
+        let base_url = self.bitnet_base_url.as_deref().ok_or_else(|| {
+            ProviderError::api_message(
+                "No BitNet endpoint configured — run `xencode config set bitnet_url <url>` \
+                 with the URL of a local bitnet.cpp server, then use `bitnet:<model>`"
+                    .to_string(),
+            )
+        })?;
+        if url_host(base_url).is_none_or(|host| !host_is_local(host)) {
+            return Err(ProviderError::Egress(
+                "The configured BitNet endpoint is not on this machine — only loopback hosts \
+                 such as http://127.0.0.1:8080 are supported in this slice. Set bitnet_url to \
+                 a local bitnet.cpp server"
+                    .to_string(),
+            ));
+        }
+        Ok(compatible::OpenAICompatibleProvider::new(base_url, None)
+            .with_recorder(self.traffic.clone()))
+    }
+
     /// Inner generate without retry wrapping (used by retry logic).
     async fn generate_inner(
         &self,
@@ -813,6 +872,15 @@ impl ProviderManager {
             return self.generate_llamacpp(inner_model, messages, options).await;
         }
 
+        // Local BitNet server (models prefixed with "bitnet:"). bitnet.cpp
+        // serves llama.cpp's HTTP API, so the OpenAI-compatible client with no
+        // key is the whole transport.
+        if let Some(inner_model) = bitnet_target(model) {
+            let provider = self.bitnet_provider()?;
+            let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
+            return provider.generate(inner_model, &rendered, "Bitnet").await;
+        }
+
         // Custom OpenAI-compatible endpoint (models prefixed with "remote:")
         if let Some(inner_model) = remote_target(model) {
             let provider = self.remote_provider()?;
@@ -857,6 +925,7 @@ impl ProviderManager {
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
     /// - `nvidia:` → NVIDIA NIM
+    /// - `bitnet:` → the configured local BitNet (bitnet.cpp) server
     /// - `remote:` → the configured OpenAI-compatible endpoint
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
@@ -1097,6 +1166,16 @@ impl ProviderManager {
                 .await;
         }
 
+        // Local BitNet server, with full tool-calling support (bitnet.cpp
+        // serves llama.cpp's OpenAI-compatible HTTP API).
+        if let Some(inner_model) = bitnet_target(model) {
+            let provider = self.bitnet_provider()?;
+            let rendered = tools::render_history(messages, history, tools::HistoryStyle::OpenAI);
+            return provider
+                .generate_stream_with_tools(inner_model, &rendered, tools, "Bitnet", callback)
+                .await;
+        }
+
         // Custom OpenAI-compatible endpoint, with full tool-calling support
         if let Some(inner_model) = remote_target(model) {
             let provider = self.remote_provider()?;
@@ -1181,6 +1260,17 @@ impl ProviderManager {
             let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
             let step = provider
                 .generate_stream_with_tools(inner_model, &rendered, &[], "Nvidia", callback)
+                .await?;
+            return Ok(step.text);
+        }
+
+        // Local BitNet server (bitnet.cpp speaks the same HTTP API as
+        // llama.cpp, so its stream carries OpenAI-compatible tool calls).
+        if let Some(inner_model) = bitnet_target(model) {
+            let provider = self.bitnet_provider()?;
+            let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
+            let step = provider
+                .generate_stream_with_tools(inner_model, &rendered, &[], "Bitnet", callback)
                 .await?;
             return Ok(step.text);
         }
@@ -2147,6 +2237,39 @@ mod tests {
         assert!(!routes_to_llamacpp("llama3.1:8b"));
         assert!(!routes_to_llamacpp("llama:"));
         assert!(!routes_to_llamacpp("qwen2.5:7b"));
+    }
+
+    #[test]
+    fn bitnet_target_matches_only_the_bitnet_prefix() {
+        assert_eq!(
+            bitnet_target("bitnet:BitNet-b1.58-2B"),
+            Some("BitNet-b1.58-2B")
+        );
+        assert_eq!(bitnet_target("bitnet:qwen3:4b"), Some("qwen3:4b"));
+        assert_eq!(bitnet_target("bitnet:"), Some(""));
+        assert_eq!(bitnet_target("llamacpp:m"), None);
+        assert_eq!(bitnet_target("bitnet.cpp:m"), None);
+        assert_eq!(bitnet_target("remote:m"), None);
+    }
+
+    #[test]
+    fn bitnet_is_a_local_route_that_is_never_asked_of_ollama() {
+        assert!(routes_to_bitnet("bitnet:m"));
+        assert!(!routes_to_bitnet("bitnet:"));
+        assert!(!routes_to_bitnet("qwen2.5:7b"));
+        assert!(!routes_to_ollama("bitnet:m"));
+        assert!(routes_to_ollama("qwen2.5:7b"));
+
+        let manager = ProviderManager::new(
+            OllamaClient::new("http://127.0.0.1:1", 1),
+            None,
+            None,
+            None,
+            None,
+        )
+        .with_bitnet("http://127.0.0.1:8080/v1");
+        assert_eq!(manager.egress_of("bitnet:m"), Egress::Local);
+        assert_eq!(provider_for("bitnet:m", manager.routing_facts()), "bitnet");
     }
 
     #[test]

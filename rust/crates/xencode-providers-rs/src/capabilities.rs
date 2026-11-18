@@ -342,6 +342,38 @@ mod tests {
     }
 
     #[test]
+    fn bitnet_is_a_local_tool_capable_route_with_no_static_window() {
+        assert_eq!(
+            capabilities_for("bitnet:BitNet-b1.58-2B").context_window,
+            None
+        );
+        let caps = capabilities_for("bitnet:m");
+        assert!(caps.supports_tools);
+        assert!(caps.supports_streaming);
+        assert!(!caps.supports_vision);
+        // A window measured on a different server is never borrowed for a
+        // BitNet route — the weights and the process that serves them differ.
+        assert_eq!(effective_context_window("bitnet:m", Some(8192)), None);
+    }
+
+    #[test]
+    fn reports_from_other_servers_do_not_describe_a_bitnet_model() {
+        let caps = capabilities_with_report(
+            "bitnet:m",
+            Some(&llamacpp_report(
+                Some(true),
+                Some("<__media_vISIONMARKERcaptured__>"),
+            )),
+            Some(true),
+        );
+        assert!(
+            !caps.supports_vision,
+            "a /props answer describes the llama.cpp process, not the BitNet one"
+        );
+        assert!(caps.media_marker.is_none());
+    }
+
+    #[test]
     fn streaming_everywhere_vision_nowhere() {
         for m in [
             "llamacpp:qwen3-4b",

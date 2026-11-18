@@ -506,6 +506,7 @@ pub(crate) async fn run_query_once(
         &config.remote_base_url,
         api_key(&config, SecretProvider::Remote),
     )
+    .with_bitnet(&config.bitnet_url)
     .with_nvidia(api_key(&config, SecretProvider::Nvidia))
     .with_request_timeout(config.response_timeout)
     .with_ollama_request(ollama_request)

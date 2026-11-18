@@ -85,6 +85,7 @@ pub(crate) async fn run_git_commit_message(
         &config.remote_base_url,
         api_key(&config, SecretProvider::Remote),
     )
+    .with_bitnet(&config.bitnet_url)
     .with_nvidia(api_key(&config, SecretProvider::Nvidia))
     .with_request_timeout(config.response_timeout)
     .with_egress_policy(EgressPolicy::new(config.allow_cloud_models));
