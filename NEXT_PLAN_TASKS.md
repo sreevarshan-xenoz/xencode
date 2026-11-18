@@ -49,6 +49,27 @@ Ordered slices: **BP-1** (BitNet provider), **HR-1** (hardware/shape router),
 this repo is Rust-only. Its role is served by a user-configured stronger model
 through the existing remote/OpenAI-compatible provider.
 
+## Free remote GPU phase (2026-11-18)
+
+Goal: a user with only a Google account and no local GPU can run one command and
+get a working model, with weights surviving across sessions. Existing: `xencode
+colab` preflight/up/status/down, SSH tunnel to 127.0.0.1:18000, provider
+integration; verified on a free T4 in Milestone K. Missing: Drive-backed model
+cache, session-lifetime UX, unified `setup --remote`/`remote up`, Kaggle backend.
+
+Ordered slices — all new work must be locally verifiable; live Colab/Kaggle/Drive
+runs cannot be faked here and stay blocked:
+
+| ID | Scope | Done-when (local) |
+|---|---|---|
+| RG-1 | Google Drive model + binary cache plan for Colab | real Drive-path decision logic tested against a local fake mount; live mount blocked |
+| RG-2 | `colab up --model` advice + session lifetime/status | pure model-for-T4 advice and remaining-time reporting tested; live VM blocked |
+| RG-3 | Unified `setup --remote` / `remote up|status|down` | CLI parse/routing tests with real backend state; live backends blocked |
+| RG-4 | Kaggle backend + notebook template + private dataset cache | notebook template and connection-string handling tested locally; live Kaggle blocked |
+
+Rules: keep the no-public-URL tunnel posture; never invent a live verification;
+prefer Colab, then Kaggle; local-first egress still applies.
+
 ## Audit 2026-11-17 — findings and fixes (`AU-*`)
 
 Six parallel reviewers audited the whole repository on 2026-11-17. Every finding
@@ -121,6 +142,7 @@ plain English. Newer entries in the table state their own status.
 | BP-1 ✅ | MED | providers+config+cli | the hybrid stack's weak-hardware role had no route: a `bitnet:` model id fell through to Ollama, so a local BitNet b1.58 server could not be asked through xencode | done-when: a `bitnet:` model reaches a loopback BitNet server through the existing OpenAI-compatible client with no API key in the plain, streaming and tool-call routers; `bitnet_url` is set by `xencode config set bitnet_url <url>` with the same http(s) validation as `remote_url` and round-trips through config save/load; the route is local for egress policy even when cloud models are denied, and an unset or non-local URL is refused with a message naming the key instead of falling through to Ollama. Verified with a real loopback HTTP server asserting the POST path, exact request body, reply text, SSE deltas and tool-call shape, plus 252 xencode-providers-rs tests, 90 xencode-config-rs tests, 94 CLI binary tests and 2 real-binary config tests; fmt and clippy clean | a real BitNet generation is NOT verified here (no bitnet.cpp runtime, 2 GB GPU): the route and its HTTP contract are proven, but no model output was measured, and TUI wiring is left to a follow-up |
 | HR-1 ✅ | MED | cli+tui+docs | `models advice`, `setup` and the default model a turn used each measured capacity and matched the advice table on their own, so the three answers could name different tiers; nothing named the rule that kept a default local or let a profile take a turn | a pure decision layer takes already-measured facts (memory, devices, optional GGUF shape and window), an advice table, the config and a task shape and returns the model with its reason; the local GGUF from the largest fitting tier is the baseline, a saved bugfix profile overrides by the query path's own rule including its refusal to swap a llama.cpp server, and a cloud or remote profile is used only with `allow_cloud_models=true` with the refusal named in the reason | done; pure tests use captured probe readings and a real override advice file and check monotonic capacity-to-tier, local-only default, cloud refusal until egress is allowed, and the bugfix override and llama.cpp-swap refusal; a live structural test checks probe invariants without naming a best model; `models advice` output keeps its meaning; the three named crate suites, fmt and clippy pass; no claim about model quality or eval pass rates (needs a GPU-backed run), and BitNet fallback belongs to a separate plan item |
 | DT-1 ✅ | MED | context+tui+cli+docs | a small model that keeps failing the same edit had no recorded signal and no way to hand the turn to a stronger model; AirLLM (Python) cannot be added to this Rust workspace | a pure helper counts failed `edit_file`/`write_file` calls plus no-change notes and writes `failed_edit_count` and `escalation_recommended` (threshold 2) to `turns.jsonl` and eval `results.jsonl`; the agent announces the signal like a provider fallback and, with `deep_think_model` set, routes only the next turn to that model; `xencode query --deep-think <model>` is the explicit one-turn override through the existing `--model`/provider path, and cloud models still need `allow_cloud_models` | done; pure trace tests with real fixtures, a loopback OpenAI-compatible server test proving the requested model id reaches `/chat/completions` and the marker reaches both JSONL files, and an egress test refusing a cloud deep-think model when cloud is off; fmt and clippy clean — AirLLM cannot be added, and a real 70B improvement is blocked/unverified here (2 GB GPU, no local 70B server) |
+| RG-0 ✅ | LOW | docs | the free-remote-GPU completion plan existed only in conversation | recorded as a phase with locally verifiable done-whens and explicit live-verification blockers |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
