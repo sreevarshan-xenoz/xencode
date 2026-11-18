@@ -22,6 +22,7 @@ pub mod cochange;
 pub mod compact;
 pub mod context;
 pub mod conversation;
+pub mod cooccurrence;
 pub mod crate_graph;
 pub mod doctor;
 pub mod documents;
@@ -112,6 +113,7 @@ pub use context::{
     HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
+pub use cooccurrence::{CooccurrenceIndex, DEFAULT_MAX_TERMS, DEFAULT_PER_TERM, MIN_CO_DF};
 pub use crate_graph::{cargo_metadata, crate_of_file, parse_crate_graph, CrateGraph, EdgeKind};
 pub use doctor::{
     check_cache_writable, check_config, check_config_version, check_dir_size, check_free_disk,
@@ -124,7 +126,9 @@ pub use documents::{
     MAX_DOC_BYTES, MAX_DOC_CHARS,
 };
 pub use editing::{replace_symbol_body, EditFailure};
-pub use embed::{hybrid_select, pseudo_document, tokenize, Bm25, LEXICAL_WEIGHT};
+pub use embed::{
+    hybrid_select, hybrid_select_terms, pseudo_document, tokenize, Bm25, LEXICAL_WEIGHT,
+};
 pub use eval::{
     append_eval_run, comparable_previous_eval_run, compare_shapes, default_gold, eval_log_path,
     evaluate, evaluate_with, gold_by_shape, gold_from_disk, previous_eval_run, read_eval_runs,
