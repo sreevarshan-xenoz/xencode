@@ -1,15 +1,17 @@
 //! Incremental snapshot refresh (Milestone F, F1-01).
 //!
 //! `/init` writes the full symbol/dep snapshot; this keeps it current when a
-//! single already-indexed Rust file changes on disk — the watcher's normal
-//! diet. The graph is rebuilt wholesale from the updated symbol map:
-//! `build_graph` is cheap and deterministic, and piecemeal edge surgery could
-//! silently drift from what `/init` would produce.
+//! single already-indexed Rust or TypeScript file changes on disk — the
+//! watcher's normal diet. The graph is rebuilt wholesale from the updated
+//! symbol map: `build_graph` is cheap and deterministic, and piecemeal edge
+//! surgery could silently drift from what `/init` would produce. Only Rust
+//! files feed the graph, so a changed TypeScript file refreshes its symbols
+//! without becoming an edge in a resolver that reads Rust module paths.
 //!
 //! A path missing from the snapshot is a deliberate no-op: brand-new files
-//! (and everything non-Rust) still need `/init` to enter the index.
+//! (and everything without a symbol tier) still need `/init` to enter the index.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::index::{
@@ -17,8 +19,11 @@ use crate::index::{
     FilesIndex, Manifest,
 };
 use crate::init::{ContextError, XENCODE_DIR};
-use crate::scanner::{count_loc, language_has_semantic_tier};
+use crate::scanner::{
+    count_loc, detect_language, language_has_semantic_tier, language_has_symbol_tier, Language,
+};
 use crate::symbols::{build_graph, extract_rust_symbols, DepEdge, PerFileSymbols};
+use crate::tssymbols::extract_typescript_symbols;
 
 /// Outcome of [`refresh_rust_file`]: either the snapshot changed and carries
 /// the new graph, or there was nothing to do.
@@ -26,14 +31,15 @@ use crate::symbols::{build_graph, extract_rust_symbols, DepEdge, PerFileSymbols}
 pub enum RefreshOutcome {
     /// Symbols/deps/index/manifest were rewritten; `graph` is the new edge set.
     Updated(Vec<DepEdge>),
-    /// No snapshot yet, unknown path, non-Rust or not an indexed file.
+    /// No snapshot yet, unknown path, file without a symbol tier, or not an
+    /// indexed file.
     NoOp,
 }
 
-/// Refresh the `.xencode` snapshot of `root` after one Rust file changed on
-/// disk. `rel_path` may be repo-relative (the watcher's format) or absolute
-/// inside `root`. Removal (file no longer readable) drops the index entry,
-/// symbol record and mtime alongside the edges.
+/// Refresh the `.xencode` snapshot of `root` after one Rust or TypeScript file
+/// changed on disk. `rel_path` may be repo-relative (the watcher's format) or
+/// absolute inside `root`. Removal (file no longer readable) drops the index
+/// entry, symbol record and mtime alongside the edges.
 pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, ContextError> {
     let root = root.canonicalize().map_err(|source| ContextError::Io {
         path: root.to_path_buf(),
@@ -51,7 +57,7 @@ pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, 
     let indexed = index
         .files
         .iter()
-        .any(|e| e.path == rel && language_has_semantic_tier(&e.language));
+        .any(|e| e.path == rel && language_has_symbol_tier(&e.language));
     if !indexed {
         return Ok(RefreshOutcome::NoOp);
     }
@@ -65,7 +71,12 @@ pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, 
     let full = root.join(&rel);
     match std::fs::read_to_string(&full) {
         Ok(content) => {
-            symbols.insert(rel.clone(), extract_rust_symbols(&content));
+            let inventory = if detect_language(&full) == Language::TypeScript {
+                extract_typescript_symbols(&content)
+            } else {
+                extract_rust_symbols(&content)
+            };
+            symbols.insert(rel.clone(), inventory);
             if let Some(entry) = index.files.iter_mut().find(|e| e.path == rel) {
                 entry.size = content.len() as u64;
                 entry.loc = count_loc(&full);
@@ -91,7 +102,13 @@ pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, 
         .filter(|e| language_has_semantic_tier(&e.language))
         .map(|e| e.path.clone())
         .collect();
-    let graph = build_graph(&rust_files, &symbols);
+    let rust_paths: BTreeSet<&str> = rust_files.iter().map(String::as_str).collect();
+    let rust_symbols: BTreeMap<String, PerFileSymbols> = symbols
+        .iter()
+        .filter(|(path, _)| rust_paths.contains(path.as_str()))
+        .map(|(path, sym)| (path.clone(), sym.clone()))
+        .collect();
+    let graph = build_graph(&rust_files, &rust_symbols);
 
     write_atomic(&file_index_path(&xencode), &index)?;
     write_atomic(&symbols_json_path(&xencode), &symbols)?;
