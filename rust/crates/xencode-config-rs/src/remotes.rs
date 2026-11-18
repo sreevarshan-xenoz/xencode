@@ -253,6 +253,40 @@ fn refuse_token(token: &str, what: &str) -> String {
     )
 }
 
+/// The profile behind `xencode remote add kaggle <private-ssh-destination>`.
+///
+/// Kaggle notebooks have no SSH server. The only path that ever worked here was
+/// a reverse tunnel to a private Tailscale address, and that path is parked
+/// (see the Kaggle note in `NEXT_PLAN_TASKS.md`, parked 2026-10-09). So this
+/// accepts exactly the shape `ssh` accepts — `[user@]host[:port]`, delegated to
+/// [`parse_destination`] so the refusal wording cannot drift — and refuses
+/// anything shaped like a public URL. Nothing here opens a socket or proves the
+/// address is reachable; that needs a private endpoint that does not exist yet.
+pub fn parse_kaggle_connection(input: &str) -> Result<RemoteProfile, String> {
+    let spec = input.trim();
+    if spec.contains("://") {
+        return Err(
+            "a Kaggle destination is a private SSH address, not a URL: Kaggle notebooks have no SSH \
+             server, and a public URL would put the model where anyone who could reach it can use it. \
+             Give `[user@]host[:port]` at a private address (a Tailscale IP or MagicDNS name), or an \
+             entry in `~/.ssh/config`. The reverse-tunnel path is parked; see the Kaggle note in \
+             NEXT_PLAN_TASKS.md."
+                .to_string(),
+        );
+    }
+    let dest = parse_destination(spec).map_err(|problem| problem.0)?;
+    Ok(RemoteProfile {
+        name: "kaggle".to_string(),
+        host: dest.host,
+        user: dest.user,
+        port: dest.port.unwrap_or(22),
+        runtime: "llama.cpp".to_string(),
+        model: None,
+        local_port: DEFAULT_LOCAL_PORT,
+        remote_port: 0,
+    })
+}
+
 /// The runtime, checked against [`RUNTIMES`] rather than corrected. A typo here
 /// is a bootstrap script that installs the wrong thing on somebody's machine.
 pub fn validate_runtime(runtime: &str) -> Result<(), RemoteError> {
@@ -566,6 +600,103 @@ mod tests {
                 port: None,
             }
         );
+    }
+
+    #[test]
+    fn a_kaggle_connection_is_a_private_ssh_destination() {
+        // These are the real shapes a private endpoint would hand a person:
+        // a Tailscale CGNAT address, a MagicDNS name, and a bare address.
+        let cases = [
+            ("root@100.116.188.53:22", Some("root"), "100.116.188.53", 22),
+            (
+                "work@gpu-abc123.ts.net:2222",
+                Some("work"),
+                "gpu-abc123.ts.net",
+                2222,
+            ),
+            ("100.116.188.53", None, "100.116.188.53", 22),
+        ];
+        for (input, user, host, port) in cases {
+            let profile = parse_kaggle_connection(input)
+                .unwrap_or_else(|problem| panic!("`{input}` should parse: {problem}"));
+            assert_eq!(profile.name, "kaggle", "`{input}` got the wrong name");
+            assert_eq!(
+                profile.user.as_deref(),
+                user,
+                "`{input}` got the wrong user"
+            );
+            assert_eq!(profile.host, host, "`{input}` got the wrong host");
+            assert_eq!(profile.port, port, "`{input}` got the wrong port");
+            assert_eq!(
+                profile.runtime, "llama.cpp",
+                "`{input}` got the wrong runtime"
+            );
+            assert_eq!(profile.local_port, DEFAULT_LOCAL_PORT);
+            assert_eq!(profile.remote_port, 0);
+            assert!(profile.model.is_none());
+        }
+    }
+
+    #[test]
+    fn a_kaggle_connection_refuses_unsafe_and_public_inputs() {
+        let refused = [
+            "",                              // no destination
+            "two@@gpu.ts.net",               // two `@` signs
+            "root@gpu.ts.net:0",             // port 0
+            "root@gpu.ts.net:notaport",      // non-numeric port
+            "-oProxyCommand=touch /tmp/pwn", // an option aimed at ssh
+            "http://100.116.188.53:8080",    // a public URL
+            "https://gpu.example.com",       // another public URL
+        ];
+        for spec in refused {
+            let error = parse_kaggle_connection(spec)
+                .expect_err(&format!("`{spec}` should be refused before it reaches ssh"));
+            assert!(!error.is_empty(), "`{spec}` was refused with no sentence");
+            if spec.contains("://") {
+                assert!(
+                    error.contains("not a URL"),
+                    "a public URL was not named as such: {error}"
+                );
+            }
+        }
+        // The shape errors keep the wording parse_destination already gives.
+        let empty = parse_kaggle_connection("").unwrap_err();
+        assert!(empty.contains("a host is needed"), "{empty}");
+        let two_at = parse_kaggle_connection("two@@gpu.ts.net").unwrap_err();
+        assert!(two_at.contains("two `@` signs"), "{two_at}");
+        let zero = parse_kaggle_connection("root@gpu.ts.net:0").unwrap_err();
+        assert!(zero.contains("port 0"), "{zero}");
+        let bad_port = parse_kaggle_connection("root@gpu.ts.net:notaport").unwrap_err();
+        assert!(bad_port.contains("is not a port number"), "{bad_port}");
+        let option = parse_kaggle_connection("-oProxyCommand=touch /tmp/pwn").unwrap_err();
+        assert!(
+            option.contains("is not a host xencode will hand to `ssh`"),
+            "{option}"
+        );
+    }
+
+    #[test]
+    fn a_kaggle_connection_round_trips_into_a_private_profile_file() {
+        with_scratch(|_| {
+            let profile = parse_kaggle_connection("root@100.116.188.53:22").unwrap();
+            let path = save(&profile, false).unwrap();
+            assert!(
+                path.ends_with("remotes/kaggle.json"),
+                "unexpected path {path:?}"
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(
+                    mode, 0o600,
+                    "a Kaggle profile is world-readable at {mode:o}"
+                );
+            }
+            let loaded = load("kaggle").unwrap().expect("the profile was saved");
+            assert_eq!(loaded, profile);
+            assert_eq!(loaded.destination(), "root@100.116.188.53");
+        });
     }
 
     #[test]

@@ -244,6 +244,68 @@ fn remote_add_refuses_unsafe_inputs() {
 }
 
 #[test]
+fn remote_add_kaggle_takes_a_private_ssh_destination() {
+    // The existing `remote add <name> <host>` path already parses
+    // `[user@]host[:port]`, so a Kaggle profile needs no dedicated command.
+    let dir = temp_dir("kaggle");
+    let out = xencode(&dir, &["remote", "add", "kaggle", "root@100.116.188.53:22"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Recorded remote profile `kaggle` in"),
+        "{stdout}"
+    );
+
+    let profile_file = dir.join("remotes/kaggle.json");
+    assert!(
+        profile_file.exists(),
+        "the profile was not stored in remotes/kaggle.json"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&profile_file)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "the Kaggle profile must be mode 0600, was {mode:o}"
+        );
+    }
+
+    let out = xencode(&dir, &["remote", "show", "kaggle"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("destination: root@100.116.188.53"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("ssh port:    22"), "{stdout}");
+    assert!(stdout.contains("runtime:     llama.cpp"), "{stdout}");
+
+    // A public URL is refused: Kaggle has no SSH server and a public endpoint
+    // would expose the model instead of keeping it on a private address.
+    let out = xencode(
+        &dir,
+        &["remote", "add", "kaggle-url", "http://gpu.example.com:8080"],
+    );
+    assert!(!out.status.success(), "a public URL was accepted");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("is not a host xencode will hand to `ssh`"),
+        "the URL was not refused as a host: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn remote_list_reports_unreadable_profile_without_crashing() {
     let dir = temp_dir("unreadable");
     xencode(&dir, &["remote", "add", "valid", "work@box:22"]);
