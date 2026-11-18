@@ -791,7 +791,10 @@ flowchart TD
   bridge: no public URL, nothing listenable from outside your machine.
   Free-tier VMs are reaped after 12 hours — `xencode colab status` says so and
   `xencode colab up --reconnect` rebuilds the bridge; `xencode colab down`
-  releases the VM, which you should always run when finished.
+  releases the VM, which you should always run when finished. Reusing weights
+  from a Google Drive cache is planned plumbing: the bootstrap can detect and
+  link cached GGUFs when that directory exists, but no live Drive mount was
+  used to verify it, and `drive`/`gcs` weights sources are still refused.
 - **No Anthropic key field exists yet.** `xencode-providers-rs` has an
   Anthropic client, but neither `ApiKeys` nor the app passes an Anthropic key,
   so an `anthropic:…` model always fails with *"Anthropic API key not

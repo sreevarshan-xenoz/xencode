@@ -2513,6 +2513,15 @@ xencode colab up --quant Q6_K         # which GGUF quant to serve (default Q4_K_
 xencode colab up --dry-run            # what would start and what config.json would gain
 ```
 
+Drive-backed weight reuse is **planned plumbing, not live-verified**: the
+generated bootstrap checks
+`/content/drive/MyDrive/xencode-models/<model>/<quant>/<build>/` and links any
+non-empty GGUF found there into the runtime directory under its original name
+before downloading the rest. A bare Colab VM does not mount Drive, so the check
+stays dormant unless that directory really exists; no live mount was available
+to verify the reuse end to end, and `colab_weights_source=drive` or `gcs` is
+still refused at bring-up. Keep using `--weights hf` today.
+
 `--dry-run` stops before anything happens: no preflight (which would create the
 SSH keypair), no session, no forward, no state file, no config write. It prints
 the resolved session, runtime, GPU, model, weights source, quant, and the ports,
