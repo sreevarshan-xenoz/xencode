@@ -33,11 +33,17 @@ reads that folder every second and shows the most urgent state:
 | Green `✓` | A session finished in the last minute |
 | Red `!` | A session failed; it stops showing once you have hovered over it |
 | Small grey dot on the logo | A session stopped sending its heartbeat (it may have been closed or crashed) |
+| `eval 7/8 (88%)` on a session row | That project's newest eval run that graded at least one case; a project with no graded result has no label rather than `0%` |
 
 Hover over the badge for a card with one row per session: project, state in
-words, model, what it is doing, and how long ago that changed. Drag the badge
-to move it; the place is remembered in `badge.json` in the settings directory.
-Right-click it to close it.
+words, model, what it is doing, and how long ago that changed. When the project
+has an eval log at `<project>/.xencode/cache/task_eval.jsonl`, the row also shows
+its newest graded run as `eval 7/8 (88%)`: passes over graded cases, with the
+percentage rounded to the nearest whole number. A missing log, a torn final
+write, or a run where nothing graded leaves that row unlabelled — the card never
+claims `0%`. The card grows by one line only for rows that have a label.
+Drag the badge to move it; the place is remembered in `badge.json` in the
+settings directory. Right-click it to close it.
 
 ## Platforms
 

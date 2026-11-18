@@ -52,6 +52,17 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ### 📦 Icebox / Long-Term Vision
 *Great ideas saved for later to maintain laser focus.*
+- **Voice output (text-to-speech)** — input is real since J-07: the panel records
+  through `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a
+  WAV, and transcribes with a whisper CLI when one is installed. Nothing speaks,
+  so the panel has no "speaking" state. *(Historical: the voice panel described
+  here was removed in TD-5 along with seven other rarely used panels. This entry
+  is kept as a record of why text-to-speech was parked; there is no voice panel
+  in the product now.)*
+- **Voice output (text-to-speech)** — input is real since J-07: the panel records
+  through `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a
+  WAV, and transcribes with a whisper CLI when one is installed. Nothing speaks,
+  so the panel has no "speaking" state
 - **Voice output (text-to-speech)** — historically parked as N-5; now a small
   real slice: `xencode speak <text>` drives a local TTS program (`espeak-ng` on
   Linux, `say` on macOS, PowerShell `System.Speech` on Windows, or

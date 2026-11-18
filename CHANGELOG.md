@@ -23,8 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added — MCP resources and prompts (MS-1)
 
 - `MS-1`: `xencode mcp serve` now advertises and serves MCP resources and prompts alongside its six tools. `resources/list` publishes `AGENTS.md` and `task.md` when those files exist in the served workspace, plus a live `xencode://config/summary` built from the running server's own version, workspace and launch policy. `resources/read` returns the real bytes of a workspace file (base64 for non-UTF-8 bytes) and refuses a URI that leaves the workspace, including percent-encoded `..` traversal, with a clear JSON-RPC error. `prompts/list` and `prompts/get` serve a `review-diff` prompt rendered from the explain-diff skill template shipped in this repository around the diff the caller supplied. The handshake now declares the resources and prompts capabilities, and a real stdio client test drives initialize, both list methods, a byte-for-byte file read, a prompt render and an out-of-workspace refusal over the binary's own pipes.
+### Added — eval result on the badge hover card (BD-1)
+- `BD-1`: the floating badge's hover card now shows each session's newest graded
+  eval run, read from that project's `.xencode/cache/task_eval.jsonl`, as
+  `eval 7/8 (88%)` — passed cases over graded cases, with a rounded percentage.
+  A project with no log, or with no run that graded anything, has no label at
+  all rather than `0%`; torn final writes and malformed rows are skipped, and
+  the label always comes from the newest graded run by timestamp. The card grows
+  by one line only for rows that carry a label. The pure parser in
+  `xencode-live-rs` is covered by tests for a torn tail, an ungraded newest row
+  and out-of-order timestamps; the GPUI badge workspace tests, clippy and
+  formatting pass on Linux.
 ### Added — local text-to-speech output (VO-1)
-
 - `VO-1`: `xencode speak <text>` speaks text aloud through a real local program.
   The command is taken from `XENCODE_TTS_CMD`, otherwise `espeak-ng` on Linux,
   `say` on macOS or a fixed PowerShell `System.Speech` argument list on Windows.

@@ -30,7 +30,8 @@ Execution rules: depth over breadth; prefer changes that help 4–8B local model
 
 Six parallel reviewers audited the whole repository on 2026-11-17. Every finding
 became one change, one commit naming its plan ID, one branch and one pull request.
-All of them are merged; each commit message describes the fix in plain English.
+All of the audit findings are merged; each commit message describes the fix in
+plain English. Newer entries in the table state their own status.
 
 | ID | Sev | Area | Finding | Status |
 |---|---|---|---|---|
@@ -88,6 +89,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | PI-1 ✅ | LOW | plugin+cli | `plugin update` swaps the installed copy through a dot-prefixed backup named with the process id; a process killed between moving the old copy aside and deleting the backup left that full copy on disk forever, and a later process reusing the id could not rename over it, so the update failed with "directory not empty" | the update now removes leftover `.<name>.old-<digits>` backups for the plugin it is replacing before the swap, and only that exact shape — other dot-prefixed names and other plugins' backups are untouched; real `file://` git tests show the regression failing without the change and passing with it | done; two new plugin-crate tests cover a reused-id collision and a foreign-id orphan, the plugin crate (70 tests) and CLI consumer tests pass, fmt and clippy clean; orphans for plugins that are never updated again are still not collected |
 | OM-7 ✅ | MED | tui | the orchestrator Inbox and the window title rendered only pending approvals and terminal agents needing attention, so a pending question or a ByteBot task waiting for review could be outstanding while neither view showed anything | one pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review and every terminal agent calling for attention; the Inbox renders from that list and `shell::waiting_keys`/`attention_title` count from it, keeping the `+N` approval summary | done; unit tests cover a question with its text, a review task, approvals and calling tiles with the `+N` summary, the empty case and the attention count; crate tests, fmt and clippy pass; no live agent run needed for this state-to-text change |
 | MS-1 ✅ | MED | cli+tui | `xencode mcp serve` was a real stdio MCP server but published only its six tools, so a client could not read a workspace file or obtain a prompt through it | the handshake now declares resources and prompts and the server implements `resources/list`, `resources/read`, `prompts/list` and `prompts/get`; it publishes real workspace files (`AGENTS.md`, `task.md` when present) plus a live configuration summary, renders a `review-diff` prompt from the shipped explain-diff skill, and refuses URIs outside the workspace or using path traversal | done; a real stdio client test drives initialize, both list methods, a byte-for-byte file read, a prompt render and both raw and encoded traversal refusals over the binary's own pipes; the TUI crate (737 tests) and the stdio test (6 tests) pass, fmt and clippy clean |
+| BD-1 ✅ | MED | badge+live | the hover card showed each session's project, state, model and age but none of that project's eval history, so the newest pass rate was invisible without leaving the desktop | the badge reads `<project>/.xencode/cache/task_eval.jsonl` for each session and shows `eval 7/8 (88%)` on that row; a missing log or a run where nothing graded shows no label rather than `0%`, torn lines are skipped and the newest graded run by timestamp wins | done on branch `fix/bd1-badge-eval`; pure-parser tests, GPUI badge workspace tests, clippy and formatting pass; not merged yet |
 | VO-1 ✅ | LOW | tui+cli | there was no text-to-speech and no CLI verb to speak text; the former voice panel's input recorder had been deleted, and older docs still claimed voice input was real | `xencode speak <text>` now speaks through a local TTS program resolved from `XENCODE_TTS_CMD` or the platform default (`espeak-ng`, `say`, PowerShell `System.Speech`), run with `std::process::Command` and a fixed argument vector so text is passed literally; a missing binary is named in the error, and the stale voice-input claims in the roadmap and plan are marked historical | done; a real executable script test proves the exact text reaches the subprocess and exits zero, a real missing-path test proves the named error, the built binary speaks through the same script end to end, the CLI verb help and generated completions/man were regenerated, and docs were corrected — Windows and macOS argv defaults cannot be executed on this Linux host |
 | CA-1 ✅ | MED | context+cli | the L-9 done claim promised per-session spend, but `xencode orchestrator costs` priced only per model — the rollup already grouped tokens by session, yet the text report had no SESSIONS block and `--format json` had no `sessions` key | a pure helper prices each session's own per-model totals through the same `cost_of` the whole project uses, so unknown prices stay unknown; the text report gains a SESSIONS table (id, requests, prompt/completion tokens, cost or `unpriced`, model count) and the JSON report a `sessions` array, with the per-model output untouched | done; 2 new xencode-context-rs unit tests (one hand-summing 486/90/576 micros from real request rows, one proving an unpriced model stays unknown) and 1 new xencode-cli integration test (real metrics.jsonl and pricing.json in a temporary project, both formats checked, both files byte-for-byte unchanged) pass; fmt and clippy clean on both crates; live price fetching and RAPL electricity dollars remain unverified |
 | RV-1 ✅ | MED | analysis+cli | `xencode review` analysed the whole working-tree file, so a finding on an untouched line looked exactly like one the diff introduced and the report said nothing about what the change added | a pure parser maps real `@@ -a,b +c,d @@` hunks to added new-file line ranges and classifies each finding as introduced or preexisting; both labels appear in text output and JSON (`origin`), `--introduced-only` hides pre-existing ones, and the default still shows both | done; pure tests use captured git diffs with multiple hunks, context and removed lines; a real CLI test builds a temporary git repo with one finding on an untouched line and one added in a commit, checks both labels and the filter, and completions were regenerated; workspace suite at the docs commit: 3,247 passed, 0 failed, 35 ignored — local diffs only, unresolved GitHub threads and live PR support remain out of scope |
@@ -1235,6 +1237,9 @@ workspace gates green.
   loud, failed capture stops the meter, mute reaches the flag the reader thread
   reads, empty capture, and three panel renders at 160×44).
   **733 tests passed.**
+  *(Historical: the voice panel this item built was removed in TD-5 along with
+  seven other rarely used panels. The entry is kept as the record of what J-07
+  shipped; there is no voice panel in the product now.)*
 - [x] J-08 — **Plugin runtime** (2026-09-21): manifests now load.
   `PluginRuntime::load(dir, version)` discovers `plugin.json` /
   `manifest.json`, skips a manifest whose `xencode_version` does not accept this
@@ -2591,6 +2596,17 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
    highlighting** (`markdown.rs:1-5`). 8 hardcoded themes (`theme.rs:7-16`), 3
    layout presets (`layout.rs:14`), mouse scroll/click hit-testing exists
    (`app.rs:6138-6280`).
+9. **Voice is record-only.** `voice.rs` is real — `arecord` subprocess (`:115`),
+   16 kHz S16_LE WAV, 15 s cap (`:26`), transcription by shelling to a whisper CLI
+   on PATH (`:145-157`). **No TTS anywhere** (zero hits for
+   tts/speak/piper/kokoro/sherpa). *(Historical: this was the state at the
+   2026-11-17 audit. `voice.rs` and the voice panel were removed in TD-5, so no
+   voice panel exists in the product now; the line is kept as part of the
+   original audit record.)*
+9. **Voice is record-only.** `voice.rs` is real — `arecord` subprocess (`:115`),
+   16 kHz S16_LE WAV, 15 s cap (`:26`), transcription by shelling to a whisper CLI
+   on PATH (`:145-157`). **No TTS anywhere** (zero hits for
+   tts/speak/piper/kokoro/sherpa).
 9. **Voice input was removed; voice output is a local subprocess.** The old
    `xencode-tui-rs/src/voice.rs` recorder (`arecord` at `:115`, 16 kHz S16_LE
    WAV, 15 s cap at `:26`, whisper transcription at `:145-157`) was deleted with
