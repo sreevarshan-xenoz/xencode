@@ -4,7 +4,7 @@
   "announcement_tag_is_implicit": true,
   "announcement_is_prerelease": false,
   "announcement_title": "v0.1.0",
-  "announcement_github_body": "## Install xencode-cli 0.1.0\n\n### Install prebuilt binaries via shell script\n\n```sh\ncurl --proto '=https' --tlsv1.2 -LsSf https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-installer.sh | sh\n```\n\n### Install prebuilt binaries via powershell script\n\n```sh\npowershell -ExecutionPolicy Bypass -c \"irm https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-installer.ps1 | iex\"\n```\n\n## Download xencode-cli 0.1.0\n\n|  File  | Platform | Checksum |\n|--------|----------|----------|\n| [xencode-cli-aarch64-apple-darwin.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-aarch64-apple-darwin.tar.xz) | Apple Silicon macOS | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-aarch64-apple-darwin.tar.xz.sha256) |\n| [xencode-cli-x86_64-apple-darwin.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-apple-darwin.tar.xz) | Intel macOS | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-apple-darwin.tar.xz.sha256) |\n| [xencode-cli-x86_64-pc-windows-msvc.zip](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-pc-windows-msvc.zip) | x64 Windows | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-pc-windows-msvc.zip.sha256) |\n| [xencode-cli-aarch64-unknown-linux-gnu.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-aarch64-unknown-linux-gnu.tar.xz) | ARM64 Linux | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-aarch64-unknown-linux-gnu.tar.xz.sha256) |\n| [xencode-cli-x86_64-unknown-linux-gnu.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-unknown-linux-gnu.tar.xz) | x64 Linux | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-unknown-linux-gnu.tar.xz.sha256) |\n\n",
+  "announcement_github_body": "## Install xencode-cli 0.1.0\n\n### Install prebuilt binaries via shell script\n\n```sh\ncurl --proto '=https' --tlsv1.2 -LsSf https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-installer.sh | sh\n```\n\n### Install prebuilt binaries via powershell script\n\n```sh\npowershell -ExecutionPolicy Bypass -c \"irm https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-installer.ps1 | iex\"\n```\n\n## Download xencode-cli 0.1.0\n\n|  File  | Platform | Checksum |\n|--------|----------|----------|\n| [xencode-cli-x86_64-apple-darwin.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-apple-darwin.tar.xz) | Intel macOS | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-apple-darwin.tar.xz.sha256) |\n| [xencode-cli-x86_64-pc-windows-msvc.zip](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-pc-windows-msvc.zip) | x64 Windows | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-pc-windows-msvc.zip.sha256) |\n| [xencode-cli-aarch64-unknown-linux-gnu.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-aarch64-unknown-linux-gnu.tar.xz) | ARM64 Linux | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-aarch64-unknown-linux-gnu.tar.xz.sha256) |\n| [xencode-cli-x86_64-unknown-linux-gnu.tar.xz](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-unknown-linux-gnu.tar.xz) | x64 Linux | [checksum](https://github.com/sreevarshan-xenoz/xencode/releases/download/v0.1.0/xencode-cli-x86_64-unknown-linux-gnu.tar.xz.sha256) |\n\n",
   "releases": [
     {
       "app_name": "xencode-cli",
@@ -29,8 +29,6 @@
         "xencode-cli-installer.sh",
         "xencode-cli-installer.ps1",
         "sha256.sum",
-        "xencode-cli-aarch64-apple-darwin.tar.xz",
-        "xencode-cli-aarch64-apple-darwin.tar.xz.sha256",
         "xencode-cli-aarch64-unknown-linux-gnu.tar.xz",
         "xencode-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
         "xencode-cli-x86_64-apple-darwin.tar.xz",
@@ -66,44 +64,6 @@
     "source.tar.gz.sha256": {
       "name": "source.tar.gz.sha256",
       "kind": "checksum"
-    },
-    "xencode-cli-aarch64-apple-darwin.tar.xz": {
-      "name": "xencode-cli-aarch64-apple-darwin.tar.xz",
-      "kind": "executable-zip",
-      "target_triples": [
-        "aarch64-apple-darwin"
-      ],
-      "assets": [
-        {
-          "name": "CHANGELOG.md",
-          "path": "CHANGELOG.md",
-          "kind": "changelog"
-        },
-        {
-          "name": "LICENSE",
-          "path": "LICENSE",
-          "kind": "license"
-        },
-        {
-          "name": "README.md",
-          "path": "README.md",
-          "kind": "readme"
-        },
-        {
-          "id": "xencode-cli-aarch64-apple-darwin-exe-xencode",
-          "name": "xencode",
-          "path": "xencode",
-          "kind": "executable"
-        }
-      ],
-      "checksum": "xencode-cli-aarch64-apple-darwin.tar.xz.sha256"
-    },
-    "xencode-cli-aarch64-apple-darwin.tar.xz.sha256": {
-      "name": "xencode-cli-aarch64-apple-darwin.tar.xz.sha256",
-      "kind": "checksum",
-      "target_triples": [
-        "aarch64-apple-darwin"
-      ]
     },
     "xencode-cli-aarch64-unknown-linux-gnu.tar.xz": {
       "name": "xencode-cli-aarch64-unknown-linux-gnu.tar.xz",
@@ -302,19 +262,6 @@
     "github": {
       "artifacts_matrix": {
         "include": [
-          {
-            "runner": "macos-14",
-            "host": "aarch64-apple-darwin",
-            "install_dist": {
-              "shell": "sh",
-              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh"
-            },
-            "dist_args": "--artifacts=local --target=aarch64-apple-darwin",
-            "targets": [
-              "aarch64-apple-darwin"
-            ],
-            "cache_provider": "github"
-          },
           {
             "runner": "ubuntu-22.04-arm",
             "host": "aarch64-unknown-linux-gnu",

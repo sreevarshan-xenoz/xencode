@@ -68,6 +68,7 @@ pub mod state;
 pub mod symbols;
 pub mod trace;
 pub mod trust;
+pub mod tssymbols;
 pub mod tsymbols;
 pub mod verify;
 pub mod watcher;
@@ -205,8 +206,8 @@ pub use runledger::{
     ApprovalDecision, ApprovalRow, RunEvidence, RunRecord, RUNS_FILE, RUNS_WINDOW,
 };
 pub use scanner::{
-    detect_language, language_for_extension, language_has_semantic_tier, scan_tree,
-    semantic_tier_refusal, Language, ScanOptions, ScanOutcome,
+    detect_language, language_for_extension, language_has_semantic_tier, language_has_symbol_tier,
+    scan_tree, semantic_tier_refusal, Language, ScanOptions, ScanOutcome,
 };
 pub use seeds::{
     all_seed_cases, seed_case, write_seed, BugShape, GraderRun, SeedCase, SeedEdit, SeedFile,
@@ -227,6 +228,7 @@ pub use symbols::{
     build_graph, dependency_map, dependent_map, extract_rust_symbols, rank_files, resolve_import,
     DepEdge, PerFileSymbols,
 };
+pub use tssymbols::extract_typescript_symbols;
 pub use tsymbols::extract as extract_tree_symbols;
 pub use verify::{
     nextest_available, run as run_tests, Engine, Options as TestOptions, Outcome as TestOutcome,
