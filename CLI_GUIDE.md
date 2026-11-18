@@ -2060,7 +2060,26 @@ four steps in order and prints each before it starts:
 ```bash
 xencode setup                                   # choose a model from this machine's memory
 xencode setup --model ~/models/model.gguf --yes # choose the GGUF, skip the download prompt
+xencode setup --remote                          # let the decision choose a remote GPU route
+xencode setup --remote --dry-run                # preview that route, touching no VM or network
 ```
+
+`--remote` asks the same decision layer used by `xencode models advice` and the
+default model a turn uses to choose a route. A local GGUF that fits this
+machine's largest single memory pool always wins; the local four steps below run
+unchanged. Only when no GGUF fits is the Colab bridge considered, and only when
+it is enabled (`xencode config set colab_enabled true`) and actually available
+on this machine. Otherwise setup stops and names both refusals instead of
+guessing. No Kaggle route is chosen here — that is a separate slice.
+
+On the Colab route, setup checks the bridge with the same preflight
+`xencode colab preflight` runs, then brings up `xencode colab up` using the model
+the HR-1 advice table recommends. `--dry-run` stops at the existing
+`colab up --dry-run` preview: it prints the session, model, forward and the
+config it would write, but creates no VM, opens no forward, makes no network
+call and writes no file. Bringing up a live Colab VM still needs a Google
+account with Colab access and a T4-class runtime; that live step is not
+verified here.
 
 1. **Detect and recommend.** With no `--model`, the largest tier of the advice
    table that this machine's biggest single memory pool can hold is chosen — the

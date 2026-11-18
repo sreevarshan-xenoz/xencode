@@ -917,6 +917,18 @@ pub(crate) enum Commands {
         /// Skip the confirmation prompt before downloading a model
         #[arg(long)]
         yes: bool,
+
+        /// Let the shared decision pick a remote GPU route when no local model
+        /// fits this machine: a local GGUF wins when one fits, otherwise the
+        /// Colab bridge is used when it is enabled and available. No Kaggle
+        /// route is chosen here.
+        #[arg(long)]
+        remote: bool,
+
+        /// Report what the remote route would start and write to config without
+        /// creating a VM, opening a forward or making a network call
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// What this machine can serve, read from the machine

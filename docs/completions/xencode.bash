@@ -8706,7 +8706,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__setup)
-            opts="-m -h --model --yes --help"
+            opts="-m -h --model --yes --remote --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

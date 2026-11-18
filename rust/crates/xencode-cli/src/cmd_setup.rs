@@ -15,6 +15,7 @@
 //! reported as a failure by that run, never marked a success here.
 
 use super::*;
+use xencode_models_rs::advice::Advice;
 
 /// The concrete choices the recommendation step made and the later steps use.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,11 +326,212 @@ impl SetupSteps for RealSetup {
     }
 }
 
+/// Which route `setup --remote` takes once the shared decision has looked at
+/// this machine. `Local` means a GGUF from the advice table fits; `Colab` means
+/// none fits but the bridge is enabled and observed available; `None` means
+/// neither holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetupRoute {
+    Local,
+    Colab,
+    None,
+}
+
+/// A route with the reason it was picked, so every caller prints the same
+/// answer instead of re-deriving one from the route alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SetupRouteDecision {
+    pub(crate) route: SetupRoute,
+    pub(crate) reason: String,
+}
+
+/// Remote-backend availability, measured by the caller from the real backend
+/// registry and passed into the decision as data. The pure decision runs no
+/// probe, process or network call of its own.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RemoteAvailability {
+    pub(crate) colab_available: bool,
+    pub(crate) colab_detail: String,
+}
+
+/// Pure route decision for `setup --remote`, from facts already measured by the
+/// caller. Local wins whenever a GGUF fits the largest single memory pool, even
+/// if a remote bridge is available. Only when nothing fits is Colab taken, and
+/// only when it is enabled in config and observed available. Otherwise no route
+/// is chosen and the reason names every refusal. Kaggle is a separate slice and
+/// is never considered here.
+pub(crate) fn choose_setup_route(
+    facts: &HardwareFacts,
+    advice: &Advice,
+    config: &XencodeConfig,
+    availability: &RemoteAvailability,
+) -> SetupRouteDecision {
+    let decision = choose_default_model(
+        facts,
+        advice,
+        config,
+        xencode_context_rs::TaskShape::General,
+    );
+    let local_fits = decision
+        .tier
+        .as_ref()
+        .and_then(|tier| tier.gguf.first())
+        .is_some();
+    let size_note = format!(
+        "the largest memory pool can give one model file {}",
+        xencode_models_rs::human_bytes(decision.capacity_bytes)
+    );
+
+    if local_fits {
+        let tier = decision
+            .tier
+            .as_ref()
+            .map(|t| t.name.as_str())
+            .unwrap_or("?");
+        return SetupRouteDecision {
+            route: SetupRoute::Local,
+            reason: format!(
+                "a local GGUF from the {tier} tier of the advice table fits {size_note}, read \
+                 from the hardware probe; the local route is used even if a remote bridge is \
+                 available"
+            ),
+        };
+    }
+
+    let no_fit = format!("no GGUF in the advice table fits {size_note}");
+    if config.colab.enabled && availability.colab_available {
+        return SetupRouteDecision {
+            route: SetupRoute::Colab,
+            reason: format!(
+                "{no_fit}; Colab is enabled and available: {}",
+                availability.colab_detail
+            ),
+        };
+    }
+
+    let mut refusals = vec![no_fit];
+    if !config.colab.enabled {
+        refusals.push(
+            "Colab is disabled — set it with `xencode config set colab_enabled true`".to_string(),
+        );
+    } else {
+        refusals.push(format!(
+            "Colab is enabled but not available: {}",
+            availability.colab_detail
+        ));
+    }
+    SetupRouteDecision {
+        route: SetupRoute::None,
+        reason: refusals.join("; "),
+    }
+}
+
+/// Measure Colab bridge availability from the real backend registry once. This
+/// is the only place the remote route touches the system for the decision; the
+/// pure function above receives the result as plain data.
+fn colab_availability() -> RemoteAvailability {
+    let bins = xencode_colab_rs::resolve_binaries().unwrap_or_else(|_| {
+        let colab = xencode_colab_rs::which("colab").unwrap_or_else(|| PathBuf::from("colab"));
+        let ssh = xencode_colab_rs::which("ssh").unwrap_or_else(|| PathBuf::from("ssh"));
+        xencode_colab_rs::Binaries { colab, ssh }
+    });
+    let key_path = XencodeConfig::config_dir()
+        .map(|dir| dir.join(xencode_colab_rs::KEY_FILENAME))
+        .unwrap_or_else(|_| PathBuf::from(xencode_colab_rs::KEY_FILENAME));
+    let registry = xencode_colab_rs::BackendRegistry::default();
+    match registry
+        .list_computers(&bins, &key_path)
+        .into_iter()
+        .find(|info| info.id == "colab")
+    {
+        Some(info) => RemoteAvailability {
+            colab_available: info.available,
+            colab_detail: info.detail,
+        },
+        None => RemoteAvailability::default(),
+    }
+}
+
+/// The model the remote route asks the VM to serve: the repository id of the
+/// first GGUF in the largest tier of the same advice table the HR-1 local
+/// decision reads. No local fit is required — the table's own pick is used even
+/// when this machine cannot hold any of its files. It is a size-table choice,
+/// not a claim that this model answers best.
+fn remote_recommended_model(advice: &Advice) -> Option<String> {
+    advice
+        .file
+        .tiers
+        .iter()
+        .filter(|tier| !tier.gguf.is_empty())
+        .max_by_key(|tier| tier.max_file_bytes)
+        .and_then(|tier| tier.gguf.first().map(|entry| entry.repo.clone()))
+}
+
 /// Entry point for `xencode setup`.
-pub(crate) async fn run_setup(model: Option<String>, yes: bool) -> Result<(), String> {
+pub(crate) async fn run_setup(
+    model: Option<String>,
+    yes: bool,
+    remote: bool,
+    dry_run: bool,
+) -> Result<(), String> {
+    if remote {
+        return run_remote_setup(model, yes, dry_run).await;
+    }
     println!("setup: bringing up a local model; each step is reported before it runs");
     let mut steps = RealSetup::new(model, yes);
     orchestrate_setup(&mut steps).await
+}
+
+/// The `setup --remote` path: measure once, let the pure decision choose a
+/// route, and follow it. Nothing here re-measures hardware or invents backend
+/// state — the availability passed to the decision comes from the real backend
+/// registry above.
+async fn run_remote_setup(model: Option<String>, yes: bool, dry_run: bool) -> Result<(), String> {
+    let config = XencodeConfig::load().map_err(|e| format!("could not read config: {e}"))?;
+    let facts = measure_hardware(&config);
+    let advice = Advice::load(&xencode_models_rs::advice::default_path());
+    let availability = colab_availability();
+    let route = choose_setup_route(&facts, &advice, &config, &availability);
+    println!(
+        "setup --remote: route is {:?} — {}",
+        route.route, route.reason
+    );
+
+    match route.route {
+        SetupRoute::Local => {
+            println!("setup --remote: a local GGUF fits; bringing it up locally");
+            let mut steps = RealSetup::new(model, yes);
+            orchestrate_setup(&mut steps).await
+        }
+        SetupRoute::Colab => {
+            // The Colab bridge is the only remote backend this slice handles.
+            // Preflight is a real subprocess check of the installed CLI; in a
+            // dry run it runs against whatever `colab` is on PATH, but the
+            // bring-up below stops at the preview before any VM or network call.
+            run_colab_preflight(false).await?;
+            let model = remote_recommended_model(&advice).or(model);
+            println!(
+                "setup --remote: starting the Colab route with model {}",
+                model.as_deref().unwrap_or("the configured default")
+            );
+            run_colab_up_cli(
+                None, // session
+                None, // gpu
+                None, // runtime
+                model, None,  // weights
+                None,  // quant
+                None,  // local_port
+                None,  // remote_port
+                false, // reconnect
+                dry_run,
+            )
+            .await
+        }
+        SetupRoute::None => Err(format!(
+            "setup --remote: no route is available — {}",
+            route.reason
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -454,5 +656,171 @@ mod tests {
         );
         assert_eq!(alias_from_path("/models/my model.gguf"), "my-model");
         assert_eq!(alias_from_path("/"), "model");
+    }
+
+    // Captured from hwprobe's own fixtures, the same readings the HR-1 decision
+    // tests use (model_decision.rs:272-297). These are readings, not a model of
+    // the machine, so the route decision stays pure and repeatable.
+    const CAPTURED_DEVICES: &str = "Available devices:
+  BLAS: OpenBLAS (0 MiB, 0 MiB free)
+  Vulkan0: Intel(R) UHD Graphics (ICL GT1) (11822 MiB, 8987 MiB free)
+  Vulkan1: NVIDIA GeForce MX250 (2294 MiB, 1156 MiB free)
+";
+    const CAPTURED_TOTAL_KIB: u64 = 16_141_084;
+    const CAPTURED_AVAILABLE_KIB: u64 = 9_536_364;
+
+    fn captured_facts() -> HardwareFacts {
+        HardwareFacts {
+            total_kib: Some(CAPTURED_TOTAL_KIB),
+            available_kib: Some(CAPTURED_AVAILABLE_KIB),
+            devices: xencode_context_rs::hwprobe::parse_llama_devices(CAPTURED_DEVICES),
+            model_shape: None,
+            window: Some(8192),
+        }
+    }
+
+    /// Only 8 MiB available and no devices: nothing in the override table fits,
+    /// so the local route is refused without pretending a GPU is present.
+    fn no_fit_facts() -> HardwareFacts {
+        HardwareFacts {
+            total_kib: Some(CAPTURED_TOTAL_KIB),
+            available_kib: Some(8 * 1024),
+            devices: Vec::new(),
+            ..HardwareFacts::default()
+        }
+    }
+
+    /// A real override file loaded by the real `Advice::load`, in the shape
+    /// advice.rs:318 uses. Returned with its path so the test removes it.
+    fn advice_override(tag: &str) -> (Advice, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "xencode-rg3-advice-{tag}-{}.json",
+            std::process::id()
+        ));
+        let body = r#"{"as_of":"2026-11-18","tiers":[
+          {"name":"small","max_file_bytes":52428800,"gguf":[{"label":"Small GGUF","repo":"example/repo","file":"small.gguf","revision":"0123456789012345678901234567890123456789","size_bytes":52428800,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]},
+          {"name":"large","max_file_bytes":8589934592,"gguf":[{"label":"Large GGUF","repo":"example/large-repo","file":"large.gguf","revision":"0123456789012345678901234567890123456789","size_bytes":8589934592,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]}
+        ]}"#
+        .to_string();
+        std::fs::write(&path, body).unwrap();
+        (Advice::load(&path), path)
+    }
+
+    fn available_colab() -> RemoteAvailability {
+        RemoteAvailability {
+            colab_available: true,
+            colab_detail: "google-colab-cli and OpenSSH available".to_string(),
+        }
+    }
+
+    #[test]
+    fn choose_setup_route_local_fit_wins_over_an_available_remote_bridge() {
+        let (advice, path) = advice_override("local-first");
+        let config = XencodeConfig {
+            colab: xencode_config_rs::ColabConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..XencodeConfig::default()
+        };
+        let decision = choose_setup_route(&captured_facts(), &advice, &config, &available_colab());
+        assert_eq!(decision.route, SetupRoute::Local);
+        assert!(
+            decision.reason.contains("local GGUF"),
+            "{}",
+            decision.reason
+        );
+        assert!(
+            decision
+                .reason
+                .contains("even if a remote bridge is available"),
+            "{}",
+            decision.reason
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn choose_setup_route_no_fit_with_colab_enabled_and_available_chooses_colab() {
+        let (advice, path) = advice_override("colab");
+        let config = XencodeConfig {
+            colab: xencode_config_rs::ColabConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..XencodeConfig::default()
+        };
+        let decision = choose_setup_route(&no_fit_facts(), &advice, &config, &available_colab());
+        assert_eq!(decision.route, SetupRoute::Colab);
+        assert!(decision.reason.contains("no GGUF"), "{}", decision.reason);
+        assert!(
+            decision.reason.contains("Colab is enabled and available"),
+            "{}",
+            decision.reason
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn choose_setup_route_no_fit_with_colab_disabled_chooses_no_route_and_names_the_setting() {
+        let (advice, path) = advice_override("disabled");
+        let config = XencodeConfig::default(); // colab.enabled is false by default
+        assert!(!config.colab.enabled);
+        let decision = choose_setup_route(&no_fit_facts(), &advice, &config, &available_colab());
+        assert_eq!(decision.route, SetupRoute::None);
+        assert!(
+            decision.reason.contains("Colab is disabled"),
+            "{}",
+            decision.reason
+        );
+        assert!(
+            decision.reason.contains("colab_enabled true"),
+            "{}",
+            decision.reason
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn choose_setup_route_no_fit_with_colab_unavailable_chooses_no_route_and_names_why() {
+        let (advice, path) = advice_override("unavailable");
+        let config = XencodeConfig {
+            colab: xencode_config_rs::ColabConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..XencodeConfig::default()
+        };
+        let unavailable = RemoteAvailability {
+            colab_available: false,
+            colab_detail: "google-colab-cli not found on PATH".to_string(),
+        };
+        let decision = choose_setup_route(&no_fit_facts(), &advice, &config, &unavailable);
+        assert_eq!(decision.route, SetupRoute::None);
+        assert!(
+            decision
+                .reason
+                .contains("Colab is enabled but not available"),
+            "{}",
+            decision.reason
+        );
+        assert!(
+            decision
+                .reason
+                .contains("google-colab-cli not found on PATH"),
+            "{}",
+            decision.reason
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn choose_setup_route_remote_model_is_the_advice_tables_largest_tier_repository() {
+        let (advice, path) = advice_override("model");
+        assert_eq!(
+            remote_recommended_model(&advice).as_deref(),
+            Some("example/large-repo")
+        );
+        let _ = std::fs::remove_file(path);
     }
 }
