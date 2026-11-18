@@ -12,6 +12,7 @@
 //! a remote command is just ssh without the tunnel flag.
 
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::TransportCmd;
 use crate::preflight::which;
@@ -191,6 +192,12 @@ pub fn now_rfc3339() -> String {
 /// Colab reaps idle VMs (free tier keeps sessions ~12h), so `status` uses this
 /// to tell "VM reaped" apart from a transient blip.
 pub fn started_age_hours(started_at: &str) -> Option<f64> {
+    started_age_hours_at(started_at, SystemTime::now())
+}
+
+/// The pure core of [`started_age_hours`]: the same stamp parsing and age
+/// math, but with `now` injected so a caller can reason about a fixed instant.
+fn started_age_hours_at(started_at: &str, now: SystemTime) -> Option<f64> {
     let b = started_at.as_bytes();
     if b.len() < 20 {
         return None;
@@ -227,8 +234,8 @@ pub fn started_age_hours(started_at: &str) -> Option<f64> {
         _ => 0,
     };
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now_secs = now
+        .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
@@ -241,7 +248,33 @@ pub fn started_age_hours(started_at: &str) -> Option<f64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let epoch_day = era * 146097 + doe - 719468;
     let stamp = epoch_day * 86400 + hour * 3600 + min * 60 + sec - offset;
-    Some((now - stamp) as f64 / 3600.0)
+    Some((now_secs - stamp) as f64 / 3600.0)
+}
+
+/// The status line that reports how long a bridge has been up, when its
+/// endpoint has stopped answering. Pure: `now` is injected so the age can be
+/// tested against a fixed instant, and it reuses [`started_age_hours`]'s parser
+/// and the backend's 12-hour figure.
+///
+/// The wording is deliberately honest — the age is elapsed time, Colab *may*
+/// reclaim idle VMs *around* 12h (no precise countdown), and `--reconnect` is a
+/// suggestion for when the endpoint actually stops answering, not a claim that
+/// a VM was reclaimed. `None` when there is no usable stamp or the endpoint is
+/// still serving, so a healthy bridge never gets a scary line.
+pub fn session_age_hint(
+    started_at: Option<&str>,
+    now: SystemTime,
+    endpoint_ok: bool,
+) -> Option<String> {
+    if endpoint_ok {
+        return None;
+    }
+    let age = started_at.and_then(|s| started_age_hours_at(s, now))?;
+    Some(format!(
+        "session age: {age:.0}h — Colab may reclaim idle VMs around \
+         ~{:.0}h; if the endpoint stops answering, run `xencode colab up --reconnect`.",
+        crate::colab::VM_MAX_AGE_HOURS
+    ))
 }
 
 #[cfg(test)]
@@ -410,5 +443,73 @@ mod tests {
 
         let future = started_age_hours("2099-01-02T03:04:05Z").expect("future parses");
         assert!(future < 0.0, "future stamp ages negative: {future}");
+    }
+
+    /// A fixed `SystemTime` for an RFC3339 instant, so age hints are
+    /// reproducible without touching the wall clock.
+    fn now_at(rfc3339: &str) -> SystemTime {
+        let secs = chrono::DateTime::parse_from_rfc3339(rfc3339)
+            .expect("valid fixed stamp")
+            .timestamp();
+        if secs >= 0 {
+            UNIX_EPOCH + std::time::Duration::from_secs(secs as u64)
+        } else {
+            UNIX_EPOCH - std::time::Duration::from_secs((-secs) as u64)
+        }
+    }
+
+    #[test]
+    fn session_age_hint_reports_elapsed_age_and_honest_advice() {
+        // Fixture from state.rs: 2026-09-23T10:00:00Z. Injected now is 12h
+        // later, so the age is exactly 12h.
+        let hint = session_age_hint(
+            Some("2026-09-23T10:00:00Z"),
+            now_at("2026-09-23T22:00:00Z"),
+            false,
+        )
+        .expect("a down endpoint with a stamp gets a hint");
+        assert!(hint.contains("session age:"), "{hint}");
+        assert!(hint.contains("12h"), "elapsed age is in the text: {hint}");
+        assert!(
+            hint.contains("~12h"),
+            "the 12h figure is in the text: {hint}"
+        );
+        assert!(hint.contains("reclaim idle VMs"), "{hint}");
+        assert!(hint.contains("--reconnect"), "{hint}");
+        // It is a suggestion, not a claim that the VM was reclaimed.
+        assert!(!hint.contains("reaped"), "{hint}");
+    }
+
+    #[test]
+    fn session_age_hint_parses_every_offset_to_the_same_instant() {
+        // All three fixtures from the started_age_hours test denote
+        // 2026-09-23T12:00:00Z; injected now is 6h later.
+        let now = now_at("2026-09-23T18:00:00Z");
+        for stamp in [
+            "2026-09-23T12:00:00Z",
+            "2026-09-23T07:00:00-05:00",
+            "2026-09-23T17:00:00+05:00",
+        ] {
+            let hint = session_age_hint(Some(stamp), now, false)
+                .unwrap_or_else(|| panic!("hint for {stamp}"));
+            assert!(hint.contains("6h"), "same 6h age for {stamp}: {hint}");
+        }
+    }
+
+    #[test]
+    fn session_age_hint_is_absent_without_a_stamp_or_with_a_live_endpoint() {
+        let now = now_at("2026-09-23T22:00:00Z");
+        assert!(
+            session_age_hint(None, now, false).is_none(),
+            "no stamp -> no hint"
+        );
+        assert!(
+            session_age_hint(Some("not a date"), now, false).is_none(),
+            "junk stamp -> no hint"
+        );
+        assert!(
+            session_age_hint(Some("2026-09-23T10:00:00Z"), now, true).is_none(),
+            "a serving endpoint never gets a reclamation hint"
+        );
     }
 }

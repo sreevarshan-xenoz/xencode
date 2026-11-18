@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `RG-0`: records the Colab + Kaggle + Drive completion plan: Drive-backed model cache, session-lifetime UX, unified setup/remote entry point, and a Kaggle backend. Live Colab/Kaggle/Drive verification stays explicitly blocked; no public-URL tunnel posture is preserved.
 
+### Added — honest session-age line in colab status (RG-2)
+- `RG-2`: `xencode colab status` now prints a `session age:` line when the endpoint has stopped answering and a start time is recorded. It reports how long the bridge has been up, notes that Colab may reclaim idle VMs around ~12h, and suggests `xencode colab up --reconnect`. It gives no precise countdown and never claims a VM was reclaimed. A pure helper computes the age from an injected clock and the recorded RFC3339 stamp, reusing the existing age parser and the 12-hour figure; pure tests use fixed instants and the real state stamps, and a status test proves the line appears with a start stamp and is absent without one; fmt, clippy and the full workspace suite (3,292 passed, 0 failed, 35 ignored) are clean. Real reclaim timing still needs a live free-tier VM and is not verified here.
+
 ### Added — hybrid multi-model stack direction (HM-1)
 - `HM-1`: records the adopted hybrid architecture in the plan: a fast Qwen-class default, BitNet b1.58 as the weak-hardware fallback, a stronger configured model for explicit deep-think or repeated failure, and small tool specialists. All roles share the existing tool protocol and local-first egress rules; weights are never merged. AirLLM itself is Python and is deliberately out of scope.
 ### Added — local BitNet provider route (BP-1)

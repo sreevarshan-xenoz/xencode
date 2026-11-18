@@ -2570,11 +2570,14 @@ Session names are validated before they touch a shell (`[A-Za-z0-9_-]`,
 
 `status` never fails hard — it reports three cells (forward pid alive,
 session listed by `colab sessions`, and a `/v1/models` probe on the forward)
-so it stays scriptable while fully degraded. When the VM is older than 12
-hours and the endpoint is down it flags a likely Colab reaper and prints the
-one-key fix (`xencode colab up --reconnect`). `down` is idempotent: kills the
-recorded forward pid, runs `colab stop -s <name>`, and clears state; with no
-`colab.json` it reports `nothing to tear down`.
+so it stays scriptable while fully degraded. When the endpoint is down and a
+start time is recorded it also prints a `session age:` line: how long the
+bridge has been up, that Colab *may* reclaim idle VMs around ~12h (no precise
+countdown and no claim that a VM was actually reclaimed), and the one-key fix
+`xencode colab up --reconnect`. A VM older than 12 hours with a dead endpoint
+additionally gets the stronger "likely reaped" hint. `down` is idempotent:
+kills the recorded forward pid, runs `colab stop -s <name>`, and clears state;
+with no `colab.json` it reports `nothing to tear down`.
 
 Once `up` is green the tunnel is an ordinary provider — there is no Colab-specific
 client path. `up` writes `llama_cpp_url` (or `ollama_url` for that runtime) and
