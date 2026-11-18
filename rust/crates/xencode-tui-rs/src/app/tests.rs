@@ -779,6 +779,47 @@ fn a_tool_whose_index_is_missing_is_not_offered() {
     assert!(snapshot_only.contains(&"what_breaks".to_string()));
     assert!(!snapshot_only.contains(&"find_refs".to_string()));
 
+    // TS-1: focus composes with the index filter. A bugfix with focus on still
+    // gets the tools needed to find and edit a file and the mode's own tool,
+    // while a general prompt or focus off returns the same menu as before.
+    let focused = |prompt: &str, enabled: bool| -> Vec<String> {
+        crate::task_tool_focus::focus_tools(
+            prompt,
+            crate::app::offered_tools_with(
+                &crate::mcp::McpHub::new(),
+                &xencode_plugin_rs::SkillRuntime::empty(
+                    std::path::PathBuf::new(),
+                    std::path::PathBuf::new(),
+                ),
+                crate::agent_tools::ApprovalMode::Ask,
+                &crate::reprogate::ReproGate::new(),
+                false,
+                false,
+                crate::app::AvailableIndexes {
+                    snapshot: false,
+                    semantic: false,
+                },
+            ),
+            enabled,
+        )
+        .into_iter()
+        .map(|t| t.name)
+        .collect()
+    };
+    let bugfix = focused("the count is wrong, please fix it", true);
+    for essential in crate::task_tool_focus::ESSENTIAL_TOOLS {
+        assert!(
+            bugfix.contains(&essential.to_string()),
+            "{essential} unreachable in a focused bugfix: {bugfix:?}"
+        );
+    }
+    assert!(bugfix.contains(&"update_plan".to_string()));
+    assert_eq!(focused("the count is wrong, please fix it", false), none);
+    assert_eq!(
+        focused("rename the caps struct and its callers", true),
+        none
+    );
+
     // A workspace with neither index, as every seeded eval case is.
     let empty = temp_dir("no-indexes");
     assert_eq!(
@@ -830,17 +871,49 @@ fn every_tool_the_executor_handles_is_offered_to_the_model() {
         true,
         true,
     );
+    // TS-1: compare the focused bugfix menu against this same fully switched-on
+    // menu, so a new tool must be reachable both with focus off and, unless it
+    // belongs to an off-task family, with focus on. `ask_user` is pushed by the
+    // loop for a ByteBot task, so add it to both menus as that path does.
+    let mut focused_source = offered.clone();
+    focused_source.push(xencode_providers_rs::ask_user_tool());
     let mut names: Vec<String> = offered.into_iter().map(|t| t.name).collect();
     names.extend(
         xencode_providers_rs::skill_tools()
             .into_iter()
             .map(|t| t.name),
     );
+    names.push("ask_user".to_string());
     let unreachable: Vec<&String> = dispatched.iter().filter(|d| !names.contains(d)).collect();
     assert!(
         unreachable.is_empty(),
         "the executor handles {unreachable:?}, but no tool list offers them to the model"
     );
+
+    // TS-1: the focused menu is a strict subset of the normal one, keeps the
+    // essential file/command tools and the mode tools, and drops only tools the
+    // normal (focus-off) path still offers. No dispatch arm becomes unreachable.
+    let focused: Vec<String> =
+        crate::task_tool_focus::focus_tools("fix the crash in the count", focused_source, true)
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+    for name in &focused {
+        assert!(names.contains(name), "{name} is not in the normal menu");
+    }
+    for essential in crate::task_tool_focus::ESSENTIAL_TOOLS {
+        assert!(
+            focused.contains(&essential.to_string()),
+            "{essential} unreachable in a focused bugfix: {focused:?}"
+        );
+    }
+    for mode in crate::task_tool_focus::MODE_TOOLS {
+        assert!(
+            focused.contains(&mode.to_string()),
+            "{mode} unreachable in a focused bugfix: {focused:?}"
+        );
+    }
+    assert!(focused.len() < names.len(), "focus should narrow the menu");
 }
 
 /// The tool half of the gate: no skills installed means the turn offers

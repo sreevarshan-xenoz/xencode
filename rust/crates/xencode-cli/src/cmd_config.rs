@@ -512,6 +512,10 @@ pub(crate) fn run_config(action: ConfigAction) -> Result<(), String> {
                 // because a model the user did not choose answering a query is a
                 // surprise a script cannot see in its own output.
                 "model_routing" => config.model_routing = parse_bool(&value)?,
+                // Narrow the tool menu on a turn whose prompt reads as a bugfix.
+                // Off until asked for, so an existing config keeps the menu it
+                // has always had and the pass-rate effect is not claimed here.
+                "focused_tools" => config.focused_tools = parse_bool(&value)?,
                 // The electricity tariff, in cents per kilowatt-hour. Empty clears
                 // it, which leaves a local turn showing its watt-hours with no
                 // price next to them — the honest rendering, not a free one.

@@ -1016,6 +1016,34 @@ them, and bringing the first back afterwards took 8.0 s — against 1.2–1.8 s 
 same turn once the model was loaded. That is the reason a rule is off by default and
 the reason a llama.cpp move is refused.
 
+#### Focused tools on a bugfix turn
+
+`focused_tools` narrows the tool menu the agent is offered, not the tools the
+executor can run. It is off by default, and a config written before the setting
+existed loads with it off, so an existing install keeps the menu it has always
+had:
+
+```bash
+xencode config set focused_tools true
+xencode config set focused_tools false   # back to the full menu
+```
+
+On, a turn whose prompt reads as a bugfix gets a smaller menu. The reading is
+`shape_of` — the same whole-word rule retrieval and turn routing use, so a
+prompt that says `fix`, `fails`, `crash`, `broken` and similar is a bugfix and
+everything else, including a rename or a question, is `general`. A bugfix drops
+the `background_*`, `web_*`, off-machine `search_*` (all but `search_files`,
+which finds the file to edit) and skill tools. It always keeps `read_file`,
+`list_dir`, `search_files`, `write_file`, `edit_file` and `run_command`, plus
+whatever the current mode needs, such as `update_plan` in a plan or `ask_user`
+in a task that pauses for a person. A `general` prompt, or focus off, changes
+nothing. The index, approval-mode and reproduction filters still apply: focus
+runs after them, so a tool they already removed stays removed.
+
+The live eval pass rate with this setting on has not been measured here — this
+machine has a 2 GB GPU and no `llama-server` — so no change in the ≥4/8 pass
+rate is claimed.
+
 #### Which hardware profile the budget spends against
 
 The window says how much room there is. A second setting says how much of it a run
