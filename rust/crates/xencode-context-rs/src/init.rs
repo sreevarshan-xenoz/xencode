@@ -18,8 +18,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gitinfo::{current_git_info, git_file_set, is_git_repo, GitInfo};
 use crate::index::{write_atomic, FileEntry, FilesIndex, Manifest};
-use crate::scanner::{language_for_extension, scan_tree, ScanOptions};
+use crate::scanner::{detect_language, language_for_extension, scan_tree, Language, ScanOptions};
 use crate::symbols::{build_graph, extract_rust_symbols, DepEdge, PerFileSymbols};
+use crate::tssymbols::extract_typescript_symbols;
 
 /// Directory name of the context engine inside a project.
 pub const XENCODE_DIR: &str = ".xencode";
@@ -113,7 +114,7 @@ pub struct InitSummary {
     pub skipped: u64,
     /// Combined byte size of the four index files on disk.
     pub index_bytes: u64,
-    /// Rust files that yielded at least one extracted symbol.
+    /// Files that yielded a symbol inventory: Rust files and TypeScript files.
     pub symbol_files: u64,
     /// Resolved file→file dependency edges written to `deps.json`.
     pub dep_edges: u64,
@@ -283,6 +284,10 @@ pub fn init_project(
 
     // ── Phase 6: symbols & dependency graph ───────────────────────────────
     emit(&mut progress, "phase_start:Extract symbols & dependencies");
+    // Two scopes on purpose. TypeScript files enter `symbols.json` through a
+    // lexical reader; only Rust files reach the dependency graph, whose resolver
+    // understands Rust module paths. Passing a TypeScript interface into that
+    // resolver could invent an edge from a Rust `impl` of the same name.
     let rust_files: Vec<String> = scan
         .files
         .iter()
@@ -291,9 +296,24 @@ pub fn init_project(
         })
         .map(|e| e.path.clone())
         .collect();
-    let symbols = extract_repo_symbols(&root, &rust_files)?;
-    let graph = build_graph(&rust_files, &symbols);
-    if !rust_files.is_empty() {
+    let symbol_files: Vec<String> = scan
+        .files
+        .iter()
+        .filter(|e| {
+            language_for_extension(&e.ext).has_symbol_tier() && !e.is_secret && !e.is_binary
+        })
+        .map(|e| e.path.clone())
+        .collect();
+    let symbols = extract_repo_symbols(&root, &symbol_files)?;
+    let rust_paths: std::collections::BTreeSet<&str> =
+        rust_files.iter().map(String::as_str).collect();
+    let graph_symbols: BTreeMap<String, PerFileSymbols> = symbols
+        .iter()
+        .filter(|(path, _)| rust_paths.contains(path.as_str()))
+        .map(|(path, sym)| (path.clone(), sym.clone()))
+        .collect();
+    let graph = build_graph(&rust_files, &graph_symbols);
+    if !symbol_files.is_empty() {
         let symbol_count: usize = symbols
             .values()
             .map(|s| {
@@ -311,8 +331,8 @@ pub fn init_project(
         emit(
             &mut progress,
             &format!(
-                "log:🧩 {} Rust file(s) → {} symbol(s), {} dependency edge(s)",
-                rust_files.len(),
+                "log:🧩 {} file(s) → {} symbol(s), {} Rust dependency edge(s)",
+                symbol_files.len(),
                 symbol_count,
                 graph.len()
             ),
@@ -320,7 +340,7 @@ pub fn init_project(
     } else {
         emit(
             &mut progress,
-            "log:🧩 No Rust files — symbols/deps skipped.",
+            "log:🧩 No Rust or TypeScript files — symbols/deps skipped.",
         );
     }
     write_atomic(&crate::index::symbols_json_path(&xencode), &symbols)?;
@@ -411,20 +431,26 @@ pub fn init_project(
     })
 }
 
-/// Read every Rust file and extract its symbol inventory. Secret and binary
-/// files were already filtered out upstream; unreadable files are skipped.
+/// Read every file with a symbol tier and extract its inventory. Rust uses the
+/// parse tree; TypeScript uses the lexical reader. Secret and binary files were
+/// already filtered out upstream; unreadable files are skipped.
 fn extract_repo_symbols(
     root: &Path,
-    rust_files: &[String],
+    symbol_files: &[String],
 ) -> Result<BTreeMap<String, PerFileSymbols>, ContextError> {
     let mut symbols = BTreeMap::new();
-    for path in rust_files {
+    for path in symbol_files {
         let full = root.join(path);
         let content = std::fs::read_to_string(&full).map_err(|source| ContextError::Io {
             path: full.clone(),
             source,
         })?;
-        symbols.insert(path.clone(), extract_rust_symbols(&content));
+        let inventory = if detect_language(&full) == Language::TypeScript {
+            extract_typescript_symbols(&content)
+        } else {
+            extract_rust_symbols(&content)
+        };
+        symbols.insert(path.clone(), inventory);
     }
     Ok(symbols)
 }

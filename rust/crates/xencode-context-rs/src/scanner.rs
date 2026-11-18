@@ -195,6 +195,16 @@ impl Language {
     pub fn has_semantic_tier(self) -> bool {
         matches!(self, Language::Rust)
     }
+
+    /// Whether this language contributes names to `symbols.json` at all. This is
+    /// wider than the semantic tier: TypeScript has a lexical symbol reader, but
+    /// none of the consumers that resolve Rust module paths, edit declarations by
+    /// name or read a compiler's semantic index may use its entries. Keeping the
+    /// two predicates apart is what lets TypeScript appear in the index without
+    /// being handed to a resolver that only understands `use`/`mod`/`impl`.
+    pub fn has_symbol_tier(self) -> bool {
+        matches!(self, Language::Rust | Language::TypeScript)
+    }
 }
 
 /// Whether a language name as it is stored in `files.json` is one the semantic
@@ -204,6 +214,14 @@ pub fn language_has_semantic_tier(name: &str) -> bool {
     Language::ALL
         .iter()
         .any(|language| language.has_semantic_tier() && language.as_str() == name)
+}
+
+/// The name-based form of [`Language::has_symbol_tier`], for indexes that store
+/// a language as text rather than as an enum.
+pub fn language_has_symbol_tier(name: &str) -> bool {
+    Language::ALL
+        .iter()
+        .any(|language| language.has_symbol_tier() && language.as_str() == name)
 }
 
 /// The refusal the semantic tier issues on its own grounds, when a file is not
@@ -723,6 +741,27 @@ mod tests {
         assert!(language_has_semantic_tier("rust"));
         assert!(!language_has_semantic_tier("python"));
         assert!(!language_has_semantic_tier(""));
+    }
+
+    #[test]
+    fn the_symbol_tier_covers_typescript_without_widening_the_semantic_tier() {
+        let covered: Vec<&str> = Language::ALL
+            .iter()
+            .filter(|language| language.has_symbol_tier())
+            .map(|language| language.as_str())
+            .collect();
+        assert_eq!(covered, vec!["rust", "typescript"]);
+        assert!(language_has_symbol_tier("rust"));
+        assert!(language_has_symbol_tier("typescript"));
+        assert!(!language_has_symbol_tier("javascript"));
+        assert!(!language_has_symbol_tier(""));
+        // A TypeScript file is in the symbol index but is still refused by the
+        // Rust-only surfaces, before anything tries to parse it as Rust.
+        let refusal =
+            semantic_tier_refusal("Symbol-level editing", "ui/App.tsx", Language::TypeScript)
+                .expect("TypeScript is outside the semantic tier");
+        assert!(refusal.contains("Rust only"), "{refusal}");
+        assert!(refusal.contains("a typescript file"), "{refusal}");
     }
 
     #[test]

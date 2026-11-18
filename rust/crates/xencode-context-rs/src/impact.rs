@@ -304,14 +304,19 @@ pub fn impact_from_filesystem(
     Ok(impact(&graph, &symbols, &target, symbol, IMPACT_MAX_HOPS))
 }
 
-/// Scan `root`, read every first-tier Rust file, and build the dependency graph
-/// in memory. Shared by [`impact_from_filesystem`] and [`change_impact`] so the
-/// two can never disagree about what the edges are.
+/// Scan `root`, read every file with a symbol tier, and build the dependency
+/// graph in memory. TypeScript names are available for target matching, but
+/// only Rust files reach the graph: its resolver reads Rust module paths.
+/// Shared by [`impact_from_filesystem`] and [`change_impact`] so the two can
+/// never disagree about what the edges are.
 pub(crate) fn headless_graph(
     root: &std::path::Path,
 ) -> Result<(Vec<DepEdge>, BTreeMap<String, PerFileSymbols>), crate::ContextError> {
-    use crate::scanner::{language_for_extension, scan_tree, ScanOptions};
+    use crate::scanner::{
+        detect_language, language_for_extension, scan_tree, Language, ScanOptions,
+    };
     use crate::symbols::{build_graph, extract_rust_symbols};
+    use crate::tssymbols::extract_typescript_symbols;
     let root = root
         .canonicalize()
         .map_err(|source| crate::ContextError::Io {
@@ -337,14 +342,34 @@ pub(crate) fn headless_graph(
         })
         .map(|e| e.path.clone())
         .collect();
+    let symbol_files: Vec<String> = scan
+        .files
+        .iter()
+        .filter(|e| {
+            language_for_extension(&e.ext).has_symbol_tier() && !e.is_secret && !e.is_binary
+        })
+        .map(|e| e.path.clone())
+        .collect();
     let mut symbols = BTreeMap::new();
-    for path in &rust_files {
+    for path in &symbol_files {
         let full = root.join(path);
+        let language = detect_language(&full);
         let content = std::fs::read_to_string(&full)
             .map_err(|source| crate::ContextError::Io { path: full, source })?;
-        symbols.insert(path.clone(), extract_rust_symbols(&content));
+        let inventory = if language == Language::TypeScript {
+            extract_typescript_symbols(&content)
+        } else {
+            extract_rust_symbols(&content)
+        };
+        symbols.insert(path.clone(), inventory);
     }
-    let graph = build_graph(&rust_files, &symbols);
+    let rust_paths: BTreeSet<&str> = rust_files.iter().map(String::as_str).collect();
+    let rust_symbols: BTreeMap<String, PerFileSymbols> = symbols
+        .iter()
+        .filter(|(path, _)| rust_paths.contains(path.as_str()))
+        .map(|(path, sym)| (path.clone(), sym.clone()))
+        .collect();
+    let graph = build_graph(&rust_files, &rust_symbols);
     Ok((graph, symbols))
 }
 

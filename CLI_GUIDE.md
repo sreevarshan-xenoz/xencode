@@ -2053,6 +2053,20 @@ xencode scan . --max-depth 2
 xencode scan . --format json | jq '.[].path'
 ```
 
+Repository indexing gives Rust and TypeScript different strengths of symbol
+tier. Rust is read with a tree-sitter parse tree: `symbols.json` names feed the
+dependency graph that `xencode impact` walks and the `edit_symbol` tool. `.ts`
+and `.tsx` files instead get a deterministic lexical reader: it collects
+classes, interfaces, enums, type aliases, functions and methods (including
+async functions and arrows bound to `const`/`let`/`var`), imports, exports and
+JSDoc, after masking comments, strings and template literals so keywords in
+those are not counted as declarations. It is not a TypeScript parse tree and
+makes no claim of Rust-grade precision: there is no type resolution, no
+file-to-file edges from TypeScript imports, and no name-based symbol edit.
+Semantic index answers (`--semantic`) and `edit_symbol` stay Rust-only. tsserver
+diagnostics are parked because no `tsserver` binary is bundled or invoked by
+this build.
+
 ### `xencode setup`
 Bring up a local llama.cpp model from an empty config in one command. It runs
 four steps in order and prints each before it starts:
