@@ -105,6 +105,16 @@ impl Server {
             initialized["capabilities"]["tools"].is_object(),
             "a server that lists tools must say so: {initialized}"
         );
+        // MS-1: resources and prompts are real capabilities now, so the
+        // handshake has to advertise them or no client will ever ask for them.
+        assert!(
+            initialized["capabilities"]["resources"].is_object(),
+            "a server that lists resources must say so: {initialized}"
+        );
+        assert!(
+            initialized["capabilities"]["prompts"].is_object(),
+            "a server that lists prompts must say so: {initialized}"
+        );
         // The handshake tells the caller which directory it is bound to, so a
         // client cannot be surprised later about where a write would land.
         assert!(
@@ -117,7 +127,9 @@ impl Server {
         server
     }
 
-    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+    /// Send one request and return the whole JSON-RPC envelope, error included.
+    /// Used where the refusal itself is what the test is checking.
+    fn request_raw(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
         self.next_id += 1;
         let id = self.next_id;
         self.write(serde_json::json!({
@@ -130,12 +142,17 @@ impl Server {
             // A notification or a progress message can arrive before the
             // answer; the reply is the one carrying this request's id.
             if value.get("id").and_then(|v| v.as_u64()) == Some(id) {
-                if let Some(error) = value.get("error") {
-                    panic!("method {method} failed: {error}");
-                }
-                return value["result"].clone();
+                return value;
             }
         }
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let value = self.request_raw(method, params);
+        if let Some(error) = value.get("error") {
+            panic!("method {method} failed: {error}");
+        }
+        value["result"].clone()
     }
 
     fn notify(&mut self, method: &str, params: serde_json::Value) {
@@ -196,6 +213,13 @@ fn workspace(label: &str) -> PathBuf {
     std::fs::write(
         dir.join("src/main.rs"),
         "fn main() {\n    println!(\"hi\");\n}\n",
+    )
+    .unwrap();
+    // MS-1: a real project instruction file for resources/list to publish and
+    // resources/read to return byte for byte.
+    std::fs::write(
+        dir.join("AGENTS.md"),
+        "# Workspace instructions\nReal bytes served over MCP.\n",
     )
     .unwrap();
     dir
@@ -377,6 +401,95 @@ fn a_permitted_command_reaches_where_it_says_and_the_launch_warned_of_it() {
     assert!(notice.contains("run_command"), "{notice}");
 
     let _ = std::fs::remove_file(&outside);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// MS-1: resources and prompts are exercised the way a real client does it —
+/// JSON-RPC over the child's stdin/stdout. Every byte read below comes from a
+/// file in the workspace, and the rendered prompt is the skill template that
+/// ships in this repository, not a canned answer.
+#[test]
+fn a_client_can_list_and_read_resources_and_render_a_prompt() {
+    let dir = workspace("resources");
+    let mut server = Server::start(&dir, &[]);
+
+    // resources/list names the real instruction file and the live summary.
+    let listed = server.request("resources/list", serde_json::json!({}));
+    let resources = listed["resources"]
+        .as_array()
+        .expect("resources must be an array");
+    let uris: Vec<&str> = resources.iter().filter_map(|r| r["uri"].as_str()).collect();
+    assert!(
+        uris.contains(&"xencode://workspace/AGENTS.md"),
+        "the real instruction file was not published: {listed}"
+    );
+    assert!(
+        uris.contains(&"xencode://config/summary"),
+        "the live configuration summary was not published: {listed}"
+    );
+
+    // resources/read returns the file's actual bytes, not a description of it.
+    let read = server.request(
+        "resources/read",
+        serde_json::json!({"uri": "xencode://workspace/AGENTS.md"}),
+    );
+    let text = read["contents"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the resource read carried no text: {read}"));
+    assert_eq!(
+        text,
+        std::fs::read_to_string(dir.join("AGENTS.md")).unwrap()
+    );
+
+    // The summary is built from the running server's own launch state.
+    let summary = server.request(
+        "resources/read",
+        serde_json::json!({"uri": "xencode://config/summary"}),
+    );
+    let summary_text = summary["contents"][0]["text"].as_str().unwrap();
+    assert!(
+        summary_text.contains(&dir.display().to_string()),
+        "the summary did not name the real workspace: {summary_text}"
+    );
+    assert!(
+        summary_text.contains("review-diff"),
+        "the summary did not name the published prompt: {summary_text}"
+    );
+
+    // prompts/list and prompts/get use the real shipped template.
+    let prompt_list = server.request("prompts/list", serde_json::json!({}));
+    assert_eq!(prompt_list["prompts"][0]["name"], "review-diff");
+    let diff = "--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n-one\n+two\n";
+    let got = server.request(
+        "prompts/get",
+        serde_json::json!({"name": "review-diff", "arguments": {"diff": diff}}),
+    );
+    let rendered = got["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(
+        rendered.contains("# Explain a diff"),
+        "the shipped explain-diff template was not rendered: {rendered}"
+    );
+    assert!(
+        rendered.contains(diff.trim()),
+        "the caller's diff was not rendered: {rendered}"
+    );
+
+    // A URI that leaves the workspace is a clear JSON-RPC error, both raw and
+    // percent-encoded, and it cannot name a file outside the workspace.
+    for uri in [
+        "xencode://workspace/../../etc/passwd",
+        "xencode://workspace/%2e%2e/%2e%2e/etc/passwd",
+    ] {
+        let response = server.request_raw("resources/read", serde_json::json!({"uri": uri}));
+        let error = response["error"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{uri} was not refused: {response}"));
+        let message = error["message"].as_str().unwrap_or("");
+        assert!(
+            message.contains("workspace") || message.contains("traversal"),
+            "{uri} was refused without a clear reason: {message}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

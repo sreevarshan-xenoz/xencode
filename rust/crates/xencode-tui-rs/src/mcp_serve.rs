@@ -16,18 +16,26 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use base64::Engine;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ContentBlock, Implementation, InitializeResult,
-    ListToolsResult, PaginatedRequestParams, ServerCapabilities, Tool,
+    CacheScope, CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, GetPromptResult, Implementation, InitializeResult, ListPromptsResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument,
+    PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, Role, ServerCapabilities, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use xencode_providers_rs::{command_tools, file_tools, ToolCall, ToolDefinition};
 
 use crate::agent_tools::{
-    execute_tool_call, tool_class, Headless, HeadlessPolicy, TaskRuntime, ToolClass,
+    execute_tool_call, path_allowed, tool_class, Headless, HeadlessPolicy, TaskRuntime, ToolClass,
 };
 use crate::mcp::advertised_tool_name;
+use crate::mcp_resources::{
+    render_review_diff, workspace_relative_from_uri, workspace_uri, CONFIG_SUMMARY_URI,
+    REVIEW_DIFF_PROMPT,
+};
 
 /// `serverInfo.name`, which is also the server name a client prefixes our tool
 /// names with (`mcp__xencode__read_file` once it imports them).
@@ -199,7 +207,153 @@ impl XencodeServer {
     pub fn tool_list(&self) -> ListToolsResult {
         ListToolsResult::with_all_items(self.advertised_tools())
             .with_ttl_ms(0)
-            .with_cache_scope(rmcp::model::CacheScope::Private)
+            .with_cache_scope(CacheScope::Private)
+    }
+
+    /// The `resources/list` result (MS-1). Every file resource names a file
+    /// that exists under this workspace right now; the config summary is built
+    /// from the running server's own launch state.
+    pub fn resource_list(&self) -> ListResourcesResult {
+        let mut resources = Vec::new();
+        for name in ["AGENTS.md", "task.md"] {
+            let path = self.root.join(name);
+            if path.is_file() && path_allowed(&self.root, name) {
+                resources.push(
+                    Resource::new(workspace_uri(name), name)
+                        .with_description(format!("Workspace file {name}"))
+                        .with_mime_type(mime_for(name))
+                        .with_size(path.metadata().map(|m| m.len()).unwrap_or(0)),
+                );
+            }
+        }
+        let summary = self.config_summary();
+        resources.push(
+            Resource::new(CONFIG_SUMMARY_URI, "config-summary")
+                .with_title("xencode MCP configuration")
+                .with_description(
+                    "This running server's launch configuration, read from the process itself",
+                )
+                .with_mime_type("text/markdown")
+                .with_size(summary.len() as u64),
+        );
+        ListResourcesResult::with_all_items(resources)
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private)
+    }
+
+    /// A real description of this launch, not a canned string: the version, the
+    /// workspace being served, what the launch permits and what it publishes.
+    fn config_summary(&self) -> String {
+        let launch = if self.policy.is_read_only() {
+            "read-only"
+        } else {
+            "writes permitted for the tools named at launch"
+        };
+        format!(
+            "# xencode MCP server\n\nversion: {}\nworkspace: {}\nlaunch: {}\npublished tools: {}\npublished prompts: {}\nresources: workspace files (AGENTS.md, task.md when present) and this summary\n",
+            self.version,
+            self.root.display(),
+            launch,
+            exposed_tool_names().join(", "),
+            REVIEW_DIFF_PROMPT,
+        )
+    }
+
+    /// The `prompts/list` result (MS-1). The template behind it is the
+    /// explain-diff skill shipped in this repository.
+    pub fn prompt_list(&self) -> ListPromptsResult {
+        let prompt = Prompt::new(
+            REVIEW_DIFF_PROMPT,
+            Some(
+                "Review a git diff in plain terms, using xencode's shipped explain-diff guidance.",
+            ),
+            Some(vec![PromptArgument::new("diff")
+                .with_description("The unified diff to review")
+                .with_required(true)]),
+        );
+        ListPromptsResult::with_all_items(vec![prompt])
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private)
+    }
+
+    /// Serve one `resources/read` request. Both the scheme and the workspace
+    /// boundary are checked here, on the decoded path, so a URI cannot reach a
+    /// file that a tool's `path` argument could not reach.
+    pub fn read_resource_uri(&self, uri: &str) -> Result<ReadResourceResponse, McpError> {
+        if uri == CONFIG_SUMMARY_URI {
+            let contents =
+                ResourceContents::text(self.config_summary(), uri).with_mime_type("text/markdown");
+            return Ok(ReadResourceResult::new(vec![contents]).into());
+        }
+        let relative = workspace_relative_from_uri(uri)
+            .map_err(|reason| McpError::invalid_params(reason, None))?;
+        if !path_allowed(&self.root, &relative) {
+            return Err(McpError::invalid_params(
+                format!(
+                    "resource URI `{uri}` resolves outside this workspace or in a protected zone; xencode refuses it"
+                ),
+                None,
+            ));
+        }
+        let path = self.root.join(&relative);
+        let bytes = std::fs::read(&path).map_err(|error| {
+            McpError::invalid_params(format!("could not read resource `{uri}`: {error}"), None)
+        })?;
+        let contents = match String::from_utf8(bytes.clone()) {
+            Ok(text) => ResourceContents::text(text, uri).with_mime_type(mime_for(&relative)),
+            Err(_) => {
+                ResourceContents::blob(base64::engine::general_purpose::STANDARD.encode(bytes), uri)
+                    .with_mime_type("application/octet-stream")
+            }
+        };
+        Ok(ReadResourceResult::new(vec![contents]).into())
+    }
+
+    /// Serve one `prompts/get` request: render the shipped template around the
+    /// diff the caller actually supplied.
+    pub fn render_prompt(
+        &self,
+        request: &GetPromptRequestParams,
+    ) -> Result<GetPromptResponse, McpError> {
+        if request.name != REVIEW_DIFF_PROMPT {
+            return Err(McpError::invalid_params(
+                format!(
+                    "xencode does not publish a prompt called `{}`; it publishes `{REVIEW_DIFF_PROMPT}`",
+                    request.name
+                ),
+                None,
+            ));
+        }
+        let diff = request
+            .arguments
+            .as_ref()
+            .and_then(|map| map.get("diff"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| {
+                McpError::invalid_params(
+                    "the `review-diff` prompt needs a non-empty `diff` argument",
+                    None,
+                )
+            })?;
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+            Role::User,
+            render_review_diff(diff),
+        )])
+        .into())
+    }
+}
+
+/// The MIME type a workspace file is served as, from its extension. Unknown
+/// extensions are still real resources, served as plain text.
+fn mime_for(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or("") {
+        "md" | "markdown" => "text/markdown",
+        "json" => "application/json",
+        "toml" => "application/toml",
+        "rs" => "text/rust",
+        _ => "text/plain",
     }
 }
 
@@ -232,9 +386,18 @@ impl ServerHandler for XencodeServer {
         } else {
             instructions
         };
-        InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new(SERVER_NAME, self.version.clone()))
-            .with_instructions(instructions)
+        // MS-1: this server publishes workspace resources and one prompt as
+        // well as its six tools, and the handshake must say so or a client
+        // never calls resources/list or prompts/list in the first place.
+        InitializeResult::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_prompts()
+                .build(),
+        )
+        .with_server_info(Implementation::new(SERVER_NAME, self.version.clone()))
+        .with_instructions(instructions)
     }
 
     async fn list_tools(
@@ -262,6 +425,38 @@ impl ServerHandler for XencodeServer {
             CallToolResult::success(blocks)
         };
         Ok(result.into())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(self.resource_list())
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        self.read_resource_uri(&request.uri)
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, McpError> {
+        Ok(self.prompt_list())
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, McpError> {
+        self.render_prompt(&request)
     }
 }
 
@@ -633,6 +828,114 @@ mod tests {
         assert_eq!(adapter.id(), "mcp");
         assert_eq!(adapter.protocol(), "mcp-stdio-v1");
         assert_eq!(adapter.exposed_tools().len(), 6);
+    }
+
+    #[test]
+    fn the_handshake_declares_resources_and_prompts() {
+        let dir = workspace("ms1-info");
+        let info = ServerHandler::get_info(&server(dir.clone(), &[]));
+        assert!(info.capabilities.tools.is_some());
+        assert!(
+            info.capabilities.resources.is_some(),
+            "the handshake does not advertise resources"
+        );
+        assert!(
+            info.capabilities.prompts.is_some(),
+            "the handshake does not advertise prompts"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resource_list_names_real_files_and_the_live_config_summary() {
+        let dir = workspace("ms1-list");
+        std::fs::write(dir.join("AGENTS.md"), "# instructions\n").unwrap();
+        let listed = serde_json::to_value(server(dir.clone(), &[]).resource_list()).unwrap();
+        assert_eq!(listed["ttlMs"], 0);
+        assert_eq!(listed["cacheScope"], "private");
+        let uris: Vec<&str> = listed["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["uri"].as_str().unwrap())
+            .collect();
+        assert!(uris.contains(&"xencode://workspace/AGENTS.md"), "{listed}");
+        assert!(uris.contains(&"xencode://config/summary"), "{listed}");
+        assert!(!uris.iter().any(|uri| uri.contains("task.md")), "{listed}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reading_a_resource_returns_the_files_real_bytes() {
+        let dir = workspace("ms1-read");
+        std::fs::write(dir.join("AGENTS.md"), "# real instructions\n").unwrap();
+        let s = server(dir.clone(), &[]);
+        let response = s
+            .read_resource_uri("xencode://workspace/AGENTS.md")
+            .unwrap();
+        let ReadResourceResponse::Complete(result) = response else {
+            panic!("a local file read completes without asking for input")
+        };
+        let value = serde_json::to_value(result).unwrap();
+        let text = value["contents"][0]["text"].as_str().unwrap();
+        assert_eq!(text, "# real instructions\n");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reading_a_resource_outside_the_workspace_is_refused() {
+        let dir = workspace("ms1-refuse");
+        let s = server(dir.clone(), &[]);
+        for uri in [
+            "xencode://workspace/../../etc/passwd",
+            "xencode://workspace/%2e%2e/%2e%2e/etc/passwd",
+            "xencode://workspace/../outside.txt",
+            "file:///etc/passwd",
+        ] {
+            let error = s
+                .read_resource_uri(uri)
+                .expect_err("an escaping URI must not be read");
+            assert!(
+                format!("{error}").contains("workspace")
+                    || format!("{error}").contains("traversal"),
+                "{uri} was refused without a clear reason: {error}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prompt_list_and_render_use_the_shipped_template() {
+        let dir = workspace("ms1-prompt");
+        let s = server(dir.clone(), &[]);
+        let listed = serde_json::to_value(s.prompt_list()).unwrap();
+        assert_eq!(listed["ttlMs"], 0);
+        assert_eq!(listed["cacheScope"], "private");
+        assert!(listed["prompts"][0]["name"] == "review-diff");
+
+        let request = GetPromptRequestParams::new(REVIEW_DIFF_PROMPT).with_arguments(
+            serde_json::json!({"diff": "--- a/x\n+++ b/x"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let response = s.render_prompt(&request).unwrap();
+        let GetPromptResponse::Complete(result) = response else {
+            panic!("a local prompt render completes without asking for input")
+        };
+        let value = serde_json::to_value(result).unwrap();
+        let text = value["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.contains("# Explain a diff"), "{text}");
+        assert!(
+            text.contains("--- a/x"),
+            "the caller's diff was not rendered"
+        );
+
+        let missing = GetPromptRequestParams::new(REVIEW_DIFF_PROMPT);
+        assert!(s.render_prompt(&missing).is_err());
+        let unknown = GetPromptRequestParams::new("not-a-prompt");
+        assert!(s.render_prompt(&unknown).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 

@@ -19,6 +19,7 @@ pub mod live_status;
 pub mod lsp;
 pub mod markdown;
 pub mod mcp;
+mod mcp_resources;
 pub mod mcp_serve;
 pub mod mcp_team;
 pub mod orchestrator_view;

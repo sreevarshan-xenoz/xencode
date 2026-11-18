@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed — visibility of what waits on the person (OM-7)
 
 - `OM-7`: the orchestrator Inbox and the window title now show the same, complete list of what waits on the person. Previously a pending question or a ByteBot task waiting for review could be outstanding while the Inbox and title showed nothing. One pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review, and every terminal agent calling for attention; the Inbox renders from it and the title counts from it, so the two cannot disagree. The Inbox still folds further approvals into a `+N` on the first row. Unit tests cover each source of waiting work, the empty case and the attention count.
+### Added — MCP resources and prompts (MS-1)
+
+- `MS-1`: `xencode mcp serve` now advertises and serves MCP resources and prompts alongside its six tools. `resources/list` publishes `AGENTS.md` and `task.md` when those files exist in the served workspace, plus a live `xencode://config/summary` built from the running server's own version, workspace and launch policy. `resources/read` returns the real bytes of a workspace file (base64 for non-UTF-8 bytes) and refuses a URI that leaves the workspace, including percent-encoded `..` traversal, with a clear JSON-RPC error. `prompts/list` and `prompts/get` serve a `review-diff` prompt rendered from the explain-diff skill template shipped in this repository around the diff the caller supplied. The handshake now declares the resources and prompts capabilities, and a real stdio client test drives initialize, both list methods, a byte-for-byte file read, a prompt render and an out-of-workspace refusal over the binary's own pipes.
 
 ### Fixed — screenshot test capability report (SC-1)
 
