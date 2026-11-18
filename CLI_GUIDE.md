@@ -754,6 +754,25 @@ and `--mirostat`, which Ollama has no field for — by a model served by Ollama 
 [What a request to Ollama carries](#what-a-request-to-ollama-carries). The prompt
 alone, with no flags, goes to the configured default model.
 
+#### Local BitNet models
+
+A model id prefixed `bitnet:` goes to a BitNet b1.58 server running locally
+(bitnet.cpp). It speaks llama.cpp's HTTP API, so xencode uses the same
+OpenAI-compatible `/chat/completions` client as `remote:`, with no API key:
+
+```bash
+xencode config set bitnet_url http://127.0.0.1:8080/v1
+xencode query -m 'bitnet:BitNet-b1.58-2B' "Capital of France?"
+```
+
+Only loopback/local hosts are accepted for `bitnet_url`; an off-machine URL, or
+an unset one, is refused with a message naming the key rather than falling
+through to Ollama. BitNet is the weak-hardware fallback role, not the default
+coding model. This slice documents the route and its HTTP contract only: it
+ships no BitNet runtime or weights, and a real generation could not be verified
+here (no bitnet.cpp, 2 GB GPU). The route is wired into `xencode query` and
+`xencode git commit-message`.
+
 #### Sending images
 
 `--image <PATH>` rides along with the prompt as an image part on the final user
@@ -2962,6 +2981,7 @@ in it was unchanged by the session that opened on it.
 | `default_model` | string | e.g. `qwen3:4b` |
 | `ollama_url`, `llama_cpp_url` | string | provider endpoints |
 | `remote_url`, `remote_key` | string | Remote / Colab endpoint (any OpenAI-compatible server, e.g. `http://127.0.0.1:18000/v1` + its bearer token); empty `remote_key` clears it. Its bearer token also comes from `XENCODE_API_KEY` / `API_KEY_REMOTE` when nothing is stored here |
+| `bitnet_url` | string | API root of a local BitNet b1.58 server for `bitnet:<model>` (e.g. `http://127.0.0.1:8080/v1`; `/chat/completions` is appended). Must be `http://` or `https://` and point at a loopback/local host — a remote BitNet server is refused. Empty clears it, and an empty or missing URL makes a `bitnet:` request fail with a message naming this key. No API key is sent |
 | `openai_api_key`, `openrouter_api_key`, `google_gemini_api_key`, `qwen_api_key`, `nvidia_api_key` | string | Provider credentials, `remote_key` included. Each takes a key, or `command:<program> <args>` to keep the key out of the file, and each has an environment variable of the same name if the file says nothing — see the three tiers above. `config show` reports where one lives and never its value |
 | `nvidia_api_key` | string | NVIDIA NIM token for `nvidia:<vendor/model>` (e.g. `nvidia:deepseek-ai/deepseek-v4.1-flash`); empty clears it. Also read from `NVIDIA_NIM_API_KEY` when unset here — the config value wins. **Generate it from the model's own page** (`build.nvidia.com/<vendor/model>` → Get API Key), not from the account page: an account-wide key lists models but every call returns `404 … Not found for account`. Expect 250–300s on a cold start, raise `response_timeout` (default 30s) accordingly, and give `max_tokens` room for the model's reasoning tokens |
 | `colab_enabled` | bool | Gates the whole Colab bridge; `false` → `xencode colab *` refuses |

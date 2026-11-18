@@ -644,8 +644,18 @@ flowchart TD
   stays runnable as two arms of that same test.
 - Routing is by **model prefix** on `default_model` (and each fallback entry):
   `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
-  for a local llama-server, `remote:…` for any OpenAI-compatible server at
-  `remote_base_url`, anything else goes to Ollama on `ollama_url`.
+  for a local llama-server, `bitnet:…` for a local BitNet b1.58 server at
+  `bitnet_url`, `remote:…` for any OpenAI-compatible server at
+  `remote_base_url`, anything else goes to Ollama on `ollama_url`. Set the
+  BitNet endpoint with `xencode config set bitnet_url http://127.0.0.1:8080/v1`
+  and use a model id such as `bitnet:BitNet-b1.58-2B`. bitnet.cpp serves the
+  llama.cpp HTTP API, so the same OpenAI-compatible `/chat/completions` client
+  is reused with no API key. The URL is accepted only for a loopback/local host:
+  a remote BitNet server is not supported, and an unset or non-local URL is
+  refused with a message naming `bitnet_url` instead of falling through to
+  Ollama. This slice wires the route into `xencode query` and
+  `xencode git commit-message`; it ships no BitNet runtime or model weights,
+  and no real BitNet generation was verified here (no bitnet.cpp, 2 GB GPU).
 - **A prompt leaves this machine only if you say so.** `allow_cloud_models`
   (default `false`) is the permission for any request to reach an internet
   service; a key in `api_keys` says who you are to a provider and does not

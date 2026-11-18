@@ -490,6 +490,14 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub remote_base_url: String,
 
+    /// API root of a local BitNet b1.58 server, addressed as `bitnet:<model>`
+    /// (`/chat/completions` is appended to it). Empty means nothing is
+    /// configured, and a `bitnet:` request says so rather than guessing a host.
+    /// Only loopback/local hosts are accepted in this slice: BitNet is the
+    /// weak-hardware local fallback, not a cloud route.
+    #[serde(default)]
+    pub bitnet_url: String,
+
     /// Path to a GGUF model used when auto-starting / loading llama-server.
     #[serde(default = "default_llama_cpp_model_path")]
     pub llama_cpp_model_path: String,
@@ -1079,6 +1087,7 @@ impl Default for XencodeConfig {
             ollama_keep_alive: None,
             llama_cpp_url: default_llama_cpp_url(),
             remote_base_url: String::new(),
+            bitnet_url: String::new(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
             llama_cpp_executable: String::new(),
             llama_cpp_model_url: String::new(),
@@ -1725,6 +1734,10 @@ mod tests {
             config.remote_base_url.is_empty(),
             "the example must not point at an invented endpoint"
         );
+        assert!(
+            config.bitnet_url.is_empty(),
+            "the example must not point at an invented BitNet endpoint"
+        );
         // RS-2: an example that named an engine would teach the wrong posture —
         // the whole point of the setting is that nothing dials out until asked.
         assert_eq!(
@@ -1760,6 +1773,28 @@ mod tests {
             again.api_keys.remote_api_key.as_deref(),
             Some("runtime-proxy-token")
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A BitNet endpoint is opt-in like the remote one: an absent URL stays
+    /// absent, and a config written before the field existed still loads and
+    /// keeps an explicitly set URL across a save/load round trip.
+    #[test]
+    fn bitnet_endpoint_defaults_empty_and_round_trips() {
+        assert!(XencodeConfig::default().bitnet_url.is_empty());
+
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bitnet.json");
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        let mut loaded = XencodeConfig::load_from(&path).unwrap();
+        assert!(loaded.bitnet_url.is_empty());
+
+        loaded.bitnet_url = "http://127.0.0.1:8080/v1".to_string();
+        loaded.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(again, loaded);
+        assert_eq!(again.bitnet_url, "http://127.0.0.1:8080/v1");
         fs::remove_dir_all(&dir).unwrap();
     }
 

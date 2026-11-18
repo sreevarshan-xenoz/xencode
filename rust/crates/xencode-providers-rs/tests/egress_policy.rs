@@ -7,7 +7,10 @@
 //! error type alone — no server, no network.
 
 use xencode_models_rs::OllamaClient;
-use xencode_providers_rs::{ChatMessage, Egress, EgressPolicy, ProviderError, ProviderManager};
+use xencode_providers_rs::retry::RetryConfig;
+use xencode_providers_rs::{
+    provider_for, ChatMessage, Egress, EgressPolicy, ProviderError, ProviderManager, RoutingFacts,
+};
 
 fn test_messages() -> Vec<ChatMessage> {
     vec![ChatMessage {
@@ -149,6 +152,52 @@ fn a_remote_endpoint_is_judged_by_the_host_it_points_at() {
     let off_machine = manager().with_remote("https://inference.example.invalid/v1", None);
     assert_eq!(local.egress_of("remote:qwen2.5-coder"), Egress::Local);
     assert_eq!(off_machine.egress_of("remote:qwen2.5-coder"), Egress::Cloud);
+}
+
+/// BitNet is a local fallback for weak hardware, so a machine that has
+/// switched cloud models off must still be able to use it. The endpoint is an
+/// unreachable port with retries disabled: the expected error is a network
+/// failure from having dialled, not an egress refusal.
+#[tokio::test]
+async fn bitnet_stays_available_when_cloud_models_are_denied() {
+    let manager = manager()
+        .with_bitnet("http://127.0.0.1:1/v1")
+        .with_retry_config(RetryConfig {
+            max_retries: 0,
+            ..RetryConfig::default()
+        })
+        .with_egress_policy(EgressPolicy::new(false));
+
+    assert_eq!(manager.egress_of("bitnet:m"), Egress::Local);
+    // A BitNet route does not depend on any configured host or key.
+    assert_eq!(provider_for("bitnet:m", RoutingFacts::default()), "bitnet");
+
+    let result = manager.generate("bitnet:m", &test_messages()).await;
+    assert!(
+        matches!(result, Err(ProviderError::Network(_))),
+        "the local route must run and fail on the unreachable port, got {result:?}"
+    );
+}
+
+#[test]
+fn a_bitnet_turn_keeps_only_local_fallback_candidates() {
+    let manager = manager().with_bitnet("http://127.0.0.1:8080/v1");
+    let configured: Vec<String> = ["bitnet:other", "qwen:qwen3-max", "llama3.2:3b"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let (chain, skipped) = manager.fallback_chain("bitnet:m", &configured);
+
+    assert_eq!(
+        chain,
+        vec![
+            "bitnet:m".to_string(),
+            "bitnet:other".to_string(),
+            "llama3.2:3b".to_string()
+        ]
+    );
+    assert_eq!(skipped, vec!["qwen:qwen3-max".to_string()]);
 }
 
 #[test]

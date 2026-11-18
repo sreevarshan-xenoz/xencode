@@ -18,13 +18,13 @@
 //! cannot be proven local counts as cloud. That is why `remote:` looks at the
 //! configured host rather than trusting its prefix.
 
-use crate::{llamacpp_target, nvidia_target, remote_target, ProviderError};
+use crate::{bitnet_target, llamacpp_target, nvidia_target, remote_target, ProviderError};
 
 /// Where a request ends up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Egress {
-    /// A server on this machine: Ollama, llama.cpp, or a `remote:` endpoint
-    /// whose host is local.
+    /// A server on this machine: Ollama, llama.cpp, a local BitNet endpoint,
+    /// or a `remote:` endpoint whose host is local.
     Local,
     /// Anything else — an internet service, or an endpoint we cannot place.
     Cloud,
@@ -117,6 +117,11 @@ fn route_of(model: &str, facts: RoutingFacts<'_>) -> (Egress, &'static str) {
     }
     if llamacpp_target(model).is_some() {
         return (Egress::Local, "llamacpp");
+    }
+    if bitnet_target(model).is_some() {
+        // BitNet is local by construction, and the router refuses a URL whose
+        // host is not loopback before it opens a connection.
+        return (Egress::Local, "bitnet");
     }
     if remote_target(model).is_some() {
         return match facts.remote_host {
