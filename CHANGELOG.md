@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added — hybrid multi-model stack direction (HM-1)
+
+- `HM-1`: records the adopted hybrid architecture in the plan: a fast Qwen-class default, BitNet b1.58 as the weak-hardware fallback, a stronger configured model for explicit deep-think or repeated failure, and small tool specialists. All roles share the existing tool protocol and local-first egress rules; weights are never merged. AirLLM itself is Python and is deliberately out of scope.
+
 ### Added — optional focused tool menu for bugfix turns (TS-1)
 
 - `TS-1`: a new default-off `focused_tools` setting narrows the tool menu a small model chooses from on a turn whose prompt reads as a bugfix. The reading is the same whole-word rule retrieval and model routing use; a `general` prompt and the default focus-off path see the full menu unchanged. A focused bugfix leaves out the background job, web, off-machine search and skill tools, while always keeping `read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` and whatever the approval mode needs. The rule runs after the index, mode and reproduction filters, so those still compose, and `xencode config set focused_tools true` writes the flag. Five pure tests use the real tool constructors, the index and executor-reachability guards were extended so no dispatch arm becomes unreachable, and the full workspace suite passes with 3,255 tests. The live eval pass rate with the setting on is **not verified here** (2 GB GPU, no `llama-server`), so no improvement in the ≥4/8 gate is claimed.

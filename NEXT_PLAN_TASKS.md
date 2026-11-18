@@ -26,6 +26,29 @@ The full gap list behind these phases, in priority order:
 
 Execution rules: depth over breadth; prefer changes that help 4–8B local models; every major change needs a measurable done-when; ship small vertical slices; keep the honesty bar high and report blocked verification (for example GPU-dependent eval runs) rather than faking green.
 
+## Hybrid multi-model stack (2026-11-18)
+
+Adopted direction: combine specialized models rather than choose one. All roles
+speak the same tool protocol so the agent loop does not care which brain answers.
+
+| Role | Model / tech | When it runs |
+|---|---|---|
+| Fast agent (default) | Qwen3-4B/8B Q4/Q5 on llama.cpp | normal editing, most turns |
+| Ultra-light / always-on | BitNet b1.58 2B | weak CPUs, background tasks, low-power |
+| Heavy reasoning | a configured stronger model | deep-think or repeated edit failure |
+| Tiny specialist | small tool-focused models | structured micro-actions |
+
+Rules: default is always the fast model; BitNet is the poor-hardware fallback,
+not the primary coding model; heavy reasoning runs only on explicit request or
+after repeated failure; weights are never merged (different architectures).
+This is an extension of the existing local-first and deny-by-default egress
+posture, not a cloud route.
+
+Ordered slices: **BP-1** (BitNet provider), **HR-1** (hardware/shape router),
+**DT-1** (deep-think escalation). AirLLM itself cannot be added: it is Python and
+this repo is Rust-only. Its role is served by a user-configured stronger model
+through the existing remote/OpenAI-compatible provider.
+
 ## Audit 2026-11-17 — findings and fixes (`AU-*`)
 
 Six parallel reviewers audited the whole repository on 2026-11-17. Every finding
@@ -94,6 +117,7 @@ plain English. Newer entries in the table state their own status.
 | CA-1 ✅ | MED | context+cli | the L-9 done claim promised per-session spend, but `xencode orchestrator costs` priced only per model — the rollup already grouped tokens by session, yet the text report had no SESSIONS block and `--format json` had no `sessions` key | a pure helper prices each session's own per-model totals through the same `cost_of` the whole project uses, so unknown prices stay unknown; the text report gains a SESSIONS table (id, requests, prompt/completion tokens, cost or `unpriced`, model count) and the JSON report a `sessions` array, with the per-model output untouched | done; 2 new xencode-context-rs unit tests (one hand-summing 486/90/576 micros from real request rows, one proving an unpriced model stays unknown) and 1 new xencode-cli integration test (real metrics.jsonl and pricing.json in a temporary project, both formats checked, both files byte-for-byte unchanged) pass; fmt and clippy clean on both crates; live price fetching and RAPL electricity dollars remain unverified |
 | RV-1 ✅ | MED | analysis+cli | `xencode review` analysed the whole working-tree file, so a finding on an untouched line looked exactly like one the diff introduced and the report said nothing about what the change added | a pure parser maps real `@@ -a,b +c,d @@` hunks to added new-file line ranges and classifies each finding as introduced or preexisting; both labels appear in text output and JSON (`origin`), `--introduced-only` hides pre-existing ones, and the default still shows both | done; pure tests use captured git diffs with multiple hunks, context and removed lines; a real CLI test builds a temporary git repo with one finding on an untouched line and one added in a commit, checks both labels and the filter, and completions were regenerated; workspace suite at the docs commit: 3,247 passed, 0 failed, 35 ignored — local diffs only, unresolved GitHub threads and live PR support remain out of scope |
 | TS-1 ✅ | MED | tui+config+docs | a small model still had to pick its call from the whole tool menu, and the earlier prompt nudges had not moved the eval pass rate; on bugfix turns it spent rounds on background, web, search and skill tools instead of finding and editing the file | a default-off `focused_tools` setting narrows the menu only when `shape_of` reads the prompt as a bugfix: the `background_*`, `web_*`, off-machine `search_*` (but not `search_files`) and skill tools are dropped, while `read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` and the current mode's own tools stay; the rule runs after the index, mode and reproduction filters so they still compose | done; five pure tests build the menu from the real tool constructors, the index and executor-reachability guards were extended so no dispatch arm becomes unreachable, an old config loads with the flag off and `xencode config set focused_tools true` writes it; full workspace suite 3,255 passed, 0 failed, 35 ignored, fmt and clippy clean — the live eval pass-rate effect is NOT verified here (2 GB GPU, no llama-server), so the SM-2 ≥4/8 gate is not claimed met |
+| HM-1 ✅ | LOW | docs | the hybrid multi-model direction existed only in conversation | recorded as a phase in NEXT_PLAN_TASKS.md with roles, rules and ordered BP-1/HR-1/DT-1 slices; AirLLM noted as Python and therefore out of scope |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
