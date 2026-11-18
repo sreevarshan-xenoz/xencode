@@ -3,8 +3,9 @@
 //! project index (about a second) and writes it into `.xencode/`, which is
 //! git-ignored but shared with the TUI.
 //!
-//! Run it to see what the structural retriever, the two hybrid arms and the two
-//! commit-history arms actually score on the built-in gold set:
+//! Run it to see what the structural retriever, the two hybrid arms, the two
+//! commit-history arms and the optional term-association arm actually score on
+//! the built-in gold set:
 //!
 //! ```text
 //! cargo test -p xencode-context-rs --test gold_baseline -- --ignored --nocapture
@@ -63,14 +64,17 @@ fn gold_scores_against_the_real_index() {
         xencode_context_rs::prompts::registry().len()
     );
     let prior = xencode_context_rs::read_eval_runs(&xencode);
-    // Five arms, so the run prices each addition separately: structural only,
+    // Six arms, so the run prices each addition separately: structural only,
     // plus a lexical arm over path and symbols, plus the same with the files'
     // documentation prose indexed too, then that shipped arm with each of the two
-    // commit-history terms spent on top. A probe that carries a `shape` is scored
-    // as that shape in every arm, so what is compared here is the stage being
-    // priced and nothing else; the shape's own contribution is measured per
-    // partition below.
-    let arms: [(&str, xencode_context_rs::RetrieveOptions); 5] = [
+    // commit-history terms spent on top, and the shipped arm with corpus-derived
+    // term association expanding the BM25 query. The last one is reported, never
+    // asserted: it is association between words in this repository, not neural
+    // embeddings or synonymy, and no pass-rate improvement is claimed for it.
+    // A probe that carries a `shape` is scored as that shape in every arm, so
+    // what is compared here is the stage being priced and nothing else; the
+    // shape's own contribution is measured per partition below.
+    let arms: [(&str, xencode_context_rs::RetrieveOptions); 6] = [
         ("deterministic      ", Default::default()),
         (
             "+ text (path+symbol)",
@@ -101,6 +105,14 @@ fn gold_scores_against_the_real_index() {
                 lexical: true,
                 cochange: true,
                 recency: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "+ text + doc prose + assoc",
+            xencode_context_rs::RetrieveOptions {
+                lexical: true,
+                assoc: true,
                 ..Default::default()
             },
         ),

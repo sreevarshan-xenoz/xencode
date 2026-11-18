@@ -14,6 +14,11 @@
 //!   only reordered the top-K it was handed and so could never promote a file
 //!   the structural pass had missed. A real embeddings model would fold into
 //!   `hybrid_select`; nothing is wired until the eval says it pays.
+//! - `hybrid_select_terms` is the same stage with the query already tokenized.
+//!   The optional, default-off [`crate::cooccurrence`] expansion appends terms
+//!   it learns from this corpus to the prompt's tokens and enters through that
+//!   seam. It is association between words that occur together in files, not
+//!   neural embeddings or synonymy, and no pass-rate improvement is claimed.
 
 use crate::retrieve::{RetrievalIndex, RetrievedFile};
 use std::collections::HashMap;
@@ -224,6 +229,24 @@ pub fn hybrid_select(
     with_docs: bool,
     floor: u64,
 ) -> Vec<RetrievedFile> {
+    let terms = tokenize(query);
+    hybrid_select_terms(index, structural, &terms, k, with_docs, floor)
+}
+
+/// The same candidate stage as [`hybrid_select`], but with the query already
+/// tokenized. This is the seam the optional term-association expansion uses:
+/// retrieval appends terms derived from the corpus to the prompt's own tokens
+/// and hands the combined list here, leaving the default tokenization path
+/// untouched. `terms` need not be sorted or unique; duplicate terms are how
+/// BM25 already weights a repeated word.
+pub fn hybrid_select_terms(
+    index: &RetrievalIndex,
+    structural: &[(String, u64, Vec<String>)],
+    terms: &[String],
+    k: usize,
+    with_docs: bool,
+    floor: u64,
+) -> Vec<RetrievedFile> {
     let indexable: Vec<usize> = index
         .files
         .iter()
@@ -232,7 +255,6 @@ pub fn hybrid_select(
         .map(|(i, _)| i)
         .collect();
     let bm25 = Bm25::over(index, &indexable, with_docs);
-    let terms = tokenize(query);
 
     let mut structural_of: HashMap<&str, (u64, &Vec<String>)> = HashMap::new();
     for (path, score, reasons) in structural {
@@ -242,7 +264,7 @@ pub fn hybrid_select(
     let mut scored: Vec<(u64, String, Vec<String>)> = Vec::new();
     for &i in &indexable {
         let path = &index.files[i].path;
-        let b = bm25.score(i, &terms);
+        let b = bm25.score(i, terms);
         let boost = (b * LEXICAL_WEIGHT).round() as u64;
         let (base, reasons) = structural_of
             .get(path.as_str())

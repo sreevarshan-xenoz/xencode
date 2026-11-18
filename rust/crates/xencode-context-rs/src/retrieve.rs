@@ -42,6 +42,12 @@
 //! documentation prose — before the top-K is cut, so the text of a file can
 //! carry it into the injection set instead of only reordering files that
 //! already made it. That hybrid stage is off by default; `/ctx eval` runs both.
+//!
+//! `RetrieveOptions::assoc` can append to the BM25 query the terms that most
+//! often share a pseudo-document with the prompt's words (positive PMI,
+//! [`crate::cooccurrence`]). That is corpus-derived association only — not a
+//! neural embedding and not synonymy — it is off by default and off in live
+//! chat, and it makes no claim about the eval pass rate.
 
 use crate::cochange::{COCHANGE_BONUS, RECENCY_BONUS};
 use crate::index::{FileEntry, FilesIndex, Manifest};
@@ -103,6 +109,12 @@ pub struct RetrieveOptions {
     /// Spend the recency term, on files something else already scored. Never
     /// brings a file in on its own: "committed lately" is not an answer.
     pub recency: bool,
+    /// Expand the lexical query with terms that co-occur with its words in this
+    /// repository's pseudo-documents (positive PMI, see [`crate::cooccurrence`]).
+    /// Off in [`Default`] and off in [`RetrieveOptions::for_live_chat`], so no
+    /// shipped path changes. This is corpus-derived association, not neural
+    /// embeddings or synonymy; the gold comparison is reported, not asserted.
+    pub assoc: bool,
 }
 
 impl Default for RetrieveOptions {
@@ -117,6 +129,7 @@ impl Default for RetrieveOptions {
             shape: TaskShape::General,
             cochange: false,
             recency: false,
+            assoc: false,
         }
     }
 }
@@ -362,10 +375,28 @@ pub fn retrieve(
         // The lexical arm ranks the whole index, so a file only its text
         // describes can enter the candidates rather than only reorder those
         // that structural scoring already surfaced.
-        return crate::embed::hybrid_select(
+        let mut terms = crate::embed::tokenize(query);
+        if options.assoc {
+            // The association index reads the same pseudo-documents as BM25, so
+            // the expansion feeds the very terms the lexical arm scores. It is
+            // built from the index alone: no model, no network, no state carried
+            // between turns. Off by default, including live chat.
+            let cooc = crate::cooccurrence::CooccurrenceIndex::build_focused(
+                index,
+                options.lexical_docs,
+                &terms,
+            );
+            let extra = cooc.expand(
+                &terms,
+                crate::cooccurrence::DEFAULT_PER_TERM,
+                crate::cooccurrence::DEFAULT_MAX_TERMS,
+            );
+            terms.extend(extra);
+        }
+        return crate::embed::hybrid_select_terms(
             index,
             &candidates,
-            query,
+            &terms,
             options.top_k,
             options.lexical_docs,
             options.min_score,
