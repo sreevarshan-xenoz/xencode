@@ -755,16 +755,11 @@ and `--mirostat`, which Ollama has no field for — by a model served by Ollama 
 alone, with no flags, goes to the configured default model.
 
 #### Local BitNet models
-
 A model id prefixed `bitnet:` goes to a BitNet b1.58 server running locally
 (bitnet.cpp). It speaks llama.cpp's HTTP API, so xencode uses the same
 OpenAI-compatible `/chat/completions` client as `remote:`, with no API key:
-
-```bash
 xencode config set bitnet_url http://127.0.0.1:8080/v1
 xencode query -m 'bitnet:BitNet-b1.58-2B' "Capital of France?"
-```
-
 Only loopback/local hosts are accepted for `bitnet_url`; an off-machine URL, or
 an unset one, is refused with a message naming the key rather than falling
 through to Ollama. BitNet is the weak-hardware fallback role, not the default
@@ -772,6 +767,32 @@ coding model. This slice documents the route and its HTTP contract only: it
 ships no BitNet runtime or weights, and a real generation could not be verified
 here (no bitnet.cpp, 2 GB GPU). The route is wired into `xencode query` and
 `xencode git commit-message`.
+#### Explicit deep-think override (DT-1)
+# Run this one turn on a stronger, explicitly named model
+xencode query "Fix the failing parser" --deep-think remote:strong-reasoner
+`--deep-think <model>` is a per-turn model override. It wins over `--model` and
+over profile routing, but it travels through the same provider and egress path:
+a cloud or off-machine model still needs `allow_cloud_models` set to `true`, and
+the `deep-think: using …` line on stderr names the model that actually receives
+the request. AirLLM is Python and cannot be added to this Rust workspace, so the
+stronger model here is a remote, OpenAI-compatible endpoint you have configured
+(`remote:<model>` with `remote_base_url`, or another supported cloud route) —
+the program does not download or run a large model itself.
+Turns also carry an escalation marker. A turn that ends with two or more failed
+edit attempts — `edit_file`/`write_file` calls that ended `failed`, plus
+"you changed no file" notes — writes `failed_edit_count` and
+`escalation_recommended` to its row in `.xencode/cache/turns.jsonl`, and an eval
+case copies both onto its `results.jsonl` line. In the interactive agent the
+finished turn announces the signal with a `⚠ … failed edit attempts …` line in
+the same style as a provider fallback, and when `deep_think_model` is configured
+(`xencode config set deep_think_model remote:strong-reasoner`) the **next** turn
+runs on that stronger model. The switch happens only at a turn boundary, never
+inside a turn where it would duplicate streamed tokens and executed tools;
+setting the key without a model name announces but does not switch.
+A real improvement from a 70B model is **not verified here**: this machine has a
+2 GB GPU and no local 70B server. The marker, the announcement, the model-id
+routing and the egress refusal are exercised with real loopback sockets and
+real turn traces; the quality gain of a particular stronger model is not.
 
 #### Sending images
 

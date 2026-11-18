@@ -88,6 +88,12 @@ pub(crate) enum Commands {
         #[arg(long, short)]
         model: Option<String>,
 
+        /// Use this stronger model for this turn (explicit deep-think override;
+        /// wins over --model and profile routing; cloud routes still need
+        /// allow_cloud_models)
+        #[arg(long = "deep-think", value_name = "MODEL")]
+        deep_think: Option<String>,
+
         /// Do not use cached responses
         #[arg(long)]
         no_cache: bool,

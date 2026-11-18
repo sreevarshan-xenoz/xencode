@@ -41,6 +41,12 @@ pub const TRACE_TAIL_CAP: usize = 300;
 /// replaced by their size and the rest has been redacted.
 pub const TRACE_ARGUMENTS_CAP: usize = 240;
 
+/// How many failed edit attempts in one turn recommend a stronger model on the
+/// next turn (DT-1). Two is deliberate: one failed edit is ordinary — a wrong
+/// pattern, a file that moved — but a second one says the model is not making
+/// progress, which is the signal the deeper model is meant to break.
+pub const ESCALATION_FAILED_EDIT_THRESHOLD: usize = 2;
+
 /// What one tool call did on a turn.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolTrace {
@@ -156,6 +162,38 @@ pub struct TurnTrace {
     /// that build did not keep them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub no_change_notes: Vec<ContinuationNote>,
+    /// Failed edit attempts in this turn (DT-1): `edit_file`/`write_file` calls
+    /// whose outcome was `failed`, plus every no-change note (the model said it
+    /// changed a file when none changed). Filled in when the row is written;
+    /// a row written before this field existed reads as zero.
+    #[serde(default)]
+    pub failed_edit_count: usize,
+    /// Whether [`failed_edit_count`](Self::failed_edit_count) reached
+    /// [`ESCALATION_FAILED_EDIT_THRESHOLD`], which recommends a stronger model
+    /// for the next turn. Older rows read as false.
+    #[serde(default)]
+    pub escalation_recommended: bool,
+}
+
+/// Count the failed edit attempts in one turn (DT-1): tool calls named
+/// `edit_file` or `write_file` whose outcome was `failed`, plus the number of
+/// no-change notes. A note is a failed edit attempt in its own right — the
+/// answer claimed a change that did not happen — but it is not a tool call, so
+/// counting it here never inflates `tools`. Denied, refused and successful calls
+/// are not failures, and no call is invented to make the count add up.
+pub fn count_failed_edits(tools: &[ToolTrace], notes: &[ContinuationNote]) -> usize {
+    let failed_calls = tools
+        .iter()
+        .filter(|tool| {
+            (tool.name == "edit_file" || tool.name == "write_file") && tool.outcome == "failed"
+        })
+        .count();
+    failed_calls + notes.len()
+}
+
+/// Whether a count of failed edits is enough to recommend escalation (DT-1).
+pub fn escalation_recommended(failed_edit_count: usize) -> bool {
+    failed_edit_count >= ESCALATION_FAILED_EDIT_THRESHOLD
 }
 
 /// The checks-ran verdict (EVd-3), in JUnit's terms: a check that did not run
@@ -224,6 +262,8 @@ impl TurnTrace {
             prompt_version: Some(crate::prompts::set_version().to_string()),
             checks: None,
             no_change_notes: Vec::new(),
+            failed_edit_count: 0,
+            escalation_recommended: false,
         }
     }
 
@@ -1102,5 +1142,86 @@ second line echoing the prompt";
         assert_eq!(trace.session_id.as_deref(), Some("session_1"));
         assert_eq!(trace.provider.as_deref(), Some("anthropic"));
         assert_eq!(trace.source, Some(MetricSource::Cloud));
+    }
+
+    /// DT-1: the signal is counted from the facts the loop actually recorded —
+    /// failed edit calls and no-change notes — with no tool call invented for a
+    /// note and no other kind of failure counted as an edit.
+    #[test]
+    fn failed_edits_are_counted_from_real_tools_and_notes() {
+        let tool = |name: &str, outcome: &str| ToolTrace {
+            name: name.to_string(),
+            outcome: outcome.to_string(),
+            arguments: None,
+            tail: None,
+        };
+        let note = ContinuationNote {
+            kind: "task_no_edit".to_string(),
+            round: 1,
+            edit_followed: false,
+        };
+
+        // One failed edit is not enough: it is an ordinary miss.
+        let tools = vec![tool("edit_file", "failed"), tool("read_file", "done")];
+        assert_eq!(count_failed_edits(&tools, &[]), 1);
+        assert!(!escalation_recommended(1));
+
+        // A second failed edit, of either Edit-class tool, reaches the threshold.
+        let tools = vec![
+            tool("edit_file", "failed"),
+            tool("write_file", "failed"),
+            tool("run_command", "failed"), // a command is not an edit
+            tool("edit_file", "denied"),   // a denial is not a failure
+            tool("edit_file", "refused"),  // nor is a refusal
+            tool("edit_file", "done"),     // nor a success
+        ];
+        assert_eq!(count_failed_edits(&tools, &[]), 2);
+        assert!(escalation_recommended(2));
+
+        // A no-change note counts as a failed edit attempt but never appears in
+        // `tools`, so the tool-call count the trace reports stays honest.
+        let tools = vec![tool("edit_file", "failed"), tool("list_dir", "done")];
+        assert_eq!(count_failed_edits(&tools, &[note.clone(), note]), 3);
+        assert!(escalation_recommended(3));
+
+        // Nothing failed, nothing recommended.
+        assert_eq!(count_failed_edits(&[tool("edit_file", "done")], &[]), 0);
+        assert!(!escalation_recommended(0));
+    }
+
+    /// The marker survives the append/read round trip, and a row written before
+    /// the fields existed reads as if no escalation was recommended.
+    #[test]
+    fn the_escalation_marker_round_trips_through_the_file() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut trace = TurnTrace::new(900, 4);
+        trace.tools.push(ToolTrace {
+            name: "edit_file".to_string(),
+            outcome: "failed".to_string(),
+            arguments: None,
+            tail: None,
+        });
+        trace.tools.push(ToolTrace {
+            name: "write_file".to_string(),
+            outcome: "failed".to_string(),
+            arguments: None,
+            tail: None,
+        });
+        let count = count_failed_edits(&trace.tools, &trace.no_change_notes);
+        trace.failed_edit_count = count;
+        trace.escalation_recommended = escalation_recommended(count);
+        append_trace(&xencode, &trace).unwrap();
+
+        let rows = read_recent_traces(&xencode, 50);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].failed_edit_count, 2);
+        assert!(rows[0].escalation_recommended);
+
+        let old: TurnTrace =
+            serde_json::from_str(r#"{"ts_unix_ms":1,"duration_ms":2,"rounds":1}"#).unwrap();
+        assert_eq!(old.failed_edit_count, 0);
+        assert!(!old.escalation_recommended);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -250,6 +250,10 @@ pub(crate) struct AgentRun {
     /// Alternate models tried in order when the primary fails before emitting
     /// any output (I4-01). Set from `agent_fallback_models` config.
     pub(crate) fallback_models: Vec<String>,
+    /// A stronger model configured for escalation (DT-1). Announced at the end
+    /// of a turn that recommends escalation, and applied only to the *next*
+    /// turn's model choice — never switched inside this one.
+    pub(crate) deep_think_model: Option<String>,
     pub(crate) ollama_url: String,
     pub(crate) llama_cpp_url: String,
     pub(crate) timeout: u64,
@@ -715,6 +719,10 @@ pub struct App<'a> {
     pub(crate) live_turn_stopped: bool,
     /// The person stopped the running ByteBot task (`[BYTEBOT_STOPPED]`).
     pub(crate) bytebot_stopped: bool,
+    /// Set when a finished turn recommends escalation and a stronger model is
+    /// configured; consumed by the next turn's model choice (DT-1). Both the
+    /// signal and the switch happen at turn boundaries, never mid-turn.
+    pub(crate) deep_think_pending: bool,
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
@@ -2428,6 +2436,7 @@ impl<'a> App<'a> {
             live_turn_error: None,
             live_turn_stopped: false,
             bytebot_stopped: false,
+            deep_think_pending: false,
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
@@ -3636,6 +3645,28 @@ impl<'a> App<'a> {
                 role: "system".to_string(),
                 content: format!("⚠ {body}"),
             });
+        } else if let Some(body) = token.strip_prefix("[DEEP_THINK]") {
+            // DT-1: a turn ended with repeated failed edits. The body is
+            // `<count>|<next model or empty>`. A configured stronger model
+            // arms the next turn's model choice; without one the note still
+            // says what was recommended so the signal is not silent.
+            let (count, next) = body.split_once('|').unwrap_or((body, ""));
+            if !next.is_empty() {
+                self.deep_think_pending = true;
+            }
+            let note = if next.is_empty() {
+                format!(
+                    "{count} failed edit attempts this turn — a stronger model is recommended; set deep_think_model to enable automatic escalation"
+                )
+            } else {
+                format!(
+                    "{count} failed edit attempts this turn — next turn will use {next} (set with deep_think_model)"
+                )
+            };
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: format!("⚠ {note}"),
+            });
         } else if let Some(body) = token.strip_prefix("[WATCHOFF]") {
             // The real-time watcher could not start, so no `⚠ stale context`
             // warning will ever arrive on its own. Say so once, plainly.
@@ -4590,7 +4621,7 @@ impl<'a> App<'a> {
     /// `prompt` is what the user typed (or the task a delegated run was given).
     /// Only its digest is kept, for the turn trace.
     pub(crate) fn agent_run(
-        &self,
+        &mut self,
         sink: LoopSink,
         context_messages: Vec<ChatMessage>,
         prompt: &str,
@@ -4605,7 +4636,7 @@ impl<'a> App<'a> {
     /// the run before the fork so attempts share one id; everything else
     /// generates one above.
     pub(crate) fn agent_run_with_id(
-        &self,
+        &mut self,
         sink: LoopSink,
         context_messages: Vec<ChatMessage>,
         prompt: &str,
@@ -4620,10 +4651,22 @@ impl<'a> App<'a> {
         let choice =
             crate::task_profiles::choose_profile(&self.config, &self.config.default_model, prompt);
         let profile = choice.profile().cloned();
-        let model = profile
+        let mut model = profile
             .as_ref()
             .map(|profile| profile.model.clone())
             .unwrap_or_else(|| self.config.default_model.clone());
+        // DT-1: a turn that ended with enough failed edits asks the next turn to
+        // run on a stronger model. Consume that one-shot request here, at the
+        // turn boundary, so the model is fixed for the whole of this run and is
+        // never swapped mid-turn (a swap would repeat tokens and tool calls).
+        // With no stronger model configured the request is simply spent, and the
+        // escalation is still visible in the trace and the announcement.
+        if self.deep_think_pending {
+            self.deep_think_pending = false;
+            if let Some(stronger) = self.config.deep_think_model.clone() {
+                model = stronger;
+            }
+        }
         let trace_identity = self.metrics_identity(&model);
         let temperature = profile
             .as_ref()
@@ -4647,6 +4690,7 @@ impl<'a> App<'a> {
             max_rounds: self.config.agent_max_rounds.clamp(1, 64),
             max_repair_iters: self.config.agent_repair_max_iters,
             fallback_models: self.config.agent_fallback_models.clone(),
+            deep_think_model: self.config.deep_think_model.clone(),
             egress: self.egress_policy(),
             trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
             trace_identity,
@@ -11860,6 +11904,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         max_rounds,
         max_repair_iters,
         fallback_models,
+        deep_think_model,
         ollama_url,
         llama_cpp_url,
         timeout,
@@ -12533,7 +12578,22 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         note.edit_followed = turn_edited;
     }
     trace.no_change_notes = no_change_notes;
+    // DT-1: count failed edits from what the loop actually recorded — failed
+    // edit/write calls plus no-change notes — and carry the escalation marker
+    // on the trace row so `/trace`, turns.jsonl and the eval results can all
+    // see it. No call is invented for a note.
+    let failed_edit_count =
+        xencode_context_rs::count_failed_edits(&trace.tools, &trace.no_change_notes);
+    trace.failed_edit_count = failed_edit_count;
+    trace.escalation_recommended = xencode_context_rs::escalation_recommended(failed_edit_count);
     let _ = xencode_context_rs::append_trace(&trace_dir, &trace);
+    // Announced after the row is on disk, in the same style as a provider
+    // fallback. The switch itself never happens here: only the next turn reads
+    // this signal, so the current turn cannot duplicate output or tool calls.
+    if trace.escalation_recommended && sink == LoopSink::Chat {
+        let next = deep_think_model.unwrap_or_default();
+        let _ = tx.send(format!("[DEEP_THINK]{failed_edit_count}|{next}"));
+    }
     // One row per run in `.xencode/cache/runs.jsonl` (QTR-5): the run's own
     // id, the model that answered it, and the questions a person answered
     // while it went. Written beside the turn trace so a run asked about

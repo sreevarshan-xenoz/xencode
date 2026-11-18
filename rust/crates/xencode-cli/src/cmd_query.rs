@@ -30,6 +30,7 @@ pub(crate) fn structured_answer_fits(answer: &str, schema: Option<&serde_json::V
 pub(crate) async fn run_query(
     prompt: String,
     model_override: Option<String>,
+    deep_think_model: Option<String>,
     no_cache: bool,
     session_id: Option<String>,
     temperature: Option<f64>,
@@ -74,6 +75,7 @@ pub(crate) async fn run_query(
     let outcome = run_query_once(
         prompt,
         model_override,
+        deep_think_model,
         no_cache,
         session_id,
         temperature,
@@ -101,6 +103,7 @@ pub(crate) async fn run_query(
 pub(crate) async fn run_query_once(
     prompt: String,
     model_override: Option<String>,
+    deep_think_model: Option<String>,
     no_cache: bool,
     session_id: Option<String>,
     temperature: Option<f64>,
@@ -131,6 +134,17 @@ pub(crate) async fn run_query_once(
     let config = XencodeConfig::load().unwrap_or_default();
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
 
+    // DT-1: `--deep-think <model>` is an explicit per-turn model override. It
+    // goes through the very same `--model` plumbing below — including the
+    // egress policy on the provider built further on — and wins over both
+    // `--model` and profile routing. Said on stderr so `-f ndjson` stays
+    // parsable. AirLLM is Python and cannot be added to this Rust workspace:
+    // the heavy model here is a configured remote/OpenAI-compatible endpoint
+    // this program already knows how to route to.
+    if let Some(stronger) = &deep_think_model {
+        eprintln!("deep-think: using {stronger} for this turn (explicit stronger-model override)");
+    }
+    let model_override = deep_think_model.or(model_override);
     // If no model override is provided, verify default model against Ollama's installed models
     let named_a_model = model_override.is_some();
     let model = match model_override {

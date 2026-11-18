@@ -174,6 +174,15 @@ pub struct CaseResult {
     /// `tool_calls` so a synthetic note never inflates the tool-call count.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub no_change_notes: Vec<ContinuationNote>,
+    /// Failed edit attempts in this case's turn (DT-1): failed `edit_file` and
+    /// `write_file` calls plus no-change notes. Kept apart from `tool_calls`,
+    /// which counts every real call including successes.
+    #[serde(default)]
+    pub failed_edit_count: usize,
+    /// Whether those failed edits reached the threshold that recommends a
+    /// stronger model on the next turn (DT-1).
+    #[serde(default)]
+    pub escalation_recommended: bool,
 }
 
 /// Longest final answer kept on a case's result.
@@ -237,6 +246,8 @@ impl CaseResult {
             diff: String::new(),
             final_answer: None,
             no_change_notes: Vec::new(),
+            failed_edit_count: 0,
+            escalation_recommended: false,
         }
     }
 
@@ -290,6 +301,12 @@ impl CaseResult {
                 } else {
                     "no edit followed"
                 }
+            ));
+        }
+        if self.escalation_recommended {
+            detail.push_str(&format!(
+                " · escalation recommended ({} failed edits)",
+                self.failed_edit_count
             ));
         }
         format!(
@@ -854,6 +871,8 @@ fn grade(
         no_change_notes: row
             .map(|row| row.no_change_notes.clone())
             .unwrap_or_default(),
+        failed_edit_count: row.map(|row| row.failed_edit_count).unwrap_or(0),
+        escalation_recommended: row.map(|row| row.escalation_recommended).unwrap_or(false),
     }
 }
 
@@ -979,6 +998,8 @@ pub(crate) fn test_case(shape: &str, attempt: usize, changed: &[&str], diff: &st
         diff: diff.to_string(),
         final_answer: None,
         no_change_notes: Vec::new(),
+        failed_edit_count: 0,
+        escalation_recommended: false,
     }
 }
 
@@ -1105,6 +1126,8 @@ mod tests {
                     diff: "-for i in 0..n-1\n+for i in 0..n".to_string(),
                     final_answer: None,
                     no_change_notes: Vec::new(),
+                    failed_edit_count: 0,
+                    escalation_recommended: false,
                 },
                 CaseResult {
                     shape: "swallowed-error".to_string(),
@@ -1130,6 +1153,8 @@ mod tests {
                     diff: String::new(),
                     final_answer: None,
                     no_change_notes: Vec::new(),
+                    failed_edit_count: 0,
+                    escalation_recommended: false,
                 },
             ],
             judge: None,
@@ -1188,6 +1213,8 @@ mod tests {
             diff: "+#[test] fn always_passes() {}".to_string(),
             final_answer: None,
             no_change_notes: Vec::new(),
+            failed_edit_count: 0,
+            escalation_recommended: false,
         };
         let line = case.line();
         assert!(line.contains("fail"), "{line}");
@@ -1390,6 +1417,8 @@ mod tests {
                 diff: "-n - 1\n+n".to_string(),
                 final_answer: None,
                 no_change_notes: Vec::new(),
+                failed_edit_count: 0,
+                escalation_recommended: false,
             }],
             judge: None,
         };
@@ -1648,6 +1677,85 @@ mod tests {
         assert!(line.contains("no-change note (task_no_edit)"), "{line}");
         assert!(line.contains("edit followed"), "{line}");
         assert!(!line.contains("no edit followed"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// DT-1: two failed edit attempts in a real turn put the escalation marker
+    /// on both the turn trace and the case result, without inventing a tool
+    /// call. The marker is read back from the files the harness writes, not
+    /// from values held in memory.
+    #[tokio::test]
+    async fn repeated_failed_edits_mark_the_trace_and_the_result_for_escalation() {
+        let dir = scratch("eval-escalation");
+        let case = xencode_context_rs::seed_case(BugShape::OffByOne);
+        let edit = &case.edits[0];
+        let bad_edit = || {
+            call(
+                "edit_file",
+                serde_json::json!({
+                    "path": &edit.path,
+                    "old": "THIS-TEXT-IS-NOT-IN-THE-FILE",
+                    "new": "does not matter",
+                }),
+            )
+        };
+        let (url, server) = scripted(vec![
+            bad_edit(),
+            bad_edit(),
+            said("I tried to fix the loop."),
+            said("I could not change the file."),
+        ])
+        .await;
+
+        let report = run_task_eval(&TaskEvalOptions {
+            out_dir: dir.clone(),
+            model: "scripted-agent".to_string(),
+            shapes: vec![BugShape::OffByOne],
+            ollama_url: Some(url),
+            history_dir: Some(dir.join(XENCODE_DIR)),
+            ..Default::default()
+        })
+        .await
+        .expect("the eval ran");
+        let _ = server.await;
+
+        let outcome = &report.cases[0];
+        assert_eq!(outcome.error, None, "{:?}", outcome.error);
+        assert!(
+            outcome.failed_edit_count >= 2,
+            "two edit calls failed: {:?}",
+            outcome
+        );
+        assert!(
+            outcome.escalation_recommended,
+            "the threshold was reached: {}",
+            outcome.line()
+        );
+        // The failed calls are real tool calls; the no-change note is not one.
+        assert_eq!(outcome.tool_calls, 2, "only the two edits were tool calls");
+        assert_eq!(outcome.calls_failed, 2, "both edits failed on disk");
+        assert!(
+            outcome.line().contains("escalation recommended"),
+            "{}",
+            outcome.line()
+        );
+
+        // results.jsonl round-trips the marker with the rest of the result.
+        let written: Vec<CaseResult> = std::fs::read_to_string(&report.results)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("one JSON line per case"))
+            .collect();
+        assert_eq!(written, report.cases);
+        assert!(written[0].escalation_recommended);
+        assert!(written[0].failed_edit_count >= 2);
+
+        // And turns.jsonl, beside the case's seeded repository, carries it too.
+        let trace_dir = dir.join("traces").join("r1-off-by-one").join(XENCODE_DIR);
+        let traces = read_recent_traces(&trace_dir, 1);
+        assert_eq!(traces.len(), 1, "one turn was written for this case");
+        assert!(traces[0].escalation_recommended);
+        assert!(traces[0].failed_edit_count >= 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

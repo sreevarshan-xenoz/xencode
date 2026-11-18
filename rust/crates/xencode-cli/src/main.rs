@@ -159,6 +159,7 @@ async fn async_main() {
         Commands::Query {
             prompt,
             model,
+            deep_think,
             no_cache,
             session,
             temperature,
@@ -176,6 +177,7 @@ async fn async_main() {
             run_query(
                 prompt,
                 model,
+                deep_think,
                 no_cache,
                 session,
                 temperature,
