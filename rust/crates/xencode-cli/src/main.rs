@@ -66,6 +66,8 @@ mod cmd_config;
 use cmd_config::*;
 mod cmd_models;
 use cmd_models::*;
+mod model_decision;
+use model_decision::*;
 mod cmd_setup;
 use cmd_setup::*;
 mod cmd_remote;
