@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `RG-0`: records the Colab + Kaggle + Drive completion plan: Drive-backed model cache, session-lifetime UX, unified setup/remote entry point, and a Kaggle backend. Live Colab/Kaggle/Drive verification stays explicitly blocked; no public-URL tunnel posture is preserved.
 
+### Added — Drive weight-cache reuse plumbing (RG-1)
+
+- `RG-1`: the Colab bootstrap can now reuse weights previously saved on Google Drive instead of fetching them again. A new pure Rust module computes the cache path (`/content/drive/MyDrive/xencode-models/<model>/<quant>/<build>`) and decides, from a real directory, which GGUF parts are present as non-empty files; tests cover a missing directory, a partial cache, a full cache, empty files, directories standing in for files, and HF sub-folder names. The generated script links cached parts into the runtime directory under their exact names before the existing Hugging Face download loop, and only skips a part when `test -s` sees a non-empty file. Real bash parses the generated script and executes the cache snippet against a temporary stand-in directory. This is planned plumbing only: a bare Colab VM does not mount Drive yet, no live Drive mount was available to verify, and `drive`/`gcs` remain refused at bring-up. The full workspace suite passes with 3,292 tests.
+
 ### Added — hybrid multi-model stack direction (HM-1)
 - `HM-1`: records the adopted hybrid architecture in the plan: a fast Qwen-class default, BitNet b1.58 as the weak-hardware fallback, a stronger configured model for explicit deep-think or repeated failure, and small tool specialists. All roles share the existing tool protocol and local-first egress rules; weights are never merged. AirLLM itself is Python and is deliberately out of scope.
 ### Added — local BitNet provider route (BP-1)

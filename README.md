@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (20 crates, 3,255 tests at
+At its core is a fast, single-file **Rust** binary (20 crates, 3,292 tests at
 the last full workspace run) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -791,7 +791,10 @@ flowchart TD
   bridge: no public URL, nothing listenable from outside your machine.
   Free-tier VMs are reaped after 12 hours — `xencode colab status` says so and
   `xencode colab up --reconnect` rebuilds the bridge; `xencode colab down`
-  releases the VM, which you should always run when finished.
+  releases the VM, which you should always run when finished. Reusing weights
+  from a Google Drive cache is planned plumbing: the bootstrap can detect and
+  link cached GGUFs when that directory exists, but no live Drive mount was
+  used to verify it, and `drive`/`gcs` weights sources are still refused.
 - **No Anthropic key field exists yet.** `xencode-providers-rs` has an
   Anthropic client, but neither `ApiKeys` nor the app passes an Anthropic key,
   so an `anthropic:…` model always fails with *"Anthropic API key not
@@ -861,7 +864,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (3,255 tests at the last run)
+cargo test                          # Full workspace suite (3,292 tests at the last run)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
