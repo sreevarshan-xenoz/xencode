@@ -19,7 +19,7 @@
 //! document about what something used to cost, and a model it names comes back
 //! unpriced until `xencode prices fetch` is run again.
 
-use crate::rollup::TokenTotals;
+use crate::rollup::{MetricsRollup, TokenTotals};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -512,6 +512,21 @@ pub fn cost_of(by_model: &BTreeMap<String, TokenTotals>, table: &PriceTable) -> 
     }
 }
 
+/// Price each recorded session of a rollup against the table, keyed by the
+/// session id the records carry. Pure arithmetic over what was recorded: every
+/// session goes through [`cost_of`] over its own `by_model`, so a model with no
+/// price stays unknown in that session exactly as it does on the whole-project
+/// report. The empty key, when present, holds records written before sessions
+/// were recorded — it is kept rather than dropped, so no recorded token is left
+/// out of the sum of the parts.
+pub fn cost_by_session(rollup: &MetricsRollup, table: &PriceTable) -> BTreeMap<String, CostReport> {
+    rollup
+        .by_session
+        .iter()
+        .map(|(session, totals)| (session.clone(), cost_of(&totals.by_model, table)))
+        .collect()
+}
+
 /// One line saying where the looked-up prices came from and when they were read,
 /// or `None` when nothing was looked up.
 ///
@@ -562,6 +577,7 @@ pub fn format_usd(micros: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::RequestMetrics;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
@@ -670,6 +686,78 @@ mod tests {
         assert_eq!(before.known_micros, 100_000);
         assert_eq!(after.known_micros, 200_000);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cost_by_session_matches_the_hand_sum_of_each_sessions_records() {
+        // Built entirely in memory: the rollup is folded from real request
+        // rows and the table is supplied as data, so this checks only the
+        // arithmetic that turns recorded tokens into per-session spend.
+        let mut table = PriceTable::default();
+        table.models.insert(
+            "qwen2.5:7b".to_string(),
+            ModelPrice {
+                input_usd_per_mtok: 0.3,
+                output_usd_per_mtok: 0.6,
+                cached_input_usd_per_mtok: Some(0.06),
+            },
+        );
+
+        let named = |session: &str, prompt: u32, evaluated: u32, completion: u32| {
+            let mut row = RequestMetrics::from_timings(
+                "BALANCED", 8192, prompt, evaluated, completion, 12.5, 300.0, 4,
+            );
+            row.session_id = Some(session.to_string());
+            row.model = Some("qwen2.5:7b".to_string());
+            row
+        };
+        let mut rollup = MetricsRollup::empty();
+        for row in [
+            named("session_a", 1000, 400, 200),
+            named("session_a", 500, 500, 100),
+            named("session_b", 200, 200, 50),
+        ] {
+            rollup.fold(&row);
+        }
+
+        let by_session = cost_by_session(&rollup, &table);
+        assert_eq!(by_session.len(), 2);
+        assert_eq!(rollup.by_session["session_a"].tokens.requests, 2);
+        assert_eq!(rollup.by_session["session_b"].tokens.requests, 1);
+
+        // session_a: 900 fresh input × $0.30 + 600 cached × $0.06 +
+        // 300 generated × $0.60 = 270 + 36 + 180 micro-dollars.
+        let a = &by_session["session_a"];
+        assert_eq!(a.known_micros, 486);
+        assert!(a.complete());
+        assert_eq!(a.per_model.len(), 1);
+        assert_eq!(a.per_model[0].tokens.prompt_tokens, 1500);
+        assert_eq!(a.per_model[0].tokens.cached_tokens, 600);
+        assert_eq!(a.per_model[0].tokens.completion_tokens, 300);
+        // session_b: 200 fresh × $0.30 + 50 generated × $0.60 = 60 + 30.
+        let b = &by_session["session_b"];
+        assert_eq!(b.known_micros, 90);
+        assert!(b.complete());
+        // The parts add to the whole the rollup reports when priced together.
+        assert_eq!(a.known_micros + b.known_micros, 576);
+        assert_eq!(cost_of(&rollup.by_model, &table).known_micros, 576);
+    }
+
+    #[test]
+    fn cost_by_session_keeps_an_unpriced_model_unknown() {
+        let table = PriceTable::default();
+        let mut row = RequestMetrics::from_timings("BALANCED", 8192, 1000, 0, 100, 0.0, 0.0, 1);
+        row.session_id = Some("only_session".to_string());
+        row.model = Some("qwen2.5:7b".to_string());
+        let mut rollup = MetricsRollup::empty();
+        rollup.fold(&row);
+
+        let by_session = cost_by_session(&rollup, &table);
+        let report = &by_session["only_session"];
+        assert_eq!(report.known_micros, 0);
+        assert!(!report.complete());
+        assert_eq!(report.unpriced, vec!["qwen2.5:7b".to_string()]);
+        assert_eq!(report.per_model[0].micros, None);
     }
 
     #[test]

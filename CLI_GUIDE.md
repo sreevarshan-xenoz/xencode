@@ -5316,7 +5316,12 @@ xencode orchestrator attach claude sess-1
 - `costs` — what the model calls recorded here cost, priced only where a price is
   known, beside what the recorded team runs drew from the wall, and each worker
   agent's cost as its agent reported it when the project's engine runs (it is
-  never started just to read this; without one the line says so).
+  never started just to read this; without one the line says so). The per-model
+  table is followed by a `SESSIONS` table with one row per session id in the
+  recorded metrics: its requests, prompt and completion tokens, its cost and its
+  number of distinct models. `--format json` puts the same rows in a `sessions`
+  array. A session with any unpriced model reads `unpriced` (`micros: null` in
+  JSON) rather than a smaller total that could be mistaken for the whole.
 - `inspect <target>` — one thing in full, with the file each figure came from: a
   background task by its registry id, a detached run, a recorded team run, or a
   recipe by its name. A prefix that could mean more than one thing says so rather
@@ -5336,6 +5341,18 @@ xencode orchestrator attach claude sess-1
   it never resumes a saved conversation and calls that a handover, never picks the
   session for you, and needs a real terminal because that is the thing being handed
   over. The screen comes back with the exit status the process returned.
+
+The session rows are priced from the same `.xencode/cache/metrics.jsonl` and
+`.xencode/pricing.json` as the per-model table, and the command only reads them.
+Three recorded turns in two sessions at $0.30 per million prompt tokens and
+$0.60 per million completion tokens (with a separate cache-read rate) print:
+
+```
+SESSIONS — spend by recorded conversation
+SESSION                                  REQUESTS     PROMPT COMPLETION        COST  MODELS
+session_a                                       2       1500        300   $0.000486       1
+session_b                                       1        200         50    $0.00009       1
+```
 
 #### `xencode orchestrator split` — a plan, measured before it is trusted
 
