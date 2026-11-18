@@ -141,6 +141,14 @@ pub(crate) enum Commands {
         format: QueryFormat,
     },
 
+    /// Speak text aloud through a local text-to-speech program (output only;
+    /// there is no voice input). Needs espeak-ng on Linux, say on macOS or
+    /// PowerShell with System.Speech on Windows; XENCODE_TTS_CMD overrides it.
+    Speak {
+        /// The text to speak
+        text: String,
+    },
+
     /// Manage conversation memory
     Memory {
         #[command(subcommand)]

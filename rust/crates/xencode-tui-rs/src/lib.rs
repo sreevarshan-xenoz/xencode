@@ -41,6 +41,7 @@ pub mod toast;
 pub mod transcript;
 pub mod ui;
 pub mod view;
+pub mod voice_out;
 pub mod widgets;
 pub mod worker_bridge;
 pub mod worker_panel;

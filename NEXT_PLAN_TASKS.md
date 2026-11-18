@@ -88,6 +88,7 @@ All of them are merged; each commit message describes the fix in plain English.
 | PI-1 ✅ | LOW | plugin+cli | `plugin update` swaps the installed copy through a dot-prefixed backup named with the process id; a process killed between moving the old copy aside and deleting the backup left that full copy on disk forever, and a later process reusing the id could not rename over it, so the update failed with "directory not empty" | the update now removes leftover `.<name>.old-<digits>` backups for the plugin it is replacing before the swap, and only that exact shape — other dot-prefixed names and other plugins' backups are untouched; real `file://` git tests show the regression failing without the change and passing with it | done; two new plugin-crate tests cover a reused-id collision and a foreign-id orphan, the plugin crate (70 tests) and CLI consumer tests pass, fmt and clippy clean; orphans for plugins that are never updated again are still not collected |
 | OM-7 ✅ | MED | tui | the orchestrator Inbox and the window title rendered only pending approvals and terminal agents needing attention, so a pending question or a ByteBot task waiting for review could be outstanding while neither view showed anything | one pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review and every terminal agent calling for attention; the Inbox renders from that list and `shell::waiting_keys`/`attention_title` count from it, keeping the `+N` approval summary | done; unit tests cover a question with its text, a review task, approvals and calling tiles with the `+N` summary, the empty case and the attention count; crate tests, fmt and clippy pass; no live agent run needed for this state-to-text change |
 | MS-1 ✅ | MED | cli+tui | `xencode mcp serve` was a real stdio MCP server but published only its six tools, so a client could not read a workspace file or obtain a prompt through it | the handshake now declares resources and prompts and the server implements `resources/list`, `resources/read`, `prompts/list` and `prompts/get`; it publishes real workspace files (`AGENTS.md`, `task.md` when present) plus a live configuration summary, renders a `review-diff` prompt from the shipped explain-diff skill, and refuses URIs outside the workspace or using path traversal | done; a real stdio client test drives initialize, both list methods, a byte-for-byte file read, a prompt render and both raw and encoded traversal refusals over the binary's own pipes; the TUI crate (737 tests) and the stdio test (6 tests) pass, fmt and clippy clean |
+| VO-1 ✅ | LOW | tui+cli | there was no text-to-speech and no CLI verb to speak text; the former voice panel's input recorder had been deleted, and older docs still claimed voice input was real | `xencode speak <text>` now speaks through a local TTS program resolved from `XENCODE_TTS_CMD` or the platform default (`espeak-ng`, `say`, PowerShell `System.Speech`), run with `std::process::Command` and a fixed argument vector so text is passed literally; a missing binary is named in the error, and the stale voice-input claims in the roadmap and plan are marked historical | done; a real executable script test proves the exact text reaches the subprocess and exits zero, a real missing-path test proves the named error, the built binary speaks through the same script end to end, the CLI verb help and generated completions/man were regenerated, and docs were corrected — Windows and macOS argv defaults cannot be executed on this Linux host |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
@@ -2587,10 +2588,14 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
    highlighting** (`markdown.rs:1-5`). 8 hardcoded themes (`theme.rs:7-16`), 3
    layout presets (`layout.rs:14`), mouse scroll/click hit-testing exists
    (`app.rs:6138-6280`).
-9. **Voice is record-only.** `voice.rs` is real — `arecord` subprocess (`:115`),
-   16 kHz S16_LE WAV, 15 s cap (`:26`), transcription by shelling to a whisper CLI
-   on PATH (`:145-157`). **No TTS anywhere** (zero hits for
-   tts/speak/piper/kokoro/sherpa).
+9. **Voice input was removed; voice output is a local subprocess.** The old
+   `xencode-tui-rs/src/voice.rs` recorder (`arecord` at `:115`, 16 kHz S16_LE
+   WAV, 15 s cap at `:26`, whisper transcription at `:145-157`) was deleted with
+   the rarely used TUI panels and no longer exists — there is no voice input.
+   Text-to-speech, once parked with zero hits for tts/speak/piper, now exists as
+   `xencode speak <text>` in `voice_out.rs`: a fixed-argv `std::process::Command`
+   calling `espeak-ng` (Linux), `say` (macOS), PowerShell `System.Speech`
+   (Windows) or `XENCODE_TTS_CMD`. No speech engine is bundled.
 10. **Memory has no cross-session retrieval.** `xencode-memory-rs` stores
     session-keyed raw message lists to `~/.xencode/conversation_memory.json`,
     50-message cap with the oldest drained (`lib.rs:9,176-179`); `xencode memory`
@@ -3190,7 +3195,7 @@ conflict resolution (N-6); a bespoke always-on daemon when systemd user units gi
 cgroups, journald and a watchdog free (N-6); a native VS Code/Zed extension since
 M-7 ACP covers both (N-2); Docker-based CI replay (N-2); a `gh` subprocess wrapper
 with its untestable auth surface (N-2); real PDF/DOCX/PPTX generation (N-5);
-TTS voice-out (N-5); user theme files (N-5); an embedded rust-analyzer/LSP host for
+user theme files (N-5); an embedded rust-analyzer/LSP host for
 call graphs, where index startup dwarfs the agent loop (N-1); a hand-rolled DAP
 client (N-1); libcst/jscodeshift integration, which violates the Rust-only
 directive (N-1); cargo-mutants in the default loop (N-1); local cross-encoder
