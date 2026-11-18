@@ -36,6 +36,7 @@ pub mod sidepanel;
 pub mod slash_commands;
 pub mod task_eval;
 pub mod task_profiles;
+pub mod task_tool_focus;
 pub mod theme;
 pub mod toast;
 pub mod transcript;

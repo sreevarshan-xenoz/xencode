@@ -802,6 +802,18 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub model_routing: bool,
 
+    /// Offer a smaller tool menu on a turn whose prompt reads as a bugfix.
+    /// The reading is the same whole-word rule retrieval uses — `shape_of` in
+    /// xencode-context-rs — so only a prompt that actually says something is
+    /// broken is acted on; a `general` prompt keeps the full menu. When this is
+    /// on, a bugfix turn drops the background, web, off-machine search and skill
+    /// tools while always keeping the file and command tools an edit needs and
+    /// whatever the current mode requires. Off by default, because it changes
+    /// which tools a model may reach and has not been measured against the eval
+    /// pass-rate gate.
+    #[serde(default)]
+    pub focused_tools: bool,
+
     /// Google Colab bridge settings. Opt-in: every field has a safe default,
     /// so a config that predates the block still loads with the bridge off.
     #[serde(default)]
@@ -1105,6 +1117,7 @@ impl Default for XencodeConfig {
             session_recording: false,
             model_profiles: Vec::new(),
             model_routing: false,
+            focused_tools: false,
             colab: ColabConfig::default(),
         }
     }
@@ -1626,6 +1639,8 @@ mod tests {
         assert!(config.ollama_keep_alive.is_none());
         // No saved profile takes a turn on its own until the user turns that on.
         assert!(!config.model_routing);
+        // A config with no focus setting keeps the full tool menu.
+        assert!(!config.focused_tools);
         assert!(config.model_profiles.is_empty());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
@@ -2151,6 +2166,8 @@ mod tests {
         assert!(config.ollama_keep_alive.is_none());
         // No saved profile takes a turn on its own until the user turns that on.
         assert!(!config.model_routing);
+        // A config with no focus setting keeps the full tool menu.
+        assert!(!config.focused_tools);
         assert!(config.model_profiles.is_empty());
 
         fs::remove_dir_all(&dir).unwrap();

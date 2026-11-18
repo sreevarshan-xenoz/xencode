@@ -272,6 +272,13 @@ pub(crate) struct AgentRun {
     /// Digest of the text that started the turn. The prompt itself is never
     /// recorded, only this, so a trace cannot become a copy of the conversation.
     pub(crate) prompt_digest: Option<String>,
+    /// The user's words for this turn, held in memory only so the tool-focus
+    /// rule can read their shape. Nothing writes this into a trace or a ledger;
+    /// only `prompt_digest` is persisted.
+    pub(crate) prompt: String,
+    /// Whether a bugfix turn gets the smaller tool menu (TS-1). Read from config
+    /// once when the run is built, so the menu cannot change mid-turn.
+    pub(crate) focused_tools: bool,
     /// History a previous attempt left behind (LF-4). A fresh run starts
     /// empty; a resume starts here, so the new loop continues the old
     /// conversation instead of restarting it.
@@ -4644,6 +4651,8 @@ impl<'a> App<'a> {
             trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
             trace_identity,
             prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
+            prompt: prompt.to_string(),
+            focused_tools: self.config.focused_tools,
             is_decision: xencode_context_rs::has_decision_marker(prompt),
             retrieved_files: Vec::new(),
             session: self.begin_recording(prompt, &run_id),
@@ -11868,6 +11877,8 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         trace_dir,
         trace_identity,
         prompt_digest,
+        prompt,
+        focused_tools,
         is_decision,
         retrieved_files,
         mut session,
@@ -11969,6 +11980,11 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         approval.search_offered(),
         AvailableIndexes::of(&tool_root),
     );
+    // TS-1: narrow the menu for a bugfix turn after the index, mode and
+    // reproduction filters have run, so all four compose. With focus off (the
+    // default) this returns the menu unchanged; with focus on, only the
+    // off-task families are dropped and the index/mode decisions still hold.
+    tools = crate::task_tool_focus::focus_tools(&prompt, tools, focused_tools);
     // BT-2: only a ByteBot task can stop and ask; a chat turn answers in text.
     if sink == LoopSink::ByteBot && approval.ask.is_some() {
         tools.push(xencode_providers_rs::ask_user_tool());
