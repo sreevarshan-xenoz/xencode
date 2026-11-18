@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (20 crates, 3,206 tests at
+At its core is a fast, single-file **Rust** binary (20 crates, 3,247 tests at
 the last full workspace run) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -212,7 +212,7 @@ than believed, with a credential-shaped value taken out of what does get written
 - **Text-to-speech output** — `xencode speak "text"` reads text aloud through a local program: `espeak-ng` on Linux, `say` on macOS or PowerShell with `System.Speech` on Windows. `XENCODE_TTS_CMD` overrides the program and its fixed arguments. No speech engine is bundled, so a local binary must already be installed — a missing one is reported by name. This is output only: there is no voice input.
 - **xencode as an MCP server** — `xencode mcp serve` puts the same six tools an agent uses here (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command`) behind the official Rust MCP SDK on standard input and output, so an editor, a script or another agent can drive xencode's real executor instead of reimplementing it. A caller on a pipe has no approval prompt to answer, so the server starts **read-only**: the three reads run, and a file-changing or shell tool is refused with the one flag that would have permitted that tool (`--allow write_file`). Permitting one tool does not permit its class, and a `path` or `cwd` that leaves `--workspace` — or enters `.git` or your xencode config directory — is refused even for a tool you allowed, by the same boundary check the interactive gate uses. What that check cannot see is the text inside a command the caller was allowed to run, so `--allow run_command` hands over a shell, and the launch says so.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
-- Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
+- Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`), which labels each finding as introduced by the diff or pre-existing on an untouched line and can show only introduced findings with `--introduced-only`.
 - CLI with 60 subcommands, among them: `scan`, `config`, `models`, `cache`, `audit`, `query`, `speak`, `memory`, `tasks`, `worktree`, `colab`, `remote`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `runs`, `run`, `deps`, `eval`, `plugin`, `mcp`, `llamacpp`, `hw`, `history`, `perf`, `prices`, `release-notes`, `test`, `merge`, `compete`, `computers`, `team`, `orchestrator`, `bootstrap`, `badge`, `engine`, `tui`.
 
 ### Reliability + Ops
@@ -458,7 +458,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Server** | `xencode server` | Start collaboration server (local-first: `127.0.0.1:8765`; TLS opt-in) |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
-| **Review** | `xencode review [--base main] [--session <id>]` | PR-level diff triage with per-file analysis, and the checks a session ran |
+| **Review** | `xencode review [--base main] [--session <id>] [--introduced-only]` | PR-level diff triage with per-file analysis; every finding is labelled `introduced` (on a line the diff added) or `preexisting` (on an untouched line), and `--introduced-only` hides the latter; plus the checks a session ran |
 | **Advisories** | `xencode advisories check --path rust` | Judge every package in `Cargo.lock` against the RustSec and OSV corpora downloaded once by `xencode advisories sync`; `show`/`status` read the same files offline |
 | **Replay** | `xencode replay <run-id> [--run-tools]` | Run a recorded agent turn again from the bytes it was made of, with no model answering |
 | **Eval** | `xencode eval run [-c off-by-one] [-m MODEL] [--judge]` | Score the agent on defects seeded on purpose, graded by the diff and an exit code, with an optional ranking of the attempts that came closest |
@@ -839,7 +839,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (3,206 tests at the last run)
+cargo test                          # Full workspace suite (3,247 tests at the last run)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

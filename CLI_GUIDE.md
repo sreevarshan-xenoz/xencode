@@ -5767,7 +5767,7 @@ Without nextest installed, it falls back to the repository's own test command
 including that a fallback run cannot check for retries, so its result cannot be
 compared to a nextest run.
 
-### `xencode review [--base <ref>] [--session <id>] [--format text|json]`
+### `xencode review [--base <ref>] [--session <id>] [--introduced-only] [--format text|json]`
 PR-level diff triage: files changed between the base and HEAD with line
 counts, plus working-tree analysis per file (code issues, image
 inventory). When `--base` is omitted, the base branch is resolved from
@@ -5775,6 +5775,15 @@ inventory). When `--base` is omitted, the base branch is resolved from
 falling back to `'main'` as a last resort, and the header explicitly states which source
 was used. `--base HEAD` reviews uncommitted changes. Unanalyzable files
 (deleted, binary) get visible notes, never silence.
+
+Analysis reads the whole working-tree file, so it also finds issues on lines
+the diff never touched. Each finding is labelled: `introduced` when its line
+number is a `+` line of that file's real unified diff, `preexisting` otherwise.
+The text output prints the label in brackets; with `--format json` the same
+value is the issue's `origin` field (`"introduced"` or `"preexisting"`). By
+default both kinds are shown. `--introduced-only` hides the pre-existing ones,
+so the report contains only findings the change brought in. If a file's diff
+cannot be read, its findings are conservatively labelled pre-existing.
 
 `--session <id>` adds the result envelope for that session: every check the session ran,
 read from `.xencode/ledger.jsonl` (the rows `xencode test --session` and `/verify` write),
@@ -5787,6 +5796,8 @@ status those exit codes support. A session that ran no check is `blocked`, never
 xencode review
 xencode review --base main
 xencode review --base HEAD --format json | jq '.files[] | {path, issues: (.issues|length)}'
+xencode review --base HEAD --introduced-only          # only findings on added lines
+xencode review --base HEAD --format json | jq '.files[].issues[] | {line_number, origin}'
 xencode review --base HEAD --session green   # and what session `green` proved
 ```
 

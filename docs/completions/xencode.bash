@@ -8286,7 +8286,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__review)
-            opts="-h --base --session --format --help"
+            opts="-h --base --session --introduced-only --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

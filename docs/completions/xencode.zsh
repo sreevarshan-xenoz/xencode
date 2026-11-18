@@ -2061,6 +2061,7 @@ _arguments "${_arguments_options[@]}" : \
 '--base=[Base branch, tag, commit — or HEAD for uncommitted changes. Defaults to origin/HEAD, init.defaultBranch, or '\''main'\'']:BASE:_default' \
 '--session=[Also print the result envelope for this session\: the checks it ran, read from the run ledger, and the status they support]:SESSION:_default' \
 '--format=[Output format]:FORMAT:(text json)' \
+'--introduced-only[Show only findings on lines added by the diff; hide findings on untouched lines. By default both are shown, each with a label]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0

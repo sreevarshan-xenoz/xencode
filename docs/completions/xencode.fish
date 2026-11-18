@@ -682,6 +682,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand review" -l base -d 'Base
 complete -c xencode -n "__fish_xencode_using_subcommand review" -l session -d 'Also print the result envelope for this session: the checks it ran, read from the run ledger, and the status they support' -r
 complete -c xencode -n "__fish_xencode_using_subcommand review" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
+complete -c xencode -n "__fish_xencode_using_subcommand review" -l introduced-only -d 'Show only findings on lines added by the diff; hide findings on untouched lines. By default both are shown, each with a label'
 complete -c xencode -n "__fish_xencode_using_subcommand review" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand replay" -l tool-root -d 'The tree the replay\'s tool calls work against (default: this one)' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand replay" -l out -d 'Where to write tool_calls.jsonl and the replay\'s own recording (default: <project>/.xencode/cache/replays/<run id>)' -r -F
