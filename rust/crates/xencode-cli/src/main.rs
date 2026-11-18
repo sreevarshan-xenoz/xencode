@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use std::sync::Arc;
 use xencode_analysis_rs::analyzer::CodeAnalyzer;
+use xencode_analysis_rs::diff_review::{added_line_ranges, classify_issue, FindingOrigin};
 use xencode_analysis_rs::images::{analyze_image, is_image_path, ImageMeta};
 use xencode_analysis_rs::issues::CodeIssue;
 use xencode_analysis_rs::security::VulnerabilityScanner;
@@ -79,6 +80,8 @@ mod cmd_query;
 use cmd_query::*;
 mod cmd_git;
 use cmd_git::*;
+mod cmd_voice;
+use cmd_voice::*;
 mod cmd_memory;
 use cmd_memory::*;
 mod cmd_serve;
@@ -187,6 +190,7 @@ async fn async_main() {
             )
             .await
         }
+        Commands::Speak { text } => run_speak(&text),
         Commands::Memory { action } => run_memory(action),
         Commands::Tasks { action } => run_tasks(action),
         Commands::Worktree { action } => run_worktree(action),
@@ -361,7 +365,8 @@ async fn async_main() {
             base,
             session,
             format,
-        } => run_review(base, session, format),
+            introduced_only,
+        } => run_review(base, session, format, introduced_only),
         Commands::Replay {
             run_id,
             list,

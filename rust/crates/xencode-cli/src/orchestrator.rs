@@ -1217,6 +1217,7 @@ pub(crate) async fn orchestrator_costs(format: OutputFormat) -> Result<(), Strin
         rollup.fold(row);
     }
     let report = xencode_context_rs::cost_of(&rollup.by_model, &table);
+    let sessions = xencode_context_rs::cost_by_session(&rollup, &table);
     let mut drawn = 0usize;
     let mut readable = 0usize;
     let mut watt_hours = 0f64;
@@ -1254,6 +1255,15 @@ pub(crate) async fn orchestrator_costs(format: OutputFormat) -> Result<(), Strin
                 "known_micros": report.known_micros,
                 "unpriced_models": report.unpriced,
                 "priced_from_listing": report.priced_from_listing,
+                "sessions": sessions.iter().map(|(id, session)| serde_json::json!({
+                    "session": id,
+                    "requests": rollup.by_session[id].tokens.requests,
+                    "prompt_tokens": rollup.by_session[id].tokens.prompt_tokens,
+                    "completion_tokens": rollup.by_session[id].tokens.completion_tokens,
+                    "models": session.per_model.len(),
+                    "micros": session.complete().then_some(session.known_micros),
+                    "unpriced_models": session.unpriced,
+                })).collect::<Vec<_>>(),
                 "team_runs": {
                     "recorded": fleet.runs.len(),
                     "with_power_counter": drawn,
@@ -1334,6 +1344,41 @@ pub(crate) async fn orchestrator_costs(format: OutputFormat) -> Result<(), Strin
                 report.priced_from_listing.join(", ")
             );
         }
+    }
+
+    println!("\nSESSIONS — spend by recorded conversation");
+    if sessions.is_empty() {
+        println!("  nothing recorded, so no session has a spend to show.");
+    } else {
+        println!(
+            "{:<40} {:>8} {:>10} {:>10}  {:>10} {:>7}",
+            "SESSION", "REQUESTS", "PROMPT", "COMPLETION", "COST", "MODELS"
+        );
+        for (session, report) in &sessions {
+            let tokens = &rollup.by_session[session].tokens;
+            let cost = if report.complete() {
+                xencode_context_rs::format_usd(report.known_micros)
+            } else {
+                "unpriced".to_string()
+            };
+            println!(
+                "{:<40} {:>8} {:>10} {:>10}  {:>10} {:>7}",
+                if session.is_empty() {
+                    "(no session recorded)"
+                } else {
+                    session.as_str()
+                },
+                tokens.requests,
+                tokens.prompt_tokens,
+                tokens.completion_tokens,
+                cost,
+                report.per_model.len()
+            );
+        }
+        println!(
+            "  A session reads unpriced when any of its models has no rate; the priced models \
+             are not summed into a smaller total that would be mistaken for the whole."
+        );
     }
 
     println!();

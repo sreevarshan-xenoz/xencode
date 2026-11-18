@@ -4900,6 +4900,7 @@ dependencies = [
  "clap_mangen",
  "crossterm",
  "ratatui",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

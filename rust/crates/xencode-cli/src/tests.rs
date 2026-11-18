@@ -1479,6 +1479,7 @@ fn review_file_notes_missing_and_binary() {
     // Deleted from the working tree: note, not silence, not panic.
     let gone = super::review_file(
         &dir,
+        "HEAD",
         &xencode_context_rs::DiffFile {
             path: "gone.rs".to_string(),
             added: Some(1),
@@ -1490,6 +1491,7 @@ fn review_file_notes_missing_and_binary() {
     std::fs::write(dir.join("blob.o"), [0xFF, 0xFE, 0x00]).unwrap();
     let bin = super::review_file(
         &dir,
+        "HEAD",
         &xencode_context_rs::DiffFile {
             path: "blob.o".to_string(),
             added: None,
@@ -1501,6 +1503,7 @@ fn review_file_notes_missing_and_binary() {
     std::fs::write(dir.join("ok.rs"), "pub fn f() {}\n").unwrap();
     let ok = super::review_file(
         &dir,
+        "HEAD",
         &xencode_context_rs::DiffFile {
             path: "ok.rs".to_string(),
             added: Some(1),

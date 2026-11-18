@@ -141,6 +141,14 @@ pub(crate) enum Commands {
         format: QueryFormat,
     },
 
+    /// Speak text aloud through a local text-to-speech program (output only;
+    /// there is no voice input). Needs espeak-ng on Linux, say on macOS or
+    /// PowerShell with System.Speech on Windows; XENCODE_TTS_CMD overrides it.
+    Speak {
+        /// The text to speak
+        text: String,
+    },
+
     /// Manage conversation memory
     Memory {
         #[command(subcommand)]
@@ -732,6 +740,11 @@ pub(crate) enum Commands {
         /// read from the run ledger, and the status they support
         #[arg(long)]
         session: Option<String>,
+
+        /// Show only findings on lines added by the diff; hide findings on
+        /// untouched lines. By default both are shown, each with a label.
+        #[arg(long)]
+        introduced_only: bool,
 
         /// Output format
         #[arg(long, default_value = "text")]

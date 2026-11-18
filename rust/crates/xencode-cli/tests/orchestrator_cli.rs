@@ -950,6 +950,111 @@ fn costs_prices_only_what_has_a_price_and_counts_only_what_the_counter_saw() {
 }
 
 #[test]
+fn costs_reports_each_sessions_spend_without_touching_the_files_it_reads() {
+    let dir = project(&[]);
+    let home = sandbox_home(&[]);
+    let xencode = dir.path().join(".xencode");
+
+    // Real rows written by the same appender the product uses, into the file the
+    // cost command reads, with a real price table beside them.
+    let named = |session: &str, prompt: u32, evaluated: u32, completion: u32| {
+        let mut row = xencode_context_rs::RequestMetrics::from_timings(
+            "BALANCED", 8192, prompt, evaluated, completion, 12.5, 300.0, 4,
+        );
+        row.session_id = Some(session.to_string());
+        row.model = Some("qwen2.5:7b".to_string());
+        row
+    };
+    for row in [
+        named("session_a", 1000, 400, 200),
+        named("session_a", 500, 500, 100),
+        named("session_b", 200, 200, 50),
+    ] {
+        xencode_context_rs::metrics::append_metrics(&xencode, &row).unwrap();
+    }
+    let metrics_file = xencode_context_rs::metrics::metrics_path(&xencode);
+    let pricing_file = xencode.join("pricing.json");
+    fs::write(
+        &pricing_file,
+        r#"{"models":{"qwen2.5:7b":{"input_usd_per_mtok":0.3,"output_usd_per_mtok":0.6,"cached_input_usd_per_mtok":0.06}}}"#,
+    )
+    .unwrap();
+    let metrics_before = fs::read(&metrics_file).unwrap();
+    let pricing_before = fs::read(&pricing_file).unwrap();
+
+    let json: serde_json::Value = serde_json::from_str(&succeeds(
+        dir.path(),
+        home.path(),
+        &["orchestrator", "costs", "--format", "json"],
+    ))
+    .unwrap();
+    // The per-model report is still there and still carries the whole spend.
+    assert_eq!(json["metric_records"], 3);
+    assert_eq!(json["known_micros"], 576);
+    assert_eq!(json["models"].as_array().unwrap().len(), 1);
+    assert_eq!(json["pricing_file"]["present"], true);
+
+    let sessions = json["sessions"]
+        .as_array()
+        .expect("a sessions array in JSON");
+    assert_eq!(sessions.len(), 2);
+    let a = sessions
+        .iter()
+        .find(|row| row["session"] == "session_a")
+        .expect("session_a is priced");
+    assert_eq!(a["requests"], 2);
+    assert_eq!(a["prompt_tokens"], 1500);
+    assert_eq!(a["completion_tokens"], 300);
+    assert_eq!(a["models"], 1);
+    assert_eq!(a["micros"], 486);
+    assert_eq!(a["unpriced_models"].as_array().unwrap().len(), 0);
+    let b = sessions
+        .iter()
+        .find(|row| row["session"] == "session_b")
+        .expect("session_b is priced");
+    assert_eq!(b["requests"], 1);
+    assert_eq!(b["prompt_tokens"], 200);
+    assert_eq!(b["completion_tokens"], 50);
+    assert_eq!(b["micros"], 90);
+
+    let out = succeeds(dir.path(), home.path(), &["orchestrator", "costs"]);
+    assert!(
+        out.contains("SESSIONS — spend by recorded conversation"),
+        "the text report names the block: {out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "{:<40} {:>8} {:>10} {:>10}  {:>10} {:>7}",
+            "session_a", 2, 1500, 300, "$0.000486", 1
+        )),
+        "the session row carries its own tokens, cost and model count: {out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "{:<40} {:>8} {:>10} {:>10}  {:>10} {:>7}",
+            "session_b", 1, 200, 50, "$0.00009", 1
+        )),
+        "the second session is a separate row: {out}"
+    );
+    assert!(
+        out.contains("A session reads unpriced when any of its models has no rate"),
+        "the text says what an unpriced row means: {out}"
+    );
+
+    // Both readings leave the bytes they read exactly as they were found.
+    assert_eq!(
+        fs::read(&metrics_file).unwrap(),
+        metrics_before,
+        "a reading rewrote the metrics file"
+    );
+    assert_eq!(
+        fs::read(&pricing_file).unwrap(),
+        pricing_before,
+        "a reading rewrote the price table"
+    );
+}
+
+#[test]
 fn retry_without_a_name_launches_nothing_and_an_empty_name_is_refused() {
     let marker = "RETRY-MUST-NOT-EXIST";
     let dir = project(&[("demo.toml", recipe("demo", &format!("touch {marker}")))]);

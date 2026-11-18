@@ -181,8 +181,9 @@ pub use notes::{
     append_note, note_lines, notes_path, read_notes, NoteWrite, NOTES_FILE, NOTES_MAX_LINES,
 };
 pub use pricing::{
-    cost_of, format_usd, listing_provenance, lookup_path, pricing_path, CostReport, ModelCost,
-    ModelPrice, PriceLookup, PriceSource, PriceTable, OPENROUTER_SOURCE, PRICE_TTL_DAYS,
+    cost_by_session, cost_of, format_usd, listing_provenance, lookup_path, pricing_path,
+    CostReport, ModelCost, ModelPrice, PriceLookup, PriceSource, PriceTable, OPENROUTER_SOURCE,
+    PRICE_TTL_DAYS,
 };
 pub use refresh::{refresh_rust_file, RefreshOutcome};
 pub use repo_map::{

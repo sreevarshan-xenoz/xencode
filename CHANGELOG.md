@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added — optional focused tool menu for bugfix turns (TS-1)
+
+- `TS-1`: a new default-off `focused_tools` setting narrows the tool menu a small model chooses from on a turn whose prompt reads as a bugfix. The reading is the same whole-word rule retrieval and model routing use; a `general` prompt and the default focus-off path see the full menu unchanged. A focused bugfix leaves out the background job, web, off-machine search and skill tools, while always keeping `read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` and whatever the approval mode needs. The rule runs after the index, mode and reproduction filters, so those still compose, and `xencode config set focused_tools true` writes the flag. Five pure tests use the real tool constructors, the index and executor-reachability guards were extended so no dispatch arm becomes unreachable, and the full workspace suite passes with 3,255 tests. The live eval pass rate with the setting on is **not verified here** (2 GB GPU, no `llama-server`), so no improvement in the ≥4/8 gate is claimed.
+
+### Fixed — per-session spend in the cost report (CA-1)
+
+- `CA-1`: `xencode orchestrator costs` used to price only per model, even though the rollup already groups recorded tokens by session. It now adds a `SESSIONS` block with one row per recorded session (id, requests, prompt and completion tokens, cost, model count) and a `sessions` array in `--format json`, leaving the per-model output unchanged. A new pure helper prices every session through the same `cost_of` used for the whole project, so a model without a rate stays unknown in that session rather than contributing a made-up number; a session with any unpriced model shows `unpriced` (`micros: null` in JSON). Verified with a hand-summed fixture of three real request rows yielding 486, 90 and 576 micro-dollars, and with a real CLI test that writes a metrics log and a price table into a temporary project, checks both output formats, and compares both input files byte for byte before and after. Prices still come only from the local price table; live catalogue fetching and electricity costs from a power counter are not verified here.
+### Added — introduced versus pre-existing review findings (RV-1)
+
+- `RV-1`: `xencode review` now tells a person which findings the diff brought in. Analysis reads the whole working-tree file, so previously a finding on an old, untouched line looked the same as one on a newly added line. The command fetches each changed file's real unified diff, maps the `@@ -a,b +c,d @@` hunks to added new-file line ranges, and labels every finding `introduced` (its line is a `+` line) or `preexisting`. The text output prints the label and `--format json` puts it in each issue's `origin` field; without a flag both kinds are shown, preserving existing behaviour. The new `--introduced-only` flag hides pre-existing findings so a review can focus on what the change added. When a file's diff cannot be read, nothing is claimed to be added and its findings are labelled pre-existing. Pure parser tests use captured git diffs with multiple hunks, context and removed lines; a real CLI test builds a temporary git repository with one finding on an untouched line and one on an added line and checks both labels and the filter. This reads local diffs only — it does not resolve GitHub review threads or talk to a live pull request.
+
 ### Fixed — visibility of what waits on the person (OM-7)
 
 - `OM-7`: the orchestrator Inbox and the window title now show the same, complete list of what waits on the person. Previously a pending question or a ByteBot task waiting for review could be outstanding while the Inbox and title showed nothing. One pure helper gathers the question with its text, every pending approval (local and remote), a task waiting for review, and every terminal agent calling for attention; the Inbox renders from it and the title counts from it, so the two cannot disagree. The Inbox still folds further approvals into a `+N` on the first row. Unit tests cover each source of waiting work, the empty case and the attention count.
@@ -13,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `MS-1`: `xencode mcp serve` now advertises and serves MCP resources and prompts alongside its six tools. `resources/list` publishes `AGENTS.md` and `task.md` when those files exist in the served workspace, plus a live `xencode://config/summary` built from the running server's own version, workspace and launch policy. `resources/read` returns the real bytes of a workspace file (base64 for non-UTF-8 bytes) and refuses a URI that leaves the workspace, including percent-encoded `..` traversal, with a clear JSON-RPC error. `prompts/list` and `prompts/get` serve a `review-diff` prompt rendered from the explain-diff skill template shipped in this repository around the diff the caller supplied. The handshake now declares the resources and prompts capabilities, and a real stdio client test drives initialize, both list methods, a byte-for-byte file read, a prompt render and an out-of-workspace refusal over the binary's own pipes.
 ### Added — eval result on the badge hover card (BD-1)
-
 - `BD-1`: the floating badge's hover card now shows each session's newest graded
   eval run, read from that project's `.xencode/cache/task_eval.jsonl`, as
   `eval 7/8 (88%)` — passed cases over graded cases, with a rounded percentage.
@@ -24,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xencode-live-rs` is covered by tests for a torn tail, an ungraded newest row
   and out-of-order timestamps; the GPUI badge workspace tests, clippy and
   formatting pass on Linux.
+### Added — local text-to-speech output (VO-1)
+- `VO-1`: `xencode speak <text>` speaks text aloud through a real local program.
+  The command is taken from `XENCODE_TTS_CMD`, otherwise `espeak-ng` on Linux,
+  `say` on macOS or a fixed PowerShell `System.Speech` argument list on Windows.
+  It is passed to `std::process::Command` as a fixed argument vector — never to
+  a shell — with the text appended as its own argument, so shell characters in
+  the text stay literal. A missing binary is reported by name with what to
+  install; tests use a real executable script that records its argv and a real
+  missing-path call. This is output only: there is no voice input and no bundled
+  speech engine, so a local binary must already be installed.
 
 ### Fixed — screenshot test capability report (SC-1)
 

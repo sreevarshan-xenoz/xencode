@@ -1016,6 +1016,34 @@ them, and bringing the first back afterwards took 8.0 s — against 1.2–1.8 s 
 same turn once the model was loaded. That is the reason a rule is off by default and
 the reason a llama.cpp move is refused.
 
+#### Focused tools on a bugfix turn
+
+`focused_tools` narrows the tool menu the agent is offered, not the tools the
+executor can run. It is off by default, and a config written before the setting
+existed loads with it off, so an existing install keeps the menu it has always
+had:
+
+```bash
+xencode config set focused_tools true
+xencode config set focused_tools false   # back to the full menu
+```
+
+On, a turn whose prompt reads as a bugfix gets a smaller menu. The reading is
+`shape_of` — the same whole-word rule retrieval and turn routing use, so a
+prompt that says `fix`, `fails`, `crash`, `broken` and similar is a bugfix and
+everything else, including a rename or a question, is `general`. A bugfix drops
+the `background_*`, `web_*`, off-machine `search_*` (all but `search_files`,
+which finds the file to edit) and skill tools. It always keeps `read_file`,
+`list_dir`, `search_files`, `write_file`, `edit_file` and `run_command`, plus
+whatever the current mode needs, such as `update_plan` in a plan or `ask_user`
+in a task that pauses for a person. A `general` prompt, or focus off, changes
+nothing. The index, approval-mode and reproduction filters still apply: focus
+runs after them, so a tool they already removed stays removed.
+
+The live eval pass rate with this setting on has not been measured here — this
+machine has a 2 GB GPU and no `llama-server` — so no change in the ≥4/8 pass
+rate is claimed.
+
 #### Which hardware profile the budget spends against
 
 The window says how much room there is. A second setting says how much of it a run
@@ -1746,6 +1774,26 @@ piece=$(printf '%s' "$line" | jq -r '.text')   # wrong for this stream
 This format has no `tool` line. `xencode query` sends one request and does not
 run the agent loop, so there is no tool call for it to report; tools are run by
 the TUI's chat and by the WebSocket server.
+
+### `xencode speak <text>`
+Speak text aloud. This is **output only** — xencode has no voice input, and no
+speech engine is bundled. A local program must already be installed:
+
+- Linux: `espeak-ng`
+- macOS: `say`
+- Windows: `powershell` using `System.Speech`
+
+```bash
+xencode speak "the build finished"
+XENCODE_TTS_CMD="espeak-ng -s 150" xencode speak "speak a little faster"
+```
+
+`XENCODE_TTS_CMD` names the program and any fixed arguments that go before the
+text. It is passed to `std::process::Command` as an argument vector, never to a
+shell, and the text is appended as its own argument, so quotes, `$()` and other
+shell characters in the text are spoken literally. If the binary is missing,
+the command fails with its name and what to install. A nonzero exit from the
+program is reported with its status and output.
 
 ### `xencode analyze <path> [--format text|json]`
 Analyze a file or directory for code issues and vulnerabilities. Image
@@ -5296,7 +5344,12 @@ xencode orchestrator attach claude sess-1
 - `costs` — what the model calls recorded here cost, priced only where a price is
   known, beside what the recorded team runs drew from the wall, and each worker
   agent's cost as its agent reported it when the project's engine runs (it is
-  never started just to read this; without one the line says so).
+  never started just to read this; without one the line says so). The per-model
+  table is followed by a `SESSIONS` table with one row per session id in the
+  recorded metrics: its requests, prompt and completion tokens, its cost and its
+  number of distinct models. `--format json` puts the same rows in a `sessions`
+  array. A session with any unpriced model reads `unpriced` (`micros: null` in
+  JSON) rather than a smaller total that could be mistaken for the whole.
 - `inspect <target>` — one thing in full, with the file each figure came from: a
   background task by its registry id, a detached run, a recorded team run, or a
   recipe by its name. A prefix that could mean more than one thing says so rather
@@ -5316,6 +5369,18 @@ xencode orchestrator attach claude sess-1
   it never resumes a saved conversation and calls that a handover, never picks the
   session for you, and needs a real terminal because that is the thing being handed
   over. The screen comes back with the exit status the process returned.
+
+The session rows are priced from the same `.xencode/cache/metrics.jsonl` and
+`.xencode/pricing.json` as the per-model table, and the command only reads them.
+Three recorded turns in two sessions at $0.30 per million prompt tokens and
+$0.60 per million completion tokens (with a separate cache-read rate) print:
+
+```
+SESSIONS — spend by recorded conversation
+SESSION                                  REQUESTS     PROMPT COMPLETION        COST  MODELS
+session_a                                       2       1500        300   $0.000486       1
+session_b                                       1        200         50    $0.00009       1
+```
 
 #### `xencode orchestrator split` — a plan, measured before it is trusted
 
@@ -5730,7 +5795,7 @@ Without nextest installed, it falls back to the repository's own test command
 including that a fallback run cannot check for retries, so its result cannot be
 compared to a nextest run.
 
-### `xencode review [--base <ref>] [--session <id>] [--format text|json]`
+### `xencode review [--base <ref>] [--session <id>] [--introduced-only] [--format text|json]`
 PR-level diff triage: files changed between the base and HEAD with line
 counts, plus working-tree analysis per file (code issues, image
 inventory). When `--base` is omitted, the base branch is resolved from
@@ -5738,6 +5803,15 @@ inventory). When `--base` is omitted, the base branch is resolved from
 falling back to `'main'` as a last resort, and the header explicitly states which source
 was used. `--base HEAD` reviews uncommitted changes. Unanalyzable files
 (deleted, binary) get visible notes, never silence.
+
+Analysis reads the whole working-tree file, so it also finds issues on lines
+the diff never touched. Each finding is labelled: `introduced` when its line
+number is a `+` line of that file's real unified diff, `preexisting` otherwise.
+The text output prints the label in brackets; with `--format json` the same
+value is the issue's `origin` field (`"introduced"` or `"preexisting"`). By
+default both kinds are shown. `--introduced-only` hides the pre-existing ones,
+so the report contains only findings the change brought in. If a file's diff
+cannot be read, its findings are conservatively labelled pre-existing.
 
 `--session <id>` adds the result envelope for that session: every check the session ran,
 read from `.xencode/ledger.jsonl` (the rows `xencode test --session` and `/verify` write),
@@ -5750,6 +5824,8 @@ status those exit codes support. A session that ran no check is `blocked`, never
 xencode review
 xencode review --base main
 xencode review --base HEAD --format json | jq '.files[] | {path, issues: (.issues|length)}'
+xencode review --base HEAD --introduced-only          # only findings on added lines
+xencode review --base HEAD --format json | jq '.files[].issues[] | {line_number, origin}'
 xencode review --base HEAD --session green   # and what session `green` proved
 ```
 
