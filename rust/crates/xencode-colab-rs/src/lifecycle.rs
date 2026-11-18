@@ -22,7 +22,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use xencode_config_rs::XencodeConfig;
 
@@ -30,8 +30,8 @@ use crate::backend::{error_tail, Backend, TransportCmd};
 use crate::bootstrap::bootstrap_script;
 use crate::colab::ColabBackend;
 use crate::orchestrate::{
-    effective_remote_port, forward_url, now_rfc3339, probe_models, spawn_forward_cmd, terminate,
-    validate_session_name, Binaries,
+    effective_remote_port, forward_url, now_rfc3339, probe_models, session_age_hint,
+    spawn_forward_cmd, terminate, validate_session_name, Binaries,
 };
 use crate::state::{load_state, remove_state, save_state, ColabState};
 
@@ -433,6 +433,14 @@ pub async fn bridge_status<B: Backend>(backend: &B, asked_session: &str) -> Stat
     }
     if let Some(ts) = &state.started_at {
         lines.push(format!("started: {ts}"));
+    }
+    // Honest session-lifetime line: when the endpoint is down and a stamp is
+    // recorded, say how long the bridge has been up and what Colab *may* do
+    // around 12h. Pure helper keeps the wording and age math testable.
+    if let Some(hint) =
+        session_age_hint(state.started_at.as_deref(), SystemTime::now(), endpoint_ok)
+    {
+        lines.push(hint);
     }
     lines.extend(state.warnings.iter().cloned());
     if let Some(hint) = backend.reap_hint(state.started_at.as_deref(), endpoint_ok) {
@@ -1234,5 +1242,55 @@ esac
     #[test]
     fn forward_url_no_v1_is_the_base() {
         assert_eq!(forward_url_no_v1(18000), "http://127.0.0.1:18000");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn status_reports_session_age_only_when_a_start_stamp_is_recorded() {
+        let session = "age1";
+        let bin_dir = temp_dir(&format!("status-age-{session}"));
+        let xcode_dir = temp_dir(&format!("status-age-cfg-{session}"));
+        fake_colab(&bin_dir);
+        let _g = with_env(&bin_dir, &xcode_dir);
+        std::env::set_var("MARKER", marker(session));
+        std::env::set_var("SESSION_NAME", session);
+
+        // A dead forward pid (an unassigned value) forces endpoint_ok false,
+        // which is the condition under which the age line is shown.
+        let base = ColabState {
+            backend: Some("colab".to_string()),
+            session: Some(session.to_string()),
+            forward_pid: Some(u32::MAX),
+            keepalive_pid: None,
+            local_port: Some(18099),
+            remote_port: Some(18080),
+            runtime: Some("llama.cpp".to_string()),
+            model: Some("m".to_string()),
+            started_at: Some("2020-01-02T03:04:05Z".to_string()),
+            url: Some("http://127.0.0.1:18099/v1".to_string()),
+            warnings: Vec::new(),
+        };
+        base.save().expect("seed state");
+
+        let report = run_colab_status(&bins_in(&bin_dir), session).await;
+        assert!(!report.endpoint_ok, "dead forward -> endpoint down");
+        let age_line = report
+            .lines
+            .iter()
+            .find(|l| l.contains("session age:"))
+            .expect("age line present with a recorded started_at");
+        assert!(age_line.contains("reclaim"), "{age_line}");
+        assert!(age_line.contains("--reconnect"), "{age_line}");
+
+        // Without a started_at the line must not appear at all.
+        let mut no_stamp = base.clone();
+        no_stamp.started_at = None;
+        no_stamp.save().expect("seed state without stamp");
+        let report = run_colab_status(&bins_in(&bin_dir), session).await;
+        assert!(
+            !report.lines.iter().any(|l| l.contains("session age:")),
+            "no age line without a stamp: {:?}",
+            report.lines
+        );
     }
 }
