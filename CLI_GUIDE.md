@@ -2044,8 +2044,13 @@ xencode setup --model ~/models/model.gguf --yes # choose the GGUF, skip the down
 1. **Detect and recommend.** With no `--model`, the largest tier of the advice
    table that this machine's biggest single memory pool can hold is chosen — the
    same answer `xencode models advice` prints, from the machine's memory and the
-   `llama-server` device list. A model id or GGUF path passed to `--model` wins;
-   when the config already names both a GGUF path and a URL, that pair is used.
+   `llama-server` device list. Both commands ask the same pure decision layer,
+   so they cannot name different tiers for the same facts. It always proposes a
+   local GGUF: a configured cloud model is not adopted as the default, and a
+   cloud or remote profile is used only when `allow_cloud_models=true`. A size
+   match says nothing about how well the model answers. A model id or GGUF path
+   passed to `--model` wins; when the config already names both a GGUF path and
+   a URL, that pair is used.
 2. **Download if needed.** If the GGUF file is not on disk, the same resumable,
    checksum-checking downloader used by `llamacpp start` fetches it from the
    configured URL. An existing file is left alone. With no URL and no file, the
@@ -2269,7 +2274,12 @@ to serve one of these:
 one can hold it, otherwise system RAM — measured now, not estimated from a model
 of the product line. Every `url` is a `/resolve/<revision>/` address, so the
 bytes behind it cannot be changed underneath by someone pushing to the
-repository's default branch.
+repository's default branch. The tier printed here comes from the same decision
+layer `setup` uses; the only input that differs for a turn is the turn's shape,
+and only a matching bugfix profile may change the model. A profile that would
+swap a running llama.cpp server is reported and left alone, and an off-machine
+profile is refused with a reason naming `allow_cloud_models` while that setting
+is off. No line here claims a model is better or that it passes an evaluation.
 
 The table ages in public: `advice` prints the date it was checked and how many
 days old that is, and answers from a table older than six months say so. Replace

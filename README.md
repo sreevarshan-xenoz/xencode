@@ -356,6 +356,16 @@ steps failed and exits non-zero; it never reports success for a step it could
 not verify. On a machine without those things it stops at the failing step. See
 [the CLI guide](CLI_GUIDE.md#xencode-setup).
 
+`models advice`, `setup` and the default model a turn uses all ask the same
+decision layer: it reads the already-measured memory and device facts, matches
+the largest single place a GGUF could go against the advice table, and says why
+it chose that band. A saved profile marked for bugfix work may take a bugfix
+turn by the same rule the query path uses, including its refusal to swap a
+running llama.cpp server; a cloud or remote profile is used only with
+`allow_cloud_models=true`, and the reason says which refusal kept it local
+otherwise. This is a size match, not a claim about answer quality or eval pass
+rates — measuring those needs a GPU-backed model run.
+
 **TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+P` (or `Ctrl+X`) opens the command palette (every view, panel, slash command and setting, by typing a few words).
 
 ---

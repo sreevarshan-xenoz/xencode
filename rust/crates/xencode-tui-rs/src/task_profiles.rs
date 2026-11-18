@@ -91,16 +91,47 @@ impl TurnChoice {
 /// HashMap. A profile with no `for_task` is applicable by hand only, which is what
 /// every profile written before this field existed means.
 pub fn choose_profile(config: &XencodeConfig, current_model: &str, prompt: &str) -> TurnChoice {
+    let read = shape_of(prompt);
+    let why = read
+        .reasons
+        .first()
+        .cloned()
+        .unwrap_or_else(|| format!("the turn is {} work", read.shape));
+    choose_profile_for_read(config, current_model, read.shape, &why)
+}
+
+/// The same rule for a caller that already knows the turn's shape, rather than
+/// having a prompt to read. The default-model decision layer reads the shape
+/// once and hands it here, so it cannot apply a different rule from the one a
+/// query turn applies.
+pub fn choose_profile_for_shape(
+    config: &XencodeConfig,
+    current_model: &str,
+    shape: TaskShape,
+) -> TurnChoice {
+    choose_profile_for_read(
+        config,
+        current_model,
+        shape,
+        &format!("the turn is {shape} work"),
+    )
+}
+
+fn choose_profile_for_read(
+    config: &XencodeConfig,
+    current_model: &str,
+    shape: TaskShape,
+    why: &str,
+) -> TurnChoice {
     if !config.model_routing {
         return TurnChoice::Unclaimed;
     }
-    let read = shape_of(prompt);
     let Some(profile) = config.model_profiles.iter().find(|profile| {
         profile
             .for_task
             .as_deref()
             .and_then(TaskShape::parse)
-            .is_some_and(|shape| shape == read.shape)
+            .is_some_and(|read| read == shape)
     }) else {
         return TurnChoice::Unclaimed;
     };
@@ -155,7 +186,7 @@ pub fn choose_profile(config: &XencodeConfig, current_model: &str, prompt: &str)
     } else {
         format!("{} took this turn on {}", profile.name, profile.model)
     };
-    let reason = format!("{subject}{knob_words} — {}", read.reasons[0]);
+    let reason = format!("{subject}{knob_words} — {why}");
     TurnChoice::Taken(TurnProfile {
         name: profile.name.clone(),
         model: profile.model.clone(),
@@ -198,6 +229,27 @@ mod tests {
     /// llama.cpp tests below pass it by hand to show that difference matters.
     fn choose(config: &XencodeConfig, prompt: &str) -> TurnChoice {
         choose_profile(config, &config.default_model, prompt)
+    }
+
+    #[test]
+    fn a_shape_already_read_reaches_the_same_profile_as_a_prompt() {
+        let config = config(
+            true,
+            vec![profile("quick", "smallmodel:latest", Some("bugfix"))],
+        );
+        let from_prompt = choose(&config, BUGFIX);
+        let from_shape =
+            choose_profile_for_shape(&config, &config.default_model, TaskShape::Bugfix);
+        assert_eq!(
+            from_prompt.profile().unwrap().model,
+            from_shape.profile().unwrap().model,
+            "both entry points must apply the same profile rule"
+        );
+        assert!(from_shape.note().unwrap().contains("bugfix"));
+        assert_eq!(
+            choose_profile_for_shape(&config, &config.default_model, TaskShape::General),
+            TurnChoice::Unclaimed
+        );
     }
 
     #[test]

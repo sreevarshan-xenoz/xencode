@@ -92,40 +92,35 @@ pub(crate) async fn run_models(action: ModelAction) -> Result<(), String> {
 /// Answer "which GGUF should this machine serve" from the advice table, and say
 /// how old that answer is.
 ///
-/// The capacity the table is matched against is the biggest single place a
-/// model's bytes could go — one memory pool, not the sum of several, because
-/// `llama-server` puts a model's weights in one place. That is the same reading
-/// the launch preflight uses, so the two commands cannot disagree about whether
-/// a model fits.
+/// The capacity and the band are not measured here a second time: this command
+/// asks the same `choose_default_model` that `setup` and a routing call ask, so
+/// the three cannot name different tiers for the same machine. The capacity is
+/// the biggest single place a model's bytes could go — one memory pool, not
+/// the sum of several, because `llama-server` puts a model's weights in one
+/// place — which is the reading the launch preflight uses too.
 pub(crate) fn run_models_advice() -> Result<(), String> {
-    use xencode_context_rs::hwprobe;
     use xencode_models_rs::advice;
 
+    let config = XencodeConfig::load().unwrap_or_default();
     let advice = advice::Advice::load(&advice::default_path());
     if let advice::AdviceSource::EmbeddedAfterRefusingUserFile(reason) = &advice.source {
         println!("note:     {reason}");
     }
 
-    let total_kib = xencode_context_rs::budget::total_memory_kib().unwrap_or(0);
-    let available_kib = hwprobe::available_memory_kib().unwrap_or(0);
-    let exe = xencode_models_rs::llamacpp::find_llama_server(None);
-    let devices: Vec<hwprobe::ComputeDevice> = match &exe {
-        Some(exe) => hwprobe::server_devices(exe)
-            .as_deref()
-            .map(hwprobe::parse_llama_devices)
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
-    let pools = hwprobe::memory_pools(&devices, total_kib / 1024, available_kib / 1024);
-    let largest = pools.iter().max_by_key(|pool| pool.usable_mib);
-    let capacity_bytes = largest
-        .map(|pool| pool.usable_mib * 1024 * 1024)
-        .unwrap_or(0);
-    match largest {
-        Some(pool) => println!(
-            "room:     {} ({})",
-            xencode_models_rs::human_bytes(capacity_bytes),
-            pool.label
+    let hardware = measure_hardware(&config);
+    // A question about serving capacity is a general turn: no saved profile
+    // overrides it, so the answer is the pure local size match.
+    let decision = choose_default_model(
+        &hardware,
+        &advice,
+        &config,
+        xencode_context_rs::TaskShape::General,
+    );
+
+    match &decision.pool_label {
+        Some(label) => println!(
+            "room:     {} ({label})",
+            xencode_models_rs::human_bytes(decision.capacity_bytes)
         ),
         None => println!(
             "room:     nothing measured — this machine reported no memory a model could go in"
@@ -156,10 +151,10 @@ pub(crate) fn run_models_advice() -> Result<(), String> {
     };
     println!("from:     {source}");
 
-    match advice.tier_for(capacity_bytes) {
+    match &decision.tier {
         None => println!(
             "answer:   nothing in the table fits in {r}",
-            r = xencode_models_rs::human_bytes(capacity_bytes)
+            r = xencode_models_rs::human_bytes(decision.capacity_bytes)
         ),
         Some(tier) => {
             println!("tier:     {}", tier.name);
@@ -193,9 +188,9 @@ pub(crate) fn run_models_advice() -> Result<(), String> {
 
 /// The model `xencode setup` picks when nothing names one: the largest entry
 /// in the advice table that this machine's biggest single memory pool can
-/// hold. This reads the same three sources `models advice` prints — the advice
-/// table, the machine's memory, and the server binary's device list — so the
-/// two commands cannot recommend different models.
+/// hold, taken from the same decision the advice command prints. No saved
+/// profile is consulted here, because setup is bringing up a local server
+/// rather than answering a bugfix turn.
 pub(crate) struct RecommendedModel {
     pub(crate) tier: String,
     pub(crate) label: String,
@@ -206,32 +201,23 @@ pub(crate) struct RecommendedModel {
 }
 
 pub(crate) fn recommend_model() -> Result<RecommendedModel, String> {
-    use xencode_context_rs::hwprobe;
     use xencode_models_rs::advice;
 
+    let config = XencodeConfig::load().unwrap_or_default();
     let advice = advice::Advice::load(&advice::default_path());
-    let total_kib = xencode_context_rs::budget::total_memory_kib().unwrap_or(0);
-    let available_kib = hwprobe::available_memory_kib().unwrap_or(0);
-    let exe = xencode_models_rs::llamacpp::find_llama_server(None);
-    let devices: Vec<hwprobe::ComputeDevice> = match &exe {
-        Some(exe) => hwprobe::server_devices(exe)
-            .as_deref()
-            .map(hwprobe::parse_llama_devices)
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
-    let pools = hwprobe::memory_pools(&devices, total_kib / 1024, available_kib / 1024);
-    let capacity_bytes = pools
-        .iter()
-        .max_by_key(|pool| pool.usable_mib)
-        .map(|pool| pool.usable_mib * 1024 * 1024)
-        .unwrap_or(0);
+    let hardware = measure_hardware(&config);
+    let decision = choose_default_model(
+        &hardware,
+        &advice,
+        &config,
+        xencode_context_rs::TaskShape::General,
+    );
 
-    let tier = advice.tier_for(capacity_bytes).ok_or_else(|| {
+    let tier = decision.tier.as_ref().ok_or_else(|| {
         format!(
             "no model in the advice table fits the {} this machine can give one; run \
              `xencode models advice` to see the table and the sizes it names",
-            xencode_models_rs::human_bytes(capacity_bytes)
+            xencode_models_rs::human_bytes(decision.capacity_bytes)
         )
     })?;
     let entry = tier.gguf.first().ok_or_else(|| {
@@ -753,7 +739,7 @@ fn free_port() -> Result<u16, String> {
 /// flags are appended after the one xencode adds and llama-server runs with
 /// the last value it is given. Otherwise the GGUF's file name is the choice —
 /// stable and deterministic: no clock, no counter, no reading of the file.
-fn server_alias(model_path: &str, user_args: &[String]) -> String {
+pub(crate) fn server_alias(model_path: &str, user_args: &[String]) -> String {
     if let Some(pos) = user_args.iter().position(|a| a == "--alias") {
         if let Some(name) = user_args.get(pos + 1) {
             if !name.trim().is_empty() {
