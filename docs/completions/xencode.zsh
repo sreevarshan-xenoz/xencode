@@ -433,6 +433,13 @@ _arguments "${_arguments_options[@]}" : \
 ':prompt -- The prompt to send:_default' \
 && ret=0
 ;;
+(speak)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':text -- The text to speak:_default' \
+&& ret=0
+;;
 (memory)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -2857,6 +2864,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(speak)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (memory)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__help__subcmd__memory_commands" \
@@ -3713,6 +3724,7 @@ _xencode_commands() {
 'advisories:Known security advisories for the crates this project depends on' \
 'deps:Supply-chain report\: shell to the installed dependency checkers (cargo-shear, cargo-deny) and stream their findings. Report only — it never edits a manifest or auto-fixes a dependency' \
 'query:Send a query to a model' \
+'speak:Speak text aloud through a local text-to-speech program (output only; there is no voice input). Needs espeak-ng on Linux, say on macOS or PowerShell with System.Speech on Windows; XENCODE_TTS_CMD overrides it' \
 'memory:Manage conversation memory' \
 'tasks:Manage background tasks (file-backed, survives this process)' \
 'worktree:Manage git worktrees of the current repository' \
@@ -4344,6 +4356,7 @@ _xencode__subcmd__help_commands() {
 'advisories:Known security advisories for the crates this project depends on' \
 'deps:Supply-chain report\: shell to the installed dependency checkers (cargo-shear, cargo-deny) and stream their findings. Report only — it never edits a manifest or auto-fixes a dependency' \
 'query:Send a query to a model' \
+'speak:Speak text aloud through a local text-to-speech program (output only; there is no voice input). Needs espeak-ng on Linux, say on macOS or PowerShell with System.Speech on Windows; XENCODE_TTS_CMD overrides it' \
 'memory:Manage conversation memory' \
 'tasks:Manage background tasks (file-backed, survives this process)' \
 'worktree:Manage git worktrees of the current repository' \
@@ -5239,6 +5252,11 @@ _xencode__subcmd__help__subcmd__session__subcmd__resolve_commands() {
 _xencode__subcmd__help__subcmd__setup_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help setup commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__speak_commands] )) ||
+_xencode__subcmd__help__subcmd__speak_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help speak commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__tasks_commands] )) ||
 _xencode__subcmd__help__subcmd__tasks_commands() {
@@ -6515,6 +6533,11 @@ _xencode__subcmd__session__subcmd__resolve_commands() {
 _xencode__subcmd__setup_commands() {
     local commands; commands=()
     _describe -t commands 'xencode setup commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__speak_commands] )) ||
+_xencode__subcmd__speak_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode speak commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__tasks_commands] )) ||
 _xencode__subcmd__tasks_commands() {

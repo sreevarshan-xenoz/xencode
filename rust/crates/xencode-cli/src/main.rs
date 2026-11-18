@@ -79,6 +79,8 @@ mod cmd_query;
 use cmd_query::*;
 mod cmd_git;
 use cmd_git::*;
+mod cmd_voice;
+use cmd_voice::*;
 mod cmd_memory;
 use cmd_memory::*;
 mod cmd_serve;
@@ -187,6 +189,7 @@ async fn async_main() {
             )
             .await
         }
+        Commands::Speak { text } => run_speak(&text),
         Commands::Memory { action } => run_memory(action),
         Commands::Tasks { action } => run_tasks(action),
         Commands::Worktree { action } => run_worktree(action),

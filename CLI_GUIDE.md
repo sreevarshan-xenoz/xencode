@@ -1747,6 +1747,26 @@ This format has no `tool` line. `xencode query` sends one request and does not
 run the agent loop, so there is no tool call for it to report; tools are run by
 the TUI's chat and by the WebSocket server.
 
+### `xencode speak <text>`
+Speak text aloud. This is **output only** — xencode has no voice input, and no
+speech engine is bundled. A local program must already be installed:
+
+- Linux: `espeak-ng`
+- macOS: `say`
+- Windows: `powershell` using `System.Speech`
+
+```bash
+xencode speak "the build finished"
+XENCODE_TTS_CMD="espeak-ng -s 150" xencode speak "speak a little faster"
+```
+
+`XENCODE_TTS_CMD` names the program and any fixed arguments that go before the
+text. It is passed to `std::process::Command` as an argument vector, never to a
+shell, and the text is appended as its own argument, so quotes, `$()` and other
+shell characters in the text are spoken literally. If the binary is missing,
+the command fails with its name and what to install. A nonzero exit from the
+program is reported with its status and output.
+
 ### `xencode analyze <path> [--format text|json]`
 Analyze a file or directory for code issues and vulnerabilities. Image
 files take the intake path: format, dimensions, and byte size are reported
