@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use std::sync::Arc;
 use xencode_analysis_rs::analyzer::CodeAnalyzer;
+use xencode_analysis_rs::diff_review::{added_line_ranges, classify_issue, FindingOrigin};
 use xencode_analysis_rs::images::{analyze_image, is_image_path, ImageMeta};
 use xencode_analysis_rs::issues::CodeIssue;
 use xencode_analysis_rs::security::VulnerabilityScanner;
@@ -364,7 +365,8 @@ async fn async_main() {
             base,
             session,
             format,
-        } => run_review(base, session, format),
+            introduced_only,
+        } => run_review(base, session, format, introduced_only),
         Commands::Replay {
             run_id,
             list,

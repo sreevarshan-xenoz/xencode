@@ -211,6 +211,17 @@ pub(crate) async fn run_fetch(url: String, format: OutputFormat) -> Result<(), S
     Ok(())
 }
 
+/// One finding in a reviewed file, tagged with whether the diff introduced it.
+///
+/// The issue is flattened in JSON so consumers keep every original `CodeIssue`
+/// field and only gain the `origin` label.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct ReviewedIssue {
+    #[serde(flatten)]
+    pub(crate) issue: CodeIssue,
+    pub(crate) origin: FindingOrigin,
+}
+
 /// One file in a review: diff stats plus working-tree analysis. `note` is
 /// set instead of `issues` when the file cannot be analyzed (deleted,
 /// binary, unreadable, oversized image) — visible, never silent.
@@ -219,13 +230,15 @@ pub(crate) struct ReviewedFile {
     pub(crate) path: String,
     pub(crate) added: Option<u64>,
     pub(crate) deleted: Option<u64>,
-    pub(crate) issues: Vec<CodeIssue>,
+    pub(crate) issues: Vec<ReviewedIssue>,
     pub(crate) note: Option<String>,
 }
 
-/// Review one diff entry against the working tree.
+/// Review one diff entry against the working tree, marking each finding as
+/// introduced by the diff or already present on an untouched line.
 pub(crate) fn review_file(
     root: &std::path::Path,
+    base: &str,
     diff: &xencode_context_rs::DiffFile,
 ) -> ReviewedFile {
     let full = root.join(&diff.path);
@@ -244,7 +257,22 @@ pub(crate) fn review_file(
         return file;
     }
     match CodeAnalyzer::analyze_file(&full) {
-        Ok(issues) => file.issues = issues,
+        Ok(issues) => {
+            // Read this file's real diff to learn which new-file lines were
+            // added. If it cannot be read, nothing can be proved added, so
+            // every finding is conservatively labelled pre-existing.
+            let ranges = match xencode_context_rs::git_diff_file(root, base, &diff.path) {
+                Ok(text) => added_line_ranges(&text),
+                Err(_) => Vec::new(),
+            };
+            file.issues = issues
+                .into_iter()
+                .map(|issue| {
+                    let origin = classify_issue(issue.line_number, &ranges);
+                    ReviewedIssue { issue, origin }
+                })
+                .collect();
+        }
         Err(e) => file.note = Some(format!("not analyzed: {e}")),
     }
     file

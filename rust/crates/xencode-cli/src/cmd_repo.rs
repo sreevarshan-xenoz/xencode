@@ -826,12 +826,21 @@ pub(crate) fn run_review(
     explicit_base: Option<String>,
     session: Option<String>,
     format: OutputFormat,
+    introduced_only: bool,
 ) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = resolve_review_root(&cwd);
     let (base, source) = resolve_review_base(&root, explicit_base.as_deref());
     let diffs = xencode_context_rs::git_diff_numstat(&root, &base)?;
-    let files: Vec<ReviewedFile> = diffs.iter().map(|d| review_file(&root, d)).collect();
+    let mut files: Vec<ReviewedFile> = diffs.iter().map(|d| review_file(&root, &base, d)).collect();
+    // Default keeps both kinds with a label; --introduced-only hides findings
+    // on lines the diff did not add.
+    if introduced_only {
+        for file in &mut files {
+            file.issues
+                .retain(|issue| issue.origin == FindingOrigin::Introduced);
+        }
+    }
     // AE-1: the evidence half, from the ledger rows this session wrote.
     let envelope = session.as_deref().map(|session| {
         xencode_context_rs::envelope_for_session(
@@ -883,16 +892,18 @@ pub(crate) fn run_review(
                 format_review_text(&base, Some(&source.header_suffix()), &files)
             );
             for file in &files {
-                for issue in &file.issues {
+                for review in &file.issues {
+                    let issue = &review.issue;
                     let icon = match issue.severity.label() {
                         "critical" | "high" => "R",
                         "medium" => "Y",
                         _ => "G",
                     };
                     println!(
-                        "    {} [{}] {} Ln{}: {} -- {}",
+                        "    {} [{}] [{}] {} Ln{}: {} -- {}",
                         icon,
                         issue.severity.label(),
+                        review.origin.label(),
                         file.path,
                         issue.line_number,
                         issue.message,

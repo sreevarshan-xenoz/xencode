@@ -741,6 +741,11 @@ pub(crate) enum Commands {
         #[arg(long)]
         session: Option<String>,
 
+        /// Show only findings on lines added by the diff; hide findings on
+        /// untouched lines. By default both are shown, each with a label.
+        #[arg(long)]
+        introduced_only: bool,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,

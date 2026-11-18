@@ -4,6 +4,7 @@ pub mod compete;
 pub mod covdiff;
 pub mod dap;
 pub mod deps;
+pub mod diff_review;
 pub mod envdrift;
 pub mod failure;
 pub mod images;
@@ -36,6 +37,9 @@ pub use veto::{
     veto_path, Veto, VetoClearance, VetoSource, VetoStore, VETO_FILE,
 };
 
+pub use diff_review::{
+    added_line_ranges, classify_issue, classify_issue_in_diff, AddedRange, FindingOrigin,
+};
 pub use failure::{
     classify_command_output, render_suggestions, Category, FailureDiagnostic, FailureSeverity,
 };
