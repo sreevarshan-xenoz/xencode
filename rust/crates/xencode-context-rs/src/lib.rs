@@ -12,6 +12,7 @@
 //!
 //! The single entry point is [`init_project`].
 
+pub mod adaptive;
 pub mod advise;
 pub mod anchor;
 pub mod artifacts;
@@ -76,6 +77,10 @@ pub mod verify;
 pub mod watcher;
 pub mod worktree;
 
+pub use adaptive::{
+    assemble_chat_adaptive, body_tokens, decide, relation_source_label, AppliedPlan, ContextPlan,
+    DecisionEvidence, RetrievalOrder,
+};
 pub use advise::{
     advise, advise_from_snapshot, affected_dependents, broken_imports, find_cycles, hub_files,
     orphan_files, Advice, AdviceKind, FailingCheckObservation, ProposedTask, AFFECTED_MAX_HOPS,
