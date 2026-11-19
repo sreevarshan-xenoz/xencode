@@ -122,6 +122,7 @@ pub(crate) async fn run_eval(action: EvalAction) -> Result<(), String> {
             llamacpp_url,
             timeout,
             max_tokens,
+            structured_edits,
             judge,
             judge_model,
         } => {
@@ -163,6 +164,7 @@ pub(crate) async fn run_eval(action: EvalAction) -> Result<(), String> {
                 seed: Some(config.llama_cpp_seed.unwrap_or(42)),
                 timeout_secs: timeout,
                 max_tokens: (max_tokens > 0).then_some(max_tokens),
+                structured_edits,
                 history_dir: Some(project_xencode_dir()),
                 judge,
                 judge_model,

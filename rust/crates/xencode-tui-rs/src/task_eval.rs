@@ -71,6 +71,8 @@ pub struct TaskEvalOptions {
     /// Grant the shell class as well. Off means a `run_command` from the model is
     /// refused, and the refusal is recorded like any other call.
     pub allow_shell: bool,
+    /// Offer only the validated line-range patch as the edit path (SM-3).
+    pub structured_edits: bool,
     /// Pinned sampling parameters, so two runs of one case can be compared.
     /// `None` leaves the server's own defaults in charge, and says so in the
     /// report rather than pretending the run was pinned.
@@ -108,6 +110,7 @@ impl Default for TaskEvalOptions {
             remote_base_url: None,
             max_rounds: DEFAULT_MAX_ROUNDS,
             allow_shell: false,
+            structured_edits: false,
             temperature: Some(0.0),
             seed: Some(42),
             timeout_secs: 120,
@@ -713,6 +716,7 @@ async fn run_case(options: &TaskEvalOptions, shape: BugShape, attempt: usize) ->
         "edit-allow".to_string()
     };
     app.config.agent_max_rounds = options.max_rounds.clamp(1, 64);
+    app.config.structured_edits = options.structured_edits;
     app.config.response_timeout = options.timeout_secs;
     app.config.llama_cpp_temperature = options.temperature;
     app.config.llama_cpp_seed = options.seed;

@@ -2414,6 +2414,102 @@ fn absent_edit_unrelated_text_says_nothing_resembles() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+#[test]
+fn patch_lines_replaces_a_validated_range() {
+    let root = temp_root("patch_ok");
+    let source = "fn top() {}\nfn total(v: &[u32]) -> u32 {\n    v.iter().sum()\n}\n";
+    std::fs::write(root.join("p.rs"), source).unwrap();
+    let out = tool_patch_lines(
+        &root,
+        &args_of(serde_json::json!({
+            "file": "p.rs", "start_line": 2, "end_line": 4,
+            "expected_old": "v.iter().sum()",
+            "replacement": "v.iter().take(v.len()).sum()"
+        })),
+    );
+    assert!(out.contains("patched p.rs"), "{out}");
+    let after = std::fs::read_to_string(root.join("p.rs")).unwrap();
+    assert!(
+        after.contains("take(v.len())"),
+        "the range was replaced: {after}"
+    );
+    assert!(
+        after.starts_with("fn top() {}"),
+        "outside lines are untouched: {after}"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn patch_lines_refuses_a_wrong_expected_old_without_writing() {
+    let root = temp_root("patch_wrong");
+    let source = "fn top() {}\nfn total() -> u32 { 1 }\n";
+    std::fs::write(root.join("p.rs"), source).unwrap();
+    let out = tool_patch_lines(
+        &root,
+        &args_of(serde_json::json!({
+            "file": "p.rs", "start_line": 2, "end_line": 2,
+            "expected_old": "this text is not there",
+            "replacement": "fn total() -> u32 { 2 }"
+        })),
+    );
+    assert!(out.contains("not in lines 2-2"), "{out}");
+    // The refusal shows the real line, so a small model has something to copy.
+    assert!(out.contains("    2 | fn total() -> u32 { 1 }"), "{out}");
+    assert_eq!(std::fs::read_to_string(root.join("p.rs")).unwrap(), source);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn patch_lines_refuses_ambiguous_or_out_of_range_targets() {
+    let root = temp_root("patch_refuse");
+    let source = "same\nsame\nthird\n";
+    std::fs::write(root.join("p.rs"), source).unwrap();
+    let ambiguous = tool_patch_lines(
+        &root,
+        &args_of(serde_json::json!({
+            "file": "p.rs", "start_line": 1, "end_line": 2,
+            "expected_old": "same", "replacement": "x"
+        })),
+    );
+    assert!(ambiguous.contains("appears in 2 lines"), "{ambiguous}");
+    let out_of_range = tool_patch_lines(
+        &root,
+        &args_of(serde_json::json!({
+            "file": "p.rs", "start_line": 4, "end_line": 5,
+            "expected_old": "third", "replacement": "x"
+        })),
+    );
+    assert!(out_of_range.contains("past the end"), "{out_of_range}");
+    assert_eq!(std::fs::read_to_string(root.join("p.rs")).unwrap(), source);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[tokio::test]
+async fn patch_lines_approval_preview_is_the_diff_that_gets_written() {
+    let root = temp_root("patch_preview");
+    let source = "fn f() -> u32 { 1 }\n";
+    std::fs::write(root.join("p.rs"), source).unwrap();
+    let c = call(
+        "patch_lines",
+        serde_json::json!({
+            "file": "p.rs", "start_line": 1, "end_line": 1,
+            "expected_old": "1", "replacement": "fn f() -> u32 { 2 }"
+        }),
+    );
+    assert_eq!(tool_class("patch_lines"), ToolClass::Edit);
+    let preview = approval_preview(&root, &c);
+    assert!(preview.contains("-fn f() -> u32 { 1 }"), "{preview}");
+    assert!(preview.contains("+fn f() -> u32 { 2 }"), "{preview}");
+    let out = execute_tool_call(&new_task_runtime(), &root, &c).await;
+    assert!(out.contains("patched p.rs"), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("p.rs")).unwrap(),
+        "fn f() -> u32 { 2 }\n"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 #[tokio::test]
 async fn file_tools_route_through_execute_tool_call() {
     let root = temp_root("route");

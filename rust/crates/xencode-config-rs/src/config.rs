@@ -822,6 +822,13 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub focused_tools: bool,
 
+    /// Offer only structured line-range patches as the way to edit an existing
+    /// file, instead of the whole-block `edit_file` protocol. Off by default:
+    /// it changes which tools a model may reach and its effect on the eval is
+    /// measured, not assumed. Creating new files still needs `write_file`.
+    #[serde(default)]
+    pub structured_edits: bool,
+
     /// A stronger model to route the next turn to after a turn ends with two or
     /// more failed edit attempts (DT-1). Usually a remote or OpenAI-compatible
     /// endpoint — AirLLM is Python and cannot be added to this Rust workspace —
@@ -1135,6 +1142,7 @@ impl Default for XencodeConfig {
             model_profiles: Vec::new(),
             model_routing: false,
             focused_tools: false,
+            structured_edits: false,
             deep_think_model: None,
             colab: ColabConfig::default(),
         }

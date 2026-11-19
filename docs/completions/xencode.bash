@@ -2944,7 +2944,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__eval__subcmd__run)
-            opts="-c -m -h --case --model --repeats --max-rounds --allow-shell --out --ollama-url --llamacpp-url --timeout --max-tokens --judge --judge-model --help"
+            opts="-c -m -h --case --model --repeats --max-rounds --allow-shell --out --ollama-url --llamacpp-url --timeout --max-tokens --structured-edits --judge --judge-model --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

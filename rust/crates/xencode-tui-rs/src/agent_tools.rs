@@ -260,9 +260,8 @@ pub fn tool_class(tool: &str) -> ToolClass {
         "background_poll" | "repo_advise" | "what_breaks" | "find_refs" | "callers"
         | "read_file" | "list_dir" | "search_files" | "read_docs" | "lookup_advisory"
         | "load_skill" | "update_plan" | "ask_user" => ToolClass::ReadOnly,
-        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
-            ToolClass::Edit
-        }
+        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename"
+        | "patch_lines" => ToolClass::Edit,
         // EV-6: a note is a write — into `.xencode/notes.md`, one line at a time,
         // with no path the model can choose. It is the same class as `write_file`
         // because it is the same kind of act, and plan mode refusing it is the
@@ -1869,6 +1868,21 @@ fn preview_and_bound_files(root: &Path, call: &ToolCall) -> (String, Vec<(PathBu
             .collect()
     };
     match call.name.as_str() {
+        "patch_lines" => match planned_patch(root, &args) {
+            Ok((full, display, updated)) => {
+                let current = read_text(&full, &display).unwrap_or_default();
+                (
+                    format!(
+                        "target: {display}\n{}",
+                        unified_diff(&current, &updated).trim_end()
+                    ),
+                    vec![(full, display)],
+                )
+            }
+            // A call that cannot be validated shows why and binds nothing: a
+            // person is never asked to approve an edit that would just fail.
+            Err(reason) => (reason, Vec::new()),
+        },
         "write_file" => match (arg_str(&args, "path"), arg_str(&args, "content")) {
             (Some(p), Some(c)) => diff_for(p, c),
             _ => (summarize_call(call), Vec::new()),
@@ -2363,6 +2377,114 @@ fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
         &display,
         &updated,
         format!("edited {display}: {how}\n{diff}")
+            .trim_end()
+            .to_string(),
+    )
+}
+
+/// The edit a `patch_lines` call would perform, or the reason it would refuse.
+///
+/// Structured editing for small models: the model names a line range and a
+/// short `expected_old` instead of reproducing a whole block. Both this planner
+/// and the approval preview call it, so the diff a person approves is the bytes
+/// the executor writes. Every refusal prints the real numbered lines in the
+/// range — a model that got a line number wrong has something concrete to fix.
+fn planned_patch(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(PathBuf, String, String), String> {
+    let Some(raw) = arg_str(args, "file") else {
+        return Err(err("patch_lines needs a string \"file\""));
+    };
+    let Some(start) = arg_usize(args, "start_line") else {
+        return Err(err("patch_lines needs an integer \"start_line\""));
+    };
+    let Some(end) = arg_usize(args, "end_line") else {
+        return Err(err("patch_lines needs an integer \"end_line\""));
+    };
+    let Some(expected) = arg_str(args, "expected_old") else {
+        return Err(err("patch_lines needs a string \"expected_old\""));
+    };
+    let Some(replacement) = arg_str(args, "replacement") else {
+        return Err(err("patch_lines needs a string \"replacement\""));
+    };
+    if start == 0 || end < start {
+        return Err(err(
+            "patch_lines needs 1-based lines with start_line <= end_line",
+        ));
+    }
+    if expected.trim().is_empty() {
+        return Err(err("patch_lines needs a non-empty \"expected_old\""));
+    }
+    let (full, display) = workspace_path(root, raw)?;
+    let text = read_text(&full, &display)?;
+    let lines: Vec<&str> = text.lines().collect();
+    if end > lines.len() {
+        return Err(err(format!(
+            "patch_lines range {start}-{end} is past the end of {display} ({} lines)",
+            lines.len()
+        )));
+    }
+    let range = &lines[start - 1..end];
+    let numbered: String = range
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("\n  {:>4} | {}", start + i, line))
+        .collect();
+    let fold = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let expected_fold = fold(expected);
+    let hits: Vec<usize> = range
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| fold(line) == expected_fold || line.contains(expected))
+        .map(|(i, _)| i)
+        .collect();
+    if hits.is_empty() {
+        return Err(err(format!(
+            "patch_lines: \"expected_old\" is not in lines {start}-{end} of {display}:{numbered}"
+        )));
+    }
+    if hits.len() > 1 {
+        return Err(err(format!(
+            "patch_lines: \"expected_old\" appears in {} lines of {start}-{end} in {display}; \
+             narrow the range to one:{numbered}",
+            hits.len()
+        )));
+    }
+    let mut updated = String::new();
+    updated.push_str(&text[..offset_of_line(&text, start - 1)]);
+    let replacement_lines: Vec<&str> = replacement.lines().collect();
+    for line in replacement_lines {
+        updated.push_str(line);
+        updated.push('\n');
+    }
+    let after = if end < lines.len() {
+        offset_of_line(&text, end)
+    } else {
+        text.len()
+    };
+    updated.push_str(&text[after..]);
+    Ok((full, display, updated))
+}
+
+/// Execute a structured patch: validate first, then write only a checked edit.
+fn tool_patch_lines(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let (full, display, updated) = match planned_patch(root, args) {
+        Ok(ok) => ok,
+        Err(reason) => return reason,
+    };
+    let text = match read_text(&full, &display) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    if let Err(e) = std::fs::write(&full, &updated) {
+        return err(format!("cannot write {display}: {e}"));
+    }
+    let diff = unified_diff(&text, &updated);
+    secret_guard(
+        &display,
+        &updated,
+        format!("patched {display} by line range\n{diff}")
             .trim_end()
             .to_string(),
     )
@@ -4039,6 +4161,7 @@ async fn execute_tool_call_plan(
         "write_file" => tool_write_file(root, &args),
         "write_note" => tool_write_note(root, &args),
         "edit_file" => tool_edit_file(root, &args),
+        "patch_lines" => tool_patch_lines(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
         "ast_edit" => tool_ast_edit(root, &args, command_timeout),
         "codemod" => tool_codemod(root, &args, command_timeout),

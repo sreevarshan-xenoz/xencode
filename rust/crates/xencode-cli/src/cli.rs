@@ -1041,6 +1041,12 @@ pub(crate) enum EvalAction {
         #[arg(long, default_value_t = 1024)]
         max_tokens: u32,
 
+        /// Offer only the validated line-range patch as the edit path. The
+        /// whole-block edit tools are removed from the menu and `patch_lines`
+        /// is offered instead; default off, so an existing eval is unchanged.
+        #[arg(long)]
+        structured_edits: bool,
+
         /// After every verdict is in, ask a model to rank the attempts that came
         /// close. Two more requests per run, and no verdict changes.
         #[arg(long)]

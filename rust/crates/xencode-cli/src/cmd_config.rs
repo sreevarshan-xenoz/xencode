@@ -532,6 +532,7 @@ pub(crate) fn run_config(action: ConfigAction) -> Result<(), String> {
                 // Off until asked for, so an existing config keeps the menu it
                 // has always had and the pass-rate effect is not claimed here.
                 "focused_tools" => config.focused_tools = parse_bool(&value)?,
+                "structured_edits" => config.structured_edits = parse_bool(&value)?,
                 // The electricity tariff, in cents per kilowatt-hour. Empty clears
                 // it, which leaves a local turn showing its watt-hours with no
                 // price next to them — the honest rendering, not a free one.

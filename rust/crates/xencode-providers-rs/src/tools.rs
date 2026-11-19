@@ -775,6 +775,47 @@ pub fn file_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "patch_lines".to_string(),
+            description: "Replace a numbered line range in an existing workspace \
+                          file. Give start_line and end_line (1-based, both \
+                          included) from a recent read_file, plus expected_old: \
+                          a short expression that must appear in that range. The \
+                          edit is applied only when the range exists and \
+                          expected_old matches exactly one line in it; the \
+                          replacement may be one line or several. A refusal \
+                          shows the real numbered lines in the range so you can \
+                          correct it. Use this instead of edit_file when you want \
+                          to change a small, known range without reproducing a \
+                          whole block of text. Returns a unified diff."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "File path relative to the workspace root"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "First line of the range to replace, 1-based"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Last line of the range to replace, 1-based, included"
+                    },
+                    "expected_old": {
+                        "type": "string",
+                        "description": "A short string that must appear in exactly one line of the range"
+                    },
+                    "replacement": {
+                        "type": "string",
+                        "description": "The new text for the whole range"
+                    }
+                },
+                "required": ["file", "start_line", "end_line", "expected_old", "replacement"]
+            }),
+        },
+        ToolDefinition {
             name: "edit_symbol".to_string(),
             description: "Replace the body of one declaration in a Rust file, \
                           found by name rather than by matching text: no need to \
@@ -1464,6 +1505,7 @@ mod tests {
                 "lookup_advisory",
                 "write_file",
                 "edit_file",
+                "patch_lines",
                 "edit_symbol",
                 "ast_edit",
                 "codemod",

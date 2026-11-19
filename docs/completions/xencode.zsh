@@ -2210,6 +2210,7 @@ _arguments "${_arguments_options[@]}" : \
 '--max-tokens=[How long one answer may be. Default 1024; a small model that will not stop talking otherwise holds a case for minutes. \`0\` leaves the limit to the server]:MAX_TOKENS:_default' \
 '--judge-model=[Rank with a different model than the one under test, which is the only thing here that does anything about a judge favouring its own style. Defaults to the model being scored, and says so in the report]:JUDGE_MODEL:_default' \
 '--allow-shell[Let the model really run shell commands. Without this a \`run_command\` is refused and the refusal is recorded like any other call]' \
+'--structured-edits[Offer only the validated line-range patch as the edit path. The whole-block edit tools are removed from the menu and \`patch_lines\` is offered instead; default off, so an existing eval is unchanged]' \
 '--judge[After every verdict is in, ask a model to rank the attempts that came close. Two more requests per run, and no verdict changes]' \
 '-h[Print help]' \
 '--help[Print help]' \

@@ -283,6 +283,8 @@ pub(crate) struct AgentRun {
     /// Whether a bugfix turn gets the smaller tool menu (TS-1). Read from config
     /// once when the run is built, so the menu cannot change mid-turn.
     pub(crate) focused_tools: bool,
+    /// Offer only the validated line-range patch as the edit path (SM-3).
+    pub(crate) structured_edits: bool,
     /// History a previous attempt left behind (LF-4). A fresh run starts
     /// empty; a resume starts here, so the new loop continues the old
     /// conversation instead of restarting it.
@@ -4697,6 +4699,7 @@ impl<'a> App<'a> {
             prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
             prompt: prompt.to_string(),
             focused_tools: self.config.focused_tools,
+            structured_edits: self.config.structured_edits,
             is_decision: xencode_context_rs::has_decision_marker(prompt),
             retrieved_files: Vec::new(),
             session: self.begin_recording(prompt, &run_id),
@@ -11924,6 +11927,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         prompt_digest,
         prompt,
         focused_tools,
+        structured_edits,
         is_decision,
         retrieved_files,
         mut session,
@@ -12030,6 +12034,10 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     // default) this returns the menu unchanged; with focus on, only the
     // off-task families are dropped and the index/mode decisions still hold.
     tools = crate::task_tool_focus::focus_tools(&prompt, tools, focused_tools);
+    // SM-3: when structured editing is asked for, the only way to change an
+    // existing file is the validated line-range patch. Applied after the other
+    // filters so the mode and index decisions still hold.
+    tools = crate::task_tool_focus::require_structured_edits(tools, structured_edits);
     // BT-2: only a ByteBot task can stop and ask; a chat turn answers in text.
     if sink == LoopSink::ByteBot && approval.ask.is_some() {
         tools.push(xencode_providers_rs::ask_user_tool());

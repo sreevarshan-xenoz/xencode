@@ -52,6 +52,41 @@ fn off_task(name: &str) -> bool {
         || name == "load_skill"
 }
 
+/// Tools that change an existing file by reproducing its text. In structured
+/// edit mode these are replaced by `patch_lines`, which validates a short
+/// expected fragment against a real line range before writing.
+pub const WHOLE_BLOCK_EDIT_TOOLS: &[&str] = &[
+    "edit_file",
+    "edit_symbol",
+    "ast_edit",
+    "codemod",
+    "rename",
+    "write_file",
+];
+
+/// Offer only the validated line-range patch as the edit path when `enabled`.
+/// With the flag off the menu is returned unchanged, so no existing install
+/// loses a tool. With it on, whole-block edit tools are removed and
+/// `patch_lines` is appended, making a short, validated patch the one way to
+/// change an existing file. Read-only and command tools are left alone.
+pub fn require_structured_edits(tools: Vec<ToolDefinition>, enabled: bool) -> Vec<ToolDefinition> {
+    if !enabled {
+        return tools;
+    }
+    let mut kept: Vec<ToolDefinition> = tools
+        .into_iter()
+        .filter(|def| !WHOLE_BLOCK_EDIT_TOOLS.contains(&def.name.as_str()))
+        .collect();
+    if !kept.iter().any(|def| def.name == "patch_lines") {
+        let patch = xencode_providers_rs::file_tools()
+            .into_iter()
+            .find(|def| def.name == "patch_lines")
+            .expect("file_tools publishes patch_lines");
+        kept.push(patch);
+    }
+    kept
+}
+
 /// Narrow `tools` for a bugfix prompt when `enabled` is on.
 ///
 /// With the flag off, or for a `general` prompt, the menu is returned unchanged:
@@ -197,5 +232,20 @@ mod tests {
             focused_names.len() < names(&unfocused).len(),
             "a focused bugfix menu should actually be smaller"
         );
+    }
+
+    #[test]
+    fn structured_edits_leaves_only_the_validated_patch_as_an_edit_path() {
+        let normal = require_structured_edits(full_menu(), false);
+        assert_eq!(names(&normal), names(&full_menu()));
+
+        let structured = require_structured_edits(full_menu(), true);
+        let names = names(&structured);
+        for tool in WHOLE_BLOCK_EDIT_TOOLS {
+            assert!(!has(&names, tool), "{tool} was still offered");
+        }
+        assert!(has(&names, "patch_lines"), "the patch tool is offered");
+        assert!(has(&names, "read_file"), "reading is still offered");
+        assert!(has(&names, "run_command"), "commands are still offered");
     }
 }
