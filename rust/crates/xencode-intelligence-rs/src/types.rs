@@ -347,6 +347,8 @@ pub mod sources {
     pub const RETRIEVAL_EVALUATION: &str = "the retrieval evaluation supplied by the caller";
     pub const OBSERVED_TURN_TRACE: &str = "the observed turn trace";
     pub const REASONING_RULES: &str = "the adaptive reasoning rules";
+    /// A failure the classifier read out of a real command's captured output.
+    pub const CLASSIFIED_FAILURE: &str = "a classified failure from real command output";
 }
 
 /// One supporting fact attached to a decision.

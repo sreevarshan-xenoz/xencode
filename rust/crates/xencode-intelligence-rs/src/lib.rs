@@ -36,6 +36,14 @@
 //! opts in and carries no private repository content. Model claims, denials,
 //! unverified edits and incomplete checks are all refused as evidence.
 //!
+//! The [`diagnosis`] module (XI-6) adds evidence-driven failure diagnosis: a
+//! candidate cause names a real command that would kill it, and no hypothesis
+//! can leave `Proposed` until that command actually ran with its output
+//! captured. There is no `Confirmed` status. The plan said to reuse an AI-2
+//! hypothesis architecture; none exists in this tree (no `Hypothesis` type, no
+//! implemented AI-2 row), so this module is the substrate a future AI-2 may
+//! build on, not a claim that AI-2 is present.
+//!
 //! # Integration
 //!
 //! The CLI already measures hardware and reads the advice table in
@@ -48,6 +56,7 @@
 
 pub mod adaptation;
 pub mod coordinator;
+pub mod diagnosis;
 pub mod reasoning;
 pub mod types;
 
@@ -60,6 +69,11 @@ pub use adaptation::{
     MAX_TOOL_ROUNDS, MIN_TOOL_ROUNDS, ROUNDS_STEP,
 };
 pub use coordinator::{Coordinator, IntelligenceError};
+pub use diagnosis::{
+    CheckExecution, DiagnosisEngine, DiagnosisError, DiagnosisReport, DiagnosisStore, Falsifier,
+    FalsifierKind, Hypothesis, HypothesisId, HypothesisStatus, RecoveryAction, CARGO_CHECK,
+    CARGO_TEST, MAX_HYPOTHESES,
+};
 pub use reasoning::{
     decide as decide_reasoning, decide_from_trace, ReasoningInput, ReasoningPlan, ReasoningStage,
     RecoveryStrategy, VerificationIntensity, DEFAULT_MAX_TOOL_ROUNDS, HARD_MAX_TOOL_ROUNDS,

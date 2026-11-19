@@ -184,6 +184,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **Deep-think escalation for repeated failed edits** — a turn that ends with two or more failed edit attempts records `failed_edit_count` and `escalation_recommended` in `turns.jsonl` and the eval's `results.jsonl`. The agent announces it and, when `deep_think_model` is configured, runs the **next** turn on that stronger model — never mid-turn, where output and tool calls would be repeated. `xencode query "…" --deep-think remote:strong-reasoner` does the same explicitly for one turn; cloud routes still obey `allow_cloud_models`. AirLLM is Python and cannot be added to this Rust workspace, so the heavier model is a remote OpenAI-compatible endpoint you configure, not a model this program downloads. A real 70B improvement is **unverified here** (2 GB GPU, no local 70B server); the marker, announcement, routing and egress refusal are tested with real sockets.
 - **Intelligence coordinator foundation** — `xencode-intelligence-rs` gives a turn one inspectable decision and a durable outcome instead of letting model, context and verification choices drift apart. It is a foundation slice, not an intelligence claim: **no model is chosen without measurements**, **no cloud route is used without permission** (local-only and no-network each veto it), and **there is no repeated or unverified self-learning** — recorded outcomes never change a later decision. It reuses the existing prompt-shape reader, context budget and evaluation reports rather than duplicating them, and does not depend on the CLI or the TUI.
 - **Adaptive reasoning controller (opt-in)** — a pure controller in `xencode-intelligence-rs` can now decide how hard the *next* turn should try, from the real facts the last turn recorded in `turns.jsonl`: failed tool calls, no-change notes, the DT-1 failed-edit count, failed build or regression checks and missing repository evidence. It returns an inspectable plan — a fast/normal/escalate stage, a **hard cap** on tool rounds, a verification intensity, a recovery rule and escalation eligibility — with a plain-English reason naming the observed event behind each choice. **Model-verbalised confidence is never escalation authority**: nothing a model said about its own certainty is read; only recorded tool outcomes and check results count. **Budgets are hard caps**, never exceeded whatever the stage asks for, and an unmeasured budget defaults conservatively. **Escalation is observed-event only** and never routes a cloud model without explicit `allow_cloud_models` permission (local-only and no-network each veto it). The controller calls no model, writes no file and changes no production agent-loop behaviour on its own: a caller opts in through the coordinator's `decide_with_reasoning`, and the existing one-turn deep-think override is the action point rather than a second router. In a benchmark over the ten seeded bug shapes a decision took about 11 microseconds on average; **task-completion improvement is unverified here** — the +10% difficult-task completion and <=15% median latency targets are release gates needing a GPU-backed model run, not claims.
+- **Evidence-driven failure diagnosis** — a pure `diagnosis` module in `xencode-intelligence-rs` turns classified command failures into candidate causes, each naming the real command that would kill it. **A hypothesis needs a real check before its status can change**: `cargo check` or `cargo test` must actually run and its real output and exit code be captured; an untested hypothesis stays visibly untested, there is no `Confirmed` state, and surviving a check means only "not killed yet". **A model's explanation of its own failure is never a verified cause.** The plan said to reuse an AI-2 hypothesis architecture, but no such architecture exists here (no `Hypothesis` type, no implemented AI-2 row); this is the substrate a future AI-2 can build on, not a claim that AI-2 exists.
 - **Repository semantic relationships** — `xencode-context-rs` answers questions about which tests name a symbol, which file declares a symbol, which trait an implementation satisfies, which components a change can break, and which files history changes alongside. Every answer is derived on demand from the indexes already on disk — no second index and no universal graph — and carries the exact source field or traversal, the language tier that supports it, and a plain-English reason; a relation that cannot be established is an explicit `Unknown`, never a guessed edge. Rust resolver edges are not extrapolated to TypeScript declarations. The curated fixture set measures precision 1.000 and recall 1.000 (23 relations, five deliberate unknowns); that is a result on those fixtures, not a claim about other repositories, and the 95% precision target remains a release gate.
 - **Adaptive context decisions (opt-in)** — a pure decision layer can now choose how much context a turn carries, how many symbol and dependent facts to show, whether test and history tiers ride along, the file order and whether to trim bodies, from the task shape, the measured context caps, the files retrieval already returned and the relationship evidence above. Every choice carries the existing system it came from, the decision is deterministic, a missing measurement stays unknown, and a small budget can never fetch more files than it allows. The default is today's assembly behaviour and `assemble_chat` is unchanged: a caller opts in through `assemble_chat_adaptive`, which reorders and trims the retrieved blocks, leads with critical evidence so a tight budget cannot drop it, and hands the result to the existing assembler — so the byte-stable prefix and redaction are untouched. BM25/hybrid selection, reciprocal-rank fusion, compaction, the tier budget and redaction remain authoritative; this layer only sets limits and order for files they already produced. **No embedding was added**, corpus term association stays a default-off experiment, and real task-completion gains are unmeasured here because they need a GPU-backed model run. On the checked-in gold set the adaptive arm moved context precision@5 from 0.293 to 0.300, held recall@5 at 0.880, and lowered estimated tokens and CPU slightly; the +10% precision release gate is not met on those numbers, so no improvement is claimed.
 
@@ -603,6 +604,34 @@ On a chronological holdout fixture (training events strictly before held-out
 events) the fixed baseline scored 0/3 and session adaptation 3/3. That is a
 fixture-scale measurement, not a claim about real task completion, which remains
 unverified here.
+
+### Evidence-driven failure diagnosis (XI-6)
+
+`xencode-intelligence-rs::diagnosis` proposes candidate causes from failures the
+EC-1 classifier already extracted from a command's real output. Each hypothesis
+names a `Falsifier`: a real command the repository already runs (`cargo check`
+or `cargo test`) and the observation that would disprove the claim.
+
+- **A hypothesis needs a real check.** Status moves only
+  `Proposed → Checked → Survived | Falsified`, and a `CheckExecution` can only
+  come from actually running the process and capturing its stdout, stderr and
+  exit code. An unchecked hypothesis stays visibly untested; a check of a
+  different command is refused; a failed check keeps its real output.
+- **No `Confirmed` state.** Surviving a check means "not killed yet", never
+  "proved true". **A model's explanation of its own failure is never a verified
+  cause** — only captured command output can move a hypothesis.
+- Contradictory evidence is preserved rather than resolved, reports are written
+  atomically without overwriting an existing id, and recovery actions name the
+  diagnosis id they came from.
+- **AI-2 was not present.** The plan said to reuse an AI-2 hypothesis
+  architecture, but no `Hypothesis` type exists in `rust/crates` and `AI-2` has
+  no implemented row. This module is the honest substrate a future AI-2 can
+  build on, not a claim that AI-2 exists. No CLI or TUI surface consumes it yet.
+
+A real falsifying command was executed in tests: a tiny crate with a genuine
+missing-trait-impl error was checked with `cargo check` (nonzero exit, E0599 in
+captured output → `Survived`), then the impl was added and a second real
+`cargo check` exited zero → a fresh hypothesis `Falsified`.
 
 ---
 
