@@ -345,6 +345,8 @@ pub mod sources {
     pub const CONSTRAINTS: &str = "the request's local-only and network constraints";
     pub const MEASUREMENTS: &str = "the measurements supplied by the caller";
     pub const RETRIEVAL_EVALUATION: &str = "the retrieval evaluation supplied by the caller";
+    pub const OBSERVED_TURN_TRACE: &str = "the observed turn trace";
+    pub const REASONING_RULES: &str = "the adaptive reasoning rules";
 }
 
 /// One supporting fact attached to a decision.
@@ -420,6 +422,11 @@ pub struct IntelligenceDecision {
     pub verification_policy: VerificationPolicy,
     pub reasoning_budget: Measurement<ReasoningBudget>,
     pub rationale: Vec<DecisionEvidence>,
+    /// Opt-in adaptive reasoning plan (XI-4). Unset on the ordinary decide
+    /// path: a caller that wants it calls `decide_with_reasoning`. The default
+    /// keeps every existing decision path inert and unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_plan: Option<crate::reasoning::ReasoningPlan>,
 }
 
 /// What actually happened when a decision was carried out.
