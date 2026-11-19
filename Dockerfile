@@ -4,8 +4,11 @@ FROM rust:1-bookworm as builder
 
 WORKDIR /build
 
-# Copy the Rust workspace and build the release binary
+# Copy the Rust workspace and build the release binary. The TUI embeds the
+# official skills by a path four levels above its source file, which resolves
+# to /skills inside the builder (the parent of /build), so ship them there too.
 COPY rust/ ./
+COPY skills/ /skills/
 RUN cargo build --release -p xencode-cli
 
 # Production stage

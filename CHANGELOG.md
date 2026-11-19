@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed — Docker release build (AU-41)
+
+- `AU-41`: the CI/CD pipeline's `build-and-push` job failed on every push to main with a compile error: the TUI embeds `skills/explain-diff/SKILL.md` with a path four levels above its source file, which resolves to `/skills` inside the builder, but the Dockerfile copied only the `rust/` workspace, so the embedded file was absent. The builder stage now copies the repository's `skills/` to `/skills` before compiling the release binary. This is required by the locked plan's release gate that both CI workflows be green.
+
 ### Added — Xencode Intelligence Core plan (XI-0)
 - `XI-0`: locks the intelligence-first direction: hybrid coordinator over the existing Rust crates, bounded online adaptation with provenance and rollback, and the ordered XI-1..XI-9 slices starting with the benchmark foundation and coordinator. No weight training, no universal graph, no uncontrolled self-learning, no fake metrics.
 ### Added — intelligence benchmark foundation (XI-9)
