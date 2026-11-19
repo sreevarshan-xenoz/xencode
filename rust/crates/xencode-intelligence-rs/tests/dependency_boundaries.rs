@@ -82,7 +82,12 @@ fn the_coordinator_does_not_depend_on_cli_tui_or_other_domain_crates() {
         "the coordinator must not depend on the TUI"
     );
 
+    // `xencode-analysis-rs` is allowed as a one-way edge: XI-6's diagnosis
+    // engine reuses that crate's EC-1 classifier to turn real command output
+    // into typed failures instead of writing a second error parser. The cycle
+    // check below still pins that the analysis crate cannot depend on us.
     let allowed: BTreeSet<String> = [
+        "xencode-analysis-rs",
         "xencode-context-rs",
         "xencode-core-rs",
         "xencode-config-rs",
@@ -122,9 +127,14 @@ fn the_workspace_lists_the_coordinator() {
         body.contains(&format!("crates/{OUR_CRATE}")),
         "the workspace members must include the coordination crate"
     );
-    // The three crates this one reuses must not depend on it, which would make
-    // a cycle. Their manifests are checked again here to pin the direction.
-    for name in ["xencode-context-rs", "xencode-core-rs", "xencode-config-rs"] {
+    // The crates this one reuses must not depend on it, which would make a
+    // cycle. Their manifests are checked again here to pin the direction.
+    for name in [
+        "xencode-analysis-rs",
+        "xencode-context-rs",
+        "xencode-core-rs",
+        "xencode-config-rs",
+    ] {
         let body = fs::read_to_string(manifest(&workspace, name))
             .unwrap_or_else(|e| panic!("{} must be readable: {e}", name));
         assert!(
