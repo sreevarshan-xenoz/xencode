@@ -67,7 +67,7 @@ Ordered slices (new XI prefix, all previously unused):
 
 | ID | Scope | Key acceptance |
 |---|---|---|
-| XI-1 | Intelligence coordinator crate + decision contracts | deterministic decisions; evidence on every decision; no circular deps |
+| XI-1 ✅ | Intelligence coordinator crate + decision contracts | deterministic decisions; evidence on every decision; no circular deps |
 | XI-2 ✅ | Repository semantic intelligence (compose existing indexes) | 95% precision on scoped relationship fixtures; no duplicate index |
 | XI-3 ✅ | Adaptive context controller | pure deterministic decision layer + opt-in assembly integration shipped and tested; +10% precision gate **not met** on the measured gold comparison (+2.3% relative), recall regression 0.0% (within the <=5% gate), tokens and CPU both lower, task gain **unmeasured** (blocked on GPU/model); BM25/RRF/compaction/redaction stay authoritative, no embedding added |
 | XI-4 ✅ | Adaptive reasoning controller | pure deterministic, observed-event-only reasoning plan + opt-in coordinator integration shipped and tested; +10% difficult-task completion and <=15% median latency are release gates NOT claimed here (task gain unmeasured, GPU blocked); model confidence is not escalation authority, budgets are hard caps, cloud escalation needs allow_cloud_models |
