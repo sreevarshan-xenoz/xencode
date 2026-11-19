@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (20 crates, 3,319 tests at
+At its core is a fast, single-file **Rust** binary (21 crates, 3,334 tests at
 the last full workspace run) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -68,7 +68,7 @@ deployment files are a [`Dockerfile`](Dockerfile) and a
 - **Measures itself.** `xencode eval run` seeds ten real bugs and grades each fix with the
   bug's own tests and the exact files it changed — and reports a failure as a failure.
 
-One Rust binary: 20 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
+One Rust binary: 21 crates, 57 commands, 27 agent tools — plus the separate floating badge in `rust/badge`.
 
 ## 📍 Where it stands, honestly
 
@@ -182,6 +182,8 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
   - *Custom models* — edits real `model_profiles` in `config.json`: `Enter` applies to the next turn, `s` saves, `t` shows the provider's real reply or its real error, `f` marks the profile for a kind of turn (`bugfix`, `general`, or by hand only). With `model_routing` set to `true`, a marked profile takes matching turns on its own model — Ollama models only, since a running llama.cpp server holds one model at a time and such a swap is refused and said out loud instead. `xencode query` follows the same rule unless `-m` names a model.
 - **Optional focused tool menu for bugfix turns** — `xencode config set focused_tools true` takes the background, web, off-machine search and skill tools off the menu when the prompt reads as a bugfix, leaving `read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` and whatever the current mode needs. The reading is the same whole-word rule retrieval uses, so a `general` prompt keeps the full menu, and the flag is off by default so existing installs are unchanged. The live eval pass rate was not measured with it here (2 GB GPU, no llama-server), so no gain is claimed.
 - **Deep-think escalation for repeated failed edits** — a turn that ends with two or more failed edit attempts records `failed_edit_count` and `escalation_recommended` in `turns.jsonl` and the eval's `results.jsonl`. The agent announces it and, when `deep_think_model` is configured, runs the **next** turn on that stronger model — never mid-turn, where output and tool calls would be repeated. `xencode query "…" --deep-think remote:strong-reasoner` does the same explicitly for one turn; cloud routes still obey `allow_cloud_models`. AirLLM is Python and cannot be added to this Rust workspace, so the heavier model is a remote OpenAI-compatible endpoint you configure, not a model this program downloads. A real 70B improvement is **unverified here** (2 GB GPU, no local 70B server); the marker, announcement, routing and egress refusal are tested with real sockets.
+- **Intelligence coordinator foundation** — `xencode-intelligence-rs` gives a turn one inspectable decision and a durable outcome instead of letting model, context and verification choices drift apart. It is a foundation slice, not an intelligence claim: **no model is chosen without measurements**, **no cloud route is used without permission** (local-only and no-network each veto it), and **there is no repeated or unverified self-learning** — recorded outcomes never change a later decision. It reuses the existing prompt-shape reader, context budget and evaluation reports rather than duplicating them, and does not depend on the CLI or the TUI.
+
 - **Approval-gated agent tool loop** — the chat model can call 25 tools (`read_file`, `list_dir`, `search_files`, `read_docs`, `lookup_advisory`, `web_fetch`, `web_search`, `write_file`, `edit_file`, `edit_symbol`, `ast_edit`, `codemod`, `rename`, `what_breaks`, `find_refs`, `callers`, `run_command`, `debug_test`, `reproduce_bug`, `update_plan`, `write_note`, `background_start/poll/stop`, `repo_advise`) — a 26th, `load_skill`, is offered with them exactly when at least one skill is installed, so a machine with no skills sends the model the same tool list it sent before; file changes and shell commands stop at a modal prompt showing the exact diff or command line (`y` allow · `a` allow for the session · `n`/`Esc` deny), and that shown diff is what the `y` agrees to: the file is re-checked before the approval is spent, so a file that moved while the prompt was open raises the prompt again over its current contents instead of landing an edit nobody read — twice, then the call is refused with the reason — and a multi-file `ast_edit`, `rename` or `codemod` re-checks every file its per-file diff was worked out from. A `n` writes nothing of yours: no byte outside `.xencode/` moves and no undo record is made for a change that never happened — the one thing a refusal still writes is the lesson draft under `.xencode/` that `n` has always left for `/lesson`. Paths outside the workspace are refused in every mode, the three read tools (`read_file`, `list_dir`, `search_files`) can additionally reach a dependency's own upstream source — the exact version `Cargo.lock` pins, already unpacked by cargo — by addressing it as `crate:<name>[/<path>]`, which is read-only in every mode, resolved through the lock file rather than "whatever version is on disk", and labels every answer with the version it came from, `read_docs` answers how a crate documents itself — its own readme, chosen by its manifest, with the other documents in it named so the next call can ask for one — and stays on cargo's local copy unless `allow_online_docs` is on, `lookup_advisory` answers what the security advisories downloaded onto this machine say about a crate and judges the version this project's lock file pins when the model does not name one — saying that the advisory state is unknown rather than that a crate is safe on a machine that has never synced, and making no request of its own, `web_fetch` reads one page or API response whose address the model names — it is offered only when `allow_web_fetch` is on, it asks every time it is used because a yes about one address is not a yes about the next, and no approval at all lets it reach a private network or the cloud metadata service: the address is resolved and refused before the connection is made, and again at every redirect, so a page cannot point the fetch inward, a page the server says is missing is
 answered with that site's own `/llms.txt` index when it publishes one and is
 labelled as the index rather than the page, `web_search` puts the model's question
@@ -865,7 +867,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (3,319 tests at the last run)
+cargo test                          # Full workspace suite (3,334 tests at the last run)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -894,7 +896,7 @@ CI runs fmt + clippy + the full suite on every push, a coverage job that fails b
 
 ```
 xencode/
-├── rust/                    # Rust workspace — the whole product, 20 crates
+├── rust/                    # Rust workspace — the whole product, 21 crates
 │   └── crates/
 │       ├── xencode-cli      # CLI entry point (xencode binary)
 │       ├── xencode-tui-rs   # Ratatui TUI + agent loop + `mcp serve` tool server
