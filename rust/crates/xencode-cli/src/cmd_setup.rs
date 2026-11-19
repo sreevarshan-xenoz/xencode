@@ -119,6 +119,19 @@ fn free_port() -> Result<u16, String> {
     Ok(port)
 }
 
+/// Record where the server was actually started, not just which model it
+/// serves. `verify` and later `xencode query` calls load the config afresh, so
+/// leaving the default llama.cpp URL in place sends them to a port no setup
+/// ever opened. Keeping this in one place lets a test assert the address the
+/// query will use without starting a process.
+fn setup_config_updates(config: &mut XencodeConfig, plan: &SetupPlan, base_url: &str) {
+    config.llama_cpp_url = base_url.to_string();
+    config.llama_cpp_model_path = plan.model_path.clone();
+    config.llama_cpp_model_url = plan.model_url.clone();
+    config.llama_cpp_model_sha256 = plan.model_sha256.clone();
+    config.default_model = format!("llamacpp:{}", plan.alias);
+}
+
 fn confirm_download(plan: &SetupPlan, yes: bool) -> Result<bool, String> {
     if yes {
         return Ok(true);
@@ -249,18 +262,15 @@ impl SetupSteps for RealSetup {
     }
 
     async fn start(&mut self, plan: &SetupPlan) -> Result<(), String> {
+        let port = free_port()?;
+        let base_url = format!("http://127.0.0.1:{port}");
         let mut config =
             XencodeConfig::load().map_err(|e| format!("could not read config: {e}"))?;
-        config.llama_cpp_model_path = plan.model_path.clone();
-        config.llama_cpp_model_url = plan.model_url.clone();
-        config.llama_cpp_model_sha256 = plan.model_sha256.clone();
-        config.default_model = format!("llamacpp:{}", plan.alias);
+        setup_config_updates(&mut config, plan, &base_url);
         config
             .save()
             .map_err(|e| format!("could not save config: {e}"))?;
 
-        let port = free_port()?;
-        let base_url = format!("http://127.0.0.1:{port}");
         let mut launcher = tokio::spawn(run_llamacpp(LlamacppAction::Start {
             model: Some(plan.model_path.clone()),
             port: Some(port),
@@ -281,7 +291,12 @@ impl SetupSteps for RealSetup {
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
             }
-            if client.ping().await.is_ok() {
+            // A socket that answers is not a model that is loaded. llama.cpp
+            // returns 503 "Loading model" from /health until the weights and
+            // the KV cache are in place, and ping() counts that as reachable.
+            // Asking the stronger question here is what lets the very next
+            // step be a real query instead of a 503.
+            if client.model_ready().await {
                 ready = true;
                 break;
             }
@@ -646,6 +661,21 @@ mod tests {
                 steps.calls
             );
         }
+    }
+
+    #[test]
+    fn setup_points_the_query_at_the_server_it_actually_started() {
+        let mut config = XencodeConfig::default();
+        assert_ne!(config.llama_cpp_url, "http://127.0.0.1:40063");
+        setup_config_updates(&mut config, &plan(), "http://127.0.0.1:40063");
+        assert_eq!(config.llama_cpp_url, "http://127.0.0.1:40063");
+        assert_eq!(config.default_model, "llamacpp:tiny");
+        assert_eq!(config.llama_cpp_model_path, "/models/tiny.gguf");
+        assert_eq!(
+            config.llama_cpp_model_url,
+            "https://example.invalid/tiny.gguf"
+        );
+        assert_eq!(config.llama_cpp_model_sha256, "");
     }
 
     #[test]

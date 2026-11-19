@@ -233,7 +233,7 @@ keeps its IDs and history; nothing is renumbered.
 | 1 | **RT-1** ✅ | A reachability test: every tool the executor dispatches is offered to the model by some tool list, or is named as internal | two tools were found built but unreachable on 2026-10-08 (`rename`, and `OR-4`/`OR-15` before it) | the test fails when a dispatch arm has no definition |
 | 2 | **SM-1** | Diagnose why a 4B model stops before the edit: read each case's turn trace — tools called, the last thing it said, the round it stopped | the 0/8 shows *that* it fails, not *why*; changing prompts blind is guessing | a table of the eight cases with the stop point and a named cause each |
 | 3 | **SM-2** | Fix what SM-1 names — the edit protocol, the prompt, the step size — one change at a time, each A/B'd on the eval at temperature 0, seed 42 | this is the product | Qwen3-4B passes **4 of 8** or more, recorded by `xencode eval run` |
-| 4 | **SU-1** | `xencode setup`: detect the GPU and free memory, pick a GGUF that fits (or one already on disk), download it, pick a free port, start llama-server with `--alias`, write `llama_cpp_url` and `default_model` | an hour to first answer loses every new user | from an empty config to a working `xencode query` in one command, on this machine |
+| 4 | **SU-1** ✅ | `xencode setup`: detect the GPU and free memory, pick a GGUF that fits (or one already on disk), download it, pick a free port, start llama-server with `--alias`, write `llama_cpp_url` and `default_model` | an hour to first answer loses every new user | from an empty config to a working `xencode query` in one command, on this machine |
 | 5 | **PS-1** ✅ | `PLAN_STATUS.md`: one row per ID — wave, status, gate, commit — generated from this file by a script, so counts cannot drift | this file is 17,000 lines and status lives in prose | the script's output matches the wave tables and is committed |
 | 6 | — | Back to wave order: `QA-6` (W5), then W6 | | |
 
@@ -250,8 +250,23 @@ keeps its IDs and history; nothing is renumbered.
 > `llama-server`. `SU-1` now has a free-port/alias/default-model launch path and
 > a thin `xencode setup` command that recommends, downloads, starts and verifies
 > with one real query. The download step was exercised for real (1.9 GiB, verified
-> SHA-256); starting the server and the final query are blocked here for the same
-> GPU/`llama-server` reason, so SU-1's done-when is not claimed met.⟩
+> SHA-256); starting the server and the final query were blocked here for the same
+> GPU/`llama-server` reason, so SU-1's done-when was not claimed met at that time.
+>
+> **Phase 0 update, 2026-11-19 — `SU-1` met.** GPU access was enabled on this
+> machine and a CUDA build of `llama-server` was installed. A real one-command
+> `xencode setup` from an empty config now completes all four steps: the pinned
+> Qwen3-1.7B Q4_K_M GGUF (SHA-256 verified), a free port, a server started with
+> a stable alias and a real `xencode query` answer ("ready"). Two real bugs were
+> found and fixed on the way: setup started the server on a free port but left
+> `llama_cpp_url` at its default, so verification queried a port nobody held; and
+> it treated a socket that answered `/health` with 503 "Loading model" as ready,
+> so the first query hit a 503. Setup now writes the address it actually started
+> and waits for `model_ready()`. Inference used the MX250 (about 987 MiB of its
+> 2048 MiB in use) at roughly 14 tokens/s. `hw probe` also measured that the
+> 4-bit Qwen3-4B GGUF cannot use this card at all (2382 MiB of weights against
+> 1468 MiB usable), so `SM-2`'s pass-rate gate stays open: the owner moved its
+> evals to a Colab T4 in October, and this machine cannot hold that model.⟩
 >
 > The script that generates `PLAN_STATUS.md` reports fifteen IDs as done with no
 > commit naming them: `AM-3`, `DB-1`, `DB-5`, `DB-7`, `QN-1`, `QO-2`, `QTR-6`,

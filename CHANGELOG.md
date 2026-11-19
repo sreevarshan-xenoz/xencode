@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Verified — one-command local setup (SU-1)
+
+- `SU-1`: with GPU access now enabled on this machine, `xencode setup` completes all four steps from an empty config and a real `xencode query` answers. A CUDA build of `llama-server` was installed, the pinned Qwen3-1.7B Q4_K_M GGUF was downloaded and its SHA-256 verified, and setup chose a free port, started the server with a stable alias and verified with a real query that returned "ready". Inference ran on the MX250 (about 987 MiB of 2048 MiB in use) at roughly 14 tokens/s. Two real bugs surfaced in the end-to-end run and were fixed: setup left `llama_cpp_url` at its default even though it started the server on a different free port, so verification went to a port nobody held; and it counted a `/health` response of 503 "Loading model" as ready, so the first query arrived before the model was loaded. Setup now writes the address it actually started and waits for `model_ready()`. A new test asserts the query is pointed at the started server. `hw probe` also measured that the 4-bit Qwen3-4B GGUF cannot fit this 2 GB card (2382 MiB of weights against 1468 MiB usable), so the SM-2 pass-rate gate remains open; its evals were moved to a Colab T4 in October.
+
 ### Fixed — Docker release build (AU-41)
 
 - `AU-41`: the CI/CD pipeline's `build-and-push` job failed on every push to main with a compile error: the TUI embeds `skills/explain-diff/SKILL.md` with a path four levels above its source file, which resolves to `/skills` inside the builder, but the Dockerfile copied only the `rust/` workspace, so the embedded file was absent. The builder stage now copies the repository's `skills/` to `/skills` before compiling the release binary. This is required by the locked plan's release gate that both CI workflows be green.
