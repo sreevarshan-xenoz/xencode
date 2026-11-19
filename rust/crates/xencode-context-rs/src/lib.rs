@@ -53,6 +53,7 @@ pub mod pricing;
 pub mod prompts;
 pub mod redact;
 pub mod refresh;
+pub mod relationships;
 pub mod releasenotes;
 pub mod repo_map;
 pub mod retrieve;
@@ -198,6 +199,10 @@ pub use pricing::{
     PRICE_TTL_DAYS,
 };
 pub use refresh::{refresh_rust_file, RefreshOutcome};
+pub use relationships::{
+    impact_evidence, query_relations, ImpactEvidence, Relation, RelationKind, RelationScope,
+    RelationSource, RELATIONSHIP_MAX_HOPS,
+};
 pub use repo_map::{
     rank_repo_map, repo_map_text, MapRow, REPO_MAP_CAP_TOKENS, REPO_MAP_MAX_FILES,
     REPO_MAP_MAX_HOPS, REPO_MAP_MAX_SYMBOLS,
