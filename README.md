@@ -878,6 +878,8 @@ With [`just`](https://github.com/casey/just) installed, the [`justfile`](justfil
 
 CI runs fmt + clippy + the full suite on every push, a coverage job that fails below 80% line coverage (82.8% measured on Linux, 2026-10-26), and a gitleaks secret scan of the whole history — see [`.github/workflows/`](.github/workflows/).
 
+**Benchmarks and intelligence claims.** The `xencode-context-rs` benchmark module records a versioned result: the checked-in retrieval gold set and the ten seeded bug shapes, the prompt-set digest, configuration, repeat count, per-metric variance and failure classes, with reports written to `.xencode/reports/benchmark.json`. Comparing two records reports numeric deltas but marks them insufficient when prompts, config, corpus or repeat counts do not match, and only a real model run may carry an improvement claim. Passing unit tests — including a seeded case being graded red before a reference change and green after — verifies the harness, not the intelligence being measured. **No intelligence feature is marked done on unit tests alone.** Real-model pass rates need GPU/model access and are explicitly blocked in environments without it; the retrieval baseline can be printed with `cargo test -p xencode-context-rs --test gold_baseline -- --ignored --nocapture`.
+
 ---
 
 ## 🐳 Deployment

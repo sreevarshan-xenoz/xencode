@@ -64,7 +64,9 @@ pub struct EvalRun {
     pub reranked: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+// Serialize/Deserialize let the benchmark record embed a report as-is (XI-9);
+// its fields stay defined here rather than being restated in that module.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct EvalReport {
     pub queries: usize,
     pub top_k: usize,
