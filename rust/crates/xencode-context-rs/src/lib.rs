@@ -15,6 +15,7 @@
 pub mod advise;
 pub mod anchor;
 pub mod artifacts;
+pub mod benchmark;
 pub mod bootstrap;
 pub mod budget;
 pub mod cli_impact;
@@ -83,6 +84,12 @@ pub use anchor::{
     anchor_age_days, discover, is_current, prove, read_anchor_meta, read_anchor_meta_from_dir,
     render, write_anchor, write_anchor_meta, AnchorMeta, Discovery, Kind, Provenance, Recipe,
     Verdict, ANCHOR_META_FILE, ANCHOR_STALE_AGE_DAYS,
+};
+pub use benchmark::{
+    benchmark_report_path, classify_failures, compare, read_benchmark_report,
+    write_benchmark_report, BenchmarkConfig, BenchmarkCorpus, BenchmarkRecord, BenchmarkRun,
+    Comparison, EvidenceKind, FailureClass, FailureKind, Metric, MetricDelta, MetricStats,
+    TaskMetrics, TaskOutcome, BENCHMARK_SCHEMA_VERSION, MIN_REPEATS,
 };
 pub use bootstrap::{
     bootstrap, offered_files, BootstrapEntry, BootstrapKind, BootstrapReport, OfferedFile,

@@ -75,7 +75,7 @@ Ordered slices (new XI prefix, all previously unused):
 | XI-6 | Evidence-driven failure diagnosis | reuse AI-2 hypotheses; no falsified claim without a real check |
 | XI-7 | Evidence-gated repair integration | reuse U-6 red-to-green + approval + evidence ledger |
 | XI-8 | Intelligence observability | extend traces/metrics/TUI; unknown renders as unknown |
-| XI-9 | Benchmark foundation (first, continuous) | baseline + held-out corpus; no feature marked done on unit tests alone |
+| XI-9 ✅ | Benchmark foundation (first, continuous) | versioned record + comparison live in `xencode-context-rs`; baseline is the checked-in gold set plus the ten seeded shapes; comparisons refuse when prompts, config, corpus, suite, arm or evidence kind differ or repeats are below three; no feature marked done on unit tests alone; real-model pass rates blocked here on GPU/model access |
 
 Execution cycles: A = XI-9 + XI-1; B = XI-2; C = XI-3; D = XI-4; E = XI-5;
 F = XI-6; G = XI-7; H = XI-8. First milestones: close Phase 0, then XI-9,
@@ -201,6 +201,7 @@ plain English. Newer entries in the table state their own status.
 | TSL-1 ✅ | MED | context+docs | TypeScript files were recognised by the scanner but never contributed names to `symbols.json`, so repository maps and impact had nothing to say about a `.ts`/`.tsx` file | a lexical, comment/string/template-aware reader collects classes, interfaces, enums, type aliases, functions and methods, bound arrows, imports, exports and JSDoc; a separate symbol-tier predicate wires it into `/init`, incremental refresh and headless impact while the Rust-only semantic tier keeps the resolver, `edit_symbol` and the compiler index on Rust files only. No TypeScript grammar, type resolution or edges from TS imports, and no Rust-grade precision is claimed; tsserver diagnostics stay parked because no tsserver binary ships here | done; checked-in `.ts`/`.tsx` source files pin exact sorted inventories and negative cases for keywords in comments, strings, templates and regexes, plus index and refresh tests on real temporary workspaces; crate suite 746 passed, 0 failed, 4 ignored; workspace suite 3,319 passed, 0 failed, 35 ignored; fmt and Clippy clean |
 | LP-1 ✅ | MEDIUM | web | the project had no landing page or GitHub Pages site | animated responsive single-page site in site/ with scroll reveals, typing terminal, particle field, hybrid-stack diagram and copyable install commands, published through the official Pages action |
 | XI-0 ✅ | LOW | docs | the intelligence-first direction existed only in conversation | locked as a plan with ordered XI-1..XI-9 slices, hybrid architecture, online-adaptation safety rules and measured release gates |
+| XI-9 ✅ | MED | context | intelligence work had no versioned baseline or honest way to compare two runs, so a prompt edit or a single lucky run could be reported as improvement | a versioned benchmark record embeds the existing retrieval report and the checked-in gold and seeded corpus with prompt, config, corpus and repeat evidence; comparisons withhold a claim when those differ or repeats are under three, and only real model runs may claim improvement; reports round-trip through a stable JSON schema; real-model pass rates stay unverified here because they need GPU/model access |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `XI-0`: locks the intelligence-first direction: hybrid coordinator over the existing Rust crates, bounded online adaptation with provenance and rollback, and the ordered XI-1..XI-9 slices starting with the benchmark foundation and coordinator. No weight training, no universal graph, no uncontrolled self-learning, no fake metrics.
 
+### Added — intelligence benchmark foundation (XI-9)
+
+- `XI-9`: adds a versioned benchmark record and a comparison function to `xencode-context-rs`. The record embeds the existing retrieval report (recall@k, precision@k, mean reciprocal rank and per-probe ranks), the checked-in gold probes and the ten seeded bug shapes, together with the prompt-set digest, configuration, corpus digest, repeat count, per-metric variance and failure classes. Task-side rates are derived from real grader runs, tool traces and request rows; a metric that was not measured stays empty rather than being filled with a zero. The comparison reports per-metric deltas but marks them as insufficient evidence when prompt versions, configuration, corpus, suite, arm or evidence kind differ, or when either side has fewer than three repeats; an improvement claim is only carried for real model runs. Reports are written with the stable schema under `.xencode/reports/benchmark.json` and read back, with a test proving the round-trip. A seeded case is graded red and then green to prove the harness measures something real. This is a foundation, not a result: no intelligence feature is marked done on unit tests alone, and real-model pass rates remain blocked here because they need GPU/model access this environment does not have.
+
 ### Added — landing page (LP-1)
 
 - `LP-1`: an animated responsive landing page under `site/`, published to GitHub Pages through the official Pages deploy action. Includes scroll-reveal sections, an animated terminal, particle field, hybrid model/remote GPU diagram, live counters and copyable install commands.
