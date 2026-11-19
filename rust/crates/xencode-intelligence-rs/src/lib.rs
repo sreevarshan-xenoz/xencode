@@ -28,6 +28,14 @@
 //! learned behaviour could later be attached without duplicating the model,
 //! context or verification logic that already exists.
 //!
+//! The [`adaptation`] module (XI-5) adds bounded policy adaptation from
+//! observed outcomes. It is not training and not self-modification: it changes
+//! no weight, edits no file and widens no permission. Level 1 is an in-memory
+//! session policy; level 2 is a repo-scoped, provenance-bearing policy that
+//! can be rolled back exactly; level 3 (cross-session) is off until a caller
+//! opts in and carries no private repository content. Model claims, denials,
+//! unverified edits and incomplete checks are all refused as evidence.
+//!
 //! # Integration
 //!
 //! The CLI already measures hardware and reads the advice table in
@@ -38,10 +46,19 @@
 //! provider, the TUI or a hardware probe, so the dependency arrow points one
 //! way and no domain crate needs to depend on this one.
 
+pub mod adaptation;
 pub mod coordinator;
 pub mod reasoning;
 pub mod types;
 
+pub use adaptation::{
+    classify, evaluate_holdout, update_policy, AdaptationDecision, AdaptationError,
+    AdaptationObservation, AdaptationParameters, AdaptationPolicy, Classification, Eligibility,
+    EvidenceRecord, EvidenceRef, FixtureEvent, HoldoutReport, IneligibleObservation,
+    LearningOptions, OutcomeKind, PolicyEnvelope, PolicyStatus, PolicyStore, Provenance,
+    RecoveryHint, Scope, SessionAdaptation, SignalOrigin, ToolOutcomeStatus, DEFAULT_TOOL_ROUNDS,
+    MAX_TOOL_ROUNDS, MIN_TOOL_ROUNDS, ROUNDS_STEP,
+};
 pub use coordinator::{Coordinator, IntelligenceError};
 pub use reasoning::{
     decide as decide_reasoning, decide_from_trace, ReasoningInput, ReasoningPlan, ReasoningStage,
