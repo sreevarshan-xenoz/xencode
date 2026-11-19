@@ -44,6 +44,17 @@
 //! implemented AI-2 row), so this module is the substrate a future AI-2 may
 //! build on, not a claim that AI-2 is present.
 //!
+//! The [`repair`] module (XI-7) adds the pure coordination of a red-to-green
+//! repair. It mirrors the TUI's production U-6 gate without importing it: no
+//! production edit is authorized before a real failing check was witnessed,
+//! the reproduction is frozen at that failure, only a granted human approval
+//! unlocks an edit, and verification needs a clean checks verdict plus a real
+//! check independent of the implementation step. A failed or skipped check
+//! becomes `NotVerified` and can never be promoted to success. The state
+//! machine writes nothing and runs nothing; the file edits and commands stay
+//! in the TUI and CLI. Its guarantees are structural, not a measured drop in
+//! false-verified repairs (that needs a GPU-backed model run).
+//!
 //! # Integration
 //!
 //! The CLI already measures hardware and reads the advice table in
@@ -58,6 +69,7 @@ pub mod adaptation;
 pub mod coordinator;
 pub mod diagnosis;
 pub mod reasoning;
+pub mod repair;
 pub mod types;
 
 pub use adaptation::{
@@ -77,6 +89,10 @@ pub use diagnosis::{
 pub use reasoning::{
     decide as decide_reasoning, decide_from_trace, ReasoningInput, ReasoningPlan, ReasoningStage,
     RecoveryStrategy, VerificationIntensity, DEFAULT_MAX_TOOL_ROUNDS, HARD_MAX_TOOL_ROUNDS,
+};
+pub use repair::{
+    ImplementAuthorization, PipelineStage, RepairAction, RepairApproval, RepairCheck, RepairError,
+    RepairEvidence, RepairLoop, RepairPhase, RepairResult, RepairStore, ReproIdentity, Transition,
 };
 pub use types::{
     sources, CapabilityView, Constraints, ContextBudget, DecisionEvidence, ExecutionRecord,

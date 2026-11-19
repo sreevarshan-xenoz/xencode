@@ -633,6 +633,45 @@ missing-trait-impl error was checked with `cargo check` (nonzero exit, E0599 in
 captured output → `Survived`), then the impl was added and a second real
 `cargo check` exited zero → a fresh hypothesis `Falsified`.
 
+### Evidence-gated repair coordination (XI-7)
+
+`xencode-intelligence-rs::repair` coordinates a red-to-green repair as a pure
+state machine. It mirrors the TUI's production U-6 gate
+(`Off → AwaitingRed → RedWitnessed → Verified`) without importing it: **the
+actual file edits and shell commands stay in the TUI and CLI**, which consult
+this state machine and supply the real evidence. The crate adds no TUI or CLI
+dependency and edits no file or runs no process on its own.
+
+- **No edit before a witnessed failure.** A production edit is never authorized
+  while the gate is `AwaitingRed`: a real check must first run and exit nonzero,
+  and a model's claim that "the fix works" is recorded as refused, never treated
+  as a check.
+- **Failed or skipped checks cannot become success.** Verification requires a
+  clean `ChecksVerdict::all_passed()` *and* a fresh real green check. A failed,
+  skipped or empty check renders as `NotVerified`, loops back to diagnosis, and
+  can never be promoted to a successful result later. An absent or incomplete
+  evidence record also reads as `NotVerified`, never success.
+- **Human approval preserved.** Only a granted approval record (tool/class/
+  decision, reusing the run ledger's approval decision) unlocks an edit; a
+  denial never does, and no new permission is created here.
+- **Verification is independent.** The green check's command must differ from
+  the implementation step's command and match the witnessed red's command, so
+  the component that applied the fix cannot be the sole authority for saying it
+  worked.
+- **Resumable, without invented writes.** Every transition, the diagnosis id,
+  the real red and green output and exit codes, the verdict, the approval and
+  the result are written atomically. An interrupted repair resumes from that
+  record; no write is recorded until its check passes, so resuming never
+  replays an unverified write. The reproduction file is frozen at the red —
+  rewriting it later invalidates the repair.
+
+These guarantees are **structural and tested** (11 new tests, including a real
+red-then-green `cargo check` loop and a real reproduction-file rewrite). They
+are **not a measured improvement in the false-verified rate**: real calibration
+needs GPU-backed model repair runs, which are blocked here — this machine has
+only a 2 GB GPU and no local heavy model. No CLI or TUI surface consumes the
+slice yet, so no live repair path changes on its own.
+
 ---
 
 ## 🔧 Configuration & Model Routing
