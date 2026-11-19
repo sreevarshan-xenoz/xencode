@@ -7,6 +7,7 @@
 //! a success. Recorded outcomes are never fed back into `decide`, so there is
 //! no repeated or unverified self-learning in this slice.
 
+use crate::reasoning::{self, ReasoningInput};
 use crate::types::{
     sources, CapabilityView, ContextBudget, DecisionEvidence, ExecutionRecord,
     IntelligenceDecision, IntelligenceOutcome, IntelligenceRequest, Measurement, ModelEgress,
@@ -192,7 +193,27 @@ impl Coordinator {
             verification_policy,
             reasoning_budget,
             rationale,
+            reasoning_plan: None,
         })
+    }
+
+    /// Decide a turn and attach an adaptive reasoning plan (XI-4).
+    ///
+    /// This is the opt-in consumption point. The plan is a pure function of a
+    /// finished [`xencode_context_rs::TurnTrace`] the caller supplies in
+    /// [`ReasoningInput`], plus this request's shape and constraints. The
+    /// ordinary [`Self::decide`] path is unchanged and leaves the plan unset,
+    /// so no existing agent-loop behaviour changes; a future CLI turn may call
+    /// this and act on `decision.reasoning_plan` through the existing deep-think
+    /// and tool-loop seams. Nothing here routes a model or edits a file.
+    pub fn decide_with_reasoning(
+        &self,
+        request: &IntelligenceRequest,
+        reasoning: &ReasoningInput<'_>,
+    ) -> Result<IntelligenceDecision, IntelligenceError> {
+        let mut decision = self.decide(request)?;
+        decision.reasoning_plan = Some(reasoning::decide(reasoning));
+        Ok(decision)
     }
 
     /// Walk candidates in a stable order and take the first one that truly
@@ -319,7 +340,16 @@ impl Coordinator {
         execution: ExecutionRecord,
         verification: VerificationRecord,
     ) -> Result<IntelligenceOutcome, IntelligenceError> {
-        if &self.decide(request)? != decision {
+        // The reasoning plan is opt-in and derived from a separate trace, not
+        // from the request, so it is not part of what `decide` recomputes here.
+        // Compare the base decision without it: a caller may attach a plan and
+        // still record a real outcome, and a forged plan cannot turn a decision
+        // this coordinator would not make into a valid one.
+        let mut recomputed = self.decide(request)?;
+        recomputed.reasoning_plan = None;
+        let mut submitted = decision.clone();
+        submitted.reasoning_plan = None;
+        if recomputed != submitted {
             return Err(IntelligenceError::DecisionMismatch);
         }
         let id = self.decision_id(request, decision);

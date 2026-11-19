@@ -21,9 +21,12 @@
 //!   cannot quietly train the next one.
 //!
 //! Nothing here claims that xencode is "intelligent" yet: there is no model
-//! quality score, no learned preference and no adaptive behaviour. This is the
-//! seam where those things could later be attached without duplicating the
-//! model, context or verification logic that already exists.
+//! quality score, no learned preference and no model-driven adaptation. The
+//! [`reasoning`] module adds a deterministic, observed-event-only reasoning
+//! plan (XI-4) that a caller may opt into, but it calls no model, edits nothing
+//! and changes no existing agent-loop path on its own. This is the seam where
+//! learned behaviour could later be attached without duplicating the model,
+//! context or verification logic that already exists.
 //!
 //! # Integration
 //!
@@ -36,9 +39,14 @@
 //! way and no domain crate needs to depend on this one.
 
 pub mod coordinator;
+pub mod reasoning;
 pub mod types;
 
 pub use coordinator::{Coordinator, IntelligenceError};
+pub use reasoning::{
+    decide as decide_reasoning, decide_from_trace, ReasoningInput, ReasoningPlan, ReasoningStage,
+    RecoveryStrategy, VerificationIntensity, DEFAULT_MAX_TOOL_ROUNDS, HARD_MAX_TOOL_ROUNDS,
+};
 pub use types::{
     sources, CapabilityView, Constraints, ContextBudget, DecisionEvidence, ExecutionRecord,
     ExecutionStatus, IntelligenceDecision, IntelligenceOutcome, IntelligenceRequest, Measurement,
