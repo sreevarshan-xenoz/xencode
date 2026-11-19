@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added — Xencode Intelligence Core plan (XI-0)
+
+- `XI-0`: locks the intelligence-first direction: hybrid coordinator over the existing Rust crates, bounded online adaptation with provenance and rollback, and the ordered XI-1..XI-9 slices starting with the benchmark foundation and coordinator. No weight training, no universal graph, no uncontrolled self-learning, no fake metrics.
+
 ### Added — landing page (LP-1)
 
 - `LP-1`: an animated responsive landing page under `site/`, published to GitHub Pages through the official Pages deploy action. Includes scroll-reveal sections, an animated terminal, particle field, hybrid model/remote GPU diagram, live counters and copyable install commands.
