@@ -568,6 +568,42 @@ flowchart TD
 > root (paths outside it are refused in every approval mode) and every mutation
 > stops at the approval gate — see [Approval-gated agent tool loop](#-features).
 
+### Bounded online adaptation (XI-5)
+
+`xencode-intelligence-rs::adaptation` turns already-recorded outcomes into a
+small, bounded policy for the next turn. This is **policy adaptation from
+observed outcomes, not model-weight training and not self-modification**: the
+learning step changes no weight, edits no file, calls no model and rewires no
+agent-loop path. No CLI command or TUI panel exposes it yet, and no persistent
+policy is consulted by the live loop.
+
+The safety rules are enforced in the types:
+
+- **Observed facts only.** Model claims about a turn are never evidence. Edits
+  and recoveries must be checked against reality, checks must have run and
+  produced an exit code, and ambiguous outcomes are refused with a named reason.
+- **No security learning.** The policy can only choose a hard-capped tool-round
+  allowance (4–16) and a closed recovery hint. It has no permission, egress,
+  cloud, network or verification field, so adaptation cannot weaken a security
+  rule; a tool call that was denied or refused is itself ineligible evidence.
+- **Three explicit levels.** Session adaptation is immediate and in-memory with
+  no persistent state. Project policies are opt-in, bound to one repository,
+  carry a named actor and reason on every write, and can be rolled back to the
+  exact earlier policy from an append-only history. Cross-session learning is
+  **off by default** and refuses without an explicit opt-in; a global record
+  carries no evidence references and no repository path, so private repository
+  content does not leave the project.
+- **Human corrections are distinct.** They are tagged separately from observed
+  signals and cannot be forged from model narrative.
+- **Verification is independent of the implementing model.** Every decision is
+  a deterministic function of typed evidence and closed rules; no model judges
+  its own work.
+
+On a chronological holdout fixture (training events strictly before held-out
+events) the fixed baseline scored 0/3 and session adaptation 3/3. That is a
+fixture-scale measurement, not a claim about real task completion, which remains
+unverified here.
+
 ---
 
 ## 🔧 Configuration & Model Routing
