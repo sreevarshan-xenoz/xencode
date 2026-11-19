@@ -167,3 +167,54 @@ This is the key separation: the structured protocol fixed *how the model emits
 an edit*, not *what the model decides to edit*. Autonomous small-model bug
 fixing remains 0/10, and that number is kept as-is. No token budget was raised
 again and no prompt was stacked on top of this result.
+
+**Classification for the research record:** SM-3 is an **infrastructure
+improvement**, not an intelligence improvement. It raised emission reliability
+from 8/10 graded to 10/10 graded and made patch application deterministic, but
+it did not change a single correct fix. Its implementation is frozen; no further
+harness change is made on top of it.
+
+## The boundary this exposes
+
+The 1.7B model has now demonstrated, across these runs, that it can:
+
+- retrieve and read the relevant file,
+- interact with tools over multiple rounds,
+- emit well-formed structured arguments, and
+- apply a valid patch when one is attempted.
+
+It has **not** demonstrated that it can reliably decide *which change is
+necessary*. That is the research boundary, not tool calling. The next variable
+to isolate is **diagnosis quality**: can the model identify the actual defect,
+the relevant function, the expected behaviour, the exact faulty condition and
+why a proposed change fixes it — before it is asked to edit anything?
+
+Three candidate hypotheses were named (diagnosis before editing,
+evidence-grounded editing, independent diagnosis and execution). They are not
+established solutions. Only the diagnosis question is tested next; the other
+two are left untouched so the next result has a single variable.
+
+### Diagnosis-only probe (first measurement)
+
+A standalone script read the same ten seeded repositories from the 0/10 run and
+asked the same model, with no Xencode harness and no edit tool, for a structured
+diagnosis (defect, function, faulty condition, expected behaviour, proposed
+change, why it fixes). Answers were scored against each seed's recorded faulty
+and correct lines. This is **not** one of the pinned eval benchmarks — it uses a
+larger answer budget because Qwen3 spends its first ~430–17,000 tokens on
+reasoning before writing the JSON.
+
+At a 2,048-token answer budget: **3/10 complete diagnoses** (correct function,
+faulty condition and correct change all present); 4/10 named each part at least
+once. Four answers were empty because reasoning exhausted the budget. On a
+follow-up with larger budgets, `utf8-boundary` produced a complete diagnosis and
+`early-return` named the right function and faulty condition; `ignored-result`
+still hit the limit and `lost-update` timed out.
+
+This is the first evidence that the boundary is real rather than assumed: the
+same model that scored 0/10 at editing produced correct diagnoses for at least
+three to four of the same cases when asked to diagnose instead of edit. It does
+**not** establish that diagnosis will improve editing — that is the next
+controlled experiment, and this probe is not a substitute for it. The result is
+recorded with its token-budget caveat because a diagnosis hidden inside tokens
+the model never emitted is not a measured diagnosis.
