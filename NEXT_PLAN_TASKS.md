@@ -49,6 +49,47 @@ Ordered slices: **BP-1** (BitNet provider), **HR-1** (hardware/shape router),
 this repo is Rust-only. Its role is served by a user-configured stronger model
 through the existing remote/OpenAI-compatible provider.
 
+## Xencode Intelligence Core — locked plan (2026-11-19)
+
+Direction: **intelligence-first**, hybrid architecture, bounded online adaptation,
+Rust-only. Existing crates stay the domain foundation; a new coordinator crate
+sits above them and never becomes a dependency of a domain crate. No universal
+knowledge graph, no uncontrolled self-learning, no fake metrics, no model-weight
+training, no new AgentGraph, no TUI rebuild.
+
+Pillars: **Understand** (repository intelligence), **Reason** (adaptive
+computation), **Prove** (evidence-based correctness).
+
+Phase 0 gate: close SM-2 (real model pass rate) and SU-1 (first-run validation).
+These need GPU/hardware and stay blocked here; not faked green.
+
+Ordered slices (new XI prefix, all previously unused):
+
+| ID | Scope | Key acceptance |
+|---|---|---|
+| XI-1 | Intelligence coordinator crate + decision contracts | deterministic decisions; evidence on every decision; no circular deps |
+| XI-2 | Repository semantic intelligence (compose existing indexes) | 95% precision on scoped relationship fixtures; no duplicate index |
+| XI-3 | Adaptive context controller | +10% context precision, <=5% recall regression, reuse BM25/RRF/compaction |
+| XI-4 | Adaptive reasoning controller | +10% difficult-task completion, <=15% median latency, observed-event escalation |
+| XI-5 | Online adaptation engine | session->project->opt-in cross-session; provenance + rollback; no security weakening |
+| XI-6 | Evidence-driven failure diagnosis | reuse AI-2 hypotheses; no falsified claim without a real check |
+| XI-7 | Evidence-gated repair integration | reuse U-6 red-to-green + approval + evidence ledger |
+| XI-8 | Intelligence observability | extend traces/metrics/TUI; unknown renders as unknown |
+| XI-9 | Benchmark foundation (first, continuous) | baseline + held-out corpus; no feature marked done on unit tests alone |
+
+Execution cycles: A = XI-9 + XI-1; B = XI-2; C = XI-3; D = XI-4; E = XI-5;
+F = XI-6; G = XI-7; H = XI-8. First milestones: close Phase 0, then XI-9,
+then XI-1, then XI-2/XI-3, then XI-4/XI-5.
+
+Learning safety: no weight mutation, no learned security/egress changes,
+repo-scoped project memory, opt-in global learning, provenance + rollback on
+every persistent policy, human corrections distinguished from inferred signals,
+verification independent of the implementing model.
+
+Release gates: Phase 0 closed, both CI workflows green, existing IDs intact,
+every decision path tested, replayable adaptation fixtures, benchmark shows
+improvement over fixed baseline, docs distinguish measured vs unverified.
+
 ## Free remote GPU phase (2026-11-18)
 
 Goal: a user with only a Google account and no local GPU can run one command and
@@ -159,6 +200,7 @@ plain English. Newer entries in the table state their own status.
 | REL-1 ✅ | MEDIUM | release | the v0.1.0 tag produced a cancelled aarch64-apple-darwin job and therefore no GitHub Release | dist target list reduced to the four buildable targets, fixture and shape test regenerated; Apple Silicon blocked on runner availability |
 | TSL-1 ✅ | MED | context+docs | TypeScript files were recognised by the scanner but never contributed names to `symbols.json`, so repository maps and impact had nothing to say about a `.ts`/`.tsx` file | a lexical, comment/string/template-aware reader collects classes, interfaces, enums, type aliases, functions and methods, bound arrows, imports, exports and JSDoc; a separate symbol-tier predicate wires it into `/init`, incremental refresh and headless impact while the Rust-only semantic tier keeps the resolver, `edit_symbol` and the compiler index on Rust files only. No TypeScript grammar, type resolution or edges from TS imports, and no Rust-grade precision is claimed; tsserver diagnostics stay parked because no tsserver binary ships here | done; checked-in `.ts`/`.tsx` source files pin exact sorted inventories and negative cases for keywords in comments, strings, templates and regexes, plus index and refresh tests on real temporary workspaces; crate suite 746 passed, 0 failed, 4 ignored; workspace suite 3,319 passed, 0 failed, 35 ignored; fmt and Clippy clean |
 | LP-1 ✅ | MEDIUM | web | the project had no landing page or GitHub Pages site | animated responsive single-page site in site/ with scroll reveals, typing terminal, particle field, hybrid-stack diagram and copyable install commands, published through the official Pages action |
+| XI-0 ✅ | LOW | docs | the intelligence-first direction existed only in conversation | locked as a plan with ordered XI-1..XI-9 slices, hybrid architecture, online-adaptation safety rules and measured release gates |
 
 ## ▶ Current order (owner handover, 2026-10-08) — read this first
 
