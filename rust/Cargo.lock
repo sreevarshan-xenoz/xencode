@@ -4999,6 +4999,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xencode-intelligence-rs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "xencode-config-rs",
+ "xencode-context-rs",
+ "xencode-core-rs",
+]
+
+[[package]]
 name = "xencode-live-rs"
 version = "0.1.0"
 dependencies = [
