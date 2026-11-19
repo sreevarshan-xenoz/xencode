@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (21 crates, 3,361 tests at
+At its core is a fast, single-file **Rust** binary (21 crates, 3,416 tests at
 the last full workspace run) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven from your terminal, or from Zed through `xencode acp`.
 
@@ -672,6 +672,40 @@ needs GPU-backed model repair runs, which are blocked here — this machine has
 only a 2 GB GPU and no local heavy model. No CLI or TUI surface consumes the
 slice yet, so no live repair path changes on its own.
 
+### Intelligence observability (XI-8)
+
+`xencode-intelligence-rs::observability` makes the coordinator's stored
+decisions inspectable by **extending the existing `/trace` presentation** — it
+is a loader plus a pure string renderer, not a new dashboard, view, command or
+navigation entry. `load_decisions` reads the decision and outcome JSON the
+coordinator already writes under its artifact root; `intelligence_report`
+returns an inspector block with a count header and one group per decision,
+named by its recorded decision id. Each group shows the selected model with the
+rationale that explains it, the measured context budget and quoted retrieval
+evidence, the reasoning stage, escalation eligibility and planned recovery
+rule, the checks that really ran, and which adjacent observables are not
+available here.
+
+- **Every figure comes from real persisted events.** Nothing here measures
+  hardware, calls a model or invents activity. A value that was not measured
+  reads as `unknown`; an unread store reads as `not recorded here` or `not
+  recorded in this session`. A verification status of `NotRun` never reads as
+  passed, even if check names are present, and a decision whose outcome file is
+  missing is shown with unknown verification plus a note. Unreadable decision
+  files are skipped and noted rather than replaced with invented ones.
+- **No fabricated confidence.** No confidence number, percentage or model
+  self-report is produced or treated as truth.
+- **Integration point documented, not wired.** No TUI or CLI dependency was
+  added; the dependency-boundary tests and unchanged manifests confirm that.
+  The exact append point in `rust/crates/xencode-tui-rs/src/app.rs::trace_report`
+  (around line 11160) is documented in the module: a later slice that adds the
+  edge can append the rendered lines to the vector `/trace` already returns.
+  No integration, navigation or screen changes exist in this slice.
+- **An empty report is honest.** The coordinator is opt-in and inert in
+  production paths, so a normal session writes no decisions and the inspector
+  says "no intelligence decisions recorded". That is the expected result, not
+  a failure.
+
 ---
 
 ## 🔧 Configuration & Model Routing
@@ -974,7 +1008,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (3,361 tests at the last run)
+cargo test                          # Full workspace suite (3,416 tests at the last run)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

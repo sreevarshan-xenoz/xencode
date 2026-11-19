@@ -55,6 +55,14 @@
 //! in the TUI and CLI. Its guarantees are structural, not a measured drop in
 //! false-verified repairs (that needs a GPU-backed model run).
 //!
+//! The [`observability`] module (XI-8) loads the decisions and outcomes the
+//! coordinator already persisted and renders them as lines for the existing
+//! `/trace` presentation. It is a loader plus a pure string renderer, not a
+//! new dashboard or view: every figure comes from a real recorded value,
+//! an unmeasured value reads as `unknown`, and no confidence or percentage is
+//! invented. The dependency graph is unchanged — the TUI and CLI integration
+//! point is documented in that module, not wired in here.
+//!
 //! # Integration
 //!
 //! The CLI already measures hardware and reads the advice table in
@@ -68,6 +76,7 @@
 pub mod adaptation;
 pub mod coordinator;
 pub mod diagnosis;
+pub mod observability;
 pub mod reasoning;
 pub mod repair;
 pub mod types;
@@ -85,6 +94,10 @@ pub use diagnosis::{
     CheckExecution, DiagnosisEngine, DiagnosisError, DiagnosisReport, DiagnosisStore, Falsifier,
     FalsifierKind, Hypothesis, HypothesisId, HypothesisStatus, RecoveryAction, CARGO_CHECK,
     CARGO_TEST, MAX_HYPOTHESES,
+};
+pub use observability::{
+    intelligence_report, intelligence_report_with_notes, load_decisions, load_decisions_with_notes,
+    DecisionLoad, ObservabilityError, NOT_RECORDED, NOT_RECORDED_SESSION, UNKNOWN,
 };
 pub use reasoning::{
     decide as decide_reasoning, decide_from_trace, ReasoningInput, ReasoningPlan, ReasoningStage,
